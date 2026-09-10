@@ -1,0 +1,7 @@
+{
+  "sourceRoot": "<READ_ONLY_RETAIL_FOLDER>",
+  "testRoot": "<ISOLATED_TEST_FOLDER>",
+  "serverHost": "<TEST_SERVER_HOST>",
+  "serverPort": 9010,
+  "serverName": "ACE HD Test - OpenAC"
+}

@@ -1,0 +1,16 @@
+#!/bin/sh
+# Install in .git/hooks/pre-push after checking for an existing hook/hooksPath.
+# Validate the actual outgoing branches, not just HEAD. Tag metadata needs review.
+set -eu
+repo=$(git rev-parse --show-toplevel)
+while read -r local_ref local_sha remote_ref remote_sha
+do
+    case "$local_sha" in
+        0000000000000000000000000000000000000000) continue ;;
+    esac
+    case "$remote_ref" in
+        refs/heads/*) ;;
+        *) echo 'Privacy guard: non-branch pushes require separate metadata review.' >&2; exit 1 ;;
+    esac
+    powershell.exe -NoProfile -NonInteractive -File "$repo/tools/evaluation/Test-PublicChanges.ps1" -Revision "$local_sha" || exit 1
+done

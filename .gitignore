@@ -17,6 +17,11 @@ Thumbs.db
 
 # Local content and captures — never commit a prepared package or a run log
 *.pak
+*.dat
+# Local launcher/session state can contain credentials.
+launcher-profiles.json
+launcher-profiles.json.*
+evaluation.local.json
 logs/
 artifacts/
 launch*.log

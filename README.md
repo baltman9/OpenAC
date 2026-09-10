@@ -4,6 +4,9 @@
 
 <h1 align="center">OpenAC</h1>
 
+Fork development: see [our isolated evaluation setup](docs/openac-evaluation.md).
+Work is on `dev/openac-evaluation`; `main` is reserved for reviewed milestones.
+
 <p align="center">
   An open-source Asheron's Call client for .NET 10.<br>
   <strong>The original game's behavior, in a codebase built to be worked on.</strong>
