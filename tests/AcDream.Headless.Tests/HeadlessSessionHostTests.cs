@@ -2432,6 +2432,141 @@ public sealed class HeadlessSessionHostTests
     }
 
     [Fact]
+    public void ProjectSpawnCommittingCollisionGenerationDoesNotCancelTheLocalPlayersOwnFreshPlacement()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        GameRuntime runtime = host.Runtime;
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+        const uint player = 0x50000014u;
+        runtime.PlayerIdentity.ServerGuid = player;
+        AcDream.Runtime.Session.RuntimeFirstEntryDriveController firstEntry =
+            CreateFirstEntryDrive(runtime);
+        RuntimeEntityRecord record = runtime.EntityObjects
+            .RegisterEntityWithInitialResidence(Spawn(player), isLocalPlayer: true)
+            .Canonical!;
+        Assert.True(runtime.EntityObjects.ApplyAcceptedSpawn(
+            record,
+            record.CreateIntegrationVersion,
+            record.Snapshot,
+            replaceGeneration: false));
+
+        var collision = new CollisionGenerationCommittingNeighborhood(runtime);
+        var projection = new HeadlessSessionWorldProjection(
+            runtime,
+            collision,
+            firstEntry);
+
+        // CenterOn commits the destination landblock's collision generation, the
+        // same as production; that commit races the local player's own just-begun
+        // placement while it is still unprepared.
+        projection.ProjectSpawn(record, isLocalPlayer: true);
+
+        Assert.NotNull(runtime.MovementOwner.Controller);
+    }
+
+    [Fact]
+    public void ProjectPositionCommittingCollisionGenerationDoesNotCancelTheLocalPlayersOwnFreshPlacement()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        GameRuntime runtime = host.Runtime;
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+        const uint player = 0x50000015u;
+        runtime.PlayerIdentity.ServerGuid = player;
+        AcDream.Runtime.Session.RuntimeFirstEntryDriveController firstEntry =
+            CreateFirstEntryDrive(runtime);
+        RuntimeEntityRecord record = runtime.EntityObjects
+            .RegisterEntityWithInitialResidence(Spawn(player), isLocalPlayer: true)
+            .Canonical!;
+        Assert.True(runtime.EntityObjects.ApplyAcceptedSpawn(
+            record,
+            record.CreateIntegrationVersion,
+            record.Snapshot,
+            replaceGeneration: false));
+
+        var collision = new CollisionGenerationCommittingNeighborhood(runtime);
+        var projection = new HeadlessSessionWorldProjection(
+            runtime,
+            collision,
+            firstEntry);
+
+        // ProjectPosition's own CenterOn call races the same still-unprepared
+        // placement while the movement controller has not yet been created.
+        projection.ProjectPosition(
+            record,
+            isLocalPlayer: true,
+            PositionTimestampDisposition.Apply);
+
+        Assert.NotNull(runtime.MovementOwner.Controller);
+    }
+
+    private sealed class CollisionGenerationCommittingNeighborhood(
+        GameRuntime runtime) : IHeadlessCollisionNeighborhood
+    {
+        public void CenterOn(uint fullCellId) =>
+            CommitSyntheticCollisionGeneration(
+                runtime,
+                (fullCellId & 0xFFFF0000u) | 0xFFFFu);
+
+        public bool IsReady(uint fullCellId) => true;
+
+        public bool IsWithinServiceWindow(uint fullCellId) => true;
+
+        public bool IsQuiescent => true;
+    }
+
+    private static void CommitSyntheticCollisionGeneration(
+        GameRuntime runtime,
+        uint landblockId)
+    {
+        HeadlessCollisionGenerationTransaction transaction =
+            HeadlessCollisionGenerationTransaction.Begin(
+                runtime.EntityObjects.Physics,
+                landblockId,
+                afterAdmission: null,
+                (admission, prepared) =>
+                {
+                    prepared.SetAssetClosure([], []);
+                    runtime.EntityObjects.Physics.StageCollisionAssets(
+                        admission,
+                        prepared,
+                        new RuntimeLandblockCollisionAssets(
+                            landblockId,
+                            new TerrainSurface(new byte[81], new float[256]),
+                            [],
+                            [],
+                            WorldOffsetX: 0f,
+                            WorldOffsetY: 0f,
+                            CurrentCellId: landblockId));
+                });
+        HeadlessCollisionGenerationAdvance advance;
+        do
+        {
+            advance = transaction.Advance();
+        } while (!advance.Completed && advance.Progressed);
+        Assert.True(advance.Completed);
+    }
+
+    [Fact]
     public void CanAdvancePlayerReflectsControllerPublicationLifecycle()
     {
         var operations = new FixtureSessionOperations();
