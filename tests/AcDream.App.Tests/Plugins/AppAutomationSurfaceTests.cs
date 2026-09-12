@@ -34,6 +34,25 @@ public sealed class AppAutomationSurfaceTests
         Assert.Empty(surface.CaptureProjectileDebugSamples());
     }
 
+    /// <summary>
+    /// The single-property read answers the same "no" the whole-bundle read
+    /// answers when there is no session to ask, rather than reaching through
+    /// a null runtime. Mutation: dropping the runtime/availability guard
+    /// throws a NullReferenceException here instead of answering false.
+    /// </summary>
+    [Fact]
+    public void SinglePropertyReadAgreesWithTheBundleReadWhileUnbound()
+    {
+        using var surface = new AppAutomationSurface();
+
+        Assert.False(surface.Objects.TryCaptureProperties(0x50000001u, out _));
+        Assert.False(surface.Objects.TryGetIntProperty(
+            0x50000001u,
+            131u,
+            out int material));
+        Assert.Equal(0, material);
+    }
+
     [Fact]
     public void SelectionAutomationUsesTheBoundCanonicalActionRoute()
     {
