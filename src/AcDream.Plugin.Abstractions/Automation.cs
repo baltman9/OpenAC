@@ -151,9 +151,10 @@ public interface ICharacterInfo
     uint MaxMana { get; }
 
     /// <summary>
-    /// The unbuffed maximum health — the maximum with the secondary-attribute
-    /// enchantments taken back off. A host that does not track the split
-    /// reports the buffed maximum instead.
+    /// The unbuffed maximum health: the maximum with every enchantment layer
+    /// off — base attributes, no vital enchantments. A host that does not
+    /// track the split reports the buffed maximum instead, in which case this
+    /// and <see cref="MaxHealth"/> are the same number.
     /// </summary>
     uint BaseHealth => MaxHealth;
 
