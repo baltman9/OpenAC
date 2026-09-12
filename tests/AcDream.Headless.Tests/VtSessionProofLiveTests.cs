@@ -124,11 +124,20 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
         var diagnosticsOutput = new StringWriter();
         var observed = new SessionObservation();
 
+        // The session needs a body: without prepared content there is no
+        // local movement controller and no collision, so nothing that walks,
+        // faces or measures a distance can be judged.
+        using HeadlessProcessContentOwner content = OpenProcessContent(
+            message => diagnosticsOutput.WriteLine("content: " + message));
+        using HeadlessProcessContentOwner.HeadlessProcessContentLease contentLease =
+            content.AcquireLease(descriptor.Id);
+
         using var session = new HeadlessSessionHost(
             descriptor,
             credential,
             new HeadlessDiagnosticWriter(diagnosticsOutput),
             sessionOperations: null, // real network
+            contentLease: contentLease,
             vtankProfiles: new FilePluginStorage(vtankRoot),
             pluginRoots: [temporary.Path]);
         using IDisposable subscription = session.Runtime.Subscribe(observed);
@@ -205,7 +214,8 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
             ledger.Pass(
                 "P1",
                 "connected, plugin loaded, entered world",
-                $"status events {string.Join(",", requiredEvents)} present");
+                $"status events {string.Join(",", requiredEvents)} present; "
+                    + PositionText(session));
         }
         else
         {
@@ -743,6 +753,42 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
     // ======================================================================
     // Fixture staging.
     // ======================================================================
+
+    /// <summary>
+    /// The installed retail data plus the machine-local prepared package the
+    /// production hosts read. The proof refuses to run without them rather
+    /// than reporting a bodiless session's milestones as if they meant
+    /// something.
+    /// </summary>
+    private static HeadlessProcessContentOwner OpenProcessContent(
+        Action<string> diagnostic)
+    {
+        string datDirectory =
+            Environment.GetEnvironmentVariable("ACDREAM_DAT_DIR")
+            ?? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "Documents",
+                "Asheron's Call");
+        string preparedAssetPath =
+            Environment.GetEnvironmentVariable("ACDREAM_PAK_PATH")
+            ?? Path.Combine(datDirectory, "acdream.pak");
+        Assert.True(
+            Directory.Exists(datDirectory),
+            $"The proof needs the installed data directory: {datDirectory} "
+                + "(set ACDREAM_DAT_DIR).");
+        Assert.True(
+            File.Exists(preparedAssetPath),
+            $"The proof needs the prepared package: {preparedAssetPath} "
+                + "(set ACDREAM_PAK_PATH).");
+
+        return new HeadlessProcessContentOwner(
+            new HeadlessContentDescriptor
+            {
+                DatDirectory = datDirectory,
+                PreparedAssetPath = preparedAssetPath,
+            },
+            diagnostic);
+    }
 
     private static string StageProfileFixtures(string root)
     {
