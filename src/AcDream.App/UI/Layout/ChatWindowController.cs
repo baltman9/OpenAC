@@ -597,6 +597,21 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
         FindRootOf(Input)?.SetKeyboardFocus(Input);
     }
 
+    /// <summary>
+    /// Puts text in the chat entry and focuses it without sending. Refused
+    /// while the player is already typing there, so an automated paste never
+    /// overwrites what they are in the middle of.
+    /// </summary>
+    internal bool ComposeText(string text)
+    {
+        UiRoot? root = FindRootOf(Input);
+        if (root is null || ReferenceEquals(root.KeyboardFocus, Input))
+            return false;
+        Input.SetText(text);
+        root.SetKeyboardFocus(Input);
+        return true;
+    }
+
     internal void EnterChatMode(KeyChord? physicalChord = null)
     {
         UiRoot? root = FindRootOf(Input);

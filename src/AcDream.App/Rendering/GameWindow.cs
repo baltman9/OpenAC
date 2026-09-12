@@ -929,6 +929,7 @@ public sealed class GameWindow :
             _retailChatVm = retained.Chat;
             _characterSheetProvider = retained.CharacterSheet;
             _frameScreenshots = retained.Screenshots;
+            _automation?.BindChatComposer(retained.Runtime.ComposeChatText);
             retained.Runtime.AttachNativeCursorWindow(_window?.Native?.Glfw ?? 0);
         }
     }

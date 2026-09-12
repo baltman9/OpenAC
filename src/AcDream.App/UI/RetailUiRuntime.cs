@@ -941,6 +941,10 @@ public sealed class RetailUiRuntime : IDisposable
             Host.Root.SetKeyboardFocus(input);
     }
 
+    /// <summary>Stages text in the chat entry without sending it.</summary>
+    public bool ComposeChatText(string text) =>
+        _chatWindowController?.ComposeText(text) == true;
+
     public void LogOutCharacter() => EndCharacterSessionWithRetailGates();
 
     private enum SocialPanelPage { Friends, Allegiance, Fellowship }

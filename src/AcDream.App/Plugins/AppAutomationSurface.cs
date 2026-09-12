@@ -64,6 +64,7 @@ internal sealed class AppAutomationSurface
     private Func<uint, uint, int, bool>? _sellItem;
     private Func<uint, bool>? _dismissGhost;
     private Func<PluginSelectionAction, bool>? _selectionAction;
+    private Func<string, bool>? _composeChat;
     private PhysicsEngine? _projectilePhysics;
     private IReadOnlyList<PluginProjectileDebugSample> _projectileDebugSamples =
         Array.Empty<PluginProjectileDebugSample>();
@@ -446,6 +447,14 @@ internal sealed class AppAutomationSurface
         ArgumentNullException.ThrowIfNull(execute);
         lock (_gate)
             _selectionAction = execute;
+    }
+
+    /// <summary>Stages chat text in the entry box without sending it.</summary>
+    public void BindChatComposer(Func<string, bool> compose)
+    {
+        ArgumentNullException.ThrowIfNull(compose);
+        lock (_gate)
+            _composeChat = compose;
     }
 
     public void Unbind()
@@ -1125,6 +1134,14 @@ internal sealed class AppAutomationSurface
         lock (_gate)
             commands = _sessionCommands;
         return commands?.SubmitChatText(text) == true;
+    }
+
+    public bool Compose(string text)
+    {
+        Func<string, bool>? compose;
+        lock (_gate)
+            compose = _disposed ? null : _composeChat;
+        return compose?.Invoke(text) == true;
     }
 
     bool ISelectionAutomation.Execute(PluginSelectionAction action)
