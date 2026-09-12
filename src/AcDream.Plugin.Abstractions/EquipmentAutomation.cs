@@ -19,6 +19,13 @@ public readonly record struct PluginEquipmentItem(
     public uint AmmoType { get; init; }
     public int StackSize { get; init; } = 1;
     public int WeaponType { get; init; }
+
+    /// <summary>
+    /// How many creatures one swing of this weapon can strike. Greater than
+    /// one means a kill sentence may name a creature the swing was not aimed
+    /// at.
+    /// </summary>
+    public int Cleaving { get; init; }
 }
 
 public enum PluginEquipmentCommandStatus

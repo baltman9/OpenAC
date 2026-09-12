@@ -2116,6 +2116,8 @@ internal sealed class AppAutomationSurface
                 StackSize = Math.Max(1, item.StackSize),
                 WeaponType = item.Properties.GetInt(
                     (uint)PropertyInt.WeaponType),
+                Cleaving = item.Properties.GetInt(
+                    (uint)PropertyInt.Cleaving),
             });
         }
         built.Sort(static (left, right) =>
