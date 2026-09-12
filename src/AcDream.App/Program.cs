@@ -147,7 +147,7 @@ using IDisposable atmosphericPackRegistration = renderPackRegistry.Register(
             "spv")));
 using var automation = new AcDream.App.Plugins.AppAutomationSurface(
     worldEvents,
-    new AcDream.App.Plugins.LocalPluginPeerRegistry(Path.Combine(
+    new AcDream.Runtime.Plugins.LocalPluginPeerRegistry(Path.Combine(
         applicationPaths.DataDirectory,
         "plugin-peers")),
     runtimeOptions.PluginTags);

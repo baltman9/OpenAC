@@ -44,7 +44,10 @@ internal sealed class HeadlessPluginSession : IDisposable
         IPluginCommandRegistry? commands = null,
         IPluginStorage? vtankProfiles = null,
         IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
-        Func<string, bool>? submitChatText = null)
+        Func<string, bool>? submitChatText = null,
+        IGameRuntimeCommands? sessionCommands = null,
+        AcDream.Content.IDatReaderWriter? content = null,
+        AcDream.Content.MagicCatalog? magicCatalog = null)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(diagnostics);
@@ -61,7 +64,10 @@ internal sealed class HeadlessPluginSession : IDisposable
             commands,
             vtankProfiles,
             sessionSettings,
-            submitChatText);
+            submitChatText,
+            sessionCommands,
+            content,
+            magicCatalog);
         var plugins = new PluginSession(
             host,
             status => Report(statusWriter, sessionId, status),

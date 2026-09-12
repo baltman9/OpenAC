@@ -304,13 +304,14 @@ public sealed class AppAutomationSurfaceTests
             IconId = 0x06000165u,
         };
 
-        System.Reflection.MethodInfo method = typeof(AppAutomationSurface)
+        System.Reflection.MethodInfo method =
+            typeof(AcDream.Runtime.Plugins.RuntimeAutomationSurface)
             .GetMethod(
                 "ProjectWorldObject",
                 System.Reflection.BindingFlags.NonPublic
                     | System.Reflection.BindingFlags.Instance)
             ?? throw new InvalidOperationException(
-                "AppAutomationSurface.ProjectWorldObject was not found by reflection.");
+                "RuntimeAutomationSurface.ProjectWorldObject was not found by reflection.");
         var result = (PluginWorldObject)method.Invoke(
             surface,
             [runtime, null, item, 0u])!;
@@ -358,8 +359,45 @@ public sealed class AppAutomationSurfaceTests
 
         Assert.True(index >= 0, "INavigationAutomation.FaceHeading not found.");
         Assert.Equal(
-            typeof(AppAutomationSurface),
+            typeof(AcDream.Runtime.Plugins.RuntimeAutomationSurface),
             map.TargetMethods[index].DeclaringType);
+    }
+
+    /// <summary>
+    /// One plugin, two hosts: the graphical host answers a plugin out of the
+    /// shared presentation-free surface and adds nothing of its own to it.
+    /// If the graphical host ever grew a private answer to an automation
+    /// question, a plugin would behave differently here than in the
+    /// windowless host — that is the divergence this pins shut. The
+    /// windowless host has the mirror of this test.
+    /// </summary>
+    [Fact]
+    public void EveryAutomationAnswerComesFromTheSharedRuntimeSurface()
+    {
+        Type[] contracts = typeof(AppAutomationSurface)
+            .GetInterfaces()
+            .Where(static contract =>
+                contract.Namespace == typeof(IAutomationSurface).Namespace)
+            .ToArray();
+        Assert.NotEmpty(contracts);
+
+        var declaredByTheHost = new List<string>();
+        foreach (Type contract in contracts)
+        {
+            System.Reflection.InterfaceMapping map =
+                typeof(AppAutomationSurface).GetInterfaceMap(contract);
+            for (int index = 0; index < map.TargetMethods.Length; index++)
+            {
+                if (map.TargetMethods[index].DeclaringType
+                    != typeof(AcDream.Runtime.Plugins.RuntimeAutomationSurface))
+                {
+                    declaredByTheHost.Add(
+                        $"{contract.Name}.{map.InterfaceMethods[index].Name}");
+                }
+            }
+        }
+
+        Assert.Equal([], declaredByTheHost);
     }
 
     [Fact]

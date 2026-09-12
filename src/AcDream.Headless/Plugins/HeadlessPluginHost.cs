@@ -45,14 +45,24 @@ internal sealed class HeadlessPluginHost
         IPluginCommandRegistry? commands = null,
         IPluginStorage? vtankProfiles = null,
         IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
-        Func<string, bool>? submitChatText = null)
+        Func<string, bool>? submitChatText = null,
+        IGameRuntimeCommands? sessionCommands = null,
+        AcDream.Content.IDatReaderWriter? content = null,
+        AcDream.Content.MagicCatalog? magicCatalog = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         Log = logger ?? throw new ArgumentNullException(nameof(logger));
         Commands = commands ?? NoOpPluginCommandRegistry.Instance;
         VtankProfiles = vtankProfiles ?? NoOpPluginStorage.Instance;
         _sessionSettingsByPlugin = CopySessionSettings(sessionSettings);
-        _automation = new HeadlessAutomationSurface(runtime, submitChatText);
+        _automation = new HeadlessAutomationSurface(
+            runtime,
+            this,
+            sessionCommands,
+            submitChatText,
+            content,
+            magicCatalog,
+            Log.Warn);
         _eventSubscription = runtime.Subscribe(this);
     }
 
@@ -261,6 +271,7 @@ internal sealed class HeadlessPluginHost
         }
         lock (_tickGate)
             _tick = null;
+        _automation.Dispose();
         _eventSubscription.Dispose();
     }
 
