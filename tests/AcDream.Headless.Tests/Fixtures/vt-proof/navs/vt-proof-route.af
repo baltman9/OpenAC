@@ -1,0 +1,12 @@
+~~ {
+~~ The VT session proof route: a small square loop around the outdoor
+~~ arena the proof harness teleports to. Coordinates are game
+~~ coordinates (east-west, north-south, elevation).
+~~ }
+
+NAV: vtproof circular ~~ {
+	pnt 33.7900150 42.1057993 0.4013750
+	pnt 33.8233483 42.1057993 0.4013750
+	pnt 33.8233483 42.1391327 0.4013750
+	pnt 33.7900150 42.1391327 0.4013750
+~~ }
