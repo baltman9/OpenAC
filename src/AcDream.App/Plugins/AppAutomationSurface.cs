@@ -2122,6 +2122,14 @@ internal sealed class AppAutomationSurface
                     (uint)PropertyInt.ImbuedEffect),
                 ResistanceCleaving = item.Properties.GetInt(
                     (uint)PropertyInt.ResistanceModifierType),
+                SlayerCreatureType = item.Properties.GetInt(
+                    (uint)PropertyInt.SlayerCreatureType),
+                CrushingBlow = item.Properties.GetFloat(
+                    (uint)PropertyFloat.CriticalMultiplier) > 0d,
+                BitingStrike = item.Properties.GetFloat(
+                    (uint)PropertyFloat.CriticalFrequency) > 0d,
+                ArmorCleaving = item.Properties.GetFloat(
+                    (uint)PropertyFloat.IgnoreArmor) > 0d,
             });
         }
         built.Sort(static (left, right) =>

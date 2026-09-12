@@ -38,6 +38,19 @@ public readonly record struct PluginEquipmentItem(
     /// bit layout as <see cref="DamageType"/>.
     /// </summary>
     public int ResistanceCleaving { get; init; }
+
+    /// <summary>
+    /// The creature type this weapon slays, or zero. A weapon that slays what
+    /// is being fought outranks every other consideration.
+    /// </summary>
+    public int SlayerCreatureType { get; init; }
+
+    /// <summary>Rating bonuses a quest weapon can carry.</summary>
+    public bool CrushingBlow { get; init; }
+
+    public bool BitingStrike { get; init; }
+
+    public bool ArmorCleaving { get; init; }
 }
 
 public enum PluginEquipmentCommandStatus
