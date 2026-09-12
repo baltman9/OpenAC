@@ -132,7 +132,7 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
         using HeadlessProcessContentOwner.HeadlessProcessContentLease contentLease =
             content.AcquireLease(descriptor.Id);
 
-        using var session = new HeadlessSessionHost(
+        var session = new HeadlessSessionHost(
             descriptor,
             credential,
             new HeadlessDiagnosticWriter(diagnosticsOutput),
@@ -141,368 +141,418 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
             vtankProfiles: new FilePluginStorage(vtankRoot),
             pluginRoots: [temporary.Path]);
         using IDisposable subscription = session.Runtime.Subscribe(observed);
-
-        var staged = new List<string>();
-
-        void Pump(TimeSpan duration)
+        // A proof that cannot report its own failure is worth nothing, and a
+        // disposal that throws on the way out of a failed run replaces the
+        // reason with itself. So the run's own error is printed first and the
+        // teardown's, if any, printed after it — neither hides the other.
+        try
         {
-            DateTime deadline = DateTime.UtcNow + duration;
-            while (DateTime.UtcNow < deadline)
+            var staged = new List<string>();
+
+            void Pump(TimeSpan duration)
             {
-                session.Tick(0.1d);
-                Thread.Sleep(100);
-            }
-        }
-
-        bool WaitUntil(TimeSpan timeout, Func<bool> condition)
-        {
-            DateTime deadline = DateTime.UtcNow + timeout;
-            while (DateTime.UtcNow < deadline)
-            {
-                if (condition())
-                    return true;
-                session.Tick(0.1d);
-                Thread.Sleep(100);
-            }
-            return condition();
-        }
-
-        void Stage(string command)
-        {
-            SubmitOutcome outcome = session.SubmitConsoleLine(command);
-            staged.Add($"{command} -> {outcome}");
-            Pump(TimeSpan.FromSeconds(1.5d));
-        }
-
-        string Evidence()
-        {
-            string[] pluginMessages = PluginMessages(diagnosticsOutput.ToString());
-            string[] problems = pluginMessages
-                .Where(static line =>
-                    line.StartsWith("plugin-warn:", StringComparison.Ordinal)
-                    || line.StartsWith("plugin-error:", StringComparison.Ordinal))
-                .Distinct(StringComparer.Ordinal)
-                .ToArray();
-            return string.Join(
-                Environment.NewLine,
-                "staged server commands:",
-                Indent(staged),
-                "plugin warnings and errors:",
-                Indent(problems),
-                "last 30 chat lines:",
-                Indent(Tail(observed.SnapshotChat(), 30)),
-                "last 30 plugin messages:",
-                Indent(Tail(pluginMessages, 30)));
-        }
-
-        _ = session.Start();
-
-        // ---- P1: connected, plugin loaded, entered world -------------------
-        bool enteredWorld = WaitUntil(
-            TimeSpan.FromSeconds(45d),
-            () => EventNames(ReadStatuses(statusPath)).Contains("enteredWorld"));
-        string[] names = EventNames(ReadStatuses(statusPath));
-        string[] requiredEvents =
-            ["started", "pluginLoaded", "connected", "characterList", "enteredWorld"];
-        string[] missing = requiredEvents.Where(name => !names.Contains(name)).ToArray();
-        bool pluginLoaded = ReadStatuses(statusPath).Any(static item =>
-            item.GetProperty("e").GetString() == "pluginLoaded"
-            && item.GetProperty("plugin").GetString() == "acdream.mosstank");
-        if (enteredWorld && missing.Length == 0 && pluginLoaded
-            && session.Plugins.LoadedCount >= 1)
-        {
-            ledger.Pass(
-                "P1",
-                "connected, plugin loaded, entered world",
-                $"status events {string.Join(",", requiredEvents)} present; "
-                    + PositionText(session));
-        }
-        else
-        {
-            ledger.Fail(
-                "P1",
-                "connected, plugin loaded, entered world",
-                missing.Length > 0
-                    ? $"missing status events: {string.Join(",", missing)}"
-                    : $"plugin not loaded (loadedCount={session.Plugins.LoadedCount})",
-                Evidence());
-        }
-
-        if (ledger.Failed("P1"))
-        {
-            // Nothing downstream can be judged without a live session.
-            foreach ((string id, string title) in RemainingMilestones("P1"))
-                ledger.NotReached(id, title, "the session never entered the world");
-            FinishAndReport(session, statusPath, ledger, Evidence, output);
-            return;
-        }
-
-        // Give the plugin's autostart edge a tick or two, then open every
-        // log channel the plugin knows about so its work becomes observable.
-        Pump(TimeSpan.FromSeconds(3d));
-        foreach (string channel in LogChannels)
-            Stage($"/vt log {channel} on");
-
-        // ---- P2: the three fixture profiles are loaded ---------------------
-        {
-            string[] pluginMessages = PluginMessages(diagnosticsOutput.ToString());
-            string[] autostartLines = pluginMessages
-                .Where(static line => line.Contains("Autostart:", StringComparison.Ordinal))
-                .ToArray();
-            string[] chat = observed.SnapshotChat();
-            bool NamesProfile(string profile) =>
-                pluginMessages.Concat(chat).Any(line =>
-                    line.Contains(profile, StringComparison.OrdinalIgnoreCase)
-                    && line.Contains("oaded", StringComparison.Ordinal));
-            string[] unreported = new[]
+                DateTime deadline = DateTime.UtcNow + duration;
+                while (DateTime.UtcNow < deadline)
                 {
-                    SettingsProfileName + ".usd",
-                    LootProfileName + ".utl",
-                    RouteProfileName + ".af",
+                    session.Tick(0.1d);
+                    Thread.Sleep(100);
                 }
-                .Where(profile => !NamesProfile(Path.GetFileNameWithoutExtension(profile)))
-                .ToArray();
-            if (unreported.Length == 0 && autostartLines.Length == 0)
-            {
-                ledger.Pass(
-                    "P2",
-                    "the fixture settings, loot and route profiles are loaded",
-                    "each profile reported a load line");
             }
-            else
-            {
-                ledger.Fail(
-                    "P2",
-                    "the fixture settings, loot and route profiles are loaded",
-                    unreported.Length > 0
-                        ? $"no load line for: {string.Join(", ", unreported)}"
-                        : "the plugin reported an autostart problem",
-                    (autostartLines.Length > 0
-                        ? "autostart lines:" + Environment.NewLine
-                            + Indent(autostartLines) + Environment.NewLine
-                        : string.Empty)
-                        + Evidence());
-            }
-        }
 
-        // ---- stage the arena ----------------------------------------------
-        Stage(ArenaTeleport);
-        bool inArena = WaitUntil(
-            TimeSpan.FromSeconds(20d),
-            () => DistanceMetersFromArena(session) < 40d);
-        Pump(TimeSpan.FromSeconds(2d));
-        staged.Add($"arena reached -> {inArena} ({PositionText(session)})");
-
-        // ---- P3: a buff pass runs and finishes -----------------------------
-        {
-            int before = observed.ChatCount;
-            bool buffed = WaitUntil(
-                TimeSpan.FromSeconds(45d),
-                () => MentionsAny(
-                    observed.SnapshotChat(),
-                    "Buffing:", "SpellCaster: Begin", "Casting:"));
-            bool settled = buffed
-                && WaitUntil(
-                    TimeSpan.FromSeconds(30d),
-                    () => Quiet(observed, "Casting:", TimeSpan.FromSeconds(6d)));
-            if (buffed && settled)
+            bool WaitUntil(TimeSpan timeout, Func<bool> condition)
             {
-                ledger.Pass(
-                    "P3",
-                    "the buff pass runs and then goes quiet",
-                    $"buff lines observed after chat entry {before}");
-            }
-            else
-            {
-                ledger.Fail(
-                    "P3",
-                    "the buff pass runs and then goes quiet",
-                    buffed
-                        ? "the buff pass never went quiet"
-                        : "no buff line was ever emitted",
-                    Evidence());
-            }
-        }
-
-        // ---- P4: a fight -- attack rule active, a kill observed ------------
-        Stage("@create " + MonsterWeenie);
-        Stage("@create " + MonsterWeenie);
-        {
-            bool attackRule = WaitUntil(
-                TimeSpan.FromSeconds(45d),
-                () => MentionsAny(
-                    observed.SnapshotChat(),
-                    "Picked Attack P:", "(Attack) Running"));
-            bool killed = WaitUntil(
-                TimeSpan.FromSeconds(45d),
-                () => observed.SnapshotChat().Any(IsKillLine));
-            if (attackRule && killed)
-            {
-                ledger.Pass(
-                    "P4",
-                    "the attack rule wins the loop and a kill is observed",
-                    "attack rule active and a kill line reached the chat log");
-            }
-            else
-            {
-                ledger.Fail(
-                    "P4",
-                    "the attack rule wins the loop and a kill is observed",
-                    attackRule
-                        ? "the attack rule ran but nothing died"
-                        : "the attack rule never became the active rule",
-                    Evidence());
-            }
-        }
-
-        // ---- P5: loot -- a corpse is opened and a decision is made ---------
-        {
-            bool decision = WaitUntil(
-                TimeSpan.FromSeconds(45d),
-                () => MentionsAny(
-                    observed.SnapshotChat(),
-                    "Opening ", "Looting ", "Looted "));
-            bool picked = observed.InventoryAdditions > 0;
-            if (decision && picked)
-            {
-                ledger.Pass(
-                    "P5",
-                    "a corpse is opened and at least one loot decision is made",
-                    $"{observed.InventoryAdditions} item(s) reached the inventory");
-            }
-            else
-            {
-                ledger.Fail(
-                    "P5",
-                    "a corpse is opened and at least one loot decision is made",
-                    decision
-                        ? "a loot decision was reported but nothing entered the inventory"
-                        : "no corpse was opened and no loot decision was reported",
-                    Evidence());
-            }
-        }
-
-        // Clear the arena so the route and the vitals milestones are not
-        // decided by a monster the plugin cannot fight.
-        Stage("@smite all");
-        Stage("@heal");
-
-        // ---- P6: the route is walked -- two waypoints reached in order -----
-        {
-            var reached = new List<int>();
-            _ = WaitUntil(
-                TimeSpan.FromSeconds(100d),
-                () =>
+                DateTime deadline = DateTime.UtcNow + timeout;
+                while (DateTime.UtcNow < deadline)
                 {
-                    int index = NearestWaypointWithin(
-                        session, route, WaypointArrivalMeters);
-                    if (index >= 0 && (reached.Count == 0 || reached[^1] != index))
-                        reached.Add(index);
-                    return reached.Count >= 3;
-                });
-            int advances = Math.Max(0, reached.Count - 1);
-            if (advances >= 2)
+                    if (condition())
+                        return true;
+                    session.Tick(0.1d);
+                    Thread.Sleep(100);
+                }
+                return condition();
+            }
+
+            void Stage(string command)
+            {
+                SubmitOutcome outcome = session.SubmitConsoleLine(command);
+                staged.Add($"{command} -> {outcome}");
+                Pump(TimeSpan.FromSeconds(1.5d));
+            }
+
+            string Evidence()
+            {
+                string[] pluginMessages = PluginMessages(diagnosticsOutput.ToString());
+                string[] problems = pluginMessages
+                    .Where(static line =>
+                        line.StartsWith("plugin-warn:", StringComparison.Ordinal)
+                        || line.StartsWith("plugin-error:", StringComparison.Ordinal))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+                return string.Join(
+                    Environment.NewLine,
+                    "staged server commands:",
+                    Indent(staged),
+                    "plugin warnings and errors:",
+                    Indent(problems),
+                    "last 30 chat lines:",
+                    Indent(Tail(observed.SnapshotChat(), 30)),
+                    "last 30 plugin messages:",
+                    Indent(Tail(pluginMessages, 30)));
+            }
+
+            _ = session.Start();
+
+            // ---- P1: connected, plugin loaded, entered world -------------------
+            bool enteredWorld = WaitUntil(
+                TimeSpan.FromSeconds(45d),
+                () => EventNames(ReadStatuses(statusPath)).Contains("enteredWorld"));
+            string[] names = EventNames(ReadStatuses(statusPath));
+            string[] requiredEvents =
+                ["started", "pluginLoaded", "connected", "characterList", "enteredWorld"];
+            string[] missing = requiredEvents.Where(name => !names.Contains(name)).ToArray();
+            bool pluginLoaded = ReadStatuses(statusPath).Any(static item =>
+                item.GetProperty("e").GetString() == "pluginLoaded"
+                && item.GetProperty("plugin").GetString() == "acdream.mosstank");
+            if (enteredWorld && missing.Length == 0 && pluginLoaded
+                && session.Plugins.LoadedCount >= 1)
             {
                 ledger.Pass(
-                    "P6",
-                    "the route advances by at least two waypoints",
-                    $"waypoint order {string.Join("->", reached)}");
+                    "P1",
+                    "connected, plugin loaded, entered world",
+                    $"status events {string.Join(",", requiredEvents)} present; "
+                        + PositionText(session));
             }
             else
             {
                 ledger.Fail(
-                    "P6",
-                    "the route advances by at least two waypoints",
-                    $"only {advances} waypoint advance(s); "
-                        + $"visited {(reached.Count == 0 ? "none" : string.Join("->", reached))}; "
-                        + PositionText(session),
+                    "P1",
+                    "connected, plugin loaded, entered world",
+                    missing.Length > 0
+                        ? $"missing status events: {string.Join(",", missing)}"
+                        : $"plugin not loaded (loadedCount={session.Plugins.LoadedCount})",
                     Evidence());
             }
-        }
 
-        // ---- P7: a vitals recharge fires -----------------------------------
-        Stage("@setvital stamina 10");
-        {
-            bool recharged = WaitUntil(
-                TimeSpan.FromSeconds(45d),
-                () => MentionsAny(
-                    [.. PluginMessages(diagnosticsOutput.ToString())
-                        .Concat(observed.SnapshotChat())],
-                    "Vitals:", "Recharging "));
-            if (recharged)
+            if (ledger.Failed("P1"))
             {
-                ledger.Pass(
-                    "P7",
-                    "a vitals recharge fires at least once",
-                    "a recharge line was emitted after stamina was forced down");
+                // Nothing downstream can be judged without a live session.
+                foreach ((string id, string title) in RemainingMilestones("P1"))
+                    ledger.NotReached(id, title, "the session never entered the world");
+                FinishAndReport(session, statusPath, ledger, Evidence, output);
+                return;
             }
-            else
-            {
-                ledger.Fail(
-                    "P7",
-                    "a vitals recharge fires at least once",
-                    $"no recharge line after forcing stamina down "
-                        + $"(stamina now {VitalText(session, LocalPlayerState.VitalKind.Stamina)})",
-                    Evidence());
-            }
-        }
 
-        // ---- P8: death, then recovery --------------------------------------
-        Stage("@setvital health 1");
-        Stage("@smite " + character);
-        {
-            bool died = WaitUntil(
-                TimeSpan.FromSeconds(45d),
-                () => IsDead(session)
-                    || MentionsAny(observed.SnapshotChat(), "You were killed by"));
-            // The plugin has to notice the death itself, not merely keep
-            // talking: its own death handling stops the macro, so the proof
-            // of a real recovery is that acknowledgement followed by the
-            // scheduler picking rules again.
-            bool acknowledged = died
-                && WaitUntil(
-                    TimeSpan.FromSeconds(30d),
-                    () => observed.SnapshotChat().Any(static line =>
-                        line.Contains("[MossTank]", StringComparison.Ordinal)
-                        && line.Contains("died", StringComparison.Ordinal)));
-            bool recovered = acknowledged
-                && WaitUntil(
-                    TimeSpan.FromSeconds(60d),
-                    () => !IsDead(session) && session.Runtime.Lifecycle.State
-                        == RuntimeLifecycleState.InWorld);
-            int chatBeforeResume = observed.ChatCount;
-            bool macroResumed = recovered
-                && WaitUntil(
+            // Give the plugin's autostart edge a tick or two, then open every
+            // log channel the plugin knows about so its work becomes observable.
+            Pump(TimeSpan.FromSeconds(3d));
+            foreach (string channel in LogChannels)
+                Stage($"/vt log {channel} on");
+
+            // ---- P2: the three fixture profiles are loaded ---------------------
+            {
+                string[] pluginMessages = PluginMessages(diagnosticsOutput.ToString());
+                string[] autostartLines = pluginMessages
+                    .Where(static line => line.Contains("Autostart:", StringComparison.Ordinal))
+                    .ToArray();
+                string[] chat = observed.SnapshotChat();
+                bool NamesProfile(string profile) =>
+                    pluginMessages.Concat(chat).Any(line =>
+                        line.Contains(profile, StringComparison.OrdinalIgnoreCase)
+                        && line.Contains("oaded", StringComparison.Ordinal));
+                string[] unreported = new[]
+                    {
+                        SettingsProfileName + ".usd",
+                        LootProfileName + ".utl",
+                        RouteProfileName + ".af",
+                    }
+                    .Where(profile => !NamesProfile(Path.GetFileNameWithoutExtension(profile)))
+                    .ToArray();
+                if (unreported.Length == 0 && autostartLines.Length == 0)
+                {
+                    ledger.Pass(
+                        "P2",
+                        "the fixture settings, loot and route profiles are loaded",
+                        "each profile reported a load line");
+                }
+                else
+                {
+                    ledger.Fail(
+                        "P2",
+                        "the fixture settings, loot and route profiles are loaded",
+                        unreported.Length > 0
+                            ? $"no load line for: {string.Join(", ", unreported)}"
+                            : "the plugin reported an autostart problem",
+                        (autostartLines.Length > 0
+                            ? "autostart lines:" + Environment.NewLine
+                                + Indent(autostartLines) + Environment.NewLine
+                            : string.Empty)
+                            + Evidence());
+                }
+            }
+
+            // ---- stage the arena ----------------------------------------------
+            Stage(ArenaTeleport);
+            bool inArena = WaitUntil(
+                TimeSpan.FromSeconds(20d),
+                () => DistanceMetersFromArena(session) < 40d);
+            Pump(TimeSpan.FromSeconds(2d));
+            staged.Add($"arena reached -> {inArena} ({PositionText(session)})");
+
+            // ---- P3: a buff pass runs and finishes -----------------------------
+            {
+                int before = observed.ChatCount;
+                bool buffed = WaitUntil(
                     TimeSpan.FromSeconds(45d),
-                    () => observed.SnapshotChat()
-                        .Skip(chatBeforeResume)
-                        .Any(static line => line.Contains(
-                            "Picked ", StringComparison.Ordinal)));
-            if (died && acknowledged && recovered && macroResumed)
-            {
-                ledger.Pass(
-                    "P8",
-                    "the character dies, recovers and the macro resumes",
-                    "death observed and acknowledged, vitals restored, "
-                        + "the scheduler picked a rule again");
+                    () => MentionsAny(
+                        observed.SnapshotChat(),
+                        "Buffing:", "SpellCaster: Begin", "Casting:"));
+                bool settled = buffed
+                    && WaitUntil(
+                        TimeSpan.FromSeconds(30d),
+                        () => Quiet(observed, "Casting:", TimeSpan.FromSeconds(6d)));
+                if (buffed && settled)
+                {
+                    ledger.Pass(
+                        "P3",
+                        "the buff pass runs and then goes quiet",
+                        $"buff lines observed after chat entry {before}");
+                }
+                else
+                {
+                    ledger.Fail(
+                        "P3",
+                        "the buff pass runs and then goes quiet",
+                        buffed
+                            ? "the buff pass never went quiet"
+                            : "no buff line was ever emitted",
+                        Evidence());
+                }
             }
-            else
+
+            // ---- P4: a fight -- attack rule active, a kill observed ------------
+            Stage("@create " + MonsterWeenie);
+            Stage("@create " + MonsterWeenie);
             {
-                ledger.Fail(
-                    "P8",
-                    "the character dies, recovers and the macro resumes",
-                    !died
-                        ? "no death was observable"
-                        : !acknowledged
-                            ? "the plugin never noticed the death"
-                            : !recovered
-                                ? "the character never recovered after dying"
-                                : "the scheduler picked no rule after the recovery",
-                    Evidence());
+                bool attackRule = WaitUntil(
+                    TimeSpan.FromSeconds(45d),
+                    () => MentionsAny(
+                        observed.SnapshotChat(),
+                        "Picked Attack P:", "(Attack) Running"));
+                bool killed = WaitUntil(
+                    TimeSpan.FromSeconds(45d),
+                    () => observed.SnapshotChat().Any(IsKillLine));
+                if (attackRule && killed)
+                {
+                    ledger.Pass(
+                        "P4",
+                        "the attack rule wins the loop and a kill is observed",
+                        "attack rule active and a kill line reached the chat log");
+                }
+                else
+                {
+                    ledger.Fail(
+                        "P4",
+                        "the attack rule wins the loop and a kill is observed",
+                        attackRule
+                            ? "the attack rule ran but nothing died"
+                            : "the attack rule never became the active rule",
+                        Evidence());
+                }
+            }
+
+            // ---- P5: loot -- a corpse is opened and a decision is made ---------
+            {
+                bool decision = WaitUntil(
+                    TimeSpan.FromSeconds(45d),
+                    () => MentionsAny(
+                        observed.SnapshotChat(),
+                        "Opening ", "Looting ", "Looted "));
+                bool picked = observed.InventoryAdditions > 0;
+                if (decision && picked)
+                {
+                    ledger.Pass(
+                        "P5",
+                        "a corpse is opened and at least one loot decision is made",
+                        $"{observed.InventoryAdditions} item(s) reached the inventory");
+                }
+                else
+                {
+                    ledger.Fail(
+                        "P5",
+                        "a corpse is opened and at least one loot decision is made",
+                        decision
+                            ? "a loot decision was reported but nothing entered the inventory"
+                            : "no corpse was opened and no loot decision was reported",
+                        Evidence());
+                }
+            }
+
+            // Clear the arena so the route and the vitals milestones are not
+            // decided by a monster the plugin cannot fight.
+            Stage("@smite all");
+            Stage("@heal");
+
+            // ---- P6: the route is walked -- two waypoints reached in order -----
+            {
+                var reached = new List<int>();
+                _ = WaitUntil(
+                    TimeSpan.FromSeconds(100d),
+                    () =>
+                    {
+                        int index = NearestWaypointWithin(
+                            session, route, WaypointArrivalMeters);
+                        if (index >= 0 && (reached.Count == 0 || reached[^1] != index))
+                            reached.Add(index);
+                        return reached.Count >= 3;
+                    });
+                int advances = Math.Max(0, reached.Count - 1);
+                if (advances >= 2)
+                {
+                    ledger.Pass(
+                        "P6",
+                        "the route advances by at least two waypoints",
+                        $"waypoint order {string.Join("->", reached)}");
+                }
+                else
+                {
+                    ledger.Fail(
+                        "P6",
+                        "the route advances by at least two waypoints",
+                        $"only {advances} waypoint advance(s); "
+                            + $"visited {(reached.Count == 0 ? "none" : string.Join("->", reached))}; "
+                            + PositionText(session),
+                        Evidence());
+                }
+            }
+
+            // ---- P7: a vitals recharge fires -----------------------------------
+            Stage("@setvital stamina 10");
+            {
+                bool recharged = WaitUntil(
+                    TimeSpan.FromSeconds(45d),
+                    () => MentionsAny(
+                        [.. PluginMessages(diagnosticsOutput.ToString())
+                            .Concat(observed.SnapshotChat())],
+                        "Vitals:", "Recharging "));
+                if (recharged)
+                {
+                    ledger.Pass(
+                        "P7",
+                        "a vitals recharge fires at least once",
+                        "a recharge line was emitted after stamina was forced down");
+                }
+                else
+                {
+                    ledger.Fail(
+                        "P7",
+                        "a vitals recharge fires at least once",
+                        $"no recharge line after forcing stamina down "
+                            + $"(stamina now {VitalText(session, LocalPlayerState.VitalKind.Stamina)})",
+                        Evidence());
+                }
+            }
+
+            // ---- P8: death, then recovery --------------------------------------
+            Stage("@setvital health 1");
+            Stage("@smite " + character);
+            {
+                bool died = WaitUntil(
+                    TimeSpan.FromSeconds(45d),
+                    () => IsDead(session)
+                        || MentionsAny(observed.SnapshotChat(), "You were killed by"));
+                // The plugin has to notice the death itself, not merely keep
+                // talking: its own death handling stops the macro, so the proof
+                // of a real recovery is that acknowledgement followed by the
+                // scheduler picking rules again.
+                bool acknowledged = died
+                    && WaitUntil(
+                        TimeSpan.FromSeconds(30d),
+                        () => observed.SnapshotChat().Any(static line =>
+                            line.Contains("[MossTank]", StringComparison.Ordinal)
+                            && line.Contains("died", StringComparison.Ordinal)));
+                bool recovered = acknowledged
+                    && WaitUntil(
+                        TimeSpan.FromSeconds(60d),
+                        () => !IsDead(session) && session.Runtime.Lifecycle.State
+                            == RuntimeLifecycleState.InWorld);
+                int chatBeforeResume = observed.ChatCount;
+                bool macroResumed = recovered
+                    && WaitUntil(
+                        TimeSpan.FromSeconds(45d),
+                        () => observed.SnapshotChat()
+                            .Skip(chatBeforeResume)
+                            .Any(static line => line.Contains(
+                                "Picked ", StringComparison.Ordinal)));
+                if (died && acknowledged && recovered && macroResumed)
+                {
+                    ledger.Pass(
+                        "P8",
+                        "the character dies, recovers and the macro resumes",
+                        "death observed and acknowledged, vitals restored, "
+                            + "the scheduler picked a rule again");
+                }
+                else
+                {
+                    ledger.Fail(
+                        "P8",
+                        "the character dies, recovers and the macro resumes",
+                        !died
+                            ? "no death was observable"
+                            : !acknowledged
+                                ? "the plugin never noticed the death"
+                                : !recovered
+                                    ? "the character never recovered after dying"
+                                    : "the scheduler picked no rule after the recovery",
+                        Evidence());
+                }
+            }
+
+            FinishAndReport(session, statusPath, ledger, Evidence, output);
+        }
+        catch (Exception error) when (error is not Xunit.Sdk.XunitException)
+        {
+            Console.Out.WriteLine(
+                "vt-proof: the run threw before it could report:");
+            Console.Out.WriteLine(error.ToString());
+            Console.Out.WriteLine("player: " + PositionText(session));
+            Console.Out.WriteLine("player record: " + LocalPlayerRecordText(session));
+            Console.Out.WriteLine("last 60 host diagnostics (plugin chatter removed):");
+            Console.Out.WriteLine(Indent(Tail(
+                SplitLines(diagnosticsOutput.ToString())
+                    .Where(static line => !line.Contains(
+                        "\"eventName\":\"plugin-", StringComparison.Ordinal))
+                    .ToArray(),
+                60)));
+            Console.Out.WriteLine("last 20 plugin messages:");
+            Console.Out.WriteLine(Indent(
+                Tail(PluginMessages(diagnosticsOutput.ToString()), 20)));
+            Console.Out.WriteLine("last 20 chat lines:");
+            Console.Out.WriteLine(Indent(Tail(observed.SnapshotChat(), 20)));
+
+            // The table is the deliverable. A run that dies mid-way still
+            // owes one, with every milestone it never got to marked as such.
+            string reason = error.GetBaseException().Message;
+            foreach ((string id, string title) in AllMilestones)
+            {
+                if (!ledger.Reported(id))
+                    ledger.NotReached(id, title, "the run threw: " + reason);
+            }
+            Console.Out.WriteLine(ledger.RenderTable());
+            Console.Out.Flush();
+            throw;
+        }
+        finally
+        {
+            try
+            {
+                session.Dispose();
+            }
+            catch (Exception teardown)
+            {
+                Console.Out.WriteLine("vt-proof: teardown threw: " + teardown);
+                Console.Out.Flush();
             }
         }
-
-        FinishAndReport(session, statusPath, ledger, Evidence, output);
     }
 
     // ======================================================================
@@ -635,6 +685,31 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
     /// The controller flag matters: without one there is no position to
     /// judge a route against, whatever the character is really doing.
     /// </summary>
+    /// <summary>
+    /// What the runtime actually holds for the local player. A placement that
+    /// refuses because there is "no canonical body" is unreadable without
+    /// knowing whether the record exists, whether it has a body, and whether
+    /// its arrival placement is still unresolved.
+    /// </summary>
+    private static string LocalPlayerRecordText(HeadlessSessionHost session)
+    {
+        uint guid = session.Runtime.PlayerIdentity.ServerGuid;
+        if (!session.Runtime.EntityObjects.Entities.TryGetActive(
+                guid,
+                out AcDream.Runtime.Entities.RuntimeEntityRecord record))
+        {
+            return $"guid=0x{guid:X8} no active record "
+                + $"(entities={session.Runtime.Entities.Count})";
+        }
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"guid=0x{guid:X8} body={record.PhysicsBody is not null} "
+                + $"cell=0x{record.Snapshot.Position?.LandblockId ?? 0u:X8} "
+                + $"initialCreateResidence="
+                + $"{session.Runtime.EntityObjects.TryGetInitialCreateResidence(record, out _)} "
+                + $"entities={session.Runtime.Entities.Count}");
+    }
+
     private static string PositionText(HeadlessSessionHost session)
     {
         RuntimeMovementSnapshot movement = session.Runtime.Movement.Snapshot;
@@ -929,7 +1004,12 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
 
         public void Dispose()
         {
-            for (int attempt = 0; Directory.Exists(Path); attempt++)
+            // The plugin's load context unloads asynchronously, so the
+            // copied plugin assembly can still be mapped for a moment after
+            // the session is gone. Cleaning up scratch files is housekeeping:
+            // it must never throw over the run's own verdict, which is the
+            // only thing this test exists to report.
+            for (int attempt = 0; attempt < 50 && Directory.Exists(Path); attempt++)
             {
                 try
                 {
@@ -937,14 +1017,16 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                     return;
                 }
                 catch (Exception error)
-                    when (error is IOException or UnauthorizedAccessException
-                        && attempt < 9)
+                    when (error is IOException or UnauthorizedAccessException)
                 {
                     GC.Collect();
                     GC.WaitForPendingFinalizers();
-                    Thread.Sleep(10);
+                    Thread.Sleep(20);
                 }
             }
+
+            if (Directory.Exists(Path))
+                Console.Out.WriteLine($"vt-proof: scratch directory left behind: {Path}");
         }
     }
 }
@@ -977,6 +1059,10 @@ internal sealed class VtProofLedger
 
     internal void NotReached(string id, string title, string because) =>
         _entries.Add(new Entry(id, title, false, "not reached: " + because, string.Empty));
+
+    /// <summary>Has this milestone been judged at all yet?</summary>
+    internal bool Reported(string id) =>
+        _entries.Exists(entry => entry.Id == id);
 
     internal bool Failed(string id) =>
         _entries.Exists(entry => entry.Id == id && !entry.Passed);
