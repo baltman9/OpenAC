@@ -150,6 +150,19 @@ public interface ICharacterInfo
     uint CurrentMana { get; }
     uint MaxMana { get; }
 
+    /// <summary>
+    /// The unbuffed maximum health — the maximum with the secondary-attribute
+    /// enchantments taken back off. A host that does not track the split
+    /// reports the buffed maximum instead.
+    /// </summary>
+    uint BaseHealth => MaxHealth;
+
+    /// <inheritdoc cref="BaseHealth"/>
+    uint BaseStamina => MaxStamina;
+
+    /// <inheritdoc cref="BaseHealth"/>
+    uint BaseMana => MaxMana;
+
     int SummoningMastery => 0;
 
     IReadOnlyList<PluginSkillInfo> Skills { get; }

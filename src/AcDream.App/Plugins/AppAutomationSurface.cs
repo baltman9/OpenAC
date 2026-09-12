@@ -840,6 +840,9 @@ internal sealed class AppAutomationSurface
     public uint MaxStamina => Vital(LocalPlayerState.VitalKind.Stamina).Maximum;
     public uint CurrentMana => Vital(LocalPlayerState.VitalKind.Mana).Current;
     public uint MaxMana => Vital(LocalPlayerState.VitalKind.Mana).Maximum;
+    public uint BaseHealth => BaseVital(LocalPlayerState.VitalKind.Health);
+    public uint BaseStamina => BaseVital(LocalPlayerState.VitalKind.Stamina);
+    public uint BaseMana => BaseVital(LocalPlayerState.VitalKind.Mana);
     public int SummoningMastery
     {
         get
@@ -866,6 +869,16 @@ internal sealed class AppAutomationSurface
             return (0, 0);
         }
         return (vital.Current, vital.Maximum);
+    }
+
+    /// <summary>The maximum before the secondary-attribute enchantments.</summary>
+    private uint BaseVital(LocalPlayerState.VitalKind kind)
+    {
+        RuntimeCharacterState? character;
+        lock (_gate)
+            character = _character;
+        return character?.LocalPlayer.GetBaseMaxApprox(kind)
+            ?? Vital(kind).Maximum;
     }
 
     public IReadOnlyList<PluginActiveEnchantment> ActiveEnchantments => _enchantments;
