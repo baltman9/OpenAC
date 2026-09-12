@@ -26,6 +26,18 @@ public readonly record struct PluginEquipmentItem(
     /// at.
     /// </summary>
     public int Cleaving { get; init; }
+
+    /// <summary>
+    /// The imbue burned into the weapon: the rends that change which element
+    /// it strikes with, plus the critical bonuses.
+    /// </summary>
+    public int ImbuedEffect { get; init; }
+
+    /// <summary>
+    /// The damage type this weapon cleaves the target's resistance to. Same
+    /// bit layout as <see cref="DamageType"/>.
+    /// </summary>
+    public int ResistanceCleaving { get; init; }
 }
 
 public enum PluginEquipmentCommandStatus

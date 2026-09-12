@@ -2118,6 +2118,10 @@ internal sealed class AppAutomationSurface
                     (uint)PropertyInt.WeaponType),
                 Cleaving = item.Properties.GetInt(
                     (uint)PropertyInt.Cleaving),
+                ImbuedEffect = item.Properties.GetInt(
+                    (uint)PropertyInt.ImbuedEffect),
+                ResistanceCleaving = item.Properties.GetInt(
+                    (uint)PropertyInt.ResistanceModifierType),
             });
         }
         built.Sort(static (left, right) =>
