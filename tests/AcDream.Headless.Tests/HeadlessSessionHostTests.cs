@@ -2431,6 +2431,101 @@ public sealed class HeadlessSessionHostTests
         Assert.NotNull(runtime.MovementOwner.Controller);
     }
 
+    /// <summary>
+    /// The spawn that opens the local player's initial-Create placement is the
+    /// same spawn that asks the neighbourhood to publish collision for the
+    /// landblock that placement targets. A publication takes quiescence over
+    /// that prefix by cancelling every placement still waiting for its mover,
+    /// and the residence that owns such a placement cannot come back from the
+    /// cancellation - so the conductor has to reach its preparation before the
+    /// publication runs. This pins that a spawn followed by a real publication
+    /// still ends with a published local player.
+    /// </summary>
+    [Fact]
+    public void ASpawnFollowedByItsOwnLandblockPublicationStillHydratesThePlayer()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        GameRuntime runtime = host.Runtime;
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+        const uint player = 0x50000014u;
+        runtime.PlayerIdentity.ServerGuid = player;
+        AcDream.Runtime.Session.RuntimeFirstEntryDriveController firstEntry =
+            CreateFirstEntryDrive(runtime);
+        RuntimeEntityRecord record = runtime.EntityObjects
+            .RegisterEntityWithInitialResidence(Spawn(player), isLocalPlayer: true)
+            .Canonical!;
+        Assert.True(runtime.EntityObjects.ApplyAcceptedSpawn(
+            record,
+            record.CreateIntegrationVersion,
+            record.Snapshot,
+            replaceGeneration: false));
+
+        var collision = new PublishOnCenterCollisionNeighborhood(
+            runtime.EntityObjects.Physics);
+        var projection = new HeadlessSessionWorldProjection(
+            runtime,
+            collision,
+            firstEntry);
+
+        projection.ProjectSpawn(record, isLocalPlayer: true);
+        Assert.Equal(1, collision.PublicationCount);
+
+        bool published = false;
+        for (int tick = 0; tick < 200 && !published; tick++)
+        {
+            projection.PumpFirstEntry();
+            published = runtime.MovementOwner.Controller
+                is { IsRuntimePublished: true };
+        }
+
+        Assert.True(
+            published,
+            "the local player never hydrated after its own landblock "
+                + "published: residence="
+                + runtime.EntityObjects.TryGetInitialCreateResidence(
+                    record,
+                    out _)
+                + $" body={record.PhysicsBody is not null}"
+                + $" pending={firstEntry.PendingCount}");
+    }
+
+    private sealed class PublishOnCenterCollisionNeighborhood(
+        RuntimePhysicsState physics) : IHeadlessCollisionNeighborhood
+    {
+        private const uint PublishedLandblockId = 0xA9B4FFFFu;
+
+        internal int PublicationCount { get; private set; }
+
+        public void CenterOn(uint fullCellId)
+        {
+            PublicationCount++;
+            CompleteCollisionGeneration(
+                physics,
+                PublishedLandblockId,
+                afterAdmission: null,
+                (admission, prepared) => physics.StageCollisionAssets(
+                    admission,
+                    prepared,
+                    CollisionAssets(PublishedLandblockId, 50f)));
+        }
+
+        public bool IsReady(uint fullCellId) => PublicationCount > 0;
+
+        public bool IsWithinServiceWindow(uint fullCellId) => true;
+
+        public bool IsQuiescent => true;
+    }
+
     [Fact]
     public void CanAdvancePlayerReflectsControllerPublicationLifecycle()
     {

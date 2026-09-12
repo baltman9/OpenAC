@@ -560,6 +560,18 @@ internal sealed class HeadlessSessionWorldProjection
             && record.ServerGuid == _runtime.PlayerIdentity.ServerGuid
             && record.Snapshot.Position is { LandblockId: not 0u } position)
         {
+            // Order matters, and it is the placement's, not the collision's.
+            // Publishing collision for a landblock requires quiescence over
+            // that landblock's prefix, and anything still waiting for its
+            // mover to be prepared there is cancelled outright to obtain it -
+            // a cancellation the owning initial-Create residence cannot come
+            // back from. So the placement this spawn just opened is driven to
+            // its preparation FIRST; a prepared placement whose destination
+            // cell is not resident yet parks instead of being cancelled, and
+            // the publication below is what wakes it. The conductor still
+            // never runs while an admission is open, so the pump is the
+            // quiescent case only - the same gate every other drive site uses.
+            PumpPlacementDrivesIfQuiescent();
             _requestedLocalPlayerCell = position.LandblockId;
             _collision.CenterOn(position.LandblockId);
         }
@@ -589,6 +601,9 @@ internal sealed class HeadlessSessionWorldProjection
         {
             if (record.Snapshot.Position is { LandblockId: not 0u } position)
             {
+                // Same ordering rule as ProjectSpawn: preparation before
+                // publication, or the publication cancels the preparation.
+                PumpPlacementDrivesIfQuiescent();
                 _requestedLocalPlayerCell = position.LandblockId;
                 _collision.CenterOn(position.LandblockId);
             }
@@ -597,6 +612,22 @@ internal sealed class HeadlessSessionWorldProjection
             _firstEntry?.DriveAll();
             _acceptedPositionDrive?.Advance();
         }
+    }
+
+    /// <summary>
+    /// Advances every placement drive one pass before a collision
+    /// neighbourhood mutation, so that placements reach their prepared (and
+    /// therefore parkable) state instead of being cancelled as unprepared
+    /// debt against the prefix about to be published. Skipped while the
+    /// neighbourhood is working: the conductor never runs against a half
+    /// published collision generation.
+    /// </summary>
+    private void PumpPlacementDrivesIfQuiescent()
+    {
+        if (!_collision.IsQuiescent)
+            return;
+        _firstEntry?.DriveAll();
+        _acceptedPositionDrive?.Advance();
     }
 
     public void CenterOnAcceptedForcePosition(RuntimeEntityRecord record)
