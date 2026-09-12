@@ -1807,6 +1807,23 @@ internal sealed class AppAutomationSurface
         return true;
     }
 
+    bool IWorldObjectAutomation.TryGetIntProperty(
+        uint objectId,
+        uint property,
+        out int value)
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        ClientObject? item = runtime?.InventoryOwner.Objects.Get(objectId);
+        if (runtime is null || !IsAvailable || item is null)
+        {
+            value = 0;
+            return false;
+        }
+        return item.Properties.Ints.TryGetValue(property, out value);
+    }
+
     PluginItemCommandResult IWorldObjectAutomation.Identify(uint objectId) =>
         ((ILootAutomation)this).Identify(objectId);
 
