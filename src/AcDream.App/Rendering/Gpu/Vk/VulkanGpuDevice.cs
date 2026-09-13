@@ -155,6 +155,7 @@ internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineF
         _flights = new VulkanFrameFlightController(
             new VulkanTimelineApi(_vk, _device, _timeline),
             framesInFlight);
+        _destroyedBuffers = new VulkanDestroyedBufferLedger(_flights.SlotCount);
         _allocator = new VulkanDeviceMemoryAllocator(
             _vk,
             physicalDevice,
@@ -264,45 +265,11 @@ internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineF
             _vk, _device, _allocator, _uploads, _flights, _debugNames, description, NoteBufferDestroyed);
     }
 
-    // Buffer handles destroyed since each flight slot's previous frame start,
-    // with a cursor per slot. Retirement normally runs on the render thread
-    // inside BeginFrame, but a release can also run inline on the disposing
-    // thread once the flight ledger is torn down, so the list is locked. The
-    // prefix every slot has consumed is dropped each frame, so the list holds
-    // at most one frame's worth of destructions per slot in flight.
-    private readonly List<ulong> _destroyedBuffers = [];
-    private readonly object _destroyedBuffersSync = new();
-    private int[]? _destroyedBuffersSeen;
+    // Destroyed buffer handles, taken per flight slot at BeginFrame so the
+    // slot's descriptor sets drop them; see the ledger for the bookkeeping.
+    private readonly VulkanDestroyedBufferLedger _destroyedBuffers;
 
-    private void NoteBufferDestroyed(ulong handle)
-    {
-        lock (_destroyedBuffersSync)
-            _destroyedBuffers.Add(handle);
-    }
-
-    // The returned span is over the list's backing array and is consumed
-    // before the next call; a concurrent Add appends past its end or grows
-    // into a new array, neither of which changes what the span reads.
-    private ReadOnlySpan<ulong> TakeDestroyedBuffersFor(int slot)
-    {
-        lock (_destroyedBuffersSync)
-        {
-            _destroyedBuffersSeen ??= new int[_flights.SlotCount];
-            int seen = _destroyedBuffersSeen[slot];
-            _destroyedBuffersSeen[slot] = _destroyedBuffers.Count;
-            int consumedByAll = int.MaxValue;
-            foreach (int count in _destroyedBuffersSeen)
-                consumedByAll = Math.Min(consumedByAll, count);
-            if (consumedByAll > 0)
-            {
-                _destroyedBuffers.RemoveRange(0, consumedByAll);
-                for (int i = 0; i < _destroyedBuffersSeen.Length; i++)
-                    _destroyedBuffersSeen[i] -= consumedByAll;
-                seen -= consumedByAll;
-            }
-            return CollectionsMarshal.AsSpan(_destroyedBuffers)[seen..];
-        }
-    }
+    private void NoteBufferDestroyed(ulong handle) => _destroyedBuffers.Note(handle);
 
     public void QueueDeviceAction(Action action)
     {
@@ -337,7 +304,7 @@ internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineF
 
         _uploads.ReleaseCompleted(CompletedSerial());
         _ringStates[slot].Reset();
-        FrameBindingsAt(slot).BeginFrame(TakeDestroyedBuffersFor(slot));
+        FrameBindingsAt(slot).BeginFrame(_destroyedBuffers.Take(slot));
 
         _acquiredImageIndex = null;
         if (_backbuffer is not null)
