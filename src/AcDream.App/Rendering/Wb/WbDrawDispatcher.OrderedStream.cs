@@ -100,8 +100,13 @@ public sealed unsafe partial class WbDrawDispatcher
     internal static void BuildOrderedInstanceRuns(
         OrderedDrawStream stream,
         IReadOnlyList<OrderedMergeRun> mergeRuns,
-        List<OrderedMergeRun> destination)
+        List<OrderedMergeRun> destination,
+        IReadOnlyList<int>? forcedBreaksAscending = null)
     {
+        // Forced breaks (the walk's flush points) end an instance run so a
+        // draw range can stop at any of them; a merge run may span them.
+        IReadOnlyList<int> breaks = forcedBreaksAscending ?? Array.Empty<int>();
+        int breakCursor = 0;
         destination.Clear();
         foreach (OrderedMergeRun run in mergeRuns)
         {
@@ -109,12 +114,18 @@ public sealed unsafe partial class WbDrawDispatcher
             int runEnd = cursor + run.CommandCount;
             while (cursor < runEnd)
             {
+                while (breakCursor < breaks.Count && breaks[breakCursor] <= cursor)
+                    breakCursor++;
                 int end = cursor + 1;
                 if (stream.AllowInstanceMerges[cursor])
                 {
-                    while (end < runEnd && stream.AllowInstanceMerges[end]
+                    while (end < runEnd
+                        && stream.AllowInstanceMerges[end]
+                        && !(breakCursor < breaks.Count && breaks[breakCursor] == end)
                         && stream.Keys[end] == stream.Keys[cursor])
+                    {
                         end++;
+                    }
                 }
                 destination.Add(new OrderedMergeRun(cursor, end - cursor));
                 cursor = end;
@@ -221,8 +232,11 @@ public sealed unsafe partial class WbDrawDispatcher
         _orderedFrame = frame;
         _orderedPreparedCount = 0;
 
-        BuildOrderedMergeRuns(stream, forcedBreaksAscending, _orderedRuns);
-        BuildOrderedInstanceRuns(stream, _orderedRuns, _orderedInstanceRuns);
+        // Merge runs ignore the walk's flush points: a draw range that ends
+        // at one draws the clamped part of the run it lands in. Instance runs
+        // still break there so every range boundary is a draw boundary.
+        BuildOrderedMergeRuns(stream, null, _orderedRuns);
+        BuildOrderedInstanceRuns(stream, _orderedRuns, _orderedInstanceRuns, forcedBreaksAscending);
 
         int count = stream.Count;
         if (count == 0)
@@ -366,6 +380,13 @@ public sealed unsafe partial class WbDrawDispatcher
                 _buildingDetail)
             && _buildingDetail.Tiling != 0f;
 
+        if (!IsDrawBoundary(firstCommand) || !IsDrawBoundary(rangeEnd))
+        {
+            throw new InvalidOperationException(
+                $"DrawOrderedRange [{firstCommand}, {rangeEnd}) splits an instanced draw — "
+                + "a range boundary must be a flush point PrepareOrderedStream was told about.");
+        }
+
         foreach (OrderedMergeRun run in _orderedRuns)
         {
             int runEnd = run.FirstCommand + run.CommandCount;
@@ -374,21 +395,14 @@ public sealed unsafe partial class WbDrawDispatcher
             if (run.FirstCommand >= rangeEnd)
                 break;
 
-            if (run.FirstCommand < firstCommand || runEnd > rangeEnd)
-            {
-                throw new InvalidOperationException(
-                    $"DrawOrderedRange [{firstCommand}, {rangeEnd}) straddles merge run "
-                    + $"[{run.FirstCommand}, {runEnd}) — a range boundary must coincide with "
-                    + "a run boundary by construction (PrepareOrderedStream's "
-                    + "forcedBreaksAscending should have forced a break here).");
-            }
-
             ValidateMergeRun(_orderedStream, run);
+            int drawFirst = Math.Max(run.FirstCommand, firstCommand);
+            int drawEnd = Math.Min(runEnd, rangeEnd);
 
-            PipelineBucket bucket = BucketFor(_orderedStream.Keys[run.FirstCommand].Translucency);
-            GroupKey key = _orderedStream.Keys[run.FirstCommand];
+            PipelineBucket bucket = BucketFor(_orderedStream.Keys[drawFirst].Translucency);
+            GroupKey key = _orderedStream.Keys[drawFirst];
             bool hasDetail = detailEnabled
-                && _orderedStream.DetailCategories[run.FirstCommand] != 0u;
+                && _orderedStream.DetailCategories[drawFirst] != 0u;
             IGpuPipeline bucketPipeline = PipelineForBucket(pipelines, bucket);
             IGpuPipeline pipeline = hasDetail
                 ? PipelineForMaterial(pipelines, key.MaterialState, bucketPipeline)
@@ -402,14 +416,19 @@ public sealed unsafe partial class WbDrawDispatcher
             BindPipelineWithMesh(encoder, pipeline, global);
             DrawIndirectRangeRhi(
                 encoder, ref pushConstants, commandBuffer, commandBase,
-                _orderedIndirectOffsets[run.FirstCommand],
-                _orderedIndirectOffsets[runEnd] - _orderedIndirectOffsets[run.FirstCommand],
+                _orderedIndirectOffsets[drawFirst],
+                _orderedIndirectOffsets[drawEnd] - _orderedIndirectOffsets[drawFirst],
                 _orderedDrawCullModes);
         }
 
         ClearDetailPushConstants(ref pushConstants);
         encoder.SetPushConstants(in pushConstants);
     }
+
+    private bool IsDrawBoundary(int command) =>
+        command == 0
+        || command == _orderedPreparedCount
+        || _orderedIndirectOffsets[command - 1] != _orderedIndirectOffsets[command];
 
     private void EnsureOrderedCullModeCapacity(int count)
     {
