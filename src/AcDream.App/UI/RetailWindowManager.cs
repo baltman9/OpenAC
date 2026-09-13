@@ -159,7 +159,9 @@ public sealed class RetailWindowManager : IDisposable
     {
         if (!_byName.TryGetValue(name, out var handle)) return false;
         var frame = handle.OuterFrame;
-        if (frame.ConstrainDragToParent && frame.Parent is { } parent)
+        // Same rule as a drag in UiRoot: a window is always kept inside its parent,
+        // so a layout restored from a larger screen still lands where it can be reached.
+        if (frame.Parent is { } parent)
         {
             left = Math.Clamp(left, 0f, Math.Max(0f, parent.Width - frame.Width));
             top = Math.Clamp(top, 0f, Math.Max(0f, parent.Height - frame.Height));

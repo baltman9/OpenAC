@@ -33,15 +33,20 @@ public class UiRootInputTests
         root.SuppressPhysicalKeyUntilRelease(Silk.NET.Input.Key.Enter);
 
         root.OnKeyDown((int)Silk.NET.Input.Key.Enter);
-        root.OnChar('x');
+        root.OnChar(13);   // Enter's own char tail: swallowed, so it cannot submit
 
         Assert.Equal(0, submissions);
         Assert.Equal("hello", field.Text);
         Assert.Same(field, root.KeyboardFocus);
 
+        // A character typed before Enter comes back up is real input - a fast "/"
+        // after opening chat must not be lost.
+        root.OnChar('/');
+        Assert.Equal("hello/", field.Text);
+
         root.OnKeyUp((int)Silk.NET.Input.Key.Enter);
         root.OnChar('x');
-        Assert.Equal("hellox", field.Text);
+        Assert.Equal("hello/x", field.Text);
     }
 
     [Fact]
@@ -290,7 +295,9 @@ public class UiRootInputTests
     [Fact]
     public void DragHandle_MovedAnchoredWindow_SurvivesTheNextLayoutPass()
     {
-        var root = new UiRoot { Width = 800, Height = 600 };
+        // 900 wide: the window is 610 wide and every window is kept on screen, so an
+        // 800-wide root would clamp the drag at Left=190 before the layout pass ran.
+        var root = new UiRoot { Width = 900, Height = 600 };
         var window = new UiPanel
         {
             Left = 0, Top = 510, Width = 610, Height = 90,
