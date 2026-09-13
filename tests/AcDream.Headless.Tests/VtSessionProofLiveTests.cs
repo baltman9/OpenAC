@@ -58,6 +58,25 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
     /// </summary>
     private const int MaximumSweptCorpses = 30;
 
+    /// <summary>
+    /// Every character the proof account family plays. The start-of-run sweep
+    /// removes a corpse belonging to NONE of them — the previous run's
+    /// monsters — so this list is the guard that keeps a player's corpse out
+    /// of the sweep's reach, and every character a run can log in as has to
+    /// be in it.
+    /// </summary>
+    private static readonly string[] SweptCharacterNames =
+        ["Acdream", "Horan"];
+
+    /// <summary>
+    /// How far back the loot milestone stands the character before it judges.
+    /// Far enough that the corpse is outside the server's own reach for it —
+    /// which is a little under three metres between these two bodies — and
+    /// close enough to stay inside the looter's five-metre open step, so what
+    /// the milestone proves is that the character walks the difference.
+    /// </summary>
+    private const float CorpseStepBackMeters = 3.5f;
+
     private const double ArenaEastWest = 33.8066816d;
     private const double ArenaNorthSouth = 42.1224660d;
 
@@ -428,7 +447,7 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
             // accepting new ones past its per-player ceiling -- so the run
             // sweeps its own leavings at both ends and, from here on, dies
             // without leaving a corpse at all.
-            int SweepArena(string when)
+            int SweepArena(string when, bool alsoForeign = false)
             {
                 // Monsters first: a live one would fight the sweep, and their
                 // own corpses rot on their own.
@@ -437,12 +456,22 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 ILootAutomation corpses = session.Plugins.Host.Automation.Loot;
                 for (int round = 0; round < MaximumSweptCorpses; round++)
                 {
-                    if (VtProofArena.NextOwnCorpse(
-                            corpses.CaptureCorpses(float.MaxValue),
-                            character) is not { } own)
-                    {
+                    IReadOnlyList<PluginLootContainer> reported =
+                        corpses.CaptureCorpses(float.MaxValue);
+                    // A monster corpse rots on its own, but not before the
+                    // next run has begun and its looter has found it standing
+                    // where this run left it. At the START of a run they go
+                    // too; at the end they are left to rot, which is what the
+                    // server does with them anyway.
+                    PluginLootContainer? target =
+                        VtProofArena.NextOwnCorpse(reported, character)
+                        ?? (alsoForeign
+                            ? VtProofArena.NextForeignCorpse(
+                                reported,
+                                SweptCharacterNames)
+                            : null);
+                    if (target is not { } own)
                         break;
-                    }
                     uint corpseId = own.ObjectId;
                     // The server deletes what the character last assessed, so
                     // the assessment IS the selection, and the run will not
@@ -467,7 +496,7 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 staged.Add(
                     $"arena swept ({when}) -> "
                         + (removed.Count == 0
-                            ? "nothing of the character's to remove"
+                            ? "nothing to remove"
                             : string.Join(", ", removed)));
                 return removed.Count;
             }
@@ -478,7 +507,7 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 () => DistanceMetersFromArena(session) < 40d);
             Pump(TimeSpan.FromSeconds(2d));
             staged.Add($"arena reached -> {inArena} ({PositionText(session)})");
-            _ = SweepArena("before the run");
+            _ = SweepArena("before the run", alsoForeign: true);
 
             // ---- stage the caster, then start the macro ------------------------
             // In that order: the gate every casting rule shares stops the
@@ -629,23 +658,38 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 // the name the server's own corpse description can never
                 // match it and this milestone is unreachable.
                 int additionsBefore = observed.InventoryAdditions;
+                // Everything this milestone judges has to happen inside it.
+                // Watermark the transcript the same way the inventory is
+                // watermarked above: a corpse the looter opened during the
+                // buff phase used to satisfy all three sub-tests before the
+                // window even started.
+                int chatBefore = observed.SnapshotChat().Length;
+                string[] Slice() => observed.SnapshotChat()
+                    .Skip(chatBefore)
+                    .ToArray();
+                // The point of this milestone is the walk: the character is
+                // stood back off the ground the fight ended on, so the corpse
+                // is certainly outside the server's own reach and inside the
+                // looter's. A corpse that happens to fall underfoot proves
+                // nothing about a corpse that does not.
+                RuntimeMovementSnapshot stood =
+                    session.Runtime.Movement.Snapshot;
+                Stage(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"@teleloc A9B40029 {stood.Position.Frame.Origin.X:0.000} "
+                        + $"{stood.Position.Frame.Origin.Y - CorpseStepBackMeters:0.000} "
+                        + $"{stood.Position.Frame.Origin.Z:0.000} 1 0 0 0"));
                 bool opened = WaitUntil(
                     TimeSpan.FromSeconds(120d),
-                    () => MentionsAny(
-                        observed.SnapshotChat(),
-                        "LootCorpse: opening "));
+                    () => MentionsAny(Slice(), "LootCorpse: opening "));
                 bool decided = opened
                     && WaitUntil(
                         TimeSpan.FromSeconds(45d),
-                        () => MentionsAny(
-                            observed.SnapshotChat(),
-                            "LootDecision: "));
+                        () => MentionsAny(Slice(), "LootDecision: "));
                 bool taken = decided
                     && WaitUntil(
                         TimeSpan.FromSeconds(45d),
-                        () => MentionsAny(
-                            observed.SnapshotChat(),
-                            "LootPickup: took "));
+                        () => MentionsAny(Slice(), "LootPickup: took "));
                 // The looter is put down for the rest of the run, the same
                 // reason the arena is cleared of monsters below: nothing after
                 // this milestone loots, and a looter still working a corpse
@@ -653,7 +697,7 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 Stage("/vt opt set EnableLooting False");
                 if (opened && decided && taken)
                 {
-                    string[] lootChat = observed.SnapshotChat();
+                    string[] lootChat = Slice();
                     ledger.Pass(
                         "P5",
                         "a corpse is opened and at least one loot decision is made",
@@ -1891,6 +1935,61 @@ internal static class VtProofArena
             }
         }
         return null;
+    }
+
+    /// <summary>
+    /// The next corpse in the reported set that belongs to NO character the
+    /// run knows of — the previous run's monsters, which rot on their own but
+    /// not before the next run has begun and its looter has found them.
+    /// <para>
+    /// The guard is the same one <see cref="NextOwnCorpse"/> makes, inverted
+    /// and widened: a corpse whose name is "Corpse of " plus any of the named
+    /// characters, in either spelling of the marker, is never returned. A
+    /// corpse whose name does not begin "Corpse of " at all is not returned
+    /// either — whatever it is, it is not a corpse this sweep understands.
+    /// </para>
+    /// </summary>
+    internal static PluginLootContainer? NextForeignCorpse(
+        IReadOnlyList<PluginLootContainer> reported,
+        IReadOnlyList<string> characterNames)
+    {
+        ArgumentNullException.ThrowIfNull(reported);
+        ArgumentNullException.ThrowIfNull(characterNames);
+        for (int index = 0; index < reported.Count; index++)
+        {
+            string name = reported[index].Name;
+            if (!name.StartsWith("Corpse of ", StringComparison.Ordinal))
+                continue;
+            if (BelongsToAnyone(name, characterNames))
+                continue;
+            return reported[index];
+        }
+        return null;
+    }
+
+    private static bool BelongsToAnyone(
+        string corpseName,
+        IReadOnlyList<string> characterNames)
+    {
+        for (int index = 0; index < characterNames.Count; index++)
+        {
+            string character = characterNames[index];
+            if (string.IsNullOrWhiteSpace(character))
+                continue;
+            string plain = character.TrimStart('+');
+            if (string.Equals(
+                    corpseName,
+                    OwnCorpseName(plain),
+                    StringComparison.Ordinal)
+                || string.Equals(
+                    corpseName,
+                    OwnCorpseName("+" + plain),
+                    StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 }
 

@@ -275,10 +275,16 @@ internal sealed class LiveEntityMotionRuntimeController
                 turnPath.DesiredHeading);
 
             var ms = new AcDream.Core.Physics.MovementStruct { Params = mp };
+            // The same test the walk branch above makes, and for the same
+            // reason: an order that names something with no body to follow
+            // degrades to the heading it named. Facing had been letting a
+            // bodiless id through, which is the one place these two routes
+            // disagreed.
             if (update.MotionState.MovementType == 8
                 && turnPath.TargetGuid is { } turnTgt
                 && _liveEntities is { } liveTurnEntities
-                && liveTurnEntities.TryGetInteractionEligibleEntity(turnTgt, out var turnEnt))
+                && liveTurnEntities.TryGetInteractionEligibleEntity(turnTgt, out var turnEnt)
+                && ResolvePhysicsHost(turnTgt) is not null)
             {
                 ms.Type = AcDream.Core.Physics.MovementType.TurnToObject;
                 ms.ObjectId = turnTgt;

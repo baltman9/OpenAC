@@ -105,6 +105,70 @@ public sealed class VtProofArenaTests
             "+Acdream"));
     }
 
+    /// <summary>
+    /// The start-of-run sweep also takes what the LAST run left: a monster
+    /// corpse belongs to nobody the run plays, and one still standing when the
+    /// next run begins is the corpse that run's looter finds first.
+    ///
+    /// Mutation: drop the "belongs to anyone" guard and the first corpse
+    /// returned is a player's.
+    /// </summary>
+    [Fact]
+    public void TheLastRunsMonsterCorpseIsSweptAndNoPlayersIs()
+    {
+        PluginLootContainer[] reported =
+        [
+            Corpse(0x80001AF9u, "Corpse of +Acdream"),
+            Corpse(0x80001AFAu, "Corpse of Horan"),
+            Corpse(0x80001828u, "Corpse of Drudge Skulker"),
+        ];
+
+        PluginLootContainer? swept = VtProofArena.NextForeignCorpse(
+            reported,
+            ["Acdream", "Horan"]);
+
+        Assert.NotNull(swept);
+        Assert.Equal(0x80001828u, swept!.Value.ObjectId);
+    }
+
+    /// <summary>
+    /// Both spellings of both characters are protected, and so is anything
+    /// that is not a corpse at all. A set holding only those yields nothing.
+    ///
+    /// Mutation: check only the plain spelling, or only the first name, and a
+    /// player's corpse is returned.
+    /// </summary>
+    [Fact]
+    public void NoCorpseOfAnyCharacterTheRunPlaysIsEverForeign()
+    {
+        Assert.Null(VtProofArena.NextForeignCorpse(
+            [
+                Corpse(0x80001AF9u, "Corpse of Acdream"),
+                Corpse(0x80001AFAu, "Corpse of +Acdream"),
+                Corpse(0x80001AFBu, "Corpse of Horan"),
+                Corpse(0x80001AFCu, "Corpse of +Horan"),
+                Corpse(0x80001AFDu, "Treasure of Somebody"),
+            ],
+            ["Acdream", "+Horan"]));
+    }
+
+    /// <summary>
+    /// A name that merely starts the same is not the character's here either,
+    /// so the last run's monster is still swept when a similarly named
+    /// character's corpse is beside it — and the similarly named character's
+    /// corpse is swept too, because it is not one of the run's.
+    /// </summary>
+    [Fact]
+    public void TheForeignTestMatchesTheWholeNameTheSameWay()
+    {
+        PluginLootContainer? swept = VtProofArena.NextForeignCorpse(
+            [Corpse(0x80006A14u, "Corpse of Acdreamer")],
+            ["Acdream"]);
+
+        Assert.NotNull(swept);
+        Assert.Equal(0x80006A14u, swept!.Value.ObjectId);
+    }
+
     private static PluginLootContainer Corpse(uint objectId, string name) =>
         new(objectId, 1u, name, 3f, false, false, false);
 }
