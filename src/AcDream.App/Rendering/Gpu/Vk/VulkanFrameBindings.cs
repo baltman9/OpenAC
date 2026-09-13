@@ -112,22 +112,16 @@ internal sealed unsafe class VulkanFrameBindings : IDisposable
     /// previous submission has retired before <c>BeginFrame</c> returns, which is
     /// the same guarantee that lets the ring rewind.
     /// </summary>
-    private long _seenReleaseGeneration = -1;
-
-    /// <param name="releaseGeneration">
-    /// The allocator's count of device-memory releases. When it moved since
-    /// this slot's previous frame, a buffer some materialised descriptor set
-    /// names may be gone, so every set is written again before it is bound.
+    /// <param name="destroyedBuffers">
+    /// Buffer handles destroyed since this slot's previous frame. A
+    /// materialised descriptor set that names one is written again before it
+    /// is bound; a set that names none is reused as it is.
     /// </param>
-    internal void BeginFrame(long releaseGeneration = -1)
+    internal void BeginFrame(ReadOnlySpan<ulong> destroyedBuffers = default)
     {
         _arena.BeginFrame();
         SeedEveryBindingWithTheDummy();
-        if (releaseGeneration != _seenReleaseGeneration)
-        {
-            _seenReleaseGeneration = releaseGeneration;
-            _arena.InvalidateMaterialized();
-        }
+        _arena.InvalidateEntriesReferencing(destroyedBuffers);
         _packSlotsByState.Clear();
         _packLiveCount = 0;
     }

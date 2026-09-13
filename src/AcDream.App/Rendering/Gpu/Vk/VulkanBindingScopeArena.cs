@@ -77,14 +77,31 @@ internal sealed class VulkanBindingScopeArena
     }
 
     /// <summary>
-    /// A buffer was destroyed since these descriptor sets were written. Every
-    /// materialised set may still name it, so each is rewritten the next time
-    /// its state is resolved; the state cache itself is kept.
+    /// Buffers were destroyed since these descriptor sets were written. A set
+    /// that names one of them is rewritten the next time its state is
+    /// resolved; the others are left as they are. The state cache is kept.
     /// </summary>
-    internal void InvalidateMaterialized()
+    internal void InvalidateEntriesReferencing(ReadOnlySpan<ulong> destroyedBuffers)
     {
+        if (destroyedBuffers.IsEmpty)
+            return;
         foreach (Entry entry in _entries)
-            entry.Stale = true;
+        {
+            if (entry.Stale || entry.Slot < 0)
+                continue;
+            entry.Stale = References(entry.StorageBuffers, destroyedBuffers)
+                || References(entry.UniformBuffers, destroyedBuffers);
+        }
+    }
+
+    private static bool References(ulong[] bound, ReadOnlySpan<ulong> destroyed)
+    {
+        foreach (ulong handle in bound)
+        {
+            if (destroyed.IndexOf(handle) >= 0)
+                return true;
+        }
+        return false;
     }
 
     internal void SetStorage(uint binding, ulong buffer, uint offsetBytes, uint rangeBytes)

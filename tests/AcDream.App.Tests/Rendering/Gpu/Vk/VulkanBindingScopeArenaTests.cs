@@ -61,26 +61,30 @@ public sealed class VulkanBindingScopeArenaTests
     }
 
     [Fact]
-    public void InvalidateMaterialized_RewritesAMatchingEntryOnce_ThenReusesIt()
+    public void InvalidateEntriesReferencing_RewritesOnlyTheEntriesThatNameADestroyedBuffer_Once()
     {
         VulkanBindingScopeArena arena = CreateArena();
         arena.BeginFrame();
         arena.SetStorage(GpuBindingModel.StorageInstances, DispatcherBuffer, 0, 4096);
-        (int index, _, bool firstWrite) = arena.Resolve();
-        arena.AssignSlot(index, slot: 0);
-        Assert.True(firstWrite);
+        (int dispatcher, _, _) = arena.Resolve();
+        arena.AssignSlot(dispatcher, slot: 0);
+        arena.SetStorage(GpuBindingModel.StorageInstances, EnvCellBuffer, 0, 4096);
+        (int envCell, _, _) = arena.Resolve();
+        arena.AssignSlot(envCell, slot: 1);
 
-        // A buffer died somewhere: the next frame's matching state must be
-        // written again, and only that once.
+        // The dispatcher's buffer died; the env-cell entry names only live buffers.
         arena.BeginFrame();
-        arena.InvalidateMaterialized();
+        arena.InvalidateEntriesReferencing([DispatcherBuffer]);
+        arena.SetStorage(GpuBindingModel.StorageInstances, EnvCellBuffer, 0, 4096);
+        (_, _, bool envCellWrite) = arena.Resolve();
+        Assert.False(envCellWrite);
         arena.SetStorage(GpuBindingModel.StorageInstances, DispatcherBuffer, 0, 4096);
-        (int again, int slot, bool rewrite) = arena.Resolve();
-        Assert.Equal(index, again);
-        Assert.Equal(0, slot);
+        (_, int slot, bool rewrite) = arena.Resolve();
+        Assert.Equal(0, slot); // the same descriptor set, written again
         Assert.True(rewrite);
 
         arena.BeginFrame();
+        arena.InvalidateEntriesReferencing(ReadOnlySpan<ulong>.Empty);
         arena.SetStorage(GpuBindingModel.StorageInstances, DispatcherBuffer, 0, 4096);
         (_, _, bool third) = arena.Resolve();
         Assert.False(third);

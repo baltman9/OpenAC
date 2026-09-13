@@ -12,6 +12,9 @@ internal sealed unsafe class VulkanGpuBuffer : IGpuBuffer
     private readonly IGpuResourceRetirementQueue _retirement;
     private readonly VulkanAllocation _allocation;
     private bool _disposed;
+    // Runs when the handle is really destroyed (after the frames that used it
+    // retired), so the device can rewrite descriptor sets that still name it.
+    private readonly Action<ulong>? _onDestroyed;
 
     internal VulkanGpuBuffer(
         Silk.NET.Vulkan.Vk vk,
@@ -20,8 +23,10 @@ internal sealed unsafe class VulkanGpuBuffer : IGpuBuffer
         VulkanUploadQueue uploads,
         IGpuResourceRetirementQueue retirement,
         VulkanDebugNames debugNames,
-        in GpuBufferDescription description)
+        in GpuBufferDescription description,
+        Action<ulong>? onDestroyed = null)
     {
+        _onDestroyed = onDestroyed;
         _vk = vk ?? throw new ArgumentNullException(nameof(vk));
         _device = device;
         _allocator = allocator ?? throw new ArgumentNullException(nameof(allocator));
@@ -175,8 +180,10 @@ internal sealed unsafe class VulkanGpuBuffer : IGpuBuffer
 
         Buffer handle = Handle;
         VulkanAllocation allocation = _allocation;
+        Action<ulong>? onDestroyed = _onDestroyed;
         _retirement.Retire(() =>
         {
+            onDestroyed?.Invoke(handle.Handle);
             _vk.DestroyBuffer(_device, handle, null);
             _allocator.Free(allocation);
         });

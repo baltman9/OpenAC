@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Silk.NET.Vulkan;
 using Semaphore = Silk.NET.Vulkan.Semaphore;
 
@@ -258,7 +259,34 @@ internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineF
     public IGpuBuffer CreateBuffer(in GpuBufferDescription description)
     {
         ThrowIfDisposed();
-        return new VulkanGpuBuffer(_vk, _device, _allocator, _uploads, _flights, _debugNames, description);
+        return new VulkanGpuBuffer(
+            _vk, _device, _allocator, _uploads, _flights, _debugNames, description, NoteBufferDestroyed);
+    }
+
+    // Buffer handles destroyed since each flight slot's previous frame start.
+    // Retirement runs on the render thread inside BeginFrame, so a plain list
+    // and per-slot cursors are enough; the list is trimmed once every slot has
+    // seen its tail.
+    private readonly List<ulong> _destroyedBuffers = [];
+    private int[]? _destroyedBuffersSeen;
+
+    private void NoteBufferDestroyed(ulong handle) => _destroyedBuffers.Add(handle);
+
+    private ReadOnlySpan<ulong> TakeDestroyedBuffersFor(int slot)
+    {
+        _destroyedBuffersSeen ??= new int[_flights.SlotCount];
+        int seen = _destroyedBuffersSeen[slot];
+        ReadOnlySpan<ulong> unseen = CollectionsMarshal.AsSpan(_destroyedBuffers)[seen..];
+        _destroyedBuffersSeen[slot] = _destroyedBuffers.Count;
+        int minimumSeen = int.MaxValue;
+        foreach (int count in _destroyedBuffersSeen)
+            minimumSeen = Math.Min(minimumSeen, count);
+        if (minimumSeen == _destroyedBuffers.Count && unseen.IsEmpty)
+        {
+            _destroyedBuffers.Clear();
+            Array.Clear(_destroyedBuffersSeen);
+        }
+        return unseen;
     }
 
     public void QueueDeviceAction(Action action)
@@ -294,7 +322,7 @@ internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineF
 
         _uploads.ReleaseCompleted(CompletedSerial());
         _ringStates[slot].Reset();
-        FrameBindingsAt(slot).BeginFrame(_allocator.ReleaseGeneration);
+        FrameBindingsAt(slot).BeginFrame(TakeDestroyedBuffersFor(slot));
 
         _acquiredImageIndex = null;
         if (_backbuffer is not null)
