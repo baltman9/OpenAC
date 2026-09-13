@@ -469,6 +469,23 @@ public sealed class WalkProductionWorldDataTests
         Assert.Equal(0, worldData.GetBuildingShellStatics(building).Records.Count);
     }
 
+    [Fact]
+    public void RetailCellArrayRevision_AdvancesOnRegistrationAndDeregistration()
+    {
+        var shadows = new ShadowObjectRegistry();
+        ulong initial = shadows.RetailCellArrayRevision;
+
+        Register(shadows, 0x48A02040u, 0x8A02015Fu, landblockId: 0x8A020000u);
+        ulong afterRegister = shadows.RetailCellArrayRevision;
+        Assert.True(afterRegister > initial);
+
+        Assert.Equal(afterRegister, shadows.RetailCellArrayRevision);
+
+        shadows.Deregister(0x48A02040u);
+        Assert.True(shadows.RetailCellArrayRevision > afterRegister);
+        Assert.False(shadows.TryGetRetailCellArray(0x48A02040u, out _));
+    }
+
     private static RenderProjectionRecord OutdoorRecord(uint id, uint cellId, bool shell) =>
         new RenderProjectionRecord() with
         {

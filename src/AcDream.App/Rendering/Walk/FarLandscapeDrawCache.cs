@@ -11,6 +11,7 @@ internal sealed class FarLandscapeDrawCache(
 {
     private readonly record struct CellKey(uint Block, int Side, int Index);
     private readonly record struct BatchRef(Entity Entity, int PartIndex, int BatchIndex);
+    private readonly record struct AlphaOrder(float DistanceSq, int Index);
 
     private sealed class Entity(RenderProjectionRecord record, uint cellId)
     {
@@ -40,6 +41,8 @@ internal sealed class FarLandscapeDrawCache(
         /// <summary><see cref="Alpha"/> partitioned by cell, in the same
         /// relative order; cell c owns [AlphaCellEnds[c], AlphaCellEnds[c + 1]).</summary>
         public readonly List<BatchRef> AlphaByCell = new();
+        /// <summary>World-space sort center of each <see cref="AlphaByCell"/> batch.</summary>
+        public readonly List<Vector3> AlphaWorldCenters = new();
         public readonly int[] AlphaCellEnds = new int[cells.Length + 1];
         public readonly Dictionary<GroupKey, List<BatchRef>> Groups = new();
         public readonly List<List<BatchRef>> GroupLists = new();
@@ -51,7 +54,7 @@ internal sealed class FarLandscapeDrawCache(
     private readonly Dictionary<CellKey, Entry> _entries = new();
     private readonly List<CellKey> _expired = new();
     private readonly List<WbDrawDispatcher.WalkClassifiedSelectionPart> _selectionScratch = new();
-    private readonly List<WbDrawDispatcher.WalkClassifiedBatch> _alphaScratch = new();
+    private readonly List<AlphaOrder> _alphaOrderScratch = new();
     private readonly int[] _alphaEnds = new int[16];
     private (RenderSceneGeneration Generation, uint TupleLandblockId) _context;
 
@@ -64,7 +67,7 @@ internal sealed class FarLandscapeDrawCache(
     {
         _entries.Clear();
         _expired.Clear();
-        _alphaScratch.Clear();
+        _alphaOrderScratch.Clear();
     }
 
     internal void BeginFrame()
@@ -136,11 +139,14 @@ internal sealed class FarLandscapeDrawCache(
                 out entity.Lights, out entity.Indoor, out entity.Selection);
             for (int i = 0; i < entity.Parts.Count; i++)
             {
-                WbDrawDispatcher.WalkCachedPart part = entity.Parts[i];
+                ref readonly WbDrawDispatcher.WalkCachedPart part =
+                    ref CollectionsMarshal.AsSpan(entity.Parts)[i];
                 bool visible = dispatcher.AdmitCachedWalkPart(
                     in entity.Record, in part, views, route);
                 entity.Visible[i] = visible;
-                if (visible)
+                // The selection scene ignores parts without a server guid
+                // (DAT statics cannot be picked), so they are not offered.
+                if (visible && part.Selection.ServerGuid != 0u)
                 {
                     var selection = part.Selection;
                     dispatcher.PublishWalkSelectionPart(in selection);
@@ -161,28 +167,36 @@ internal sealed class FarLandscapeDrawCache(
                 entity.Selection, batch.DetailCategory, AllowInstanceMerge: true));
         }
 
+        // Per cell: order the visible alpha batches far-to-near by their
+        // precomputed world sort center, sorting only (distance, index) pairs,
+        // then copy each batch into the frame's alpha list exactly once.
         for (int cellIndex = 0; cellIndex < entry.Cells.Length; cellIndex++)
         {
-            _alphaScratch.Clear();
+            _alphaOrderScratch.Clear();
             int cellEnd = entry.AlphaCellEnds[cellIndex + 1];
             for (int k = entry.AlphaCellEnds[cellIndex]; k < cellEnd; k++)
             {
                 BatchRef item = entry.AlphaByCell[k];
-                Entity entity = item.Entity;
-                if (!entity.Visible[item.PartIndex])
+                if (!item.Entity.Visible[item.PartIndex])
                     continue;
-                WbDrawDispatcher.WalkClassifiedBatch batch = entity.Batches[item.BatchIndex];
-                _alphaScratch.Add(batch with
+                _alphaOrderScratch.Add(new AlphaOrder(
+                    Vector3.DistanceSquared(entry.AlphaWorldCenters[k], camera), k));
+            }
+            _alphaOrderScratch.Sort(static (a, b) => b.DistanceSq.CompareTo(a.DistanceSq));
+            foreach (AlphaOrder order in _alphaOrderScratch)
+            {
+                BatchRef item = entry.AlphaByCell[order.Index];
+                Entity entity = item.Entity;
+                ref readonly WbDrawDispatcher.WalkClassifiedBatch batch =
+                    ref CollectionsMarshal.AsSpan(entity.Batches)[item.BatchIndex];
+                alpha.Add(batch with
                 {
                     Lights = entity.Lights,
                     IndoorFlag = entity.Indoor,
                     SelectionLighting = entity.Selection,
-                    SortDistanceSq = Vector3.DistanceSquared(
-                        Vector3.Transform(batch.LocalSortCenter, batch.Transform), camera),
+                    SortDistanceSq = order.DistanceSq,
                 });
             }
-            _alphaScratch.Sort(static (a, b) => b.SortDistanceSq.CompareTo(a.SortDistanceSq));
-            alpha.AddRange(_alphaScratch);
             _alphaEnds[cellIndex] = alpha.Count;
         }
         return true;
@@ -336,11 +350,11 @@ internal sealed class FarLandscapeDrawCache(
                 }
             }
         }
-        // Emit the groups so consecutive draws share a cull mode, detail
-        // category, and translucency. The ordered stream starts a new merge
-        // run whenever one of those changes, and every run costs a pipeline
-        // bind plus an indirect submission. The groups are opaque and
-        // depth-tested, so their relative order does not change the image.
+        // Emit the groups so consecutive draws share a detail category (a
+        // pipeline), a cull mode, and a translucency. The ordered stream
+        // starts a new merge run whenever one of those changes, and every
+        // run costs a bind plus an indirect submission. The groups are
+        // opaque and depth-tested, so their order does not change the image.
         entry.GroupOrder.Clear();
         for (int i = 0; i < groupCount; i++)
             entry.GroupOrder.Add(i);
@@ -351,13 +365,19 @@ internal sealed class FarLandscapeDrawCache(
         // Partition the alpha batches by cell once, keeping their relative
         // order, so each cell's per-frame sort reads only its own slice.
         entry.AlphaByCell.Clear();
+        entry.AlphaWorldCenters.Clear();
         entry.AlphaCellEnds[0] = 0;
         for (int cellIndex = 0; cellIndex < entry.Cells.Length; cellIndex++)
         {
             foreach (BatchRef item in entry.Alpha)
             {
-                if (item.Entity.CellIndex == cellIndex)
-                    entry.AlphaByCell.Add(item);
+                if (item.Entity.CellIndex != cellIndex)
+                    continue;
+                entry.AlphaByCell.Add(item);
+                ref readonly WbDrawDispatcher.WalkClassifiedBatch batch =
+                    ref CollectionsMarshal.AsSpan(item.Entity.Batches)[item.BatchIndex];
+                entry.AlphaWorldCenters.Add(
+                    Vector3.Transform(batch.LocalSortCenter, batch.Transform));
             }
             entry.AlphaCellEnds[cellIndex + 1] = entry.AlphaByCell.Count;
         }
@@ -391,10 +411,10 @@ internal sealed class FarLandscapeDrawCache(
                 return 0;
             ref readonly WbDrawDispatcher.WalkClassifiedBatch a = ref First(left);
             ref readonly WbDrawDispatcher.WalkClassifiedBatch b = ref First(right);
-            int order = ((int)a.Key.CullMode).CompareTo((int)b.Key.CullMode);
+            int order = a.DetailCategory.CompareTo(b.DetailCategory);
             if (order != 0)
                 return order;
-            order = a.DetailCategory.CompareTo(b.DetailCategory);
+            order = ((int)a.Key.CullMode).CompareTo((int)b.Key.CullMode);
             if (order != 0)
                 return order;
             order = ((int)a.Key.Translucency).CompareTo((int)b.Key.Translucency);
