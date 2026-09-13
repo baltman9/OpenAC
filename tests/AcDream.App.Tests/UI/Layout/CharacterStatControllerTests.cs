@@ -1794,6 +1794,113 @@ public class CharacterStatControllerTests
     }
 
     [Fact]
+    public void RowClick_AttributeWithBuff_FooterStateBTitle_HasOneLineRunsWithBuffColor()
+    {
+        var titleB = new UiText { ElementId = CharacterStatController.FooterTitleId };
+        var stateB = new UiPanel();
+        stateB.AddChild(titleB);
+        var list = new UiPanel();
+        var layout = Fake(
+            (CharacterStatController.FooterStateBId, stateB),
+            (CharacterStatController.ListBoxId, list));
+
+        CharacterSheet Sheet() => new() { Strength = 240, AttributeBaseValues = [200, 0, 0, 0, 0, 0] };
+        CharacterStatController.Bind(layout, Sheet);
+
+        Descendants(list).OfType<UiClickablePanel>().ToList()[0].OnClick!();   // Strength = index 0
+
+        Assert.True(titleB.OneLine);
+        IReadOnlyList<UiText.TextRun> runs = titleB.RunsProvider!();
+        Assert.Equal(2, runs.Count);
+        Assert.Equal("Strength: 240", runs[0].Text);
+        Assert.Equal((" (+40)", new Vector4(0f, 1f, 0f, 1f)), (runs[1].Text, runs[1].Color));
+    }
+
+    [Fact]
+    public void RowClick_VitalWithBuff_FooterStateBTitle_ShowsBuffDelta()
+    {
+        var titleB = new UiText { ElementId = CharacterStatController.FooterTitleId };
+        var stateB = new UiPanel();
+        stateB.AddChild(titleB);
+        var list = new UiPanel();
+        var layout = Fake(
+            (CharacterStatController.FooterStateBId, stateB),
+            (CharacterStatController.ListBoxId, list));
+
+        CharacterSheet Sheet() => new()
+        {
+            HealthCurrent = 335,
+            HealthMax = 335,
+            VitalBaseMaxValues = [315, 0, 0],
+            VitalVitaeModifiers = [0, 0, 0],
+        };
+        CharacterStatController.Bind(layout, Sheet);
+
+        Descendants(list).OfType<UiClickablePanel>().ToList()[6].OnClick!();   // Health = index 6
+
+        IReadOnlyList<UiText.TextRun> runs = titleB.RunsProvider!();
+        Assert.Equal(2, runs.Count);
+        Assert.Equal("Health: 335/335", runs[0].Text);
+        Assert.Equal((" (+20)", new Vector4(0f, 1f, 0f, 1f)), (runs[1].Text, runs[1].Color));
+    }
+
+    [Fact]
+    public void RowClick_UnbuffedVital_FooterStateBTitle_HasNoDeltaRun()
+    {
+        var titleB = new UiText { ElementId = CharacterStatController.FooterTitleId };
+        var stateB = new UiPanel();
+        stateB.AddChild(titleB);
+        var list = new UiPanel();
+        var layout = Fake(
+            (CharacterStatController.FooterStateBId, stateB),
+            (CharacterStatController.ListBoxId, list));
+
+        CharacterSheet Sheet() => new()
+        {
+            StaminaCurrent = 300,
+            StaminaMax = 300,
+            VitalBaseMaxValues = [0, 300, 0],
+            VitalVitaeModifiers = [0, 0, 0],
+        };
+        CharacterStatController.Bind(layout, Sheet);
+
+        Descendants(list).OfType<UiClickablePanel>().ToList()[7].OnClick!();   // Stamina = index 7
+
+        IReadOnlyList<UiText.TextRun> runs = titleB.RunsProvider!();
+        Assert.Single(runs);
+        Assert.Equal("Stamina: 300/300", runs[0].Text);
+    }
+
+    [Fact]
+    public void SkillClick_BuffedSkill_FooterStateBTitle_HasOneLineRunsWithBuffColor()
+    {
+        Vector4 buff = new(0.2f, 0.3f, 0.4f, 1f);
+        var titleB = new UiText
+        {
+            ElementId = CharacterStatController.FooterTitleId,
+            FontColorPalette = [Vector4.One, buff],
+        };
+        var stateB = new UiPanel();
+        stateB.AddChild(titleB);
+        var list = new UiPanel { Width = 300 };
+        var layout = Fake(
+            (CharacterStatController.FooterStateBId, stateB),
+            (CharacterStatController.ListBoxId, list));
+
+        CharacterSheet Sheet() => VitaeSkillSheet(currentLevel: 350, baseLevel: 300, vitaeModifier: 0);
+        CharacterStatController.Bind(layout, Sheet, spriteResolve: id => (id, 16, 16));
+
+        ClickTab(layout, left: 92f);
+        SkillRows(list)[0].OnClick!();
+
+        Assert.True(titleB.OneLine);
+        IReadOnlyList<UiText.TextRun> runs = titleB.RunsProvider!();
+        Assert.Equal(2, runs.Count);
+        Assert.Equal("Test Skill: 350", runs[0].Text);
+        Assert.Equal((" (+50)", buff), (runs[1].Text, runs[1].Color));
+    }
+
+    [Fact]
     public void SkillClick_VitaeOnly_FooterTitleShowsVitaeParenthetical()
     {
         var list  = new UiPanel { Width = 300 };
