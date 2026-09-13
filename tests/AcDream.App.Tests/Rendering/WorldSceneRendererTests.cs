@@ -321,9 +321,43 @@ public sealed class WorldSceneRendererTests
         Assert.True(rig.PView.LastInput!.KeepDistantBuildings);
     }
 
-    private sealed class MutableBuildingDetailPolicy : IWorldSceneBuildingDetailPolicy
+    private sealed class MutableBuildingDetailPolicy
+        : IWorldSceneBuildingDetailPolicy, IWorldScenePresentationPolicy
     {
         public bool KeepDistantBuildings { get; set; } = true;
+
+        public bool DrawWorld { get; set; } = true;
+    }
+
+    [Fact]
+    public void UiOnly_PublishesEmptySelectionFrameAndSkipsWorldOwners()
+    {
+        var rig = new Rig(portalVisible: false, waitingForLogin: false, clipRoot: null);
+        rig.BuildingDetail.DrawWorld = false;
+
+        WorldRenderFrameOutcome result = rig.Renderer.Render(default);
+
+        Assert.Equal(default, result);
+        Assert.Equal(["selection:begin", "selection:complete"], rig.Calls);
+    }
+
+    [Fact]
+    public void UiOnly_PreparesNothing_AndTheWorldReturnsWhenItIsDrawnAgain()
+    {
+        var root = new LoadedCell { CellId = 0x01010001u, IsOutdoorNode = true };
+        var rig = new Rig(portalVisible: false, waitingForLogin: false, clipRoot: root);
+        rig.BuildingDetail.DrawWorld = false;
+
+        PreparedWorldSceneFrame prepared = rig.Renderer.PrepareEnhanced(default);
+        Assert.False(prepared.ShouldRender);
+        Assert.DoesNotContain("frame:build", rig.Calls);
+
+        rig.BuildingDetail.DrawWorld = true;
+        PreparedWorldSceneFrame drawn = rig.Renderer.PrepareEnhanced(default);
+        Assert.True(drawn.ShouldRender);
+        WorldRenderFrameOutcome result = rig.Renderer.Render(default);
+        Assert.True(result.NormalWorldDrawn);
+        Assert.Equal(1, rig.Calls.Count(value => value == "frame:build"));
     }
 
     [Fact]
@@ -619,9 +653,9 @@ public sealed class WorldSceneRendererTests
                 Passes,
                 new WorldRenderRangeState(4, 12),
                 diagnostics,
-                availability,
-                atmosphere: null,
-                BuildingDetail);
+                BuildingDetail,
+                BuildingDetail,
+                availability);
         }
 
         public MutableBuildingDetailPolicy BuildingDetail { get; } = new();
@@ -798,7 +832,9 @@ public sealed class WorldSceneRendererTests
                 new PViewCells(),
                 new PassExecutor(calls),
                 new WorldRenderRangeState(nearRadius: 4, farRadius: 12),
-                new Diagnostics(calls));
+                new Diagnostics(calls),
+                DefaultBuildingDetailPolicy.Instance,
+                DefaultBuildingDetailPolicy.Instance);
         }
 
         public CountingPView PView { get; }

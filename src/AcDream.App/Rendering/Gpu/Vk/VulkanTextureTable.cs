@@ -188,7 +188,10 @@ internal sealed unsafe class VulkanTextureTable : IDisposable
     {
         lock (_sync)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            // Deferred through the flight ledger, so teardown may already have
+            // dropped the table; then there is nothing left to point anywhere.
+            if (_disposed)
+                return;
             if (!slot.IsAssigned || !_slots.IsLive(slot.Index))
                 throw new InvalidOperationException($"Texture table slot {slot.Index} is not live; it cannot be rewritten.");
             Write(slot.Index, view, sampler, layout);

@@ -99,7 +99,8 @@ internal sealed unsafe partial class VulkanGpuDevice
                 "vk-binding-dummy",
                 65536,
                 GpuBufferUsage.Storage | GpuBufferUsage.Uniform,
-                GpuMemoryResidency.HostWritable));
+                GpuMemoryResidency.HostWritable),
+            NoteBufferDestroyed);
 
         _frameBindings = new VulkanFrameBindings[_flights.SlotCount];
         for (int slot = 0; slot < _flights.SlotCount; slot++)
@@ -411,14 +412,15 @@ internal sealed unsafe partial class VulkanGpuDevice
                 nameof(texture));
         }
 
-        // The table is update-after-bind, so the slot can be rewritten while
-        // frames that sample it are in flight; they see the old or the new pair,
-        // and both stay alive until the caller retires them.
-        TextureTable.Rewrite(
-            slot,
-            vulkanTexture.SampledView,
-            vulkanSampler.Handle,
-            vulkanTexture.SampledLayout);
+        // Update-after-bind allows the write between record and submit, not
+        // while a submitted frame may still sample the slot, so the rewrite
+        // waits for the frames in flight like a release does; the tiles sample
+        // the old pair for those frames, and the caller keeps both pairs alive.
+        VulkanTextureTable table = TextureTable;
+        ImageView view = vulkanTexture.SampledView;
+        Sampler samplerHandle = vulkanSampler.Handle;
+        ImageLayout layout = vulkanTexture.SampledLayout;
+        _flights.Retire(() => table.Rewrite(slot, view, samplerHandle, layout));
         return slot;
     }
 
@@ -1422,7 +1424,8 @@ internal sealed unsafe partial class VulkanGpuDevice
                 "vk-backbuffer-capture",
                 width * height * 4,
                 GpuBufferUsage.TransferDestination,
-                GpuMemoryResidency.HostReadable));
+                GpuMemoryResidency.HostReadable),
+            NoteBufferDestroyed);
     }
 
     private readonly bool _retainBackbufferCapture;

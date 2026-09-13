@@ -131,10 +131,10 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
         IWorldScenePassExecutor passes,
         IWorldRenderRangeSource renderRange,
         IWorldSceneDiagnostics diagnostics,
+        IWorldSceneBuildingDetailPolicy buildingDetail,
+        IWorldScenePresentationPolicy presentation,
         IWorldGenerationAvailability? availability = null,
-        IAtmosphericWorldFrameSink? atmosphere = null,
-        IWorldSceneBuildingDetailPolicy? buildingDetail = null,
-        IWorldScenePresentationPolicy? presentation = null)
+        IAtmosphericWorldFrameSink? atmosphere = null)
     {
         _foundation = foundation ?? throw new ArgumentNullException(nameof(foundation));
         _login = login ?? throw new ArgumentNullException(nameof(login));
@@ -152,10 +152,8 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
         _diagnostics = diagnostics ?? throw new ArgumentNullException(nameof(diagnostics));
         _availability = availability ?? AlwaysAvailableWorldGeneration.Instance;
         _atmosphere = atmosphere;
-        _buildingDetail = buildingDetail ?? DefaultBuildingDetailPolicy.Instance;
-        _presentation = presentation
-            ?? buildingDetail as IWorldScenePresentationPolicy
-            ?? DefaultBuildingDetailPolicy.Instance;
+        _buildingDetail = buildingDetail ?? throw new ArgumentNullException(nameof(buildingDetail));
+        _presentation = presentation ?? throw new ArgumentNullException(nameof(presentation));
     }
 
     public WorldRenderFrameOutcome Render(RenderFrameInput input)

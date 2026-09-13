@@ -450,6 +450,7 @@ internal sealed class FrameRootCompositionPhase
             // old dispatcher/selection observer remains detached.
             live.DrawDispatcher!.SetCurrentRenderSceneObserver(null);
             live.SelectionScene.SetCurrentRenderSceneObserver(null);
+            var displayPolicy = new DisplayBuildingDetailPolicy(d.Settings);
             worldSceneRenderer = new WorldSceneRenderer(
                 renderFrameResources,
                 renderLoginState,
@@ -478,9 +479,10 @@ internal sealed class FrameRootCompositionPhase
                 worldScenePasses,
                 d.RenderRange,
                 worldSceneDiagnostics,
+                displayPolicy,
+                displayPolicy,
                 live.WorldAvailability,
-                atmosphericInputs,
-                new DisplayBuildingDetailPolicy(d.Settings));
+                atmosphericInputs);
             worldSceneRenderer =
                 new AcDream.App.Rendering.Gpu.Vk.VulkanWorldScenePhase(
                     host.GpuFrameLifetime,
