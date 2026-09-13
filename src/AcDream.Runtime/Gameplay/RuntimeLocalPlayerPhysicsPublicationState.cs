@@ -279,6 +279,8 @@ internal sealed class RuntimeLocalPlayerPhysicsPublicationState : IDisposable
                 movement.CancelMoveTo(WeenieError.ActionCancelled);
             });
         movement.MakeMoveToManager();
+        motion.CheckForCompletedMotions ??=
+            () => CompleteDispatchedMotions(motion);
         motion.UnstickFromObject = physicsHost.PositionManager.UnStick;
         motion.InterruptCurrentMovement = () =>
         {
@@ -357,6 +359,62 @@ internal sealed class RuntimeLocalPlayerPhysicsPublicationState : IDisposable
         if (float.IsNaN(value) || value <= 0f)
             return 0f;
         return MathF.Min(value, 0.1f);
+    }
+
+    /// <summary>
+    /// A ceiling on one pass. The queue takes one entry per dispatched motion
+    /// and is drained every frame, so this is only reached if something refuses
+    /// to complete, and then stopping beats spinning.
+    /// </summary>
+    private const int MaximumMotionCompletionsPerPass = 64;
+
+    /// <summary>
+    /// Finishes the motions the local player has dispatched, for a host that
+    /// plays no animations.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A dispatched motion stays outstanding until whatever plays the animation
+    /// reports it finished. A host that draws the world has one of those and
+    /// replaces this with it; a host that does not would otherwise leave every
+    /// motion outstanding forever.
+    /// </para>
+    /// <para>
+    /// That is not a cosmetic difference: an outstanding motion suspends the
+    /// whole move-to layer, so a turn-to-heading is accepted and then never
+    /// starts and route steering that turns before it walks stands on the spot.
+    /// An object that plays no animations does not keep a dispatched motion
+    /// outstanding at all, so completing it here restores that. See the
+    /// research note on the headless navigation slice.
+    /// </para>
+    /// </remarks>
+    internal static void CompleteDispatchedMotions(MotionInterpreter motion)
+    {
+        // The invariant is about the object, not about who was wired up
+        // first: an object with something to play its animations keeps its
+        // dispatched motions outstanding until that thing finishes them, and
+        // completing them here as well would finish them twice. Whether such
+        // an object also replaced this fallback is not the question — having
+        // somewhere to dispatch to is.
+        if (motion.DefaultSink is not null)
+            return;
+        for (int completed = 0;
+             completed < MaximumMotionCompletionsPerPass;
+             completed++)
+        {
+            if (motion.PendingMotionHead is not { } head)
+                return;
+            // The queue's own length is the only honest measure of progress
+            // here. Two queued motions can be identical -- a stop always
+            // queues the same "ready" alongside whatever it cancels, and an
+            // arrival issues two of them -- so comparing the head before and
+            // after would read a second identical entry as the first refusing
+            // to leave, and stop with the queue still occupied.
+            int outstanding = motion.PendingMotionCount;
+            motion.MotionDone(head.Motion, success: true);
+            if (motion.PendingMotionCount >= outstanding)
+                return; // Nothing was taken off; stop rather than spin.
+        }
     }
 
     internal RuntimeLocalPlayerPhysicsPublicationStatus Commit(

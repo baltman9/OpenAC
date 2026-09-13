@@ -80,6 +80,7 @@ internal class RuntimeAutomationSurface
     private Func<uint, bool>? _dismissGhost;
     private Func<PluginSelectionAction, bool>? _selectionAction;
     private Func<string, bool>? _composeChat;
+    private Func<bool>? _chatInputActive;
     private IReadOnlyList<PluginProjectileDebugSample> _projectileDebugSamples =
         Array.Empty<PluginProjectileDebugSample>();
     private long _projectileDebugSamplesExpireAt;
@@ -408,6 +409,17 @@ internal class RuntimeAutomationSurface
             _selectionAction = execute;
     }
 
+    /// <summary>
+    /// Reports whether the player is typing into the chat entry. Automation
+    /// that steers by holding keys asks before it holds any.
+    /// </summary>
+    public void BindChatInputActive(Func<bool> isActive)
+    {
+        ArgumentNullException.ThrowIfNull(isActive);
+        lock (_gate)
+            _chatInputActive = isActive;
+    }
+
     /// <summary>Stages chat text in the entry box without sending it.</summary>
     public void BindChatComposer(Func<string, bool> compose)
     {
@@ -452,6 +464,7 @@ internal class RuntimeAutomationSurface
         _dismissGhost = null;
         _selectionAction = null;
         _composeChat = null;
+        _chatInputActive = null;
         _trackedEnchantments.Clear();
         _trackedCastCompletionRevision = 0;
         _projectileDebugSamples = Array.Empty<PluginProjectileDebugSample>();
@@ -1019,6 +1032,17 @@ internal class RuntimeAutomationSurface
         }
         info = default;
         return false;
+    }
+
+    public bool IsInputActive
+    {
+        get
+        {
+            Func<bool>? isActive;
+            lock (_gate)
+                isActive = _disposed ? null : _chatInputActive;
+            return isActive?.Invoke() == true;
+        }
     }
 
     // ── IPluginChat ───────────────────────────────────────────────────────
