@@ -179,12 +179,17 @@ public sealed class RuntimeLiveEntitySessionController
     {
         bool isLocal =
             update.Guid == _runtime.PlayerIdentity.ServerGuid;
-        _ = Entities.TryApplyMotion(
+        bool known = Entities.TryApplyMotion(
             update,
             retainPayload: !isLocal || !update.IsAutonomous,
             acknowledgeProjection: null,
             out _,
             out _);
+        // A movement the server drives at this character is an order to walk
+        // or turn, and it is the only answer a use out of arm's reach ever
+        // gets. A host with a window has always obeyed it.
+        if (known && isLocal)
+            _ = RuntimeServerControlledLocalMovement.TryApply(_runtime, update);
     }
 
     private void OnPositionUpdated(
