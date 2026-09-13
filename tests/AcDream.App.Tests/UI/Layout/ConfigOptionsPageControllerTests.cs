@@ -66,7 +66,10 @@ public sealed class ConfigOptionsPageControllerTests
         Assert.False(d.AutomaticDegrades);
         Assert.Equal(0f, d.GraphicsPerformance);
         Assert.Equal(50f, d.DegradeDistance);
-        Assert.Equal(2, d.LandscapeTextureDetail);
+        // Retail defaults landscape detail to 2 (half size). acdream keeps full
+        // detail unless chosen or in Potato Mode (owner direction, 2026-09-13);
+        // the register row carries the deviation.
+        Assert.Equal(0, d.LandscapeTextureDetail);
         Assert.Equal(1, d.EnvironmentTextureDetail);
         Assert.Equal(1, d.TextureFiltering);
         Assert.Equal(8, d.LandscapeDrawDistance);
@@ -1033,7 +1036,7 @@ public sealed class ConfigOptionsPageControllerTests
             "High",             // 24 Graphics Profile (acdream-only)
             false,              // 25 Potato Mode (acdream-only)
 
-            2,                  // 26 Landscape Texture Detail
+            0,                  // 26 Landscape Texture Detail (acdream: full; the retail 2 is half size)
             1,                  // 27 Environment Texture Detail
             1,                  // 28 Texture Filtering
             8,
@@ -1370,8 +1373,10 @@ public sealed class ConfigOptionsPageControllerTests
         // The graphics profile and Potato Mode, also acdream-only and LIVE.
         (26, RowKind.Menu, false, "Graphics Profile"),
         (27, RowKind.Toggle, false, "Potato Mode"),
-        (30, RowKind.Menu, true, "Landscape Texture Detail"),
-        (31, RowKind.Menu, true, "Environment Texture Detail"),
+        // Consumed since the texture-detail port: LIVE captions, applied at
+        // the next world start.
+        (30, RowKind.Menu, false, "Landscape Texture Detail"),
+        (31, RowKind.Menu, false, "Environment Texture Detail"),
         (32, RowKind.Menu, true, "Texture Filtering"),
         (33, RowKind.Menu, false, "Landscape Draw Distance"),
         (34, RowKind.Toggle, false, "Building Detail Textures"),
@@ -1396,7 +1401,7 @@ public sealed class ConfigOptionsPageControllerTests
     {
         (OptionsPanelController controller, _, bool bound) = BindReal(resolveString: (_, _) => "x");
         Assert.True(bound);
-        Assert.Equal(16, DimmingExpectations.Count(expectation => expectation.StoreOnly));
+        Assert.Equal(14, DimmingExpectations.Count(expectation => expectation.StoreOnly));
 
         var configSlot = UiElement.FindDescendant(controller.TabPanel, ConfigPageSlotId)!;
         var listBox = Assert.IsType<UiTemplateListBox>(

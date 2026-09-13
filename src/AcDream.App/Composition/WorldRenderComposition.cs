@@ -51,7 +51,11 @@ internal sealed record WorldRenderDependencies(
     string DiagnosticsDirectory,
     Action<string> Log,
     AcDream.App.Rendering.Gpu.IGpuDevice GpuDevice,
-    AcDream.App.Rendering.ICurrentGpuFrameSource GpuFrameSource);
+    AcDream.App.Rendering.ICurrentGpuFrameSource GpuFrameSource)
+{
+    /// <summary>The texture-detail choice the world starts with; full detail unless the host says otherwise.</summary>
+    public WorldTextureDetail TextureDetail { get; init; } = WorldTextureDetail.Full;
+}
 
 internal interface IGameWindowWorldRenderPublication
 {
@@ -77,7 +81,8 @@ internal interface IWorldRenderCompositionFactory
     TerrainAtlas AcquireBackendNeutralTerrainAtlas(
         IGameRenderResourceLifetime lifetime,
         AcDream.App.Rendering.Gpu.IGpuDevice device,
-        IDatReaderWriter dats);
+        IDatReaderWriter dats,
+        WorldTextureDetail textureDetail);
 
     void ExerciseBackendNeutralWorldTextures(
         AcDream.App.Rendering.Gpu.IGpuDevice device,
@@ -112,7 +117,8 @@ internal interface IWorldRenderCompositionFactory
         IDatReaderWriter dats,
         IPreparedAssetSource preparedAssets,
         IGpuResourceRetirementQueue retirement,
-        ResidencyBudgetOptions budgets);
+        ResidencyBudgetOptions budgets,
+        WorldTextureDetail textureDetail);
     TextureCache CreateTextureCache(
         AcDream.App.Rendering.Gpu.IGpuDevice device,
         IDatReaderWriter dats,
@@ -161,11 +167,12 @@ internal sealed class RetailWorldRenderCompositionFactory
     public TerrainAtlas AcquireBackendNeutralTerrainAtlas(
         IGameRenderResourceLifetime lifetime,
         AcDream.App.Rendering.Gpu.IGpuDevice device,
-        IDatReaderWriter dats)
+        IDatReaderWriter dats,
+        WorldTextureDetail textureDetail)
     {
         ArgumentNullException.ThrowIfNull(lifetime);
         return lifetime.AcquireTerrainAtlas(
-            () => TerrainAtlas.BuildBackendNeutral(device, dats));
+            () => TerrainAtlas.BuildBackendNeutral(device, dats, textureDetail));
     }
 
     public void ExerciseBackendNeutralWorldTextures(
@@ -264,14 +271,16 @@ internal sealed class RetailWorldRenderCompositionFactory
         IDatReaderWriter dats,
         IPreparedAssetSource preparedAssets,
         IGpuResourceRetirementQueue retirement,
-        ResidencyBudgetOptions budgets) =>
+        ResidencyBudgetOptions budgets,
+        WorldTextureDetail textureDetail) =>
         new(
             device,
             dats,
             preparedAssets,
             NullLogger<WbMeshAdapter>.Instance,
             retirement,
-            budgets);
+            budgets,
+            textureDetail);
 
     public TextureCache CreateTextureCache(
         AcDream.App.Rendering.Gpu.IGpuDevice device,
@@ -419,7 +428,8 @@ internal sealed class WorldRenderCompositionPhase
             TerrainAtlas terrainAtlas = _factory.AcquireBackendNeutralTerrainAtlas(
                 _dependencies.RenderResources,
                 _dependencies.GpuDevice,
-                content.Dats);
+                content.Dats,
+                _dependencies.TextureDetail);
             _factory.SetTerrainAnisotropic(
                 terrainAtlas,
                 settings.ResolvedQuality.AnisotropicLevel);
@@ -488,7 +498,8 @@ internal sealed class WorldRenderCompositionPhase
                     content.Dats,
                     content.PreparedAssets,
                     _dependencies.ResourceRetirement,
-                    residency.Budgets),
+                    residency.Budgets,
+                    _dependencies.TextureDetail),
                 _publication.PublishWbMeshAdapter,
                 WorldRenderCompositionPoint.MeshAdapterPublished);
             TextureCache textureCache = AcquireAndPublish(

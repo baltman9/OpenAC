@@ -664,7 +664,17 @@ internal sealed class FrameRootCompositionPhase
                             ? (true, string.Empty)
                             : (false, $"framebuffer resize '{resolution}' was not persisted");
                     },
-                    requestClientClose: d.Window.Close);
+                    requestClientClose: d.Window.Close,
+                    setPotatoMode: enabled =>
+                    {
+                        d.Settings.SaveDisplay(d.Settings.Display with
+                        {
+                            PotatoMode = enabled,
+                        });
+                        return d.Settings.Display.PotatoMode == enabled
+                            ? (true, string.Empty)
+                            : (false, $"potato mode '{enabled}' was not persisted");
+                    });
             bindings.Adopt(
                 "world lifecycle automation owner",
                 lifecycleAutomation);

@@ -1251,7 +1251,11 @@ public sealed class GameWindow :
                         _applicationPaths.DiagnosticsDirectory,
                         Console.WriteLine,
                         _gpuDevice!,
-                        _gpuFrameLifetime!),
+                        _gpuFrameLifetime!)
+                    {
+                        TextureDetail = AcDream.App.Rendering.Wb.WorldTextureDetail.FromDisplay(
+                            _runtimeSettings.Startup.Display),
+                    },
                     this).Compose(platformResult, contentEffectsAudio, settingsDevTools);
                 Console.WriteLine(
                     $"loading world view centered on " +

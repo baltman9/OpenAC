@@ -13,7 +13,15 @@ public readonly record struct UiWindowPosition(float X, float Y);
 
 public sealed class SettingsStore
 {
-    private const int CurrentSchemaVersion = 3;
+    private const int CurrentSchemaVersion = 4;
+
+    /// <summary>
+    /// The landscape texture-detail value every settings file carried while the
+    /// row had no effect (the retail default, half size). Now that the row is
+    /// live, a pre-v4 file's untouched default reads as full detail, so nobody
+    /// gets reduced textures without having chosen them.
+    /// </summary>
+    internal const int LegacyDefaultLandscapeTextureDetail = 2;
     private readonly string _path;
 
     public SettingsStore(string path)
@@ -37,6 +45,10 @@ public sealed class SettingsStore
             float fieldOfView = ReadFloat(disp, "fieldOfView", d.FieldOfView);
             if (ReadSchemaVersion(root) < 3 && disp.TryGetProperty("fieldOfView", out _))
                 fieldOfView = MigrateLegacyVerticalFovDegrees(fieldOfView);
+            int landscapeTextureDetail = ReadInt(disp, "landscapeTextureDetail", d.LandscapeTextureDetail);
+            if (ReadSchemaVersion(root) < 4
+                && landscapeTextureDetail == LegacyDefaultLandscapeTextureDetail)
+                landscapeTextureDetail = d.LandscapeTextureDetail;
             return new DisplaySettings(
                 Resolution:  ReadString      (disp, "resolution",  d.Resolution),
                 Fullscreen:  ReadBool        (disp, "fullscreen",  d.Fullscreen),
@@ -51,7 +63,7 @@ public sealed class SettingsStore
                 AutomaticDegrades:       ReadBool (disp, "automaticDegrades",       d.AutomaticDegrades),
                 GraphicsPerformance:     ReadFloat(disp, "graphicsPerformance",     d.GraphicsPerformance),
                 DegradeDistance:         ReadFloat(disp, "degradeDistance",         d.DegradeDistance),
-                LandscapeTextureDetail:  ReadInt  (disp, "landscapeTextureDetail",  d.LandscapeTextureDetail),
+                LandscapeTextureDetail:  landscapeTextureDetail,
                 EnvironmentTextureDetail:ReadInt  (disp, "environmentTextureDetail",d.EnvironmentTextureDetail),
                 TextureFiltering:        ReadInt  (disp, "textureFiltering",        d.TextureFiltering),
                 LandscapeDrawDistance:   ReadInt  (disp, "landscapeDrawDistance",   d.LandscapeDrawDistance),
@@ -582,8 +594,32 @@ public sealed class SettingsStore
         var dir = Path.GetDirectoryName(_path);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
         if (!File.Exists(_path)) return new JsonObject();
-        try { return JsonNode.Parse(File.ReadAllText(_path)) as JsonObject ?? new JsonObject(); }
+        JsonObject root;
+        try { root = JsonNode.Parse(File.ReadAllText(_path)) as JsonObject ?? new JsonObject(); }
         catch { return new JsonObject(); }
+        MigrateSectionsInPlace(root);
+        return root;
+    }
+
+    /// <summary>
+    /// The one schema version is stamped by every section's save, so a save of
+    /// audio or chat would otherwise carry an un-migrated display section past
+    /// the version that promises it was migrated. Every save therefore migrates
+    /// the sections it does not own first, with the same rules LoadDisplay
+    /// applies.
+    /// </summary>
+    private static void MigrateSectionsInPlace(JsonObject root)
+    {
+        int version = root["version"] is JsonValue value && value.TryGetValue(out int stored) ? stored : 1;
+        if (version >= 4)
+            return;
+        if (root["display"] is JsonObject display
+            && display["landscapeTextureDetail"] is JsonValue detail
+            && detail.TryGetValue(out int landscapeTextureDetail)
+            && landscapeTextureDetail == LegacyDefaultLandscapeTextureDetail)
+        {
+            display["landscapeTextureDetail"] = DisplaySettings.Default.LandscapeTextureDetail;
+        }
     }
 
     private void WriteMutableRoot(JsonObject root)
@@ -760,10 +796,13 @@ public sealed class SettingsStore
             {
                 using var stream = File.OpenRead(_path);
                 var doc  = JsonDocument.Parse(stream);
+                int storedVersion = ReadSchemaVersion(doc.RootElement);
                 foreach (var prop in doc.RootElement.EnumerateObject())
                 {
                     if (prop.Name == sectionName || prop.Name == "version") continue;
-                    preservedKeys[prop.Name] = prop.Value.GetRawText();
+                    preservedKeys[prop.Name] = prop.Name == "display" && storedVersion < 4
+                        ? MigrateDisplaySectionText(prop.Value)
+                        : prop.Value.GetRawText();
                 }
             }
             catch
@@ -787,6 +826,24 @@ public sealed class SettingsStore
         sb.Append('}').AppendLine();
 
         File.WriteAllText(_path, sb.ToString());
+    }
+
+    /// <summary>
+    /// A pre-v4 display section carried through another section's save gets
+    /// the same migration LoadDisplay applies, since that save stamps the
+    /// version that promises it happened.
+    /// </summary>
+    private static string MigrateDisplaySectionText(JsonElement display)
+    {
+        if (JsonNode.Parse(display.GetRawText()) is not JsonObject node)
+            return display.GetRawText();
+        if (node["landscapeTextureDetail"] is JsonValue detail
+            && detail.TryGetValue(out int landscapeTextureDetail)
+            && landscapeTextureDetail == LegacyDefaultLandscapeTextureDetail)
+        {
+            node["landscapeTextureDetail"] = DisplaySettings.Default.LandscapeTextureDetail;
+        }
+        return node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }).Replace("\n", "\n  ");
     }
 
     private static RenderPackSelectionSettings ReadRenderPackSelection(

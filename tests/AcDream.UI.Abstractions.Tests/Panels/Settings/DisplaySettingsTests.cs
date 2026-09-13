@@ -54,8 +54,9 @@ public sealed class DisplaySettingsTests
         Assert.Equal(QualityPreset.Potato, effective.Quality);
         Assert.Equal(ParticleRange.Retail, effective.ParticleRange);
         Assert.False(effective.AutomaticDegrades);
-        Assert.Equal(0, effective.LandscapeTextureDetail);
-        Assert.Equal(0, effective.EnvironmentTextureDetail);
+        // 4 is the lowest texture detail (an eighth of the source size).
+        Assert.Equal(4, effective.LandscapeTextureDetail);
+        Assert.Equal(4, effective.EnvironmentTextureDetail);
         Assert.Equal(0, effective.TextureFiltering);
         Assert.Equal(3, effective.LandscapeDrawDistance);
         Assert.False(effective.BuildingDetailTextures);

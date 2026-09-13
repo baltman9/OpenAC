@@ -799,6 +799,14 @@ internal sealed class DeferredWorldLifecycleAutomationRuntime
         return false;
     }
 
+    public bool TrySetPotatoMode(bool enabled, out string error)
+    {
+        if (!_deactivated && _target is { } target)
+            return target.TrySetPotatoMode(enabled, out error);
+        error = "world lifecycle automation is not bound";
+        return false;
+    }
+
     public bool TryResetRenderPackPerformance(out string error)
     {
         if (!_deactivated && _target is { } target)

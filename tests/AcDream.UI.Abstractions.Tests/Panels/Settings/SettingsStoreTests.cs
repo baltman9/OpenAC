@@ -215,10 +215,45 @@ public sealed class SettingsStoreTests : System.IDisposable
         var store = new SettingsStore(_tempPath);
 
         DisplaySettings migrated = store.LoadDisplay();   // 60 → 90
-        store.SaveDisplay(migrated);                      // stamps version 3
+        store.SaveDisplay(migrated);                      // stamps the current version
 
         // A second load must NOT re-migrate the already-migrated 90.
         Assert.Equal(90f, store.LoadDisplay().FieldOfView);
+    }
+
+    [Theory]
+    [InlineData(3, 2, 0)]   // the dead-row default becomes full detail
+    [InlineData(3, 3, 3)]   // a value someone chose survives
+    [InlineData(4, 2, 2)]   // a v4 file's 2 is a real choice
+    public void LoadDisplay_pre_v4_default_landscape_detail_reads_as_full(int version, int stored, int expected)
+    {
+        File.WriteAllText(_tempPath, $$"""
+            {
+              "version": {{version}},
+              "display": { "landscapeTextureDetail": {{stored}} }
+            }
+            """);
+        var store = new SettingsStore(_tempPath);
+
+        Assert.Equal(expected, store.LoadDisplay().LandscapeTextureDetail);
+    }
+
+    [Fact]
+    public void Saving_another_section_migrates_the_display_section_before_stamping_the_version()
+    {
+        File.WriteAllText(_tempPath, """
+            {
+              "version": 3,
+              "display": { "landscapeTextureDetail": 2, "resolution": "1920x1080" }
+            }
+            """);
+        var store = new SettingsStore(_tempPath);
+
+        store.SaveAudio(AudioSettings.Default with { Master = 0.4f });   // stamps version 4
+
+        DisplaySettings display = store.LoadDisplay();
+        Assert.Equal(0, display.LandscapeTextureDetail);
+        Assert.Equal("1920x1080", display.Resolution);
     }
 
     [Fact]

@@ -1111,10 +1111,13 @@ public static class ConfigOptionsPageController
 
     // ── Section 4: Rendering Quality Options ────────────────────────────
 
+    // Stored value 0 is the highest detail (source size) and 4 the lowest (an
+    // eighth), so the labels run from Very High down to Very Low. The choice
+    // applies when the world is next started.
     private static readonly string[] TextureDetailChoices =
     {
-        "ID_Graphics_Value_VeryLow", "ID_Graphics_Value_Low", "ID_Graphics_Value_Medium",
-        "ID_Graphics_Value_High", "ID_Graphics_Value_VeryHigh",
+        "ID_Graphics_Value_VeryHigh", "ID_Graphics_Value_High", "ID_Graphics_Value_Medium",
+        "ID_Graphics_Value_Low", "ID_Graphics_Value_VeryLow",
     };
 
     private static readonly string[] TextureFilteringChoices =
@@ -1150,8 +1153,8 @@ public static class ConfigOptionsPageController
             listBox, "ID_Graphics_LandscapeTextureDetail", TextureDetailChoices, page, resolveString,
             read: () => bindings.LoadDisplay().LandscapeTextureDetail,
             apply: value => bindings.SaveDisplay(bindings.LoadDisplay() with { LandscapeTextureDetail = value }),
-            defaultValue: 2,
-            storeOnly: true,
+            defaultValue: DisplaySettings.Default.LandscapeTextureDetail,
+            storeOnly: false,
             resolveSprite, datFont, debugFont);
 
         BuildMenuRow(
@@ -1159,7 +1162,7 @@ public static class ConfigOptionsPageController
             read: () => bindings.LoadDisplay().EnvironmentTextureDetail,
             apply: value => bindings.SaveDisplay(bindings.LoadDisplay() with { EnvironmentTextureDetail = value }),
             defaultValue: 1,
-            storeOnly: true,
+            storeOnly: false,
             resolveSprite, datFont, debugFont);
 
         BuildMenuRow(

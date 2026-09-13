@@ -105,6 +105,30 @@ namespace AcDream.App.Rendering.Wb
         private readonly AcDream.App.Rendering.Gpu.IGpuDevice _gpuDevice;
 
         private readonly IWorldTextureArrayFactory _atlasArrays;
+        // The texture-detail choice the world started with; mesh textures are
+        // reduced to it once per texture key here, before they enter an array.
+        private readonly WorldTextureDetail _textureDetail;
+        private readonly Dictionary<TextureKey, WorldTextureDetail.ReducedTexture> _reducedTextures = new();
+        private const int ReducedTextureCacheEntries = 8192;
+
+        internal WorldTextureDetail TextureDetail => _textureDetail;
+
+        private WorldTextureDetail.ReducedTexture ReduceForUpload(
+            (int Width, int Height, TextureFormat Format) format,
+            TextureBatchData batch)
+        {
+            if (!_textureDetail.ReducesAnything)
+                return new WorldTextureDetail.ReducedTexture(
+                    format, batch.TextureData, batch.UploadPixelFormat, batch.UploadPixelType);
+            if (_reducedTextures.TryGetValue(batch.Key, out WorldTextureDetail.ReducedTexture cached))
+                return cached;
+            WorldTextureDetail.ReducedTexture reduced = _textureDetail.ReduceEnvironment(
+                format, batch.TextureData, batch.UploadPixelFormat, batch.UploadPixelType);
+            if (_reducedTextures.Count >= ReducedTextureCacheEntries)
+                _reducedTextures.Clear();
+            _reducedTextures[batch.Key] = reduced;
+            return reduced;
+        }
 
 
         public bool IsDisposed { get; private set; }
@@ -356,9 +380,11 @@ namespace AcDream.App.Rendering.Wb
             AcDream.App.Rendering.Gpu.IGpuDevice gpuDevice,
             IPreparedAssetSource preparedAssets,
             ILogger<ObjectMeshManager> logger,
-            ResidencyBudgetOptions? budgets = null)
+            ResidencyBudgetOptions? budgets = null,
+            WorldTextureDetail? textureDetail = null)
         {
             budgets ??= ResidencyBudgetOptions.Default;
+            _textureDetail = textureDetail ?? WorldTextureDetail.Full;
             _graphicsDevice = graphicsDevice
                 ?? throw new ArgumentNullException(nameof(graphicsDevice));
             ArgumentNullException.ThrowIfNull(gpuDevice);
@@ -1771,11 +1797,13 @@ namespace AcDream.App.Rendering.Wb
                         indexSegments);
                 }
 
-                foreach (var (format, batch) in uploadOrder)
+                foreach (var (sourceFormat, batch) in uploadOrder)
                 {
                     {
                         if (batch.Indices.Count == 0) continue;
 
+                        WorldTextureDetail.ReducedTexture upload = ReduceForUpload(sourceFormat, batch);
+                        (int Width, int Height, TextureFormat Format) format = upload.Format;
                         TextureAtlasManager? atlasManager = null;
                         int textureIndex = 0;
                         uint firstIndex = 0;
@@ -1821,8 +1849,8 @@ namespace AcDream.App.Rendering.Wb
                         bool uploadsNewLayer = !atlasManager.HasTexture(batch.Key);
                         try
                         {
-                            textureIndex = atlasManager.AddTexture(batch.Key, batch.TextureData,
-                                batch.UploadPixelFormat, batch.UploadPixelType);
+                            textureIndex = atlasManager.AddTexture(batch.Key, upload.Data,
+                                upload.PixelFormat, upload.PixelType);
                         }
                         catch
                         {

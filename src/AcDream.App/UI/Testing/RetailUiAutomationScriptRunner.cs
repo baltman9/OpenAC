@@ -82,6 +82,11 @@ public interface IRetailUiAutomationRuntime
         error = "render-pack performance automation is unavailable";
         return false;
     }
+    bool TrySetPotatoMode(bool enabled, out string error)
+    {
+        error = "potato-mode automation is unavailable";
+        return false;
+    }
     bool TryRequestClientClose(out string error)
     {
         error = "client-close automation is unavailable";
@@ -269,6 +274,7 @@ public sealed class RetailUiAutomationScriptRunner : IDisposable
             "mouselook" => DoMouseLook(command),
             "checkpoint" => DoCheckpoint(command),
             "renderpack" => DoRenderPack(command),
+            "potato" => DoPotato(command),
             "resize" => DoResize(command),
             "screenshot" => DoScreenshot(command),
             "close-client" => DoCloseClient(command),
@@ -541,6 +547,26 @@ public sealed class RetailUiAutomationScriptRunner : IDisposable
         }
 
         return Stop(command, "usage: wait item|element|ms|world-ready|world-visible|materialized|render-pack|render-pack-samples|framebuffer|signal ...");
+    }
+
+    // `potato on|off`: the Options panel's Potato Mode switch, driven from a
+    // route so its live switch (render pack, sampler, radii, particles at
+    // once) can be exercised under the validation layers without a hand on
+    // the panel.
+    private bool DoPotato(ScriptCommand command)
+    {
+        if (_runtime is null)
+            return Stop(command, "potato-mode automation is unavailable");
+        var p = command.Parts;
+        if (p.Length == 2
+            && (string.Equals(p[1], "on", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(p[1], "off", StringComparison.OrdinalIgnoreCase)))
+        {
+            bool enabled = string.Equals(p[1], "on", StringComparison.OrdinalIgnoreCase);
+            return _runtime.TrySetPotatoMode(enabled, out string error)
+                || Stop(command, error);
+        }
+        return Stop(command, "usage: potato on|off");
     }
 
     private bool DoRenderPack(ScriptCommand command)
