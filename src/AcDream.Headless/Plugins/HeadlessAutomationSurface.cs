@@ -38,7 +38,14 @@ internal sealed class HeadlessAutomationSurface : RuntimeAutomationSurface
         }
 
         if (magicCatalog is not null)
+        {
             BindMagicCatalog(magicCatalog);
+            // Which weenies are component packs is named by the installed
+            // data files, so it reaches the item owner from whichever host
+            // loaded them.
+            runtime.ItemInteractionOwner.BindComponentPackResolver(
+                magicCatalog.IsComponentPack);
+        }
         if (content is null)
             return;
 

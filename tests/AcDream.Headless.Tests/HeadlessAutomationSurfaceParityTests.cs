@@ -12,6 +12,7 @@ using AcDream.Headless.Plugins;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
 using AcDream.Runtime.Session;
+using AcDream.Tests.Fixtures.AutomationParity;
 
 namespace AcDream.Headless.Tests;
 
@@ -129,6 +130,34 @@ public sealed class HeadlessAutomationSurfaceParityTests
         // Navigation: the surface reports a live position rather than
         // pretending it has none.
         Assert.True(automation.Objects.IsAvailable);
+
+        // Ghost retirement: this host installs its own route, so a plugin
+        // gets a verdict on the object rather than "no such command here".
+        Assert.Equal(
+            PluginCombatCommandStatus.InvalidTarget,
+            automation.Combat.DismissGhostTarget(0x7000FFFFu).Status);
+    }
+
+    /// <summary>
+    /// The windowless half of the shared parity script. Every item,
+    /// equipment, loot and projectile answer here used to be
+    /// <c>Unavailable</c>, because those requests reached the client only
+    /// through callbacks the graphical host installed. The graphical half
+    /// asserts the same expected list from
+    /// <c>AppAutomationSurfaceParityTests</c>.
+    /// </summary>
+    [Fact]
+    public void TheWindowlessHostGivesTheSharedParityAnswers()
+    {
+        using var fixture = new AutomationParityRuntimeFixture();
+        using var surface = new HeadlessAutomationSurface(fixture.Runtime);
+
+        IReadOnlyList<string> answers = AutomationSurfaceParityScript.Run(
+            fixture.Runtime,
+            surface,
+            () => fixture.GameActions.Count);
+
+        Assert.Equal(AutomationSurfaceParityScript.Expected, answers);
     }
 
     private static SpellMetadata SelfBuff() => new(

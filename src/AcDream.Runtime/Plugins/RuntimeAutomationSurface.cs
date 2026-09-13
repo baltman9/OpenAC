@@ -77,21 +77,8 @@ internal class RuntimeAutomationSurface
         new Dictionary<uint, uint>();
     private Func<int, string> _speciesName = static _ => string.Empty;
     private IChargenPaletteColorSource? _paletteColors;
-    private Func<uint, uint, bool>? _equip;
-    private Func<bool>? _equipmentBusy;
-    private Func<uint, bool>? _useItem;
-    private Func<uint, uint, bool>? _applyItem;
-    private Func<uint, uint, uint, int, bool>? _moveItem;
-    private Func<uint, uint, uint, bool>? _mergeItems;
-    private Func<uint, uint, bool>? _dropItem;
-    private Func<uint, uint, uint, bool>? _giveItem;
-    private Func<uint, bool, bool>? _pickupItem;
-    private Func<uint, bool>? _identifyItem;
-    private Func<uint, IReadOnlyList<uint>, bool>? _salvageItems;
-    private Func<uint, uint, int, bool>? _sellItem;
     private Func<uint, bool>? _dismissGhost;
     private Func<PluginSelectionAction, bool>? _selectionAction;
-    private PhysicsEngine? _projectilePhysics;
     private IReadOnlyList<PluginProjectileDebugSample> _projectileDebugSamples =
         Array.Empty<PluginProjectileDebugSample>();
     private long _projectileDebugSamplesExpireAt;
@@ -405,66 +392,11 @@ internal class RuntimeAutomationSurface
             _paletteColors = resolver;
     }
 
-    public void BindEquipment(
-        Func<uint, uint, bool> equip,
-        Func<bool> isBusy)
-    {
-        ArgumentNullException.ThrowIfNull(equip);
-        ArgumentNullException.ThrowIfNull(isBusy);
-        lock (_gate)
-        {
-            _equip = equip;
-            _equipmentBusy = isBusy;
-        }
-    }
-
-    public void BindItems(
-        Func<uint, bool> useItem,
-        Func<uint, uint, bool> applyItem,
-        Func<uint, uint, uint, int, bool> moveItem,
-        Func<uint, uint, uint, bool> mergeItems,
-        Func<uint, uint, bool> dropItem,
-        Func<uint, uint, uint, bool> giveItem,
-        Func<uint, bool, bool> pickupItem,
-        Func<uint, bool> identifyItem,
-        Func<uint, IReadOnlyList<uint>, bool>? salvageItems = null,
-        Func<uint, uint, int, bool>? sellItem = null)
-    {
-        ArgumentNullException.ThrowIfNull(useItem);
-        ArgumentNullException.ThrowIfNull(applyItem);
-        ArgumentNullException.ThrowIfNull(moveItem);
-        ArgumentNullException.ThrowIfNull(mergeItems);
-        ArgumentNullException.ThrowIfNull(dropItem);
-        ArgumentNullException.ThrowIfNull(giveItem);
-        ArgumentNullException.ThrowIfNull(pickupItem);
-        ArgumentNullException.ThrowIfNull(identifyItem);
-        lock (_gate)
-        {
-            _useItem = useItem;
-            _applyItem = applyItem;
-            _moveItem = moveItem;
-            _mergeItems = mergeItems;
-            _dropItem = dropItem;
-            _giveItem = giveItem;
-            _pickupItem = pickupItem;
-            _identifyItem = identifyItem;
-            _salvageItems = salvageItems;
-            _sellItem = sellItem;
-        }
-    }
-
     public void BindGhostDeletion(Func<uint, bool> dismissGhost)
     {
         ArgumentNullException.ThrowIfNull(dismissGhost);
         lock (_gate)
             _dismissGhost = dismissGhost;
-    }
-
-    public void BindProjectileCollision(PhysicsEngine physics)
-    {
-        ArgumentNullException.ThrowIfNull(physics);
-        lock (_gate)
-            _projectilePhysics = physics;
     }
 
     public void BindSelectionActions(
@@ -1155,7 +1087,7 @@ internal class RuntimeAutomationSurface
         get
         {
             lock (_gate)
-                return !_disposed && _projectilePhysics is not null && IsAvailable;
+                return !_disposed && _runtime is not null && IsAvailable;
         }
     }
 
@@ -1244,14 +1176,13 @@ internal class RuntimeAutomationSurface
         bool captureDiagnostics)
     {
         GameRuntime? runtime;
-        PhysicsEngine? physics;
         lock (_gate)
-        {
             runtime = _runtime;
-            physics = _projectilePhysics;
-        }
-        if (runtime is null || physics is null || !IsAvailable)
+        if (runtime is null || !IsAvailable)
             return new(PluginProjectilePathStatus.Unavailable);
+        // The runtime owns the one collision engine either host publishes
+        // landblocks into, so the answer does not depend on the host.
+        PhysicsEngine physics = runtime.EntityObjects.Physics.Engine;
         if (targetObjectId == 0u
             || !float.IsFinite(projectileRadius)
             || projectileRadius <= 0f
@@ -2088,7 +2019,7 @@ internal class RuntimeAutomationSurface
         get
         {
             lock (_gate)
-                return !_disposed && _equip is not null && IsAvailable;
+                return !_disposed && _runtime is not null && IsAvailable;
         }
     }
 
@@ -2096,10 +2027,10 @@ internal class RuntimeAutomationSurface
     {
         get
         {
-            Func<bool>? busy;
+            GameRuntime? runtime;
             lock (_gate)
-                busy = _equipmentBusy;
-            return busy?.Invoke() == true;
+                runtime = _runtime;
+            return runtime?.ItemInteractionOwner.IsAutoWieldBusy == true;
         }
     }
 
@@ -2162,17 +2093,12 @@ internal class RuntimeAutomationSurface
         uint objectId,
         uint requestedLocation = 0u)
     {
-        Func<uint, uint, bool>? equip;
-        Func<bool>? busy;
         GameRuntime? runtime;
         lock (_gate)
-        {
-            equip = _equip;
-            busy = _equipmentBusy;
             runtime = _runtime;
-        }
-        if (equip is null || runtime is null || !IsAvailable)
+        if (runtime is null || !IsAvailable)
             return new(PluginEquipmentCommandStatus.Unavailable);
+        RuntimeItemInteraction items = runtime.ItemInteractionOwner;
         if (objectId == 0u
             || runtime.InventoryOwner.Objects.Get(objectId) is not { } item
             || item.ValidLocations == EquipMask.None)
@@ -2186,9 +2112,9 @@ internal class RuntimeAutomationSurface
         {
             return new(PluginEquipmentCommandStatus.AlreadyEquipped);
         }
-        if (busy?.Invoke() == true)
+        if (items.IsAutoWieldBusy)
             return new(PluginEquipmentCommandStatus.Busy);
-        return equip(objectId, requestedLocation)
+        return items.TryWieldItem(objectId, (EquipMask)requestedLocation)
             ? new(PluginEquipmentCommandStatus.Started)
             : new(PluginEquipmentCommandStatus.Refused);
     }
@@ -2199,8 +2125,7 @@ internal class RuntimeAutomationSurface
         get
         {
             lock (_gate)
-                return !_disposed && _useItem is not null
-                    && _applyItem is not null && IsAvailable;
+                return !_disposed && _runtime is not null && IsAvailable;
         }
     }
 
@@ -2346,14 +2271,10 @@ internal class RuntimeAutomationSurface
         uint amount = 0u,
         int placement = 0)
     {
-        Func<uint, uint, uint, int, bool>? move;
         GameRuntime? runtime;
         lock (_gate)
-        {
-            move = _moveItem;
             runtime = _runtime;
-        }
-        if (runtime is null || move is null || !IsAvailable)
+        if (runtime is null || !IsAvailable)
             return new(PluginItemCommandStatus.Unavailable);
         ClientObjectTable objects = runtime.InventoryOwner.Objects;
         uint playerId = runtime.PlayerIdentity.ServerGuid;
@@ -2370,7 +2291,11 @@ internal class RuntimeAutomationSurface
             return new(PluginItemCommandStatus.Refused, "Invalid stack quantity.");
         if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
             return new(PluginItemCommandStatus.Busy);
-        return move(objectId, containerObjectId, amount, placement)
+        return runtime.ItemInteractionOwner.TryMoveItemForAutomation(
+            objectId,
+            containerObjectId,
+            amount,
+            placement)
             ? new(PluginItemCommandStatus.Started)
             : new(PluginItemCommandStatus.Refused);
     }
@@ -2380,14 +2305,10 @@ internal class RuntimeAutomationSurface
         uint targetObjectId,
         uint amount = 0u)
     {
-        Func<uint, uint, uint, bool>? merge;
         GameRuntime? runtime;
         lock (_gate)
-        {
-            merge = _mergeItems;
             runtime = _runtime;
-        }
-        if (runtime is null || merge is null || !IsAvailable)
+        if (runtime is null || !IsAvailable)
             return new(PluginItemCommandStatus.Unavailable);
         ClientObjectTable objects = runtime.InventoryOwner.Objects;
         uint playerId = runtime.PlayerIdentity.ServerGuid;
@@ -2399,21 +2320,20 @@ internal class RuntimeAutomationSurface
             return new(PluginItemCommandStatus.Refused, "Invalid stack quantity.");
         if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
             return new(PluginItemCommandStatus.Busy);
-        return merge(sourceObjectId, targetObjectId, amount)
+        return runtime.ItemInteractionOwner.TryMergeItemsForAutomation(
+            sourceObjectId,
+            targetObjectId,
+            amount)
             ? new(PluginItemCommandStatus.Started)
             : new(PluginItemCommandStatus.Refused);
     }
 
     public PluginItemCommandResult Drop(uint objectId, uint amount = 0u)
     {
-        Func<uint, uint, bool>? drop;
         GameRuntime? runtime;
         lock (_gate)
-        {
-            drop = _dropItem;
             runtime = _runtime;
-        }
-        if (runtime is null || drop is null || !IsAvailable)
+        if (runtime is null || !IsAvailable)
             return new(PluginItemCommandStatus.Unavailable);
         ClientObjectTable objects = runtime.InventoryOwner.Objects;
         if (!TryGetOwned(
@@ -2428,7 +2348,9 @@ internal class RuntimeAutomationSurface
             return new(PluginItemCommandStatus.Refused, "Invalid stack quantity.");
         if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
             return new(PluginItemCommandStatus.Busy);
-        return drop(objectId, amount)
+        return runtime.ItemInteractionOwner.TryDropItemForAutomation(
+            objectId,
+            amount)
             ? new(PluginItemCommandStatus.Started)
             : new(PluginItemCommandStatus.Refused);
     }
@@ -2438,14 +2360,10 @@ internal class RuntimeAutomationSurface
         uint targetObjectId,
         uint amount = 0u)
     {
-        Func<uint, uint, uint, bool>? give;
         GameRuntime? runtime;
         lock (_gate)
-        {
-            give = _giveItem;
             runtime = _runtime;
-        }
-        if (runtime is null || give is null || !IsAvailable)
+        if (runtime is null || !IsAvailable)
             return new(PluginItemCommandStatus.Unavailable);
         ClientObjectTable objects = runtime.InventoryOwner.Objects;
         if (!TryGetOwned(
@@ -2462,7 +2380,10 @@ internal class RuntimeAutomationSurface
             return new(PluginItemCommandStatus.Refused, "Invalid stack quantity.");
         if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
             return new(PluginItemCommandStatus.Busy);
-        return give(objectId, targetObjectId, amount)
+        return runtime.ItemInteractionOwner.TryGiveItemForAutomation(
+            objectId,
+            targetObjectId,
+            amount)
             ? new(PluginItemCommandStatus.Started)
             : new(PluginItemCommandStatus.Refused);
     }
@@ -2471,14 +2392,10 @@ internal class RuntimeAutomationSurface
         uint toolObjectId,
         IReadOnlyList<uint> itemObjectIds)
     {
-        Func<uint, IReadOnlyList<uint>, bool>? salvage;
         GameRuntime? runtime;
         lock (_gate)
-        {
-            salvage = _salvageItems;
             runtime = _runtime;
-        }
-        if (runtime is null || salvage is null || !IsAvailable)
+        if (runtime is null || !IsAvailable)
             return new(PluginItemCommandStatus.Unavailable);
         if (itemObjectIds is null || itemObjectIds.Count == 0)
             return new(PluginItemCommandStatus.InvalidItem);
@@ -2497,21 +2414,19 @@ internal class RuntimeAutomationSurface
         }
         if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
             return new(PluginItemCommandStatus.Busy);
-        return salvage(toolObjectId, itemObjectIds)
+        return runtime.ItemInteractionOwner.TrySalvageItemsForAutomation(
+            toolObjectId,
+            itemObjectIds)
             ? new(PluginItemCommandStatus.Started)
             : new(PluginItemCommandStatus.Refused);
     }
 
     public PluginItemCommandResult Sell(uint objectId, uint amount = 0u)
     {
-        Func<uint, uint, int, bool>? sell;
         GameRuntime? runtime;
         lock (_gate)
-        {
-            sell = _sellItem;
             runtime = _runtime;
-        }
-        if (runtime is null || sell is null || !IsAvailable)
+        if (runtime is null || !IsAvailable)
             return new(PluginItemCommandStatus.Unavailable);
         uint vendorId = runtime.InventoryOwner.Vendor.VendorId;
         if (vendorId == 0u)
@@ -2545,7 +2460,9 @@ internal class RuntimeAutomationSurface
         }
         if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
             return new(PluginItemCommandStatus.Busy);
-        return sell(vendorId, objectId, quantity)
+        return runtime.ItemInteractionOwner.TrySell(
+            vendorId,
+            [(quantity, objectId)])
             ? new(PluginItemCommandStatus.Started)
             : new(PluginItemCommandStatus.Refused);
     }
@@ -2554,16 +2471,10 @@ internal class RuntimeAutomationSurface
         uint objectId,
         uint targetObjectId)
     {
-        Func<uint, bool>? use;
-        Func<uint, uint, bool>? apply;
         GameRuntime? runtime;
         lock (_gate)
-        {
-            use = _useItem;
-            apply = _applyItem;
             runtime = _runtime;
-        }
-        if (runtime is null || use is null || apply is null || !IsAvailable)
+        if (runtime is null || !IsAvailable)
             return new(PluginItemCommandStatus.Unavailable);
         ClientObjectTable objects = runtime.InventoryOwner.Objects;
         uint playerId = runtime.PlayerIdentity.ServerGuid;
@@ -2577,9 +2488,10 @@ internal class RuntimeAutomationSurface
             return new(PluginItemCommandStatus.InvalidTarget);
         if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
             return new(PluginItemCommandStatus.Busy);
+        RuntimeItemInteraction items = runtime.ItemInteractionOwner;
         bool started = targetObjectId == 0u
-            ? use(objectId)
-            : apply(objectId, targetObjectId);
+            ? items.TryUseItemForAutomation(objectId)
+            : items.TryApplyItem(objectId, targetObjectId);
         return started
             ? new(PluginItemCommandStatus.Started)
             : new(PluginItemCommandStatus.Refused);
@@ -2624,10 +2536,7 @@ internal class RuntimeAutomationSurface
         get
         {
             lock (_gate)
-                return !_disposed && _useItem is not null
-                    && _pickupItem is not null
-                    && _identifyItem is not null
-                    && IsAvailable;
+                return !_disposed && _runtime is not null && IsAvailable;
         }
     }
 
@@ -2802,13 +2711,9 @@ internal class RuntimeAutomationSurface
     public PluginItemCommandResult Open(uint containerObjectId)
     {
         GameRuntime? runtime;
-        Func<uint, bool>? use;
         lock (_gate)
-        {
             runtime = _runtime;
-            use = _useItem;
-        }
-        if (runtime is null || use is null || !IsAvailable)
+        if (runtime is null || !IsAvailable)
             return new(PluginItemCommandStatus.Unavailable);
         if (containerObjectId == 0u
             || runtime.InventoryOwner.Objects.Get(containerObjectId)
@@ -2820,7 +2725,8 @@ internal class RuntimeAutomationSurface
         }
         if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
             return new(PluginItemCommandStatus.Busy);
-        return use(containerObjectId)
+        return runtime.ItemInteractionOwner.TryUseItemForAutomation(
+            containerObjectId)
             ? new(PluginItemCommandStatus.Started)
             : new(PluginItemCommandStatus.Refused);
     }
@@ -2828,13 +2734,9 @@ internal class RuntimeAutomationSurface
     public PluginItemCommandResult Identify(uint objectId)
     {
         GameRuntime? runtime;
-        Func<uint, bool>? identify;
         lock (_gate)
-        {
             runtime = _runtime;
-            identify = _identifyItem;
-        }
-        if (runtime is null || identify is null || !IsAvailable)
+        if (runtime is null || !IsAvailable)
             return new(PluginItemCommandStatus.Unavailable);
         uint root = runtime.InventoryOwner.ExternalContainers.CurrentContainerId;
         ClientObjectTable objects = runtime.InventoryOwner.Objects;
@@ -2850,7 +2752,7 @@ internal class RuntimeAutomationSurface
         }
         if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
             return new(PluginItemCommandStatus.Busy);
-        return identify(objectId)
+        return runtime.ItemInteractionOwner.TryAppraiseForAutomation(objectId)
             ? new(PluginItemCommandStatus.Started)
             : new(PluginItemCommandStatus.Refused);
     }
@@ -2858,13 +2760,9 @@ internal class RuntimeAutomationSurface
     public PluginItemCommandResult Pickup(uint objectId, bool mainPack = false)
     {
         GameRuntime? runtime;
-        Func<uint, bool, bool>? pickup;
         lock (_gate)
-        {
             runtime = _runtime;
-            pickup = _pickupItem;
-        }
-        if (runtime is null || pickup is null || !IsAvailable)
+        if (runtime is null || !IsAvailable)
             return new(PluginItemCommandStatus.Unavailable);
         uint root = runtime.InventoryOwner.ExternalContainers.CurrentContainerId;
         ClientObjectTable objects = runtime.InventoryOwner.Objects;
@@ -2877,7 +2775,9 @@ internal class RuntimeAutomationSurface
         }
         if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
             return new(PluginItemCommandStatus.Busy);
-        return pickup(objectId, mainPack)
+        return runtime.ItemInteractionOwner.PlaceWorldItemInBackpack(
+            objectId,
+            mainPack)
             ? new(PluginItemCommandStatus.Started)
             : new(PluginItemCommandStatus.Refused);
     }
@@ -3649,18 +3549,6 @@ internal class RuntimeAutomationSurface
             if (_disposed)
                 return;
             _disposed = true;
-            _equip = null;
-            _equipmentBusy = null;
-            _useItem = null;
-            _applyItem = null;
-            _moveItem = null;
-            _mergeItems = null;
-            _dropItem = null;
-            _giveItem = null;
-            _pickupItem = null;
-            _identifyItem = null;
-            _salvageItems = null;
-            _sellItem = null;
             _selectionAction = null;
             DetachLocked();
         }

@@ -127,6 +127,26 @@ public sealed class RuntimeLiveEntitySessionController
         }
     }
 
+    /// <summary>
+    /// Drops an object the client still holds but the server has stopped
+    /// talking about. It runs the same retirement an authoritative delete
+    /// runs, so a ghost leaves exactly the way a real deletion does.
+    /// </summary>
+    public bool DismissClientGhost(uint serverGuid)
+    {
+        if (serverGuid == 0u
+            || serverGuid == _runtime.PlayerIdentity.ServerGuid
+            || !Entities.Entities.TryGetActive(
+                serverGuid,
+                out RuntimeEntityRecord active))
+        {
+            return false;
+        }
+
+        OnDeleted(new DeleteObject.Parsed(serverGuid, active.Incarnation));
+        return !Entities.Entities.TryGetActive(serverGuid, out _);
+    }
+
     private void OnDeleted(DeleteObject.Parsed delete)
     {
         if (delete.Guid == _runtime.PlayerIdentity.ServerGuid

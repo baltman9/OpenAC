@@ -1056,6 +1056,10 @@ internal sealed class HeadlessSessionHost : IDisposable
             // sites — see RuntimeLiveEntitySessionController's own doc.
             onLoginCompleteSent: () => _optionsSeeder?.NoteLoginCompleteSent());
         _entities = entities;
+        // A plugin can drop an object the server has stopped talking about;
+        // each host retires its own projection, so the route is installed
+        // once this session's entity controller exists.
+        _pluginSession.Host.BindGhostDeletion(entities.DismissClientGhost);
         var route = new LiveSessionEventRouter(
             session,
             entities.CreateSink(),

@@ -464,7 +464,6 @@ public sealed class GameWindow :
         _runtimeHostLease = _runtime.AcquireHostLease(
             "graphical GameWindow");
         _automation?.Bind(_runtime, _runtime.CharacterOwner, _runtime.ActionOwner.SpellCast);
-        _automation?.BindProjectileCollision(_physicsEngine);
         _localPlayerIdentity = new AcDream.App.Input.LocalPlayerIdentityState(
             _runtime.PlayerIdentity);
         _updateFrameClock = new AcDream.App.Update.UpdateFrameClock(
@@ -901,25 +900,6 @@ public sealed class GameWindow :
         _combatAttackController = result.CombatAttack;
         _externalContainerLifecycle = result.ExternalContainerLifecycle;
         _itemInteractionController = result.ItemInteraction;
-        _automation?.BindEquipment(
-            (itemId, requestedLocation) =>
-                result.ItemInteraction.TryWieldItem(
-                    itemId,
-                    (AcDream.Core.Items.EquipMask)requestedLocation),
-            () => result.ItemInteraction.IsAutoWieldBusy);
-        _automation?.BindItems(
-            result.ItemInteraction.TryUseItemForAutomation,
-            result.ItemInteraction.TryApplyItem,
-            result.ItemInteraction.TryMoveItemForAutomation,
-            result.ItemInteraction.TryMergeItemsForAutomation,
-            result.ItemInteraction.TryDropItemForAutomation,
-            result.ItemInteraction.TryGiveItemForAutomation,
-            result.ItemInteraction.PlaceWorldItemInBackpack,
-            result.ItemInteraction.TryAppraiseForAutomation,
-            result.ItemInteraction.TrySalvageItemsForAutomation,
-            (vendorId, itemId, amount) => result.ItemInteraction.TrySell(
-                vendorId,
-                [(amount, itemId)]));
         _interactionUiLateBindings = result.LateBindings;
         _magicRuntime = result.Magic;
         if (result.RetainedUi is { } retained)

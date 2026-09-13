@@ -93,6 +93,15 @@ internal sealed class HeadlessPluginHost
     public ISelectionService Selection => _runtime.ActionOwner.Selection;
     public IAutomationSurface Automation => _automation;
 
+    /// <summary>
+    /// Installs this host's retirement route for an object the server has
+    /// stopped talking about. Each host retires its own projection of an
+    /// entity, so the route arrives once the session's entity controller
+    /// exists rather than at construction.
+    /// </summary>
+    internal void BindGhostDeletion(Func<uint, bool> dismissGhost) =>
+        _automation.BindGhostDeletion(dismissGhost);
+
     public IUiRegistry Ui => NoOpUiRegistry.Instance;
 
     public IReadOnlyDictionary<string, string> SessionSettings => EmptySettings;
