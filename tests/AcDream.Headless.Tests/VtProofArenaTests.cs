@@ -214,6 +214,36 @@ public sealed class VtProofArenaTests
     }
 
     /// <summary>
+    /// The step clears EVERY placed corpse, not just the nearest: with the
+    /// nearest 2 m south and a second 4 m further along the same line north
+    /// of the character, a step that only looked at the nearest would land
+    /// the character 4.5 m from the first and next to the second. Mutation:
+    /// size the step from the nearest corpse alone and the second corpse ends
+    /// up inside the wanted distance.
+    /// </summary>
+    [Fact]
+    public void TheStepClearsEveryPlacedCorpseNotJustTheNearest()
+    {
+        var stood = new PluginNavigationPosition(
+            0xA9B40029u, 0d, 0d, 0d, 0f, true);
+        PluginLootContainer south = Placed(
+            0x80001828u, "Corpse of Drudge Skulker", 0d, -2d / 240d);
+        PluginLootContainer north = Placed(
+            0x80001829u, "Corpse of Drudge Skulker", 0d, 4d / 240d);
+
+        Assert.True(VtProofArena.StepAwayFromCorpse(
+            stood, [south, north], wantedMeters: 4.5d,
+            out double eastWest, out double northSouth));
+
+        // Away from the nearest (south) means north, past the second corpse,
+        // and far enough that BOTH are at least 4.5 m off: 4 + 4.5 = 8.5 m.
+        Assert.Equal(0d, eastWest, 3);
+        Assert.True(northSouth >= 8.5d, $"stepped only {northSouth:0.00} m");
+        double toNorth = Math.Abs(northSouth - 4d);
+        Assert.True(toNorth >= 4.5d, $"the second corpse is {toNorth:0.00} m away");
+    }
+
+    /// <summary>
     /// A character already far enough out is not moved, and neither is one
     /// with nothing placed to step away from.
     /// </summary>

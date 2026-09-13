@@ -660,6 +660,16 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 }
             }
 
+            // The fight is over before the loot milestone begins. A second
+            // drudge still alive would close on the character and die at its
+            // feet DURING the milestone, and that corpse -- the character's
+            // own kill, a quarter of a metre away -- is the one the looter
+            // would open, so nothing here would need a walk. A survivor put
+            // down by the server is not the character's kill and the plain
+            // rule leaves its corpse alone.
+            Stage("@smite all");
+            Pump(TimeSpan.FromSeconds(2d));
+
             // ---- P5: loot -- a corpse is opened and a decision is made ---------
             {
                 // The corpse the fight left is the character's own kill, so
@@ -2099,13 +2109,42 @@ internal static class VtProofArena
         double dx = (stood.EastWest - corpse.Position.EastWest) * 240d;
         double dy = (stood.NorthSouth - corpse.Position.NorthSouth) * 240d;
         double apart = Math.Sqrt((dx * dx) + (dy * dy));
-        if (apart >= wantedMeters || apart < 0.05d)
+        if (apart < 0.05d)
             return false;
+        double ux = dx / apart;
+        double uy = dy / apart;
 
-        double step = wantedMeters - apart;
-        eastWestMeters = dx / apart * step;
-        northSouthMeters = dy / apart * step;
-        return true;
+        // The direction is away from the nearest corpse; the length is
+        // whatever it takes for EVERY placed corpse to end up the wanted
+        // distance off -- two drudges that died a few metres apart along
+        // the same line would otherwise have the character step off one
+        // and onto the other.
+        for (double step = 0d; step <= 30d; step += 0.25d)
+        {
+            double atX = (stood.EastWest * 240d) + (ux * step);
+            double atY = (stood.NorthSouth * 240d) + (uy * step);
+            bool clear = true;
+            for (int index = 0; index < reported.Count; index++)
+            {
+                if (!reported[index].HasPosition)
+                    continue;
+                double cx = atX - (reported[index].Position.EastWest * 240d);
+                double cy = atY - (reported[index].Position.NorthSouth * 240d);
+                if (Math.Sqrt((cx * cx) + (cy * cy)) < wantedMeters)
+                {
+                    clear = false;
+                    break;
+                }
+            }
+            if (!clear)
+                continue;
+            if (step == 0d)
+                return false;
+            eastWestMeters = ux * step;
+            northSouthMeters = uy * step;
+            return true;
+        }
+        return false;
     }
 
     /// <summary>
