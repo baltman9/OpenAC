@@ -660,6 +660,12 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                     TimeSpan.FromSeconds(20d),
                     () => OwnedEquipmentNames(session).Contains(CasterItemName));
                 staged.Add($"caster '{CasterItemName}' owned again -> {casterRestaged}");
+                // A character revives with its vitals near the floor, and the
+                // recharge rule then wins every single pass trying to fix
+                // that — it sits twenty places above navigation, so nothing
+                // below it is ever asked. Getting back on your feet before
+                // resuming is what a player does too.
+                Stage("@heal");
                 Stage(ArenaTeleport);
                 _ = WaitUntil(
                     TimeSpan.FromSeconds(20d),
@@ -689,25 +695,47 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 bool settingsBack = restored && stillOff.Length == 0;
 
                 // Dying strips the character's enchantments, so the first
-                // thing the restore turns back on is a full re-buff, and a
-                // burst holds every other rule's gate shut while it casts.
-                // Waiting it out is the point rather than a nuisance: the
-                // route line that comes after it is the macro genuinely
-                // picking its work back up. Same budget the first buff pass
-                // gets, and it returns the moment the line appears.
+                // thing the restore does is start re-buffing all of them, and
+                // a burst holds every other rule's gate shut while it casts —
+                // on this character, for longer than the whole rest of the
+                // run takes. The route's position has nothing to do with
+                // buffing, and the restore itself has already been checked
+                // above, so the run puts buffing down for as long as it takes
+                // the navigation rule to say which waypoint it is on, then
+                // hands it straight back.
                 int? waypointAfter = null;
                 bool sameWaypoint = false;
+                string routeSilence = string.Empty;
                 if (settingsBack)
                 {
+                    Stage("/vt opt set EnableBuffing false");
                     int chatBeforeRoute = observed.ChatCount;
                     _ = WaitUntil(
-                        BuffPassBudget,
+                        TimeSpan.FromSeconds(60d),
                         () => FirstRouteWaypointIndex(
                             observed.SnapshotChat(), chatBeforeRoute, route) is not null);
                     waypointAfter = FirstRouteWaypointIndex(
                         observed.SnapshotChat(), chatBeforeRoute, route);
                     sameWaypoint = waypointBefore is not null
                         && waypointAfter == waypointBefore;
+                    if (waypointAfter is null)
+                    {
+                        // The navigation rule can only name its waypoint on a
+                        // pass it is asked about, and it is sixty-first in the
+                        // list. Whoever won those passes instead is the whole
+                        // explanation, so say who rather than leaving the
+                        // reader with a silence.
+                        routeSilence = "; the route rule was never asked — "
+                            + (Tail(
+                                    [.. observed.SnapshotChat()
+                                        .Skip(chatBeforeRoute)
+                                        .Where(static line => line.Contains(
+                                            "Picked ", StringComparison.Ordinal))],
+                                    1)
+                                .FirstOrDefault()
+                                ?? "no rule won a pass at all");
+                    }
+                    Stage("/vt opt set EnableBuffing true");
                 }
 
                 string verdict = string.Create(
@@ -719,7 +747,7 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                         + $"restore-offered={Yes(restoreOffered)}, "
                         + $"resumed-on-waypoint={Yes(sameWaypoint)} "
                         + $"(before={Waypoint(waypointBefore)} "
-                        + $"after={Waypoint(waypointAfter)})");
+                        + $"after={Waypoint(waypointAfter)}){routeSilence}");
 
                 if (died && restoreOffered && recovered && passStillTicking
                     && settingsDisabled && inPeace && settingsBack && sameWaypoint)
