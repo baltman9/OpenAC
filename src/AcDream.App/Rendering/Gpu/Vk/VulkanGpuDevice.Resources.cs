@@ -417,10 +417,18 @@ internal sealed unsafe partial class VulkanGpuDevice
         // waits for the frames in flight like a release does; the tiles sample
         // the old pair for those frames, and the caller keeps both pairs alive.
         VulkanTextureTable table = TextureTable;
+        if (!table.IsLive(slot))
+            throw new InvalidOperationException($"Texture table slot {slot.Index} is not live; it cannot be replaced.");
         ImageView view = vulkanTexture.SampledView;
         Sampler samplerHandle = vulkanSampler.Handle;
         ImageLayout layout = vulkanTexture.SampledLayout;
-        _flights.Retire(() => table.Rewrite(slot, view, samplerHandle, layout));
+        _flights.Retire(() =>
+        {
+            // Released after the replace in the same frame: the release ran
+            // first at this key and wins; nothing points at the index now.
+            if (table.IsLive(slot))
+                table.Rewrite(slot, view, samplerHandle, layout);
+        });
         return slot;
     }
 

@@ -213,7 +213,7 @@ internal sealed unsafe class VulkanTextureTable : IDisposable
     internal bool IsLive(GpuTextureSlot slot)
     {
         lock (_sync)
-            return slot.IsAssigned && _slots.IsLive(slot.Index);
+            return !_disposed && slot.IsAssigned && _slots.IsLive(slot.Index);
     }
 
     private void Write(
