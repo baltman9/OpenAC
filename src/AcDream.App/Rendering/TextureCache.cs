@@ -87,9 +87,11 @@ public sealed class TextureCache
         IDatReaderWriter dats,
         IGpuResourceRetirementQueue retirementQueue,
         string diagnosticsDirectory,
-        ResidencyBudgetOptions? budgets = null)
+        ResidencyBudgetOptions? budgets = null,
+        Wb.WorldTextureDetail? textureDetail = null)
     {
         budgets ??= ResidencyBudgetOptions.Default;
+        _textureDetail = textureDetail ?? Wb.WorldTextureDetail.Full;
         _device = device ?? throw new ArgumentNullException(nameof(device));
         _dats = dats;
         ArgumentException.ThrowIfNullOrWhiteSpace(diagnosticsDirectory);
@@ -212,6 +214,13 @@ public sealed class TextureCache
 
     private readonly Dictionary<(uint SurfaceId, bool Repeat), GpuUiTextureEntry>
         _worldSurfaceGpuTextures = new();
+
+    // The texture-detail choice the world started with. The palette composites
+    // creatures and items wear are indexed textures, which take the environment
+    // scale; the composite arrays are then created at the reduced size.
+    private readonly Wb.WorldTextureDetail _textureDetail;
+
+    internal Wb.WorldTextureDetail TextureDetail => _textureDetail;
 
     private GpuUiTextureEntry UploadWorldSurfaceTexture(
         DecodedTexture decoded,
@@ -389,14 +398,16 @@ public sealed class TextureCache
         if (!composites.CanStartUpload)
             return default;
         (int width, int height) = ResolveDecodedDimensions(surfaceId, overrideOrigTextureId);
-        if (!composites.CanPrepareUpload(width, height))
+        if (!composites.CanPrepareUpload(
+                _textureDetail.EnvironmentSize(width),
+                _textureDetail.EnvironmentSize(height)))
             return default;
 
-        DecodedTexture decoded = DecodeFromDats(
+        DecodedTexture decoded = _textureDetail.ReduceEnvironment(DecodeFromDats(
             surfaceId,
             origTextureOverride: overrideOrigTextureId,
             paletteOverride: null,
-            bakeAuthoredTranslucency: true);
+            bakeAuthoredTranslucency: true));
         return composites.TryAddAndAcquire(ownerLocalId, key, decoded, out BindlessTextureLocation added)
             ? added
             : default;
@@ -421,14 +432,16 @@ public sealed class TextureCache
         if (!composites.CanStartUpload)
             return default;
         (int width, int height) = ResolveDecodedDimensions(surfaceId, overrideOrigTextureId);
-        if (!composites.CanPrepareUpload(width, height))
+        if (!composites.CanPrepareUpload(
+                _textureDetail.EnvironmentSize(width),
+                _textureDetail.EnvironmentSize(height)))
             return default;
 
-        DecodedTexture decoded = DecodeFromDats(
+        DecodedTexture decoded = _textureDetail.ReduceEnvironment(DecodeFromDats(
             surfaceId,
             origTextureOverride: overrideOrigTextureId,
             paletteOverride: paletteOverride,
-            bakeAuthoredTranslucency: true);
+            bakeAuthoredTranslucency: true));
         return composites.TryAddAndAcquire(ownerLocalId, key, decoded, out BindlessTextureLocation added)
             ? added
             : default;

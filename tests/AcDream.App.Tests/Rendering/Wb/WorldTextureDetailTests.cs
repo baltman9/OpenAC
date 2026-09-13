@@ -27,6 +27,24 @@ public sealed class WorldTextureDetailTests
     }
 
     [Fact]
+    public void ReduceEnvironment_DecodedTexture_ShrinksAtTheEnvironmentScale_AndKeepsTinyOnes()
+    {
+        var detail = new WorldTextureDetail(ImageScale.Full, ImageScale.Eighth);
+        var pixels = new byte[128 * 64 * 4];
+        Array.Fill(pixels, (byte)33);
+        var decoded = new DecodedTexture(pixels, 128, 64);
+
+        DecodedTexture reduced = detail.ReduceEnvironment(decoded);
+
+        Assert.Equal(16, reduced.Width);
+        Assert.Equal(8, reduced.Height);
+        Assert.Equal(16 * 8 * 4, reduced.Rgba8.Length);
+        Assert.All(reduced.Rgba8, value => Assert.Equal(33, value));
+        Assert.Same(DecodedTexture.Magenta, detail.ReduceEnvironment(DecodedTexture.Magenta));
+        Assert.Same(decoded, WorldTextureDetail.Full.ReduceEnvironment(decoded));
+    }
+
+    [Fact]
     public void ReduceEnvironment_AtFullDetail_ReturnsTheSameBytes()
     {
         var data = new byte[16 * 16 * 4];

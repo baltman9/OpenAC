@@ -298,7 +298,8 @@ public sealed class WorldRenderCompositionTests
             IDatReaderWriter dats,
             IGpuResourceRetirementQueue retirement,
             string diagnosticsDirectory,
-            ResidencyBudgetOptions budgets)
+            ResidencyBudgetOptions budgets,
+            WorldTextureDetail textureDetail)
         {
             TextureBudgets = budgets;
             return Resource<TextureCache>("texture cache");

@@ -124,7 +124,8 @@ internal interface IWorldRenderCompositionFactory
         IDatReaderWriter dats,
         IGpuResourceRetirementQueue retirement,
         string diagnosticsDirectory,
-        ResidencyBudgetOptions budgets);
+        ResidencyBudgetOptions budgets,
+        WorldTextureDetail textureDetail);
     void RegisterResidencySources(
         ResidencyManager manager,
         WbMeshAdapter? meshes,
@@ -287,13 +288,15 @@ internal sealed class RetailWorldRenderCompositionFactory
         IDatReaderWriter dats,
         IGpuResourceRetirementQueue retirement,
         string diagnosticsDirectory,
-        ResidencyBudgetOptions budgets) =>
+        ResidencyBudgetOptions budgets,
+        WorldTextureDetail textureDetail) =>
         new(
             device,
             dats,
             retirement,
             diagnosticsDirectory,
-            budgets);
+            budgets,
+            textureDetail);
 
     public void RegisterResidencySources(
         ResidencyManager manager,
@@ -510,7 +513,8 @@ internal sealed class WorldRenderCompositionPhase
                     content.Dats,
                     _dependencies.ResourceRetirement,
                     _dependencies.DiagnosticsDirectory,
-                    residency.Budgets),
+                    residency.Budgets,
+                    _dependencies.TextureDetail),
                 _publication.PublishTextureCache,
                 WorldRenderCompositionPoint.TextureCachePublished);
             _factory.RegisterResidencySources(

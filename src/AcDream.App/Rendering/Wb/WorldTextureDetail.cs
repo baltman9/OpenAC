@@ -12,9 +12,10 @@ namespace AcDream.App.Rendering.Wb;
 /// The texture-detail choice the world runs with, fixed when the world
 /// starts: the landscape and environment scales from the two Config rows
 /// (or Potato Mode's lowest values). Object textures are reduced here at
-/// upload time before they enter a texture array; the terrain atlas reduces
-/// its own layers with <see cref="LandscapeSize"/>. Texture merges and UI or
-/// particle textures are not reduced.
+/// upload time before they enter a texture array, the palette composites
+/// creatures and items wear are reduced as they are decoded, and the terrain
+/// atlas reduces its own layers with <see cref="LandscapeSize"/>. The terrain
+/// alpha merges, UI, particle and sky textures are not reduced.
 /// </summary>
 internal sealed record WorldTextureDetail(ImageScale Landscape, ImageScale Environment)
 {
@@ -37,6 +38,22 @@ internal sealed record WorldTextureDetail(ImageScale Landscape, ImageScale Envir
     /// <summary>One side of an environment texture at this detail.</summary>
     public int EnvironmentSize(int size) =>
         TextureDetailScale.Reduce(size, TextureDetailScale.EnvironmentShift(Environment));
+
+    /// <summary>A decoded (RGBA8) texture at the environment scale; the same instance when nothing shrinks.</summary>
+    internal DecodedTexture ReduceEnvironment(DecodedTexture decoded)
+    {
+        ArgumentNullException.ThrowIfNull(decoded);
+        if (Environment == ImageScale.Full)
+            return decoded;
+        int width = EnvironmentSize(decoded.Width);
+        int height = EnvironmentSize(decoded.Height);
+        if (width == decoded.Width && height == decoded.Height)
+            return decoded;
+        return new DecodedTexture(
+            TexturePixels.DownsampleBox(decoded.Rgba8, decoded.Width, decoded.Height, 4, width, height),
+            width,
+            height);
+    }
 
     /// <summary>A mesh texture ready for its texture array: the array key, the layer bytes, and the upload descriptor.</summary>
     internal readonly record struct ReducedTexture(
