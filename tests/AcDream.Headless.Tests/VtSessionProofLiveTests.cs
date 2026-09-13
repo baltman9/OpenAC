@@ -374,37 +374,30 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
             // ---- P3: a buff spell is really cast, then the pass goes quiet -----
             {
                 int before = observed.ChatCount;
-                bool cast = WaitUntil(
+                _ = WaitUntil(
                     TimeSpan.FromSeconds(60d),
-                    () => FirstContaining(observed.SnapshotChat(), "Casting: ") is not null);
-                string castLine = FirstContaining(observed.SnapshotChat(), "Casting: ")
-                    ?? "(none)";
-                // The caster's own record of the same cast: the tracker only
-                // opens after the surface accepted the request, so a plan
-                // line alone can never produce it.
-                bool tracked = MentionsAny(observed.SnapshotChat(), "SpellCaster: Begin");
-                bool settled = cast
+                    () => VtProofCastEvidence.Read(observed.SnapshotChat()).IsCast);
+                VtProofCastEvidence evidence =
+                    VtProofCastEvidence.Read(observed.SnapshotChat());
+                bool settled = evidence.IsCast
                     && WaitUntil(
                         TimeSpan.FromSeconds(30d),
                         () => Quiet(observed, "Casting:", TimeSpan.FromSeconds(6d)));
-                if (cast && tracked && settled)
+                if (evidence.IsCast && settled)
                 {
                     ledger.Pass(
                         "P3",
                         "a buff spell is cast and the pass then goes quiet",
-                        $"{castLine} (after chat entry {before})");
+                        $"{evidence.CastLine} (after chat entry {before})");
                 }
                 else
                 {
                     ledger.Fail(
                         "P3",
                         "a buff spell is cast and the pass then goes quiet",
-                        !cast
-                            ? "no spell was ever cast (no Casting: line)"
-                            : !tracked
-                                ? $"a cast line appeared but the caster never "
-                                    + $"began tracking it: {castLine}"
-                                : $"the buff pass never went quiet after {castLine}",
+                        evidence.IsCast
+                            ? $"the buff pass never went quiet after {evidence.CastLine}"
+                            : evidence.Explain(),
                         Evidence());
                 }
             }
@@ -713,16 +706,6 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
         || line.StartsWith("You obliterate ", StringComparison.Ordinal)
         || line.StartsWith("You destroy ", StringComparison.Ordinal)
         || line.Contains(" by your attack!", StringComparison.Ordinal);
-
-    private static string? FirstContaining(IReadOnlyList<string> lines, string needle)
-    {
-        for (int index = 0; index < lines.Count; index++)
-        {
-            if (lines[index].Contains(needle, StringComparison.Ordinal))
-                return lines[index];
-        }
-        return null;
-    }
 
     /// <summary>
     /// What the plugin's equipment surface says the character owns and could
@@ -1301,6 +1284,46 @@ internal sealed class VtProofLedger
         .Trim();
 }
 
+/// <summary>
+/// Whether a run's chat really shows a spell leaving the character, read
+/// out of the plugin's own two lines for one cast. The planner is chatty —
+/// it says which buff it would like, on whom, and for how long it is
+/// covered — and none of that means anything left the character: the milestone
+/// used to accept exactly those lines, so it stayed green through a run whose
+/// macro had already stopped.
+/// <para>
+/// The cast line is written once the caster surface has accepted the
+/// request, and the tracking line once the caster has opened its record of
+/// that same cast, so the pair together cannot be produced by planning alone.
+/// </para>
+/// </summary>
+internal readonly record struct VtProofCastEvidence(
+    string? CastLine,
+    bool CasterBeganTracking)
+{
+    internal bool IsCast => CastLine is not null && CasterBeganTracking;
+
+    internal static VtProofCastEvidence Read(IReadOnlyList<string> chat)
+    {
+        ArgumentNullException.ThrowIfNull(chat);
+        string? castLine = null;
+        bool tracking = false;
+        foreach (string line in chat)
+        {
+            castLine ??= line.Contains("Casting: ", StringComparison.Ordinal)
+                ? line
+                : null;
+            tracking |= line.Contains("SpellCaster: Begin", StringComparison.Ordinal);
+        }
+        return new VtProofCastEvidence(castLine, tracking);
+    }
+
+    internal string Explain() => CastLine is null
+        ? "no spell was ever cast (no cast line)"
+        : "a cast line appeared but the caster never began tracking it: "
+            + CastLine;
+}
+
 internal readonly record struct VtProofRoutePoint(
     double EastWest,
     double NorthSouth,
@@ -1434,6 +1457,56 @@ public sealed class VtSessionProofHarnessTests
             evidence,
             StringComparison.Ordinal);
         Assert.Contains("the chat tail", evidence, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ABuffPassThatOnlyPlannedIsNotACast()
+    {
+        string[] chat =
+        [
+            "[MossTank] Buffing: Strength Self VII → Strength Self VII, covered for 0s of 60s",
+            "[MossTank] Buffing: attribute +Acdream (1342177290) → Strength Self VII [family 12], covered for 0s of 60s",
+            "[MossTank] Picked BuffSelf P: 60",
+        ];
+
+        VtProofCastEvidence evidence = VtProofCastEvidence.Read(chat);
+
+        Assert.False(evidence.IsCast);
+        Assert.Null(evidence.CastLine);
+        Assert.Equal("no spell was ever cast (no cast line)", evidence.Explain());
+    }
+
+    [Fact]
+    public void ACastLineWithTheCastersOwnRecordOfItCountsAsACast()
+    {
+        string[] chat =
+        [
+            "[MossTank] Buffing: Strength Self VII → Strength Self VII, covered for 0s of 60s",
+            "[MossTank] Casting: Strength Self VII on 1342177290 (+Acdream)",
+            "[MossTank] SpellCaster: Begin",
+        ];
+
+        VtProofCastEvidence evidence = VtProofCastEvidence.Read(chat);
+
+        Assert.True(evidence.IsCast);
+        Assert.Equal(
+            "[MossTank] Casting: Strength Self VII on 1342177290 (+Acdream)",
+            evidence.CastLine);
+    }
+
+    [Fact]
+    public void ACastLineWithoutTheCastersRecordOfItIsReportedAsSuch()
+    {
+        string[] chat =
+            ["[MossTank] Casting: Strength Self VII on 1342177290 (+Acdream)"];
+
+        VtProofCastEvidence evidence = VtProofCastEvidence.Read(chat);
+
+        Assert.False(evidence.IsCast);
+        Assert.Contains(
+            "never began tracking it",
+            evidence.Explain(),
+            StringComparison.Ordinal);
     }
 
     [Fact]
