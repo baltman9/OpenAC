@@ -42,6 +42,10 @@ public sealed class HeadlessNavigationSteeringLiveTests(ITestOutputHelper output
     private const double FirstWaypointNorthSouth = 42.1057993d;
     private const double FirstWaypointElevation = 0.4013750d;
 
+    /// <summary>The route's second waypoint: the first leg ends here.</summary>
+    private const double SecondWaypointEastWest = 33.8233483d;
+    private const double SecondWaypointNorthSouth = 42.1057993d;
+
     /// <summary>The route mover's arrival radius, `NavigationSettings.MinimumDistanceMeters`.</summary>
     private const double ArrivalMeters = 2d;
 
@@ -234,6 +238,57 @@ public sealed class HeadlessNavigationSteeringLiveTests(ITestOutputHelper output
         }
 
         _ = navigation.ClearMovementIntent();
+
+        // The route mover's own open-world loop, driven the same way: hold a
+        // turn key while walking, with the far relaxation. It has to close the
+        // distance rather than oscillate.
+        var far = new PluginNavigationPosition(
+            ArenaCell,
+            SecondWaypointEastWest,
+            SecondWaypointNorthSouth,
+            FirstWaypointElevation,
+            HeadingDegrees: 0f,
+            IsOutdoor: true);
+        double farStart = navigation.Snapshot.Position
+            .HorizontalDistanceMeters(far);
+        double closest = farStart;
+        output.WriteLine($"curve start: {farStart:0.00} m away");
+        for (int tick = 0; tick < 120; tick++)
+        {
+            PluginNavigationSnapshot now = navigation.Snapshot;
+            double distance = now.Position.HorizontalDistanceMeters(far);
+            closest = Math.Min(closest, distance);
+            if (distance <= ArrivalMeters)
+                break;
+
+            float desired = DesiredHeading(now.Position, far);
+            float delta = SignedHeadingDelta(now.Position.HeadingDegrees, desired);
+            float offset = Math.Abs(delta);
+            bool moves = offset <= (distance > 3d ? 45f : 15f);
+            _ = navigation.SetMovementIntent(new PluginMovementIntent(
+                Forward: moves,
+                TurnLeft: offset > HeadingToleranceDegrees && delta < 0f,
+                TurnRight: offset > HeadingToleranceDegrees && delta > 0f,
+                Run: moves && distance >= 1.5d));
+
+            session.Tick(0.1d);
+            Thread.Sleep(100);
+            if (tick % 10 == 9)
+            {
+                output.WriteLine(
+                    $"  curve +{(tick + 1) * 0.1:0.0}s {distance:0.00} m, "
+                        + $"{delta:0.0} deg off");
+            }
+        }
+        _ = navigation.ClearMovementIntent();
+        output.WriteLine($"curve closest: {closest:0.00} m of {farStart:0.00} m");
+        Assert.True(
+            closest <= ArrivalMeters,
+            "The route mover's own loop did not close the route's first leg: it "
+                + $"got no closer than {closest:0.00} m of {farStart:0.00} m. "
+                + "Holding a turn key while walking only converges if the turn "
+                + "rate is slow enough for the tick rate.");
+
         Assert.True(everFaced, "the bot never had to face the goal.");
         Assert.False(
             double.IsNaN(arrivedAt),
