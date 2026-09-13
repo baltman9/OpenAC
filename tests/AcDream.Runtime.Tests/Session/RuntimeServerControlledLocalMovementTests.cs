@@ -16,33 +16,52 @@ public sealed class RuntimeServerControlledLocalMovementTests
     private const uint LocalCell = 0xA9B40029u;
     private const uint TargetGuid = 0x80000DADu;
 
-    private static WorldSession.EntityMotionUpdate MoveToObjectOrder(
-        uint targetGuid = TargetGuid,
-        bool autonomous = false) =>
+    private static CreateObject.MoveToPathData WalkPath(
+        uint? targetGuid = TargetGuid) =>
+        new(
+            TargetGuid: targetGuid,
+            OriginCellId: LocalCell,
+            OriginX: 133.6f,
+            OriginY: 22.4f,
+            OriginZ: 94f,
+            DistanceToObject: 1.8f,
+            MinDistance: 0f,
+            FailDistance: 0f,
+            WalkRunThreshold: 15f,
+            DesiredHeading: 0f,
+            Bitfield: 0x403u);
+
+    private static CreateObject.TurnToPathData FacePath(
+        uint? targetGuid = TargetGuid) =>
+        new(
+            TargetGuid: targetGuid,
+            WireHeading: 90f,
+            Bitfield: 0x3u,
+            Speed: 1f,
+            DesiredHeading: 0f);
+
+    private static WorldSession.EntityMotionUpdate Order(
+        byte movementType,
+        CreateObject.MoveToPathData? walk = null,
+        CreateObject.TurnToPathData? face = null) =>
         new(
             Guid: 0x50000001u,
             MotionState: new CreateObject.ServerMotionState(
                 Stance: (ushort)0x3Du,
                 ForwardCommand: null,
-                MovementType: 6,
+                MovementType: movementType,
                 MoveToSpeed: 1f,
                 MoveToRunRate: 1.75f,
-                MoveToPath: new CreateObject.MoveToPathData(
-                    TargetGuid: targetGuid,
-                    OriginCellId: LocalCell,
-                    OriginX: 133.6f,
-                    OriginY: 22.4f,
-                    OriginZ: 94f,
-                    DistanceToObject: 1.8f,
-                    MinDistance: 0f,
-                    FailDistance: 0f,
-                    WalkRunThreshold: 15f,
-                    DesiredHeading: 0f,
-                    Bitfield: 0x403u)),
+                MoveToPath: walk,
+                TurnToPath: face),
             InstanceSequence: 1,
             MovementSequence: 2,
             ServerControlSequence: 3,
-            IsAutonomous: autonomous);
+            IsAutonomous: false);
+
+    private static WorldSession.EntityMotionUpdate MoveToObjectOrder(
+        uint targetGuid = TargetGuid) =>
+        Order(6, walk: WalkPath(targetGuid));
 
     private static bool Resolve(
         WorldSession.EntityMotionUpdate update,
@@ -93,29 +112,42 @@ public sealed class RuntimeServerControlledLocalMovementTests
     }
 
     [Fact]
-    public void TheCharactersOwnEchoedMovementIsNotAnOrder()
+    public void TheKindOfMovementDecidesWhetherItIsAnOrderAtAll()
     {
+        // Everything an order would need is present except the one thing that
+        // says it IS one: an ordinary motion carries the same records and asks
+        // for nothing.
         Assert.False(Resolve(
-            MoveToObjectOrder(autonomous: true),
+            Order(0, walk: WalkPath(), face: FacePath()),
             out _,
             out _));
+
+        Assert.True(Resolve(
+            Order(8, walk: WalkPath(), face: FacePath()),
+            out MovementStruct faced,
+            out _));
+        Assert.Equal(MovementType.TurnToObject, faced.Type);
+
+        Assert.True(Resolve(
+            Order(6, walk: WalkPath(), face: FacePath()),
+            out MovementStruct walked,
+            out _));
+        Assert.Equal(MovementType.MoveToObject, walked.Type);
     }
 
     [Fact]
-    public void AnOrdinaryMotionIsNotAnOrderToGoAnywhere()
+    public void AnOrderThatNamesAPlaceWalksThereEvenWhenABodyIsAtHand()
     {
-        var update = new WorldSession.EntityMotionUpdate(
-            Guid: 0x50000001u,
-            MotionState: new CreateObject.ServerMotionState(
-                Stance: (ushort)0x3Du,
-                ForwardCommand: (ushort)0x45,
-                MovementType: 0),
-            InstanceSequence: 1,
-            MovementSequence: 2,
-            ServerControlSequence: 3,
-            IsAutonomous: false);
+        // The kind that names no thing to follow: a body being available for
+        // the id in the record must not turn it into a follow.
+        Assert.True(Resolve(
+            Order(7, walk: WalkPath()),
+            out MovementStruct request,
+            out _,
+            frameOffset: (0f, 0f)));
 
-        Assert.False(Resolve(update, out _, out _));
+        Assert.Equal(MovementType.MoveToPosition, request.Type);
+        Assert.Equal(133.6f, request.Pos.Frame.Origin.X, 3);
     }
 
     [Fact]
@@ -133,24 +165,10 @@ public sealed class RuntimeServerControlledLocalMovementTests
     [Fact]
     public void AnOrderToFaceSomethingWithABodyTurnsToIt()
     {
-        var update = new WorldSession.EntityMotionUpdate(
-            Guid: 0x50000001u,
-            MotionState: new CreateObject.ServerMotionState(
-                Stance: (ushort)0x3Du,
-                ForwardCommand: null,
-                MovementType: 8,
-                TurnToPath: new CreateObject.TurnToPathData(
-                    TargetGuid: TargetGuid,
-                    WireHeading: 90f,
-                    Bitfield: 0x3u,
-                    Speed: 1f,
-                    DesiredHeading: 0f)),
-            InstanceSequence: 1,
-            MovementSequence: 2,
-            ServerControlSequence: 3,
-            IsAutonomous: false);
-
-        Assert.True(Resolve(update, out MovementStruct request, out _));
+        Assert.True(Resolve(
+            Order(8, face: FacePath()),
+            out MovementStruct request,
+            out _));
         Assert.Equal(MovementType.TurnToObject, request.Type);
         Assert.Equal(TargetGuid, request.ObjectId);
     }
@@ -158,25 +176,8 @@ public sealed class RuntimeServerControlledLocalMovementTests
     [Fact]
     public void AnOrderToFaceSomethingWithNoBodyTurnsToTheHeadingItNames()
     {
-        var update = new WorldSession.EntityMotionUpdate(
-            Guid: 0x50000001u,
-            MotionState: new CreateObject.ServerMotionState(
-                Stance: (ushort)0x3Du,
-                ForwardCommand: null,
-                MovementType: 8,
-                TurnToPath: new CreateObject.TurnToPathData(
-                    TargetGuid: TargetGuid,
-                    WireHeading: 90f,
-                    Bitfield: 0x3u,
-                    Speed: 1f,
-                    DesiredHeading: 0f)),
-            InstanceSequence: 1,
-            MovementSequence: 2,
-            ServerControlSequence: 3,
-            IsAutonomous: false);
-
         Assert.True(Resolve(
-            update,
+            Order(8, face: FacePath()),
             out MovementStruct request,
             out _,
             targetRadius: null));

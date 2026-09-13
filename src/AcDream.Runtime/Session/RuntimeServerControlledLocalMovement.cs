@@ -32,22 +32,33 @@ internal static class RuntimeServerControlledLocalMovement
     private const byte MoveToObjectMovementType = 6;
     private const byte TurnToObjectMovementType = 8;
 
+    /// <summary>The stance an order that names none is read in.</summary>
+    private const uint DefaultStyle = 0x8000003Du;
+
     /// <summary>
     /// Applies one server-driven move-to or turn-to aimed at the local
     /// character. True when a movement was started.
     /// </summary>
+    /// <remarks>
+    /// The character's own movement comes back from the server with the
+    /// autonomous flag set, and the original refuses those one level above the
+    /// decode: the movement is unpacked only when it is NOT both autonomous
+    /// and this character's. The same statement that makes that decision also
+    /// records which kind of movement this was, and the movement owner reads
+    /// that record to decide whether the next key press has to take control
+    /// back from the server first.
+    /// </remarks>
     public static bool TryApply(
         GameRuntime runtime,
         in WorldSession.EntityMotionUpdate update)
     {
         ArgumentNullException.ThrowIfNull(runtime);
+        if (update.IsAutonomous)
+            return false;
         if (runtime.MovementOwner.Controller is not { } controller)
             return false;
 
         MovementManager movement = controller.Movement;
-        if (movement.MoveTo is null)
-            return false;
-
         RuntimePhysicsState physics = runtime.EntityObjects.Physics;
         if (!TryResolve(
                 update,
@@ -67,10 +78,36 @@ internal static class RuntimeServerControlledLocalMovement
             return false;
         }
 
+        // Every case makes the move-to owner first; the run rate is written
+        // before the branch that chooses between following a thing and walking
+        // to a place, so it lands either way.
+        movement.MakeMoveToManager();
         if (runRate is { } rate)
             movement.Minterp.MyRunRate = rate;
+        controller.SetLastMoveWasAutonomous(update.IsAutonomous);
+        ApplyStyle(movement.Minterp, update.MotionState.Stance);
         _ = movement.PerformMovement(request);
         return true;
+    }
+
+    /// <summary>
+    /// The stance the order was written in, applied before the movement it
+    /// asks for — the same pre-switch step the windowed host takes.
+    /// </summary>
+    /// <remarks>
+    /// The other two pre-switch steps, cancelling whatever movement is running
+    /// and unsticking from whatever the character is stuck to, are not repeated
+    /// here: <see cref="MovementManager.PerformMovement"/> already does both as
+    /// its own first two statements. The only difference left is the reason
+    /// code the cancel carries, which nothing reads.
+    /// </remarks>
+    private static void ApplyStyle(MotionInterpreter motion, ushort stance)
+    {
+        uint style = stance != 0
+            ? 0x80000000u | stance
+            : DefaultStyle;
+        if (motion.InterpretedState.CurrentStyle != style)
+            motion.DoMotion(style, new MovementParameters());
     }
 
     /// <summary>
@@ -98,12 +135,11 @@ internal static class RuntimeServerControlledLocalMovement
         request = default;
         runRate = null;
 
-        // The server echoes the character's own movement back with the
-        // autonomous flag set. Only a movement the server itself decided on
-        // is one to obey.
-        if (update.IsAutonomous)
-            return false;
-
+        // Whose movement this is, and whether it is this character's own echo,
+        // is the caller's question — the decode answers only what the movement
+        // asks for. Keeping it out of here is also what lets a host with a
+        // window share this, where an echo from ANOTHER character is a real
+        // order to that character's body.
         CreateObject.ServerMotionState state = update.MotionState;
         if (state.IsServerControlledMoveTo)
         {
@@ -179,24 +215,28 @@ internal static class RuntimeServerControlledLocalMovement
             path.Bitfield,
             path.Speed,
             path.DesiredHeading);
-        request.Params = parameters;
 
         if (state.MovementType == TurnToObjectMovementType
             && path.TargetGuid is { } targetGuid
             && targetBodyRadius(targetGuid) is not null)
         {
+            request.Params = parameters;
             request.Type = MovementType.TurnToObject;
             request.ObjectId = targetGuid;
             request.TopLevelId = targetGuid;
             return true;
         }
 
-        request.Type = MovementType.TurnToHeading;
+        // An order that named a thing with no body still carries the heading
+        // it wanted the character to end on, and turning to that heading is
+        // what the original falls through to.
         if (state.MovementType == TurnToObjectMovementType
             && path.WireHeading is { } wireHeading)
         {
             parameters.DesiredHeading = wireHeading;
         }
+        request.Params = parameters;
+        request.Type = MovementType.TurnToHeading;
         return true;
     }
 }

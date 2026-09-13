@@ -3241,6 +3241,204 @@ public sealed class HeadlessSessionHostTests
         }
     }
 
+    /// <summary>
+    /// A movement the server drives at this character is an order to walk, and
+    /// it is the only answer a use issued from beyond the server's reach ever
+    /// gets: obey it or the use is answered, seconds later, as done with
+    /// nothing done. The character's own movement, echoed back, is not an
+    /// order.
+    /// <para>
+    /// This pins the seam, not the decode: the whole of the defect was a
+    /// missing call on this route, so a test that stops at the decode cannot
+    /// tell the fixed host from the broken one.
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public void AServerDrivenMovementAtTheLocalPlayerStartsTheWalk(
+        bool autonomous,
+        bool expectWalk)
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        GameRuntime runtime = host.Runtime;
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+        const uint player = 0x50000005u;
+        const uint corpse = 0x80000ABCu;
+        runtime.PlayerIdentity.ServerGuid = player;
+        runtime.EntityObjects.Physics.SetPosition.BeginCollisionGeneration(
+            0xA9B40000u, 1UL);
+        AddFlatLandblock(runtime.EntityObjects.Physics.Engine);
+        runtime.EntityObjects.Physics.SetPosition.CommitCollisionGeneration(
+            0xA9B40000u, 1UL, ready: true);
+        RuntimeFirstEntryDriveController firstEntry =
+            CreateFirstEntryDrive(runtime);
+        RuntimeEntityRecord record = runtime.EntityObjects
+            .RegisterEntityWithInitialResidence(
+                Spawn(player),
+                isLocalPlayer: true)
+            .Canonical!;
+        Assert.True(runtime.EntityObjects.ApplyAcceptedSpawn(
+            record,
+            record.CreateIntegrationVersion,
+            record.Snapshot,
+            replaceGeneration: false));
+        var collision = new FixtureCollisionNeighborhood();
+        var projection = new HeadlessSessionWorldProjection(
+            runtime,
+            collision,
+            firstEntry);
+        projection.ProjectSpawn(record, isLocalPlayer: true);
+        PlayerMovementController controller =
+            Assert.IsType<PlayerMovementController>(
+                runtime.MovementOwner.Controller);
+        controller.SeedPlacementForTest(
+            new Vector3(48f, 49f, 50f),
+            0xA9B40001u,
+            new Vector3(48f, 49f, 50f));
+
+        using var session = new WorldSession(
+            new IPEndPoint(IPAddress.Loopback, 9000));
+        var entities = new RuntimeLiveEntitySessionController(
+            runtime,
+            session,
+            log: null,
+            projection);
+        LiveEntitySessionSink sink = entities.CreateSink();
+        Assert.False(controller.MoveTo!.IsMovingTo());
+        // Every movement so far has been the character's own.
+        Assert.True(controller.PhysicsBody.LastMoveWasAutonomous);
+
+        sink.MotionUpdated(new WorldSession.EntityMotionUpdate(
+            player,
+            new CreateObject.ServerMotionState(
+                Stance: (ushort)0x3Du,
+                ForwardCommand: null,
+                MovementType: 6,
+                MoveToSpeed: 1f,
+                MoveToRunRate: 1.75f,
+                MoveToPath: new CreateObject.MoveToPathData(
+                    TargetGuid: corpse,
+                    OriginCellId: 0xA9B40001u,
+                    OriginX: 60f,
+                    OriginY: 61f,
+                    OriginZ: 50f,
+                    DistanceToObject: 1.8f,
+                    MinDistance: 0f,
+                    FailDistance: 0f,
+                    WalkRunThreshold: 15f,
+                    DesiredHeading: 0f,
+                    Bitfield: 0x403u)),
+            InstanceSequence: 1,
+            MovementSequence: 2,
+            ServerControlSequence: 2,
+            IsAutonomous: autonomous));
+
+        Assert.Equal(expectWalk, controller.MoveTo!.IsMovingTo());
+        if (!expectWalk)
+        {
+            // An echo is not an order, so nothing about who is steering
+            // changes either.
+            Assert.True(controller.PhysicsBody.LastMoveWasAutonomous);
+            return;
+        }
+
+        // Nothing in this world has a body to follow, so the walk is to the
+        // place the order named — the original's own fallback.
+        Assert.Equal(
+            MovementType.MoveToPosition,
+            controller.MoveTo!.MovementTypeState);
+        Assert.Equal(1.75f, controller.Movement.Minterp.MyRunRate);
+        // The movement owner has to know this move was not the character's
+        // own, or the next key press cannot take control back from it.
+        Assert.False(controller.PhysicsBody.LastMoveWasAutonomous);
+    }
+
+    /// <summary>
+    /// An ordinary motion — the kind that says which animation is playing —
+    /// is not an order to go anywhere, and must not start a walk on a route
+    /// that now acts on movements.
+    /// </summary>
+    [Fact]
+    public void AnOrdinaryMotionAtTheLocalPlayerStartsNoWalk()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        GameRuntime runtime = host.Runtime;
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+        const uint player = 0x50000006u;
+        runtime.PlayerIdentity.ServerGuid = player;
+        runtime.EntityObjects.Physics.SetPosition.BeginCollisionGeneration(
+            0xA9B40000u, 1UL);
+        AddFlatLandblock(runtime.EntityObjects.Physics.Engine);
+        runtime.EntityObjects.Physics.SetPosition.CommitCollisionGeneration(
+            0xA9B40000u, 1UL, ready: true);
+        RuntimeFirstEntryDriveController firstEntry =
+            CreateFirstEntryDrive(runtime);
+        RuntimeEntityRecord record = runtime.EntityObjects
+            .RegisterEntityWithInitialResidence(
+                Spawn(player),
+                isLocalPlayer: true)
+            .Canonical!;
+        Assert.True(runtime.EntityObjects.ApplyAcceptedSpawn(
+            record,
+            record.CreateIntegrationVersion,
+            record.Snapshot,
+            replaceGeneration: false));
+        var projection = new HeadlessSessionWorldProjection(
+            runtime,
+            new FixtureCollisionNeighborhood(),
+            firstEntry);
+        projection.ProjectSpawn(record, isLocalPlayer: true);
+        PlayerMovementController controller =
+            Assert.IsType<PlayerMovementController>(
+                runtime.MovementOwner.Controller);
+        controller.SeedPlacementForTest(
+            new Vector3(48f, 49f, 50f),
+            0xA9B40001u,
+            new Vector3(48f, 49f, 50f));
+
+        using var session = new WorldSession(
+            new IPEndPoint(IPAddress.Loopback, 9000));
+        LiveEntitySessionSink sink = new RuntimeLiveEntitySessionController(
+            runtime,
+            session,
+            log: null,
+            projection).CreateSink();
+
+        sink.MotionUpdated(new WorldSession.EntityMotionUpdate(
+            player,
+            new CreateObject.ServerMotionState(
+                Stance: (ushort)0x3Du,
+                ForwardCommand: (ushort)0x45,
+                MovementType: 0),
+            InstanceSequence: 1,
+            MovementSequence: 2,
+            ServerControlSequence: 2,
+            IsAutonomous: false));
+
+        Assert.False(controller.MoveTo!.IsMovingTo());
+    }
+
     private static void AddFlatLandblock(PhysicsEngine engine)
     {
         var heights = new byte[81];
