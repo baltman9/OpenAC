@@ -45,6 +45,23 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
     /// <summary>The weenie the run spawns to make a fight happen.</summary>
     private const string MonsterWeenie = "7";
 
+    /// <summary>
+    /// The caster the run gives itself. The proof character owns no weapon
+    /// of any kind, and every rule that casts — buffs, recharges, war spells
+    /// — goes through one preparation gate that stops the whole macro when
+    /// the profile's Items page names no wand it can find. So the run stages
+    /// a plain wand before it starts the macro, and the fixture's companion
+    /// document names it.
+    /// </summary>
+    private const string CasterWeenie = "2472";
+
+    /// <summary>
+    /// The staged caster's display name, which is also the single entry on
+    /// the fixture profile's Items page. If the server ever renames the
+    /// weenie the run says so instead of silently going quiet.
+    /// </summary>
+    private const string CasterItemName = "Wand";
+
     private const string SettingsProfileName = "vt-proof-settings";
     private const string LootProfileName = "vt-proof-loot";
     private const string RouteProfileName = "vt-proof-route";
@@ -84,7 +101,8 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
         using var temporary = new TemporaryDirectory();
         string pluginRoot = InstallRealMossTankPlugin(temporary.Path);
         Assert.True(Directory.Exists(pluginRoot));
-        string vtankRoot = StageProfileFixtures(temporary.Path);
+        (string vtankRoot, string pluginStorageRoot) =
+            StageProfileFixtures(temporary.Path);
         IReadOnlyList<VtProofRoutePoint> route = VtProofRouteFixture.ReadPoints(
             File.ReadAllText(Path.Combine(
                 vtankRoot, "navs", RouteProfileName + ".af")));
@@ -121,7 +139,16 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                     // so a channel this run opened from outside would have
                     // missed them.
                     ["logChannels"] = string.Join(',', LogChannels),
-                    ["startMacro"] = "true",
+                    // Deliberately not autostarted. Autostart fires on the
+                    // tick the character's name lands, which is long before
+                    // anything outside can stage a scenario — and the
+                    // preparation gate every casting rule shares stops the
+                    // macro on its first pass if the profile's wand is not
+                    // in the character's hands yet. So the run stages the
+                    // wand first and then starts the macro the way the Run
+                    // Macro checkbox does; autostart still owns the
+                    // profiles and the log channels.
+                    ["startMacro"] = "false",
                 },
             },
             StatusFile = statusPath,
@@ -145,7 +172,11 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
             sessionOperations: null, // real network
             contentLease: contentLease,
             vtankProfiles: new FilePluginStorage(vtankRoot),
-            pluginRoots: [temporary.Path]);
+            pluginRoots: [temporary.Path],
+            // The plugin's own persisted state, which is where MossTank
+            // keeps everything the .usd format has no table for — the
+            // Items page among it.
+            pluginStorage: new FilePluginStorage(pluginStorageRoot));
         using IDisposable subscription = session.Runtime.Subscribe(observed);
         // A proof that cannot report its own failure is worth nothing, and a
         // disposal that throws on the way out of a failed run replaces the
@@ -323,33 +354,57 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
             Pump(TimeSpan.FromSeconds(2d));
             staged.Add($"arena reached -> {inArena} ({PositionText(session)})");
 
-            // ---- P3: a buff pass runs and finishes -----------------------------
+            // ---- stage the caster, then start the macro ------------------------
+            // In that order: the gate every casting rule shares stops the
+            // macro outright the first time it looks for the profile's wand
+            // and the character has none.
+            Stage("@ci " + CasterWeenie);
+            bool casterOwned = WaitUntil(
+                TimeSpan.FromSeconds(20d),
+                () => OwnedEquipmentNames(session).Contains(CasterItemName));
+            staged.Add(
+                $"caster '{CasterItemName}' owned -> {casterOwned}; "
+                    + $"equipment now: {string.Join(", ", OwnedEquipmentNames(session))}");
+            Stage("/vt start");
+            bool macroStarted = WaitUntil(
+                TimeSpan.FromSeconds(20d),
+                () => MentionsAny(observed.SnapshotChat(), "Macro started."));
+            staged.Add($"macro started -> {macroStarted}");
+
+            // ---- P3: a buff spell is really cast, then the pass goes quiet -----
             {
                 int before = observed.ChatCount;
-                bool buffed = WaitUntil(
-                    TimeSpan.FromSeconds(45d),
-                    () => MentionsAny(
-                        observed.SnapshotChat(),
-                        "Buffing:", "SpellCaster: Begin", "Casting:"));
-                bool settled = buffed
+                bool cast = WaitUntil(
+                    TimeSpan.FromSeconds(60d),
+                    () => FirstContaining(observed.SnapshotChat(), "Casting: ") is not null);
+                string castLine = FirstContaining(observed.SnapshotChat(), "Casting: ")
+                    ?? "(none)";
+                // The caster's own record of the same cast: the tracker only
+                // opens after the surface accepted the request, so a plan
+                // line alone can never produce it.
+                bool tracked = MentionsAny(observed.SnapshotChat(), "SpellCaster: Begin");
+                bool settled = cast
                     && WaitUntil(
                         TimeSpan.FromSeconds(30d),
                         () => Quiet(observed, "Casting:", TimeSpan.FromSeconds(6d)));
-                if (buffed && settled)
+                if (cast && tracked && settled)
                 {
                     ledger.Pass(
                         "P3",
-                        "the buff pass runs and then goes quiet",
-                        $"buff lines observed after chat entry {before}");
+                        "a buff spell is cast and the pass then goes quiet",
+                        $"{castLine} (after chat entry {before})");
                 }
                 else
                 {
                     ledger.Fail(
                         "P3",
-                        "the buff pass runs and then goes quiet",
-                        buffed
-                            ? "the buff pass never went quiet"
-                            : "no buff line was ever emitted",
+                        "a buff spell is cast and the pass then goes quiet",
+                        !cast
+                            ? "no spell was ever cast (no Casting: line)"
+                            : !tracked
+                                ? $"a cast line appeared but the caster never "
+                                    + $"began tracking it: {castLine}"
+                                : $"the buff pass never went quiet after {castLine}",
                         Evidence());
                 }
             }
@@ -588,7 +643,7 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
     [
         ("P1", "connected, plugin loaded, entered world"),
         ("P2", "the fixture settings, loot and route profiles are loaded"),
-        ("P3", "the buff pass runs and then goes quiet"),
+        ("P3", "a buff spell is cast and the pass then goes quiet"),
         ("P4", "the attack rule wins the loop and a kill is observed"),
         ("P5", "a corpse is opened and at least one loot decision is made"),
         ("P6", "the route advances by at least two waypoints"),
@@ -658,6 +713,31 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
         || line.StartsWith("You obliterate ", StringComparison.Ordinal)
         || line.StartsWith("You destroy ", StringComparison.Ordinal)
         || line.Contains(" by your attack!", StringComparison.Ordinal);
+
+    private static string? FirstContaining(IReadOnlyList<string> lines, string needle)
+    {
+        for (int index = 0; index < lines.Count; index++)
+        {
+            if (lines[index].Contains(needle, StringComparison.Ordinal))
+                return lines[index];
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// What the plugin's equipment surface says the character owns and could
+    /// wield. The profile's Items page is matched against these names, so a
+    /// staged item that never shows up here is invisible to every rule.
+    /// </summary>
+    private static string[] OwnedEquipmentNames(HeadlessSessionHost session)
+    {
+        IEquipmentAutomation equipment = session.Plugins.Host.Automation.Equipment;
+        return equipment.IsAvailable
+            ? [.. equipment.CaptureOwnedEquipment()
+                .Select(static item => item.Name)
+                .Order(StringComparer.Ordinal)]
+            : [];
+    }
 
     private static bool MentionsAny(IReadOnlyList<string> lines, params string[] needles)
     {
@@ -928,24 +1008,55 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
             diagnostic);
     }
 
-    private static string StageProfileFixtures(string root)
+    /// <summary>
+    /// The fixture folder holds two different things and they belong in two
+    /// different places: the three real VTank files (.usd, .utl, .af) go to
+    /// the shared profile directory the plugin reads profiles from, and
+    /// everything under <c>plugin-storage/</c> goes to the plugin's own
+    /// state directory at exactly the key it is filed under. That is where
+    /// MossTank's companion document to the .usd lives — the Items page
+    /// naming the run's wand among it — because the .usd format has no
+    /// table that could carry it.
+    /// </summary>
+    private static (string VtankRoot, string PluginStorageRoot)
+        StageProfileFixtures(string root)
     {
+        const string pluginStateFolder = "plugin-storage";
         string source = Path.Combine(AppContext.BaseDirectory, "Fixtures", "vt-proof");
         Assert.True(
             Directory.Exists(source),
             $"The proof profile fixtures are missing: {source}");
         string vtankRoot = Path.Combine(root, "vtank");
+        string pluginStorageRoot = Path.Combine(root, pluginStateFolder);
         Directory.CreateDirectory(Path.Combine(vtankRoot, "navs"));
         Directory.CreateDirectory(Path.Combine(vtankRoot, "metas"));
+        Directory.CreateDirectory(pluginStorageRoot);
+        string pluginStatePrefix = pluginStateFolder + Path.DirectorySeparatorChar;
         foreach (string file in Directory.EnumerateFiles(
             source, "*", SearchOption.AllDirectories))
         {
             string relative = Path.GetRelativePath(source, file);
-            string destination = Path.Combine(vtankRoot, relative);
+            bool pluginState = relative.StartsWith(
+                pluginStatePrefix, StringComparison.Ordinal);
+            string destination = pluginState
+                ? Path.Combine(
+                    pluginStorageRoot, relative[pluginStatePrefix.Length..])
+                : Path.Combine(vtankRoot, relative);
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             File.Copy(file, destination, overwrite: true);
         }
-        return vtankRoot;
+        Assert.True(
+            File.Exists(Path.Combine(
+                pluginStorageRoot,
+                "acdream.mosstank",
+                "profiles",
+                "macro",
+                "sidecar",
+                SettingsProfileName + ".usd.json")),
+            "The fixture's companion document to the settings profile is "
+                + "missing; without it the profile's Items page is empty and "
+                + "the macro stops on its first pass.");
+        return (vtankRoot, pluginStorageRoot);
     }
 
     private static string InstallRealMossTankPlugin(string root)
