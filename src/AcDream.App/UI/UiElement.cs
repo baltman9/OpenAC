@@ -170,7 +170,6 @@ public abstract class UiElement
 
     public bool WindowMoveHandle { get; set; }
 
-    public bool ConstrainDragToParent { get; set; }
 
     public bool ConstrainResizeToParent { get; set; }
 

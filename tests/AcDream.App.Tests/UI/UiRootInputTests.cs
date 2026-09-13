@@ -20,6 +20,47 @@ public class UiRootInputTests
     }
 
     [Fact]
+    public void SemanticChatActivation_OnAPrintableKey_SwallowsOnlyThatKeysOwnChar()
+    {
+        // The action can be bound to a letter; the letter must not be typed
+        // into the field it just focused, but anything typed after it must.
+        var root = new UiRoot { Width = 800, Height = 600 };
+        var field = new UiField { Width = 100, Height = 20 };
+        field.SetText("hello");
+        root.AddChild(field);
+        root.SetKeyboardFocus(field);
+        root.SuppressPhysicalKeyUntilRelease(Silk.NET.Input.Key.A);
+
+        root.OnKeyDown((int)Silk.NET.Input.Key.A);
+        root.OnChar('a');                                  // the activating key's own char
+        Assert.Equal("hello", field.Text);
+
+        root.OnKeyDown((int)Silk.NET.Input.Key.Slash);     // still holding A
+        root.OnChar('/');
+        Assert.Equal("hello/", field.Text);
+
+        root.OnKeyUp((int)Silk.NET.Input.Key.A);
+        root.OnKeyDown((int)Silk.NET.Input.Key.A);
+        root.OnChar('a');
+        Assert.Equal("hello/a", field.Text);
+    }
+
+    [Fact]
+    public void SemanticChatActivation_OnAKeyWithoutAChar_DoesNotEatTheNextTypedChar()
+    {
+        var root = new UiRoot { Width = 800, Height = 600 };
+        var field = new UiField { Width = 100, Height = 20 };
+        root.AddChild(field);
+        root.SetKeyboardFocus(field);
+        root.SuppressPhysicalKeyUntilRelease(Silk.NET.Input.Key.F1);
+
+        root.OnKeyDown((int)Silk.NET.Input.Key.F1);        // no char follows F1
+        root.OnKeyDown((int)Silk.NET.Input.Key.A);
+        root.OnChar('a');
+        Assert.Equal("a", field.Text);
+    }
+
+    [Fact]
     public void SemanticChatActivation_SuppressesTheSameNativeEnterTail()
     {
         var root = new UiRoot { Width = 800, Height = 600 };
@@ -292,6 +333,38 @@ public class UiRootInputTests
         Assert.Equal(450f, window.Top);
     }
 
+    [Theory]
+    [InlineData(-500, 0, 0f, 100f)]        // past the left edge
+    [InlineData(2000, 0, 500f, 100f)]      // past the right edge: 800 - 300
+    [InlineData(0, -500, 100f, 0f)]        // past the top edge
+    [InlineData(0, 2000, 100f, 450f)]      // past the bottom edge: 600 - 150
+    public void Drag_KeepsEveryWindowInsideItsParent(int dx, int dy, float left, float top)
+    {
+        var root = new UiRoot { Width = 800, Height = 600 };
+        var window = new UiPanel { Left = 100, Top = 100, Width = 300, Height = 150, Draggable = true };
+        root.AddChild(window);
+
+        root.OnMouseDown(UiMouseButton.Left, 110, 110);
+        root.OnMouseMove(110 + dx, 110 + dy);
+
+        Assert.Equal(left, window.Left);
+        Assert.Equal(top, window.Top);
+    }
+
+    [Fact]
+    public void Drag_OfAWindowLargerThanItsParent_PinsItToTheOrigin()
+    {
+        var root = new UiRoot { Width = 800, Height = 600 };
+        var window = new UiPanel { Left = 0, Top = 0, Width = 1000, Height = 700, Draggable = true };
+        root.AddChild(window);
+
+        root.OnMouseDown(UiMouseButton.Left, 10, 10);
+        root.OnMouseMove(300, 200);
+
+        Assert.Equal(0f, window.Left);
+        Assert.Equal(0f, window.Top);
+    }
+
     [Fact]
     public void DragHandle_MovedAnchoredWindow_SurvivesTheNextLayoutPass()
     {
@@ -374,7 +447,6 @@ public class UiRootInputTests
             Width = 120,
             Height = 100,
             Draggable = true,
-            ConstrainDragToParent = true,
         };
         root.AddChild(panel);
         root.RegisterWindow("radar", panel);

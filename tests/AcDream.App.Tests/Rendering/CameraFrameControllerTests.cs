@@ -90,6 +90,58 @@ public sealed class CameraFrameControllerTests
     }
 
     [Fact]
+    public void KeypadRotate_SwingsTheRetailCameraLeftForANegativeYaw_AndRightForAPositiveOne()
+    {
+        // The camera left key rotates the viewer offset by the negative angle and
+        // the right key by the positive one; a positive yaw offset moves the eye
+        // to the player's right (x = h * sin(yaw)).
+        PlayerMovementController controller = CreatePlayer();
+        var runtime = new PlayerRuntime(controller, []);
+        var localFrame = new RetailLocalPlayerFrameController(runtime, new StillMovementInput());
+        CameraController camera = CreateCamera();
+        var legacy = new ChaseCamera();
+        var retail = new RetailChaseCamera();
+        camera.EnterChaseMode(legacy, retail);
+        var input = new InputSource { Chase = default(ChaseCameraAdjustmentInput) with { RotateLeft = true } };
+        var frame = new CameraFrameController(
+            camera, new CaptureSource(), input, runtime,
+            new ChaseSource(legacy, retail), localFrame, new Reconciler([]), new CombatTargetSource());
+        var timing = new UpdateFrameTiming(1.0 / 60.0, 1f / 60f, 1.0);
+
+        frame.Tick(timing);
+        Assert.True(retail.YawOffset < 0f, $"left gave {retail.YawOffset}");
+        float afterLeft = retail.YawOffset;
+
+        input.Chase = default(ChaseCameraAdjustmentInput) with { RotateRight = true };
+        frame.Tick(timing);
+        Assert.True(retail.YawOffset > afterLeft, $"right gave {retail.YawOffset}");
+    }
+
+    [Fact]
+    public void KeypadRotate_SwingsTheLegacyCameraTheSameWay()
+    {
+        PlayerMovementController controller = CreatePlayer();
+        var runtime = new PlayerRuntime(controller, []);
+        var localFrame = new RetailLocalPlayerFrameController(runtime, new StillMovementInput());
+        CameraController camera = CreateCamera();
+        var legacy = new ChaseCamera();
+        camera.EnterChaseMode(legacy, new RetailChaseCamera());
+        var input = new InputSource { Chase = default(ChaseCameraAdjustmentInput) with { RotateLeft = true } };
+        var frame = new CameraFrameController(
+            camera, new CaptureSource(), input, runtime,
+            new ChaseSource(legacy, null), localFrame, new Reconciler([]), new CombatTargetSource());
+        var timing = new UpdateFrameTiming(1.0 / 60.0, 1f / 60f, 1.0);
+
+        frame.Tick(timing);
+        Assert.True(legacy.YawOffset < 0f, $"left gave {legacy.YawOffset}");
+        float afterLeft = legacy.YawOffset;
+
+        input.Chase = default(ChaseCameraAdjustmentInput) with { RotateRight = true };
+        frame.Tick(timing);
+        Assert.True(legacy.YawOffset > afterLeft, $"right gave {legacy.YawOffset}");
+    }
+
+    [Fact]
     public void PreNetworkAdvancedPlayer_DoesNotRunTheInboundCreationReconcile()
     {
         PlayerMovementController controller = CreatePlayer();

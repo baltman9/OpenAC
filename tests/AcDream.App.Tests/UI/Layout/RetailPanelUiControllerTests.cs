@@ -208,7 +208,6 @@ public sealed class RetailPanelUiControllerTests
                 Left = left,
                 Top = top,
                 Visible = false,
-                ConstrainDragToParent = true,
             });
     }
 }
