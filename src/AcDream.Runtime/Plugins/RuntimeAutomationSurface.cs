@@ -2632,6 +2632,14 @@ internal class RuntimeAutomationSurface
                 continue;
             }
 
+            Position? corpsePosition =
+                runtime.EntityObjects.Entities.TryGetActive(
+                    candidate.ObjectId,
+                    out RuntimeEntityRecord corpseRecord)
+                    ? corpseRecord.PhysicsBody?.CellPosition
+                        ?? ConvertPosition(corpseRecord.Snapshot.Position)
+                    : null;
+
             result.Add(new PluginLootContainer(
                 candidate.ObjectId,
                 candidate.WeenieClassId,
@@ -2641,6 +2649,10 @@ internal class RuntimeAutomationSurface
                 external.RequestedContainerId == candidate.ObjectId,
                 external.CurrentContainerId == candidate.ObjectId)
             {
+                HasPosition = corpsePosition is not null,
+                Position = corpsePosition is { } placed
+                    ? ProjectNavigationPosition(placed)
+                    : default,
                 LongDescription = candidate.Properties.GetString(
                     (uint)PropertyString.LongDesc),
                 IsGeneratedRare = candidate.Properties.GetBool(
