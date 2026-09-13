@@ -2079,6 +2079,23 @@ internal sealed class AppAutomationSurface
         }
     }
 
+    /// <summary>
+    /// The order the equipment projection is handed out in, which clients
+    /// read it by: what is equipped first, then by name, then by object id.
+    /// </summary>
+    internal static int CompareEquipmentOrder(
+        PluginEquipmentItem left,
+        PluginEquipmentItem right)
+    {
+        int equipped = right.IsEquipped.CompareTo(left.IsEquipped);
+        if (equipped != 0)
+            return equipped;
+        int name = string.CompareOrdinal(left.Name, right.Name);
+        return name != 0
+            ? name
+            : left.ObjectId.CompareTo(right.ObjectId);
+    }
+
     public IReadOnlyList<PluginEquipmentItem> CaptureOwnedEquipment()
     {
         GameRuntime? runtime;
@@ -2135,16 +2152,7 @@ internal sealed class AppAutomationSurface
                     (uint)PropertyFloat.IgnoreArmor) > 0d,
             });
         }
-        built.Sort(static (left, right) =>
-        {
-            int equipped = right.IsEquipped.CompareTo(left.IsEquipped);
-            if (equipped != 0)
-                return equipped;
-            int name = string.CompareOrdinal(left.Name, right.Name);
-            return name != 0
-                ? name
-                : left.ObjectId.CompareTo(right.ObjectId);
-        });
+        built.Sort(CompareEquipmentOrder);
         return built;
     }
 
@@ -3451,7 +3459,6 @@ internal sealed class AppAutomationSurface
             {
                 SpeciesId = target.SpeciesId,
                 SpeciesName = speciesName(target.SpeciesId),
-                MaximumHealth = target.MaximumHealth,
                 HasShield = target.HasShield,
                 Incarnation = target.Incarnation,
                 HealthRevision = target.HealthRevision,

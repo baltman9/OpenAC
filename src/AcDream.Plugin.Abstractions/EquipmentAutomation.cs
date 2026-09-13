@@ -77,6 +77,13 @@ public interface IEquipmentAutomation
     bool IsAvailable => false;
     bool IsBusy => false;
 
+    /// <summary>
+    /// Everything the character owns that can be worn or wielded, in a
+    /// defined order: what is equipped first, then by name, then by object
+    /// id. Clients rely on that order — "the first wand" means the one being
+    /// held if any wand is — so a host must not hand back an arbitrary
+    /// sequence.
+    /// </summary>
     IReadOnlyList<PluginEquipmentItem> CaptureOwnedEquipment() =>
         Array.Empty<PluginEquipmentItem>();
 

@@ -30,6 +30,12 @@ public readonly record struct PluginCombatTarget(
     public string SpeciesName { get; init; } = string.Empty;
 
     /// <summary>Spawn/appraisal maximum HP, or zero until the host knows it.</summary>
+    /// <summary>
+    /// A monster's maximum health in points, or zero when it is not known —
+    /// which is the usual answer. The server sends only the fraction of
+    /// health remaining, so a client that wants the absolute figure has to
+    /// bring a table of its own.
+    /// </summary>
     public int MaximumHealth { get; init; }
 
     public bool HasShield { get; init; }

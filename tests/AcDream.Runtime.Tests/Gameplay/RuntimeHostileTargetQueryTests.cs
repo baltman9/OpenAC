@@ -354,7 +354,6 @@ public sealed class RuntimeHostileTargetQueryTests
         Assert.Equal(0.75f, target.HealthFraction, 3);
         Assert.Equal(4, target.SpeciesId);
         Assert.True(target.HasShield);
-        Assert.Equal(0, target.MaximumHealth);
         Assert.Empty(RuntimeHostileTargetQuery.Capture(
             runtime,
             2.9f,

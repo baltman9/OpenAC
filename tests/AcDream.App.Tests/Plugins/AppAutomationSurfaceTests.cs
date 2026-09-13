@@ -5,6 +5,7 @@ using AcDream.Core.Physics;
 using AcDream.Core.Selection;
 using AcDream.Core.Spells;
 using AcDream.Plugin.Abstractions;
+using AcDream.Runtime;
 using AcDream.Runtime.Gameplay;
 using System.Numerics;
 
@@ -106,6 +107,71 @@ public sealed class AppAutomationSurfaceTests
         Assert.Equal(0.8d, nextBlock.NorthSouth, 8);
         Assert.False(nextBlock.IsOutdoor);
     }
+
+    /// <summary>
+    /// The equipment projection's order is part of the contract clients read
+    /// it by: what is held comes first, then name, then object id. "The first
+    /// profiled wand" means the one in hand when there is one.
+    /// Mutation: drop the equipped term from the sort and the wielded wand
+    /// stops leading.
+    /// </summary>
+    [Fact]
+    public void EquipmentIsProjectedEquippedFirstThenByNameThenById()
+    {
+        List<PluginEquipmentItem> items =
+        [
+            Wand(0x70000003u, "Alpha Wand"),
+            Wand(0x70000002u, "Alpha Wand"),
+            Wand(0x70000001u, "Zeta Wand", equipped: true),
+        ];
+
+        items.Sort(AppAutomationSurface.CompareEquipmentOrder);
+
+        Assert.Equal(
+            [0x70000001u, 0x70000002u, 0x70000003u],
+            items.Select(static item => item.ObjectId));
+        Assert.True(items[0].IsEquipped);
+    }
+
+    /// <summary>
+    /// A plugin has to be able to tell the character's own combat log from
+    /// somebody typing the same words, so the line's log-text type reaches it.
+    /// Mutation: stop copying it in <c>OnChat</c> and this fails.
+    /// </summary>
+    [Fact]
+    public void ChatCapture_CarriesTheLinesLogTextType()
+    {
+        using GameRuntime runtime = GameRuntimeTestFactory.Create();
+        using var surface = new AppAutomationSurface();
+        surface.Bind(
+            runtime,
+            runtime.CharacterOwner,
+            runtime.ActionOwner.SpellCast);
+
+        runtime.CommunicationOwner.AddText(
+            "You cast Imperil Other VII on Olthoi.",
+            RetailLogTextType.Magic);
+
+        PluginChatMessage message = Assert.Single(surface.CaptureMessages(0));
+        Assert.Equal((uint)RetailLogTextType.Magic, message.LogTextType);
+    }
+
+    private static PluginEquipmentItem Wand(
+        uint objectId,
+        string name,
+        bool equipped = false) => new(
+        objectId,
+        name,
+        ItemType: 0x8000u,
+        ValidLocations: 0x01000000u,
+        EquippedLocation: equipped ? 0x01000000u : 0u,
+        ContainerObjectId: equipped ? 0u : 1u,
+        WielderObjectId: equipped ? 1u : 0u,
+        CombatUse: 1,
+        DamageType: 0,
+        WeaponSkill: 0,
+        Damage: 0,
+        DamageVariance: 0d);
 
     [Fact]
     public void ChatCapture_isOrderedCursorBasedAndDetachesAcrossSessions()

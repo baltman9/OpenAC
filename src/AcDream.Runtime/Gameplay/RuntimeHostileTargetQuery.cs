@@ -20,12 +20,6 @@ public readonly record struct RuntimeHostileTargetSnapshot(
 {
     public int SpeciesId { get; init; }
 
-    /// <summary>
-    /// Always zero. A monster's maximum health is never sent to a client —
-    /// only the fraction remaining is — so a caller that needs the absolute
-    /// figure has to bring its own table of them.
-    /// </summary>
-    public int MaximumHealth { get; init; }
     public bool HasShield { get; init; }
     public ushort Incarnation { get; init; }
     public long HealthRevision { get; init; }
