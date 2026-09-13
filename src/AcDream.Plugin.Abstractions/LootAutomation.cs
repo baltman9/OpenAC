@@ -12,6 +12,18 @@ public readonly record struct PluginLootContainer(
     public string LongDescription { get; init; } = string.Empty;
     public bool IsGeneratedRare { get; init; }
     public bool IsIdentified { get; init; }
+
+    /// <summary>
+    /// Whether <see cref="Position"/> carries a real place in the world. A
+    /// corpse the client knows of but cannot place has none.
+    /// </summary>
+    public bool HasPosition { get; init; }
+
+    /// <summary>
+    /// Where the corpse is, which is what lets a looter ask how far round the
+    /// character would have to turn to face it.
+    /// </summary>
+    public PluginNavigationPosition Position { get; init; }
 }
 
 public readonly record struct PluginAppraisalState(
