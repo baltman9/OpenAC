@@ -2921,6 +2921,7 @@ internal class RuntimeAutomationSurface
             ObjectClass = ClassifyObject(item),
             Palettes = ProjectPalettes(runtime, item.ObjectId),
             IconId = item.IconId,
+            Effects = item.Effects,
         };
 
     private IReadOnlyList<PluginPaletteInfo> ProjectPalettes(

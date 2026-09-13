@@ -72,6 +72,13 @@ public readonly record struct PluginInventoryItem(
     public IReadOnlyList<PluginPaletteInfo> Palettes { get; init; } =
         Array.Empty<PluginPaletteInfo>();
     public uint IconId { get; init; }
+
+    /// <summary>
+    /// The icon-highlight effect bits the server sends with the object
+    /// itself. Bit 0 is "magical", which is how a loot rule can tell that an
+    /// item is expected to carry spells before anything has appraised it.
+    /// </summary>
+    public uint Effects { get; init; }
 }
 
 public readonly record struct PluginItemProperties(
