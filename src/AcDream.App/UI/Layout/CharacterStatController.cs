@@ -875,15 +875,13 @@ public static class CharacterStatController
             : Vector4.One;
     }
 
-    internal static Vector4 VitalValueColor(
-        CharacterSheet sheet,
-        int vitalIndex)
+    internal static int GetVitalBuffDelta(CharacterSheet sheet, int vitalIndex)
     {
         if ((uint)vitalIndex >= 3u
             || vitalIndex >= sheet.VitalBaseMaxValues.Length
             || vitalIndex >= sheet.VitalVitaeModifiers.Length)
         {
-            return Vector4.One;
+            return 0;
         }
 
         int effective = vitalIndex switch
@@ -894,9 +892,16 @@ public static class CharacterStatController
             _ => 0,
         };
         int withoutVitae = effective - sheet.VitalVitaeModifiers[vitalIndex];
-        int baseline = sheet.VitalBaseMaxValues[vitalIndex];
-        return withoutVitae > baseline ? RetailBuffGreen
-            : withoutVitae < baseline ? RetailDebuffRed
+        return withoutVitae - sheet.VitalBaseMaxValues[vitalIndex];
+    }
+
+    internal static Vector4 VitalValueColor(
+        CharacterSheet sheet,
+        int vitalIndex)
+    {
+        int delta = GetVitalBuffDelta(sheet, vitalIndex);
+        return delta > 0 ? RetailBuffGreen
+            : delta < 0 ? RetailDebuffRed
             : Vector4.One;
     }
 
@@ -1284,9 +1289,14 @@ public static class CharacterStatController
         CharacterSheet sheet = data();
         string name = GetRowName(attrSel[0]);
         string value = GetRowValueString(sheet, attrSel[0]);
-        string delta = FormatBuffDelta(GetAttributeDelta(sheet, attrSel[0]));
+        string delta = FormatBuffDelta(GetSelectedRowDelta(sheet, attrSel[0]));
         return $"{name}: {value}{delta}";
     }
+
+    private static int GetSelectedRowDelta(CharacterSheet sheet, int index) =>
+        index < AttrRows.Length
+            ? GetAttributeDelta(sheet, index)
+            : GetVitalBuffDelta(sheet, index - AttrRows.Length);
 
     private static IReadOnlyList<UiText.TextRun> BuildSelectedTitleRuns(
         UiText target,
@@ -1338,7 +1348,7 @@ public static class CharacterStatController
                 $"{GetRowName(attrSel[0])}: {GetRowValueString(sheet, attrSel[0])}",
                 Color(0)),
         };
-        int delta = GetAttributeDelta(sheet, attrSel[0]);
+        int delta = GetSelectedRowDelta(sheet, attrSel[0]);
         if (delta != 0)
             attributeRuns.Add(new(
                 FormatBuffDelta(delta),
@@ -1566,6 +1576,13 @@ public static class CharacterStatController
                 title.BackgroundSprite = 0;
                 title.VerticalJustify = VJustify.Top;
                 title.ClickThrough = true;
+                title.OneLine = true;
+                title.RunsProvider = () => BuildSelectedTitleRuns(
+                    title,
+                    activeTab[0],
+                    data,
+                    attrSel,
+                    skillSel);
                 title.LinesProvider = () =>
                 {
                     string titleText = BuildSelectedTitleText(activeTab[0], data, attrSel, skillSel);

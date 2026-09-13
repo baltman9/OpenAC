@@ -312,7 +312,12 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
 
     public void Populate()
     {
-        foreach (var list in _slots) list?.Cell.Clear();
+        foreach (var list in _slots)
+        {
+            if (list is null) continue;
+            list.Cell.Clear();
+            list.Cell.SetStructure(0, 0);
+        }
 
         for (int slot = 0; slot < _slots.Length; slot++)
         {
@@ -323,10 +328,13 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
             if (list is null) continue;
             var item = _repo.Get(guid);
             if (item is null) continue;
-            uint tex = _iconIds(item.Type, item.IconId, item.IconUnderlayId, item.IconOverlayId, item.Effects);
-            uint dragTex = _dragIconIds?.Invoke(
-                item.Type, item.IconId, item.IconUnderlayId, item.IconOverlayId, item.Effects) ?? 0u;
+            var (type, icon, underlay, overlay, effects) = guid == (_playerGuid?.Invoke() ?? 0u)
+                ? (ItemType.Container, InventoryController.PlayerPackBaseIcon, 0u, 0u, 0u)
+                : (item.Type, item.IconId, item.IconUnderlayId, item.IconOverlayId, item.Effects);
+            uint tex = _iconIds(type, icon, underlay, overlay, effects);
+            uint dragTex = _dragIconIds?.Invoke(type, icon, underlay, overlay, effects) ?? 0u;
             list.Cell.SetItem(guid, tex, entry, dragTex);
+            list.Cell.SetStructure(item.Structure, item.MaxStructure);
         }
 
         RestampShortcutNumbers();

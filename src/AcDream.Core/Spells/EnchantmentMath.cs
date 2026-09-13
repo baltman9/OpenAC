@@ -25,6 +25,10 @@ public static class EnchantmentMath
         /// <summary>Skill. <c>EnchantSkill</c> filters on this bit and DOES
         /// apply vitae first.</summary>
         Skill = 0x0000010,
+
+        /// <summary>Applies to every key of <c>requiredType</c>'s stat family
+        /// instead of one key.</summary>
+        MultipleStat = 0x0002000,
     }
 
     public static VitalMod GetMod(
@@ -73,7 +77,10 @@ public static class EnchantmentMath
                 continue;
             }
 
-            if (ench.StatModKey is not uint key || key != statKey) continue;
+            if (ench.StatModKey is not uint key) continue;
+            bool allStat = key == 0 && requiredType is not null
+                && (ench.StatModType.GetValueOrDefault() & (uint)EnchantmentTypeFlag.MultipleStat) != 0;
+            if (!allStat && key != statKey) continue;
             if (requiredType is EnchantmentTypeFlag type
                 && (ench.StatModType.GetValueOrDefault() & (uint)type) == 0)
                 continue;

@@ -30,6 +30,7 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
     private const int   SideBagSlots   = 7;
     private const int   MainPackSlots  = 102;
     private const int   SidePackSlots = 24;
+    internal const uint PlayerPackBaseIcon = 0x0600127Eu;
 
     private readonly ClientObjectTable _objects;
     private readonly Func<uint> _playerGuid;
@@ -482,7 +483,6 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
 
         if (_topContainer is not null)
         {
-            const uint PlayerPackBaseIcon = 0x0600127Eu;
             _topContainer.Flush();
             var main = new UiItemSlot
             {
