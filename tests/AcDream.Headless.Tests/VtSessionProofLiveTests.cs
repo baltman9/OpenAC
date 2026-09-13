@@ -609,7 +609,11 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
             // beats reconstructing it afterwards.
             {
                 uint[] before = SpawnedGuids(session);
-                Stage("@create " + MonsterWeenie);
+                // The looter stays down through the fight: the loot milestone
+            // wants the corpse still lying there, unopened, when it starts,
+            // so it can stand the character away from it first.
+            Stage("/vt opt set EnableLooting False");
+            Stage("@create " + MonsterWeenie);
                 Stage("@create " + MonsterWeenie);
                 Pump(TimeSpan.FromSeconds(2d));
                 string report =
@@ -684,6 +688,14 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 // that does not.
                 ILootAutomation lootSurface =
                     session.Plugins.Host.Automation.Loot;
+                // The corpse has to be PLACED before there is anything to step
+                // away from: it falls a moment after the kill line, and the
+                // client learns where it lies a moment after that.
+                bool corpsePlaced = WaitUntil(
+                    TimeSpan.FromSeconds(20d),
+                    () => lootSurface.CaptureCorpses(float.MaxValue)
+                        .Any(static corpse => corpse.HasPosition));
+                staged.Add($"corpse placed before the step -> {corpsePlaced}");
                 RuntimeMovementSnapshot stood =
                     session.Runtime.Movement.Snapshot;
                 PluginNavigationPosition standingAt = session.Plugins.Host
@@ -700,7 +712,27 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                         $"@teleloc A9B40029 {stood.Position.Frame.Origin.X + awayX:0.000} "
                             + $"{stood.Position.Frame.Origin.Y + awayY:0.000} "
                             + $"{stood.Position.Frame.Origin.Z:0.000} 1 0 0 0"));
+                    // And the step has to have LANDED before the looter is let
+                    // loose, or it opens the corpse from where the character
+                    // still stands.
+                    double wantedApart = CorpseStepBackMeters - 0.5d;
+                    bool stepLanded = WaitUntil(
+                        TimeSpan.FromSeconds(20d),
+                        () => lootSurface.CaptureCorpses(float.MaxValue)
+                            .Where(static corpse => corpse.HasPosition)
+                            .All(corpse => corpse.Distance >= wantedApart));
+                    staged.Add(string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"stepped {Math.Sqrt((awayX * awayX) + (awayY * awayY)):0.00} m away from the nearest corpse; "
+                            + $"landed -> {stepLanded}; nearest corpse now "
+                            + $"{lootSurface.CaptureCorpses(float.MaxValue).Where(static c => c.HasPosition).Select(static c => c.Distance).DefaultIfEmpty(-1d).Min():0.00} m"));
                 }
+                else
+                {
+                    staged.Add("no step: no placed corpse to step away from, or already far enough");
+                }
+                // Now the looter may work.
+                Stage("/vt opt set EnableLooting True");
 
                 // Where every corpse lay when the milestone opened. The
                 // evidence quotes this for the corpse the looter chose, and
