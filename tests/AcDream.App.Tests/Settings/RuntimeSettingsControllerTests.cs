@@ -70,13 +70,17 @@ public sealed partial class RuntimeSettingsControllerTests
         var storage = new FakeStorage();
         var events = new List<string>();
         var controller = new RuntimeSettingsController(storage, log: _ => { });
-        controller.BindRuntimeTargets(new FakeRuntimeTargets(events));
+        controller.BindRuntimeTargets(new FakeRuntimeTargets(events) { RecordRetention = true });
+
+        Assert.Equal("target-retain", events[^1]); // binding applies the current state
 
         controller.SaveDisplay(controller.Display with { UiOnly = true });
         Assert.Equal(1, controller.ResolvedQuality.FarRadius);
         Assert.Contains("target-quality", events);
+        Assert.Equal("target-release", events[^1]);
 
         controller.SaveDisplay(controller.Display with { UiOnly = false });
+        Assert.Equal("target-retain", events[^1]);
         Assert.Equal(
             RuntimeSettingsController.ApplyLandscapeDrawDistance(
                 QualitySettings.From(DisplaySettings.Default.Quality),
@@ -1347,6 +1351,15 @@ public sealed partial class RuntimeSettingsControllerTests
             if (ThrowOnDisplay)
                 throw new InvalidOperationException("display target failed");
             return DisplayResult ?? new RuntimeDisplayApplyResult(display.Fullscreen);
+        }
+
+        /// <summary>Only the retention tests care about this event; the exact-sequence tests keep their lists.</summary>
+        public bool RecordRetention { get; init; }
+
+        public void SetUnownedContentRetained(bool retained)
+        {
+            if (RecordRetention)
+                events.Add(retained ? "target-retain" : "target-release");
         }
 
         public void ApplyQuality(QualitySettings quality)

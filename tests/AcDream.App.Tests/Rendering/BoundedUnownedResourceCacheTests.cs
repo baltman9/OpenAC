@@ -18,6 +18,23 @@ public sealed class BoundedUnownedResourceCacheTests
     }
 
     [Fact]
+    public void WithRetentionOff_EveryUnownedEntryIsTakenOldestFirst_AndOnAgainStopsAtTheBudget()
+    {
+        var cache = new BoundedUnownedResourceCache<string>(budgetBytes: 100);
+        cache.MarkUnowned("first", 6);
+        cache.MarkUnowned("second", 6);
+        Assert.False(cache.TryTakeOldestOverBudget(out _));
+
+        cache.RetainUnowned = false;
+        Assert.True(cache.TryTakeOldestOverBudget(out string first));
+        Assert.Equal("first", first);
+
+        cache.RetainUnowned = true;
+        Assert.False(cache.TryTakeOldestOverBudget(out _));
+        Assert.Equal(1, cache.Count);
+    }
+
+    [Fact]
     public void TakesOnlyOldestResourceWhileOverBudget()
     {
         var cache = new BoundedUnownedResourceCache<string>(budgetBytes: 10);

@@ -97,6 +97,16 @@ internal interface IRuntimeSettingsTargets
 
     void ApplyQuality(QualitySettings quality);
 
+    /// <summary>
+    /// Whether unowned world content (released meshes, emptied atlases,
+    /// composite and particle textures) is kept for a revisit. Off while the
+    /// world is not drawn, so the memory the UI-only switch promises actually
+    /// goes back.
+    /// </summary>
+    void SetUnownedContentRetained(bool retained)
+    {
+    }
+
     void ApplyUiLock(bool locked);
 
     void SetSingleCharacterOption(uint optionId, bool value);
@@ -267,6 +277,7 @@ internal sealed class RuntimeSettingsController :
         if (_runtimeTargets is not null)
             throw new InvalidOperationException("Runtime settings targets are already bound.");
         _runtimeTargets = targets;
+        targets.SetUnownedContentRetained(!EffectiveDisplay.UiOnly);
     }
 
     public IDisposable BindRuntimeTargetsOwned(IRuntimeSettingsTargets targets)
@@ -415,6 +426,7 @@ internal sealed class RuntimeSettingsController :
             }
             Display = applied;
             ReapplyQualityPreset(applied.Effective.Quality);
+            _runtimeTargets?.SetUnownedContentRetained(!EffectiveDisplay.UiOnly);
         }
         catch (Exception ex)
         {

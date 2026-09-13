@@ -354,7 +354,9 @@ internal sealed class SessionPlayerCompositionPhase
             chatOpacity: interaction.RetainedUi?.Runtime.WindowOpacity,
             cameras: host.CameraController,
             log: d.Log,
-            audio: content.Audio?.Engine);
+            audio: content.Audio?.Engine,
+            meshes: foundation.MeshAdapter,
+            textures: foundation.TextureCache);
         bindings.Adopt(
             "runtime settings targets",
             d.Settings.BindRuntimeTargetsOwned(settingsTargets));

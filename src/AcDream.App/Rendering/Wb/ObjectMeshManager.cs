@@ -154,6 +154,18 @@ namespace AcDream.App.Rendering.Wb
         private readonly LinkedList<ulong> _lruList = new();
         private readonly long _maxGpuMemory;
         private readonly int _maxCachedObjects;
+        private bool _retainUnowned = true;
+
+        /// <summary>
+        /// While the world is not drawn nothing unowned is kept for a revisit:
+        /// released render data and emptied atlases go back to the device at
+        /// the per-frame reclamation pace instead of waiting for a budget.
+        /// </summary>
+        internal void SetUnownedContentRetained(bool retained)
+        {
+            _retainUnowned = retained;
+            _safeEmptyAtlases.RetainUnowned = retained;
+        }
         private long _currentNonArenaGpuMemory;
 
         // Shared atlases grouped by (Width, Height, Format)
@@ -644,6 +656,7 @@ namespace AcDream.App.Rendering.Wb
                         _currentNonArenaGpuMemory
                         + trackedAtlasBytes);
                     if (!forceArenaReclamation
+                        && _retainUnowned
                         && IsWithinGpuCacheBudget(
                             nonArenaAndAtlasBytes,
                             physicalArenaBytes,

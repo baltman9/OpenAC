@@ -339,7 +339,9 @@ internal sealed class RuntimeSettingsTargets : IRuntimeSettingsTargets
         RetailWindowOpacityController? chatOpacity = null,
         Action<string>? log = null,
         OpenAlAudioEngine? audio = null,
-        CameraController? cameras = null)
+        CameraController? cameras = null,
+        WbMeshAdapter? meshes = null,
+        TextureCache? textures = null)
         : this(
             displayWindow,
             new RuntimeQualityApplicationTarget(
@@ -356,9 +358,16 @@ internal sealed class RuntimeSettingsTargets : IRuntimeSettingsTargets
                 ? NullRuntimeChatOpacityTarget.Instance
                 : new RuntimeChatOpacityTarget(chatOpacity),
             audio,
-            cameras)
+            cameras,
+            contentRetention: retained =>
+            {
+                meshes?.SetUnownedContentRetained(retained);
+                textures?.SetUnownedContentRetained(retained);
+            })
     {
     }
+
+    private readonly Action<bool>? _contentRetention;
 
     internal RuntimeSettingsTargets(
         IRuntimeDisplayWindowTarget displayWindow,
@@ -368,8 +377,10 @@ internal sealed class RuntimeSettingsTargets : IRuntimeSettingsTargets
         Action<string>? log = null,
         IRuntimeChatOpacityTarget? chatOpacity = null,
         OpenAlAudioEngine? audio = null,
-        CameraController? cameras = null)
+        CameraController? cameras = null,
+        Action<bool>? contentRetention = null)
     {
+        _contentRetention = contentRetention;
         _displayWindow = displayWindow
             ?? throw new ArgumentNullException(nameof(displayWindow));
         _quality = quality ?? throw new ArgumentNullException(nameof(quality));
@@ -403,6 +414,12 @@ internal sealed class RuntimeSettingsTargets : IRuntimeSettingsTargets
             $"[QUALITY] Streaming reconciled: nearRadius={quality.NearRadius}, " +
             $"farRadius={quality.FarRadius}, " +
             $"maxCompletions={quality.MaxCompletionsPerFrame}");
+    }
+
+    public void SetUnownedContentRetained(bool retained)
+    {
+        _contentRetention?.Invoke(retained);
+        _log($"[QUALITY] Unowned world content {(retained ? "kept for revisits" : "released as it goes")}");
     }
 
     public void ApplyUiLock(bool locked) => _uiLock.Apply(locked);

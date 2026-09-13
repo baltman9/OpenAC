@@ -61,6 +61,10 @@ public sealed class WbMeshAdapter
     internal int LastMipmapArrayCount { get; private set; }
     internal long LastMipmapBytes { get; private set; }
     internal int StagedUploadBacklog => _meshManager?.StagedMeshCount ?? 0;
+
+    /// <summary>See <see cref="ObjectMeshManager.SetUnownedContentRetained"/>.</summary>
+    internal void SetUnownedContentRetained(bool retained) =>
+        _meshManager?.SetUnownedContentRetained(retained);
     internal long StagedUploadBytes => _meshManager?.StagedMeshBytes ?? 0;
     internal bool StagingAtHighWater => _meshManager?.StagingAtHighWater ?? false;
     internal (int Count, long Bytes) CpuMeshCacheDiagnostics =>

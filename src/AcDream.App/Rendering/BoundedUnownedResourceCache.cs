@@ -20,6 +20,13 @@ internal sealed class BoundedUnownedResourceCache<TKey> where TKey : notnull
 
     public int Count => _entries.Count;
     public long ResidentBytes => _residentBytes;
+
+    /// <summary>
+    /// False while nothing unowned should be kept for a revisit (the world is
+    /// not being drawn): <see cref="TryTakeOldestOverBudget"/> then hands out
+    /// every entry, oldest first, at the caller's own per-frame pace.
+    /// </summary>
+    public bool RetainUnowned { get; set; } = true;
     public long BudgetBytes => _budgetBytes;
     public int MaximumCount => _maximumCount;
     public bool Contains(TKey key) => _entries.ContainsKey(key);
@@ -56,7 +63,7 @@ internal sealed class BoundedUnownedResourceCache<TKey> where TKey : notnull
 
     public bool TryTakeOldestOverBudget(out TKey key)
     {
-        if ((_residentBytes <= _budgetBytes && _entries.Count <= _maximumCount)
+        if ((RetainUnowned && _residentBytes <= _budgetBytes && _entries.Count <= _maximumCount)
             || _lru.First is null)
         {
             key = default!;

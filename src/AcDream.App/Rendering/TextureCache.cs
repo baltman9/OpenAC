@@ -128,6 +128,17 @@ public sealed class TextureCache
         _particleTextures = particles;
     }
 
+    /// <summary>
+    /// While the world is not drawn, the composite (creature and item) and
+    /// particle texture caches keep nothing unowned; on again they keep their
+    /// budgets. Applied at the caches' own per-frame eviction pace.
+    /// </summary>
+    internal void SetUnownedContentRetained(bool retained)
+    {
+        _compositeTextures?.SetUnownedContentRetained(retained);
+        _particleTextures?.SetUnownedContentRetained(retained);
+    }
+
     internal void RegisterResidencySources(ResidencyManager manager)
     {
         ArgumentNullException.ThrowIfNull(manager);
