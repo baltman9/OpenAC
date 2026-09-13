@@ -558,19 +558,13 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 }
             }
 
-            // ---- P8: death, then the recovery the reference macro performs -----
-            // Dying disables four settings and nothing else. The macro keeps
-            // running through the whole disabled window, which is what the
-            // first four checks are about; the fifth is that the restore picks
-            // the route up where the death left it rather than at the start.
+            // ---- P8: death, the stop, and the round picked up again ------------
+            // Dying stops the macro and changes nothing else. The five checks
+            // are: the death was noticed and said so, nothing was silently
+            // reconfigured, the pass really did stop, starting again is all it
+            // takes to get the rules running, and the route carries on from
+            // the waypoint the death interrupted instead of the first one.
             {
-                // The terminal idle rule is what puts a character in peace
-                // once everything else declines, and it only does that when
-                // its own setting is on. The shipped profile leaves it off —
-                // the reference's default — so the run turns it on the way a
-                // player would, immediately before the death it judges.
-                Stage("/vt opt set IdlePeaceMode true");
-
                 Stage("@setvital health 1");
                 int chatBeforeDeath = observed.ChatCount;
                 Stage("@smite " + character);
@@ -581,80 +575,66 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                         || MentionsAny(observed.SnapshotChat(), "You were killed by"));
 
                 // Read last, not first: the route can still advance a waypoint
-                // in the seconds before the death, and nothing can advance it
-                // after — so the last one the rule named is the one the
-                // restore has to come back to.
+                // in the seconds before the death, and nothing advances it
+                // after — so the last one the rule named is the one the start
+                // has to come back to.
                 int? waypointBefore = LastRouteWaypointIndex(
                     observed.SnapshotChat(), 0, route);
 
-                // (d) the restore offer. The plugin has to notice the death
-                // itself, and what it says is the only way a player learns
-                // what was turned off and how to turn it back on.
-                bool restoreOffered = died
+                // (a) the plugin noticed the death itself and said so. That
+                // line is the only thing that tells a player why the macro
+                // went quiet.
+                bool stopAnnounced = died
                     && WaitUntil(
                         TimeSpan.FromSeconds(30d),
                         () => observed.SnapshotChat().Any(static line =>
-                            line.Contains("You died!", StringComparison.Ordinal)
-                            && line.Contains("deathrestore", StringComparison.Ordinal)));
+                            line.Contains(
+                                "Macro stopped because the character died.",
+                                StringComparison.Ordinal)));
 
-                bool recovered = restoreOffered
+                bool recovered = stopAnnounced
                     && WaitUntil(
                         TimeSpan.FromSeconds(60d),
                         () => !IsDead(session) && session.Runtime.Lifecycle.State
                             == RuntimeLifecycleState.InWorld);
 
-                // (a) the pass keeps coming round. Not "the plugin is still
-                // loaded" — the scheduler's own per-pass line, printed after
-                // the death, is the difference between a disabled macro and a
-                // stopped one.
-                int chatBeforePasses = observed.ChatCount;
-                bool passStillTicking = recovered
-                    && WaitUntil(
-                        TimeSpan.FromSeconds(30d),
-                        () => observed.SnapshotChat()
-                            .Skip(chatBeforePasses)
-                            .Any(static line => line.Contains(
-                                "Primary logic loop started", StringComparison.Ordinal)));
+                // (b) the pass really stopped. A macro that says it stopped
+                // and keeps picking rules is worse than one that never said
+                // anything, so this looks for the absence deliberately rather
+                // than assuming it.
+                int chatAfterDeath = observed.ChatCount;
+                Pump(TimeSpan.FromSeconds(6d));
+                string[] passesAfterDeath = observed.SnapshotChat()
+                    .Skip(chatAfterDeath)
+                    .Where(static line => line.Contains(
+                        "Picked ", StringComparison.Ordinal))
+                    .ToArray();
+                bool passStopped = recovered && passesAfterDeath.Length == 0;
 
-                // (b) the four settings the death turns off, read back through
-                // the plugin's own option command.
+                // (c) nothing was reconfigured behind the player's back. The
+                // four settings a death must not touch, read back through the
+                // plugin's own option command.
                 string[] deathSettings =
                     ["EnableBuffing", "EnableCombat", "EnableNav", "EnableLooting"];
-                var disabled = new Dictionary<string, string?>(StringComparer.Ordinal);
+                var afterDeath = new Dictionary<string, string?>(StringComparer.Ordinal);
                 if (recovered)
                 {
                     foreach (string name in deathSettings)
-                        disabled[name] = ReadOption(name);
+                        afterDeath[name] = ReadOption(name);
                 }
-                string[] stillOn = deathSettings
+                string[] changed = deathSettings
                     .Where(name => !string.Equals(
-                        disabled.GetValueOrDefault(name), "False", StringComparison.Ordinal))
+                        afterDeath.GetValueOrDefault(name), "True", StringComparison.Ordinal))
                     .ToArray();
-                bool settingsDisabled = recovered && stillOn.Length == 0;
+                bool settingsUntouched = recovered && changed.Length == 0;
 
-                // (c) peace, and the idle rule is what did it.
-                bool inPeace = settingsDisabled
-                    && WaitUntil(
-                        TimeSpan.FromSeconds(30d),
-                        () => session.Plugins.Host.Automation.Combat.Snapshot.Mode
-                            == PluginCombatMode.Peace);
-                // The idle rule only has work to do when the character is in a
-                // combat stance when it dies; a character that was already at
-                // peace gives it nothing to do and it correctly declines. So
-                // the check is the state, and the evidence records both
-                // whether the rule was armed and whether it was named.
-                bool idleRuleRan = observed.SnapshotChat()
-                    .Skip(chatBeforeDeath)
-                    .Any(static line => line.Contains("IdlePeace", StringComparison.Ordinal));
-                string idlePeaceArmed = ReadOption("IdlePeaceMode") ?? "unread";
-
-                // (e) the restore. Two things a player would do first. The
-                // death left the caster on the corpse, and every rule that
+                // (d) starting again. Two things a player would do first: the
+                // death left the caster on the corpse and every rule that
                 // casts stops the macro outright when the profile's wand is
-                // nowhere to be found, so the run stages another one. And the
-                // character respawned at its lifestone, where the route is out
-                // of range, so it goes back to the arena — which is also what
-                // leaves the character somewhere sane for the next run.
+                // nowhere to be found; and the character respawned at its
+                // lifestone, where the route is out of range. Both are also
+                // how the run leaves the character somewhere sane for the next
+                // one.
                 Stage("@ci " + CasterWeenie);
                 bool casterRestaged = WaitUntil(
                     TimeSpan.FromSeconds(20d),
@@ -662,51 +642,37 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 staged.Add($"caster '{CasterItemName}' owned again -> {casterRestaged}");
                 // A character revives with its vitals near the floor, and the
                 // recharge rule then wins every single pass trying to fix
-                // that — it sits twenty places above navigation, so nothing
-                // below it is ever asked. Getting back on your feet before
-                // resuming is what a player does too.
+                // that — it sits far above navigation, so nothing below it is
+                // ever asked. Getting back on your feet is what a player does
+                // too.
                 Stage("@heal");
                 Stage(ArenaTeleport);
                 _ = WaitUntil(
                     TimeSpan.FromSeconds(20d),
                     () => DistanceMetersFromArena(session) < 40d);
-                int chatBeforeRestore = observed.ChatCount;
-                Stage("/vt deathrestore");
-                bool restored = inPeace
-                    && WaitUntil(
-                        TimeSpan.FromSeconds(20d),
-                        () => observed.SnapshotChat()
-                            .Skip(chatBeforeRestore)
-                            .Any(static line => line.Contains(
-                                "have been restored to previous values",
-                                StringComparison.Ordinal)));
-                var restoredValues = new Dictionary<string, string?>(StringComparer.Ordinal);
-                if (restored)
-                {
-                    foreach (string name in deathSettings)
-                        restoredValues[name] = ReadOption(name);
-                }
-                string[] stillOff = deathSettings
-                    .Where(name => !string.Equals(
-                        restoredValues.GetValueOrDefault(name),
-                        "True",
-                        StringComparison.Ordinal))
-                    .ToArray();
-                bool settingsBack = restored && stillOff.Length == 0;
 
-                // Dying strips the character's enchantments, so the first
-                // thing the restore does is start re-buffing all of them, and
-                // a burst holds every other rule's gate shut while it casts —
-                // on this character, for longer than the whole rest of the
-                // run takes. The route's position has nothing to do with
-                // buffing, and the restore itself has already been checked
-                // above, so the run puts buffing down for as long as it takes
-                // the navigation rule to say which waypoint it is on, then
-                // hands it straight back.
+                int chatBeforeStart = observed.ChatCount;
+                Stage("/vt start");
+                bool restarted = settingsUntouched
+                    && WaitUntil(
+                        TimeSpan.FromSeconds(45d),
+                        () => observed.SnapshotChat()
+                            .Skip(chatBeforeStart)
+                            .Any(static line => line.Contains(
+                                "Picked ", StringComparison.Ordinal)));
+
+                // (e) the round carries on where it was. Dying strips the
+                // character's enchantments, so the first thing a restarted
+                // macro does is re-buff all of them, and a burst holds every
+                // other rule's gate shut while it casts — on this character
+                // for longer than the whole rest of the run takes. The route's
+                // position has nothing to do with buffing, so the run puts
+                // buffing down for as long as it takes the navigation rule to
+                // say which waypoint it is on, then hands it straight back.
                 int? waypointAfter = null;
                 bool sameWaypoint = false;
                 string routeSilence = string.Empty;
-                if (settingsBack)
+                if (restarted)
                 {
                     Stage("/vt opt set EnableBuffing false");
                     int chatBeforeRoute = observed.ChatCount;
@@ -740,57 +706,42 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
 
                 string verdict = string.Create(
                     CultureInfo.InvariantCulture,
-                    $"pass-still-ticking={Yes(passStillTicking)}, "
-                        + $"four-settings-off={Yes(settingsDisabled)}, "
-                        + $"peace={Yes(inPeace)} (idle rule armed: {idlePeaceArmed}, "
-                        + $"named: {Yes(idleRuleRan)}), "
-                        + $"restore-offered={Yes(restoreOffered)}, "
+                    $"stop-announced={Yes(stopAnnounced)}, "
+                        + $"pass-stopped={Yes(passStopped)}, "
+                        + $"settings-untouched={Yes(settingsUntouched)}, "
+                        + $"restarted={Yes(restarted)}, "
                         + $"resumed-on-waypoint={Yes(sameWaypoint)} "
                         + $"(before={Waypoint(waypointBefore)} "
                         + $"after={Waypoint(waypointAfter)}){routeSilence}");
 
-                if (died && restoreOffered && recovered && passStillTicking
-                    && settingsDisabled && inPeace && settingsBack && sameWaypoint)
+                const string title =
+                    "death stops the macro, changes no setting, and starting "
+                    + "again resumes the same waypoint";
+                if (died && stopAnnounced && recovered && passStopped
+                    && settingsUntouched && restarted && sameWaypoint)
                 {
-                    ledger.Pass(
-                        "P8",
-                        "death disables four settings, the macro keeps running, "
-                            + "and the restore resumes the same waypoint",
-                        verdict);
+                    ledger.Pass("P8", title, verdict);
                 }
                 else
                 {
                     string reason =
                         !died ? "no death was observable"
-                        : !restoreOffered
-                            ? "the plugin never offered the restore after the death"
+                        : !stopAnnounced
+                            ? "the plugin never said the death stopped the macro"
                         : !recovered ? "the character never recovered after dying"
-                        : !passStillTicking
-                            ? "the scheduler stopped instead of running on disabled"
-                        : !settingsDisabled
-                            ? "still enabled after the death: "
+                        : !passStopped
+                            ? "the scheduler kept picking rules after the stop: "
+                                + string.Join(" | ", Tail(passesAfterDeath, 2))
+                        : !settingsUntouched
+                            ? "the death changed settings it must not: "
                                 + string.Join(
                                     ", ",
-                                    stillOff.Length == 0
-                                        ? stillOn.Select(name =>
-                                            $"{name}={disabled.GetValueOrDefault(name) ?? "unread"}")
-                                        : stillOn)
-                        : !inPeace
-                            ? "the character never dropped to peace while disabled "
-                                + $"(mode {session.Plugins.Host.Automation.Combat.Snapshot.Mode})"
-                        : !restored ? "the restore command reported nothing"
-                        : !settingsBack
-                            ? "not restored: " + string.Join(
-                                ", ",
-                                stillOff.Select(name =>
-                                    $"{name}={restoredValues.GetValueOrDefault(name) ?? "unread"}"))
+                                    changed.Select(name =>
+                                        $"{name}={afterDeath.GetValueOrDefault(name) ?? "unread"}"))
+                        : !restarted
+                            ? "no rule was picked after the macro was started again"
                         : "the route did not resume on the waypoint it had";
-                    ledger.Fail(
-                        "P8",
-                        "death disables four settings, the macro keeps running, "
-                            + "and the restore resumes the same waypoint",
-                        reason + "; " + verdict,
-                        Evidence());
+                    ledger.Fail("P8", title, reason + "; " + verdict, Evidence());
                 }
 
                 // Leave the character alive and unencumbered by this run's
@@ -798,6 +749,7 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 Stage("@smite all");
                 Stage("@heal");
             }
+
 
             FinishAndReport(session, statusPath, ledger, Evidence, output);
         }
@@ -860,8 +812,8 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
         ("P5", "a corpse is opened and at least one loot decision is made"),
         ("P6", "the route advances by at least two waypoints"),
         ("P7", "a vitals recharge fires at least once"),
-        ("P8", "death disables four settings, the macro keeps running, "
-            + "and the restore resumes the same waypoint"),
+        ("P8", "death stops the macro, changes no setting, and starting "
+            + "again resumes the same waypoint"),
         ("P9", "the session exits gracefully with code 0"),
     ];
 
