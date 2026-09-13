@@ -150,6 +150,20 @@ public interface ICharacterInfo
     uint CurrentMana { get; }
     uint MaxMana { get; }
 
+    /// <summary>
+    /// The unbuffed maximum health: the maximum with every enchantment layer
+    /// off — base attributes, no vital enchantments. A host that does not
+    /// track the split reports the buffed maximum instead, in which case this
+    /// and <see cref="MaxHealth"/> are the same number.
+    /// </summary>
+    uint BaseHealth => MaxHealth;
+
+    /// <inheritdoc cref="BaseHealth"/>
+    uint BaseStamina => MaxStamina;
+
+    /// <inheritdoc cref="BaseHealth"/>
+    uint BaseMana => MaxMana;
+
     int SummoningMastery => 0;
 
     IReadOnlyList<PluginSkillInfo> Skills { get; }
@@ -205,6 +219,13 @@ public interface IPluginChat
     void PostSystemMessage(string text);
 
     bool Submit(string text) => false;
+
+    /// <summary>
+    /// Puts <paramref name="text"/> into the chat entry and focuses it,
+    /// WITHOUT sending it, so the player can finish typing. False when there
+    /// is no chat entry to type into or the player is already typing in it.
+    /// </summary>
+    bool Compose(string text) => false;
 }
 
 public interface IMagicCommands

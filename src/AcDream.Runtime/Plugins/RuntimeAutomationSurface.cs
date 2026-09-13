@@ -79,6 +79,7 @@ internal class RuntimeAutomationSurface
     private IChargenPaletteColorSource? _paletteColors;
     private Func<uint, bool>? _dismissGhost;
     private Func<PluginSelectionAction, bool>? _selectionAction;
+    private Func<string, bool>? _composeChat;
     private IReadOnlyList<PluginProjectileDebugSample> _projectileDebugSamples =
         Array.Empty<PluginProjectileDebugSample>();
     private long _projectileDebugSamplesExpireAt;
@@ -407,6 +408,14 @@ internal class RuntimeAutomationSurface
             _selectionAction = execute;
     }
 
+    /// <summary>Stages chat text in the entry box without sending it.</summary>
+    public void BindChatComposer(Func<string, bool> compose)
+    {
+        ArgumentNullException.ThrowIfNull(compose);
+        lock (_gate)
+            _composeChat = compose;
+    }
+
     public void Unbind()
     {
         lock (_gate)
@@ -441,6 +450,8 @@ internal class RuntimeAutomationSurface
         _runtime = null;
         _communication = null;
         _dismissGhost = null;
+        _selectionAction = null;
+        _composeChat = null;
         _trackedEnchantments.Clear();
         _trackedCastCompletionRevision = 0;
         _projectileDebugSamples = Array.Empty<PluginProjectileDebugSample>();
@@ -799,6 +810,9 @@ internal class RuntimeAutomationSurface
     public uint MaxStamina => Vital(LocalPlayerState.VitalKind.Stamina).Maximum;
     public uint CurrentMana => Vital(LocalPlayerState.VitalKind.Mana).Current;
     public uint MaxMana => Vital(LocalPlayerState.VitalKind.Mana).Maximum;
+    public uint BaseHealth => BaseVital(LocalPlayerState.VitalKind.Health);
+    public uint BaseStamina => BaseVital(LocalPlayerState.VitalKind.Stamina);
+    public uint BaseMana => BaseVital(LocalPlayerState.VitalKind.Mana);
     public int SummoningMastery
     {
         get
@@ -825,6 +839,19 @@ internal class RuntimeAutomationSurface
             return (0, 0);
         }
         return (vital.Current, vital.Maximum);
+    }
+
+    /// <summary>
+    /// The maximum with every enchantment layer off — base attributes, no
+    /// vital enchantments.
+    /// </summary>
+    private uint BaseVital(LocalPlayerState.VitalKind kind)
+    {
+        RuntimeCharacterState? character;
+        lock (_gate)
+            character = _character;
+        return character?.LocalPlayer.GetBaseMaxApprox(kind)
+            ?? Vital(kind).Maximum;
     }
 
     public IReadOnlyList<PluginActiveEnchantment> ActiveEnchantments => _enchantments;
@@ -1071,6 +1098,14 @@ internal class RuntimeAutomationSurface
         lock (_gate)
             commands = _sessionCommands;
         return commands?.SubmitChatText(text) == true;
+    }
+
+    public bool Compose(string text)
+    {
+        Func<string, bool>? compose;
+        lock (_gate)
+            compose = _disposed ? null : _composeChat;
+        return compose?.Invoke(text) == true;
     }
 
     bool ISelectionAutomation.Execute(PluginSelectionAction action)
@@ -1733,6 +1768,23 @@ internal class RuntimeAutomationSurface
         }
         properties = CaptureProperties(item.Properties);
         return true;
+    }
+
+    bool IWorldObjectAutomation.TryGetIntProperty(
+        uint objectId,
+        uint property,
+        out int value)
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        ClientObject? item = runtime?.InventoryOwner.Objects.Get(objectId);
+        if (runtime is null || !IsAvailable || item is null)
+        {
+            value = 0;
+            return false;
+        }
+        return item.Properties.Ints.TryGetValue(property, out value);
     }
 
     PluginItemCommandResult IWorldObjectAutomation.Identify(uint objectId) =>
@@ -3549,7 +3601,6 @@ internal class RuntimeAutomationSurface
             if (_disposed)
                 return;
             _disposed = true;
-            _selectionAction = null;
             DetachLocked();
         }
         _knownSelfBuffs = Array.Empty<PluginSpellInfo>();
