@@ -12,15 +12,13 @@ using AcDream.Core.World;
 using AcDream.Core.CharGen;
 using AcDream.Content;
 using AcDream.Plugin.Abstractions;
-using AcDream.App.Runtime;
-using AcDream.Runtime;
 using AcDream.Runtime.Entities;
 using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Session;
 
-namespace AcDream.App.Plugins;
+namespace AcDream.Runtime.Plugins;
 
-internal sealed class AppAutomationSurface
+internal class RuntimeAutomationSurface
     : IAutomationSurface, ICharacterInfo, ISpellCatalog, IMagicCommands, IPluginChat,
       ICombatAutomation, IEquipmentAutomation, IItemAutomation,
       ILootAutomation, IFellowshipAutomation, IEnchantmentAutomation,
@@ -68,7 +66,8 @@ internal sealed class AppAutomationSurface
     private IReadOnlyList<PluginProjectileDebugSample> _projectileDebugSamples =
         Array.Empty<PluginProjectileDebugSample>();
     private long _projectileDebugSamplesExpireAt;
-    private CurrentGameRuntimeAdapter? _sessionCommands;
+    private IGameRuntimeCommands? _sessionCommands;
+    private Func<string, bool>? _submitChatText;
     private IDisposable? _communicationSubscription;
     private readonly List<PluginChatMessage> _chatMessages = [];
     private ulong _pluginChatSequence;
@@ -90,12 +89,12 @@ internal sealed class AppAutomationSurface
     private static readonly string[] AttributeNames =
         ["Strength", "Endurance", "Quickness", "Coordination", "Focus", "Self"];
 
-    public AppAutomationSurface()
+    public RuntimeAutomationSurface()
         : this(events: null)
     {
     }
 
-    internal AppAutomationSurface(
+    internal RuntimeAutomationSurface(
         IEvents? events,
         LocalPluginPeerRegistry? peers = null,
         IReadOnlyList<string>? peerTags = null)
@@ -357,11 +356,17 @@ internal sealed class AppAutomationSurface
             _magicCatalog = catalog;
     }
 
-    public void BindSessionCommands(CurrentGameRuntimeAdapter commands)
+    public void BindSessionCommands(IGameRuntimeCommands commands)
     {
         ArgumentNullException.ThrowIfNull(commands);
         lock (_gate)
             _sessionCommands = commands;
+    }
+
+    internal void BindSubmit(Func<string, bool>? submitChatText)
+    {
+        lock (_gate)
+            _submitChatText = submitChatText;
     }
 
     public void BindSpeciesNameResolver(Func<int, string> resolver)
@@ -1108,10 +1113,10 @@ internal sealed class AppAutomationSurface
 
     public bool Submit(string text)
     {
-        CurrentGameRuntimeAdapter? commands;
+        Func<string, bool>? submitChatText;
         lock (_gate)
-            commands = _sessionCommands;
-        return commands?.SubmitChatText(text) == true;
+            submitChatText = _submitChatText;
+        return submitChatText?.Invoke(text) == true;
     }
 
     bool ISelectionAutomation.Execute(PluginSelectionAction action)
@@ -1620,13 +1625,17 @@ internal sealed class AppAutomationSurface
     public PluginNavigationCommandStatus SetMovementIntent(
         in PluginMovementIntent intent)
     {
-        CurrentGameRuntimeAdapter? commands;
+        IGameRuntimeCommands? commands;
+        GameRuntime? runtime;
         lock (_gate)
+        {
             commands = _sessionCommands;
-        if (commands is null || !IsAvailable)
+            runtime = _runtime;
+        }
+        if (commands is null || runtime is null || !IsAvailable)
             return PluginNavigationCommandStatus.Unavailable;
-        RuntimeCommandResult result = commands.MovementCommands.SetIntent(
-            commands.Generation,
+        RuntimeCommandResult result = commands.Movement.SetIntent(
+            runtime.Generation,
             new MovementInput(
                 intent.Forward,
                 intent.Backward,
@@ -1644,13 +1653,17 @@ internal sealed class AppAutomationSurface
 
     public PluginNavigationCommandStatus ClearMovementIntent()
     {
-        CurrentGameRuntimeAdapter? commands;
+        IGameRuntimeCommands? commands;
+        GameRuntime? runtime;
         lock (_gate)
+        {
             commands = _sessionCommands;
-        if (commands is null || !IsAvailable)
+            runtime = _runtime;
+        }
+        if (commands is null || runtime is null || !IsAvailable)
             return PluginNavigationCommandStatus.Unavailable;
-        RuntimeCommandResult result = commands.MovementCommands.ClearIntent(
-            commands.Generation);
+        RuntimeCommandResult result = commands.Movement.ClearIntent(
+            runtime.Generation);
         return result.Status == RuntimeCommandStatus.Accepted
             ? PluginNavigationCommandStatus.Accepted
             : PluginNavigationCommandStatus.Rejected;
@@ -1658,14 +1671,18 @@ internal sealed class AppAutomationSurface
 
     public PluginNavigationCommandStatus FaceHeading(float headingDegrees)
     {
-        CurrentGameRuntimeAdapter? commands;
+        IGameRuntimeCommands? commands;
+        GameRuntime? runtime;
         lock (_gate)
+        {
             commands = _sessionCommands;
-        if (commands is null || !IsAvailable)
+            runtime = _runtime;
+        }
+        if (commands is null || runtime is null || !IsAvailable)
             return PluginNavigationCommandStatus.Unavailable;
         RuntimeCommandResult result =
-            commands.MovementCommands.TurnToHeading(
-                commands.Generation,
+            commands.Movement.TurnToHeading(
+                runtime.Generation,
                 headingDegrees);
         return result.Status == RuntimeCommandStatus.Accepted
             ? PluginNavigationCommandStatus.Accepted
@@ -3149,46 +3166,50 @@ internal sealed class AppAutomationSurface
 
     public PluginFellowshipCommandResult Create(
         string name,
-        bool shareExperience) => InvokeFellowship(commands =>
-            commands.FellowshipCommands.Create(
-                commands.Generation,
+        bool shareExperience) => InvokeFellowship((commands, generation) =>
+            commands.Fellowship.Create(
+                generation,
                 name,
                 shareExperience));
 
     public PluginFellowshipCommandResult Recruit(uint targetObjectId) =>
-        InvokeFellowship(commands => commands.FellowshipCommands.Recruit(
-            commands.Generation,
+        InvokeFellowship((commands, generation) => commands.Fellowship.Recruit(
+            generation,
             targetObjectId));
 
     public PluginFellowshipCommandResult Dismiss(uint targetObjectId) =>
-        InvokeFellowship(commands => commands.FellowshipCommands.Dismiss(
-            commands.Generation,
+        InvokeFellowship((commands, generation) => commands.Fellowship.Dismiss(
+            generation,
             targetObjectId));
 
     public PluginFellowshipCommandResult Quit(bool disband) =>
-        InvokeFellowship(commands => commands.FellowshipCommands.Quit(
-            commands.Generation,
+        InvokeFellowship((commands, generation) => commands.Fellowship.Quit(
+            generation,
             disband));
 
     public PluginFellowshipCommandResult AssignLeader(uint targetObjectId) =>
-        InvokeFellowship(commands => commands.FellowshipCommands.AssignLeader(
-            commands.Generation,
+        InvokeFellowship((commands, generation) => commands.Fellowship.AssignLeader(
+            generation,
             targetObjectId));
 
     public PluginFellowshipCommandResult SetOpen(bool isOpen) =>
-        InvokeFellowship(commands => commands.FellowshipCommands.SetOpen(
-            commands.Generation,
+        InvokeFellowship((commands, generation) => commands.Fellowship.SetOpen(
+            generation,
             isOpen));
 
     private PluginFellowshipCommandResult InvokeFellowship(
-        Func<CurrentGameRuntimeAdapter, RuntimeCommandResult> invoke)
+        Func<IGameRuntimeCommands, RuntimeGenerationToken, RuntimeCommandResult> invoke)
     {
-        CurrentGameRuntimeAdapter? commands;
+        IGameRuntimeCommands? commands;
+        GameRuntime? runtime;
         lock (_gate)
+        {
             commands = _sessionCommands;
-        if (commands is null || !IsAvailable)
+            runtime = _runtime;
+        }
+        if (commands is null || runtime is null || !IsAvailable)
             return new(PluginFellowshipCommandStatus.Unavailable);
-        RuntimeCommandResult result = invoke(commands);
+        RuntimeCommandResult result = invoke(commands, runtime.Generation);
         return new(result.Status switch
         {
             RuntimeCommandStatus.Accepted => PluginFellowshipCommandStatus.Accepted,

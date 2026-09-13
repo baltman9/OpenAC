@@ -1,5 +1,6 @@
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
+using AcDream.Runtime.Plugins;
 
 namespace AcDream.Headless.Plugins;
 
@@ -19,7 +20,7 @@ internal sealed class HeadlessPluginHost
     private readonly object _eventGate = new();
     private readonly List<Subscription> _subscriptions = [];
     private Subscription[] _liveSnapshot = [];
-    private readonly HeadlessAutomationSurface _automation;
+    private readonly RuntimeAutomationSurface _automation;
     private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>
         _sessionSettingsByPlugin;
     private readonly object _tickGate = new();
@@ -52,7 +53,9 @@ internal sealed class HeadlessPluginHost
         Commands = commands ?? NoOpPluginCommandRegistry.Instance;
         VtankProfiles = vtankProfiles ?? NoOpPluginStorage.Instance;
         _sessionSettingsByPlugin = CopySessionSettings(sessionSettings);
-        _automation = new HeadlessAutomationSurface(runtime, submitChatText);
+        _automation = new RuntimeAutomationSurface();
+        _automation.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        _automation.BindSubmit(submitChatText);
         _eventSubscription = runtime.Subscribe(this);
     }
 
@@ -262,6 +265,7 @@ internal sealed class HeadlessPluginHost
         lock (_tickGate)
             _tick = null;
         _eventSubscription.Dispose();
+        _automation.Dispose();
     }
 
     public void OnEntity(in RuntimeEntityDelta delta)

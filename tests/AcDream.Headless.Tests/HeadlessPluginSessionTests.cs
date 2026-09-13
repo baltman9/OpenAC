@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Net;
+using AcDream.Core.Chat;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Headless.Configuration;
@@ -493,6 +494,49 @@ public sealed class HeadlessPluginSessionTests
         session.Plugins.Host.Automation.Chat.PostSystemMessage("hello from autostart");
 
         Assert.Equal(before + 1, session.Runtime.Chat.Count);
+    }
+
+    [Fact]
+    public void ChatCaptureMessagesReturnsTextAddedToTheRuntimeCommunicationTranscript()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+
+        session.Runtime.CommunicationOwner.AddText(
+            "Archer tells you, buff",
+            RetailLogTextType.Tell);
+
+        PluginChatMessage message = Assert.Single(
+            session.Plugins.Host.Automation.Chat.CaptureMessages(0));
+        Assert.Equal("Archer tells you, buff", message.Text);
+    }
+
+    [Fact]
+    public void CharacterAndSpellsReportRealRuntimeStateOnceTheSessionEntersTheWorld()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+
+        Assert.Equal(0u, session.Plugins.Host.Automation.Character.ObjectId);
+        Assert.False(session.Plugins.Host.Automation.Spells.IsKnown(1u));
+
+        _ = session.Start();
+        session.Runtime.CharacterOwner.Spellbook.OnSpellLearned(1u);
+
+        Assert.Equal(0x50000001u, session.Plugins.Host.Automation.Character.ObjectId);
+        Assert.True(session.Plugins.Host.Automation.Spells.IsKnown(1u));
     }
 
     private static HeadlessSessionDescriptor Descriptor(

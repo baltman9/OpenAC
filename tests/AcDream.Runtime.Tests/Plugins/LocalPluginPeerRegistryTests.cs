@@ -1,7 +1,7 @@
-using AcDream.App.Plugins;
+using AcDream.Runtime.Plugins;
 using AcDream.Plugin.Abstractions;
 
-namespace AcDream.App.Tests.Plugins;
+namespace AcDream.Runtime.Tests.Plugins;
 
 public sealed class LocalPluginPeerRegistryTests
 {
