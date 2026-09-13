@@ -445,6 +445,8 @@ public sealed class NoOpAutomationSurface
         Array.Empty<PluginInventoryItem>();
     public PluginItemCommandResult Open(uint containerObjectId) =>
         new(PluginItemCommandStatus.Unavailable);
+    public PluginItemCommandResult Close(uint containerObjectId) =>
+        new(PluginItemCommandStatus.Unavailable);
     public PluginItemCommandResult Identify(uint objectId) =>
         new(PluginItemCommandStatus.Unavailable);
     public PluginItemCommandResult Pickup(uint objectId, bool mainPack = false) =>

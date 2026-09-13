@@ -58,6 +58,9 @@ public interface ILootAutomation
     PluginItemCommandResult Open(uint containerObjectId) =>
         new(PluginItemCommandStatus.Unavailable);
 
+    PluginItemCommandResult Close(uint containerObjectId) =>
+        new(PluginItemCommandStatus.Unavailable);
+
     PluginItemCommandResult Identify(uint objectId) =>
         new(PluginItemCommandStatus.Unavailable);
 

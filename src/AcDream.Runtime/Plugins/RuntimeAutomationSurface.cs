@@ -2856,6 +2856,31 @@ internal class RuntimeAutomationSurface
             : new(PluginItemCommandStatus.Refused);
     }
 
+    public PluginItemCommandResult Close(uint containerObjectId)
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        if (runtime is null || !IsAvailable)
+            return new(PluginItemCommandStatus.Unavailable);
+        if (containerObjectId == 0u
+            || runtime.InventoryOwner.ExternalContainers.CurrentContainerId
+                != containerObjectId
+            || runtime.InventoryOwner.Objects.Get(containerObjectId)
+                is not { } container
+            || ((PublicWeenieFlags)(container.PublicWeenieBitfield ?? 0u)
+                & (PublicWeenieFlags.Corpse | PublicWeenieFlags.Openable)) == 0)
+        {
+            return new(PluginItemCommandStatus.InvalidTarget);
+        }
+        if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
+            return new(PluginItemCommandStatus.Busy);
+        return runtime.ItemInteractionOwner.TryUseItemForAutomation(
+            containerObjectId)
+            ? new(PluginItemCommandStatus.Started)
+            : new(PluginItemCommandStatus.Refused);
+    }
+
     public PluginItemCommandResult Identify(uint objectId)
     {
         GameRuntime? runtime;
