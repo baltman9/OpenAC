@@ -27,6 +27,21 @@ internal interface IWalkFrameWorldData
         return false;
     }
 
+    /// <summary>Reads the identity and write revision of the projection a local
+    /// entity currently owns, without materializing the record. Worlds that do
+    /// not track revisions return false and callers fall back to record reads.</summary>
+    bool TryGetCurrentProjectionRevision(
+        uint localEntityId,
+        out RenderProjectionId id,
+        out RenderOwnerIncarnation ownerIncarnation,
+        out ulong revision)
+    {
+        id = default;
+        ownerIncarnation = default;
+        revision = 0;
+        return false;
+    }
+
     WalkFrameStaticRecords GetCellObjects(uint cellId);
 
     WalkFrameStaticRecords GetOutdoorObjects(uint cellId);

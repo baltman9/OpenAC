@@ -28,6 +28,8 @@ internal sealed class ArchRenderScene : IRenderScene, IRenderSceneQuerySource
     private RenderProjectionCounts _counts;
     private ulong _lastAppliedJournalSequence;
     private ulong _indexRevision = 1;
+    private ulong _recordRevision;
+    private ulong _buildingShellRevision = 1;
     private ulong _directionalShadowTopologyRevision = 1;
     private DirectionalShadowTransformChange[]? _directionalShadowTransformChanges;
     private Dictionary<RenderProjectionId, DirectionalShadowPartPoseSnapshot>?
@@ -253,6 +255,7 @@ internal sealed class ArchRenderScene : IRenderScene, IRenderSceneQuerySource
         ResetDirectionalShadowTransformChanges();
         Generation = replacementGeneration;
         AdvanceIndexRevision();
+        AdvanceBuildingShellRevision();
         AdvanceDirectionalShadowTopologyRevision();
     }
 
@@ -312,6 +315,35 @@ internal sealed class ArchRenderScene : IRenderScene, IRenderSceneQuerySource
     {
         EnsureQueryGeneration(generation);
         return _indexRevision;
+    }
+
+    ulong IRenderSceneQuerySource.GetBuildingShellRevision(
+        RenderSceneGeneration generation)
+    {
+        EnsureQueryGeneration(generation);
+        return _buildingShellRevision;
+    }
+
+    bool IRenderSceneQuerySource.TryGetRevisionByLocalEntityId(
+        RenderSceneGeneration generation,
+        uint localEntityId,
+        out RenderProjectionId id,
+        out RenderOwnerIncarnation ownerIncarnation,
+        out ulong revision)
+    {
+        EnsureQueryGeneration(generation);
+        if (_byLocalEntityId.TryGetValue(localEntityId, out id)
+            && _entries.TryGetValue(id, out SceneEntry entry))
+        {
+            ownerIncarnation = entry.OwnerIncarnation;
+            revision = entry.Revision;
+            return true;
+        }
+
+        id = default;
+        ownerIncarnation = default;
+        revision = 0;
+        return false;
     }
 
     ulong IRenderSceneQuerySource.GetDirectionalShadowTopologyRevision(
@@ -529,7 +561,9 @@ internal sealed class ArchRenderScene : IRenderScene, IRenderSceneQuerySource
             {
                 RenderProjectionRecord prior = ReadRecord(in existing);
                 WriteRecord(existing.Entity, in record);
+                _entries[record.Id] = existing with { Revision = NextRecordRevision() };
                 UpdateIndices(in prior, in record);
+                NoteBuildingShellChange(in prior, in record);
                 if (HasRefreshableDirectionalShadowTransforms(record.ProjectionClass))
                 {
                     if (!TransformBitsEqual(prior.Transform, record.Transform))
@@ -553,9 +587,12 @@ internal sealed class ArchRenderScene : IRenderScene, IRenderSceneQuerySource
         _entries[record.Id] = new SceneEntry(
             entity,
             record.OwnerIncarnation,
-            record.ProjectionClass);
+            record.ProjectionClass,
+            NextRecordRevision());
         IncrementCount(record.ProjectionClass);
         AddToIndices(in record);
+        if (record.EntityPayload.IsBuildingShell)
+            AdvanceBuildingShellRevision();
         SynchronizeDirectionalShadowPartPose(in record);
         result.Applied++;
         result.Registered++;
@@ -614,7 +651,9 @@ internal sealed class ArchRenderScene : IRenderScene, IRenderSceneQuerySource
         }
 
         RenderProjectionRecord current = ReadRecord(in entry);
+        _entries[record.Id] = entry with { Revision = NextRecordRevision() };
         UpdateIndices(in prior, in current);
+        NoteBuildingShellChange(in prior, in current);
         if (HasRefreshableDirectionalShadowTransforms(current.ProjectionClass))
         {
             if (kind is RenderProjectionDeltaKind.UpdateTransform
@@ -746,6 +785,8 @@ internal sealed class ArchRenderScene : IRenderScene, IRenderSceneQuerySource
     private void Destroy(in SceneEntry entry)
     {
         RenderProjectionRecord record = ReadRecord(in entry);
+        if (record.EntityPayload.IsBuildingShell)
+            AdvanceBuildingShellRevision();
         _directionalShadowPartPoses?.Remove(record.Id);
         RemoveFromIndices(in record);
         _world.Destroy(entry.Entity);
@@ -1103,6 +1144,36 @@ internal sealed class ArchRenderScene : IRenderScene, IRenderSceneQuerySource
             _dirty.Add(record.Id);
     }
 
+    private ulong NextRecordRevision()
+    {
+        if (_recordRevision == ulong.MaxValue)
+        {
+            throw new InvalidOperationException(
+                "Render-scene record revision space was exhausted.");
+        }
+
+        return ++_recordRevision;
+    }
+
+    private void NoteBuildingShellChange(
+        in RenderProjectionRecord prior,
+        in RenderProjectionRecord current)
+    {
+        if (prior.EntityPayload.IsBuildingShell || current.EntityPayload.IsBuildingShell)
+            AdvanceBuildingShellRevision();
+    }
+
+    private void AdvanceBuildingShellRevision()
+    {
+        if (_buildingShellRevision == ulong.MaxValue)
+        {
+            throw new InvalidOperationException(
+                "Render-scene building-shell revision space was exhausted.");
+        }
+
+        _buildingShellRevision++;
+    }
+
     private void AdvanceIndexRevision()
     {
         if (_indexRevision == ulong.MaxValue)
@@ -1385,7 +1456,8 @@ internal sealed class ArchRenderScene : IRenderScene, IRenderSceneQuerySource
     private readonly record struct SceneEntry(
         Entity Entity,
         RenderOwnerIncarnation OwnerIncarnation,
-        RenderProjectionClass ProjectionClass);
+        RenderProjectionClass ProjectionClass,
+        ulong Revision);
 
     private readonly record struct ProjectionLookupSlotEstimate(
         int HashCode,

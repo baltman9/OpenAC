@@ -1065,6 +1065,102 @@ public sealed class ArchRenderSceneTests
     }
 
 
+    [Fact]
+    public void TryGetRevisionByLocalEntityId_MovesOnlyWhenThatRecordIsWritten()
+    {
+        RenderSceneGeneration generation = Generation(1);
+        using var scene = new ArchRenderScene(generation);
+        RenderProjectionRecord first = WithLocalEntityId(
+            Record(id: 10, incarnation: 1, RenderProjectionClass.OutdoorStatic, x: 1),
+            0x1001);
+        RenderProjectionRecord second = WithLocalEntityId(
+            Record(id: 11, incarnation: 1, RenderProjectionClass.OutdoorStatic, x: 2),
+            0x1002);
+        scene.Apply(
+        [
+            RenderProjectionDelta.Register(generation, 1, first),
+            RenderProjectionDelta.Register(generation, 2, second),
+        ]);
+        RenderSceneQuery query = scene.OpenQuery();
+
+        Assert.True(query.TryGetRevisionByLocalEntityId(
+            0x1001, out RenderProjectionId firstId, out RenderOwnerIncarnation firstOwner, out ulong firstRevision));
+        Assert.Equal(first.Id, firstId);
+        Assert.Equal(first.OwnerIncarnation, firstOwner);
+        Assert.NotEqual(0UL, firstRevision);
+        Assert.True(query.TryGetRevisionByLocalEntityId(0x1002, out _, out _, out ulong secondRevision));
+        Assert.NotEqual(firstRevision, secondRevision);
+
+        scene.Apply(
+        [
+            RenderProjectionDelta.Update(
+                RenderProjectionDeltaKind.UpdateTransform,
+                generation,
+                3,
+                first with { Transform = new RenderTransform(Matrix4x4.CreateTranslation(9, 2, 3)) }),
+        ]);
+        Assert.True(query.TryGetRevisionByLocalEntityId(0x1001, out _, out _, out ulong firstAfterUpdate));
+        Assert.True(query.TryGetRevisionByLocalEntityId(0x1002, out _, out _, out ulong secondAfterUpdate));
+        Assert.True(firstAfterUpdate > firstRevision);
+        Assert.Equal(secondRevision, secondAfterUpdate);
+
+        // Re-registering in place is a write too; unregistering removes the mapping.
+        scene.Apply([RenderProjectionDelta.Register(generation, 4, first with { Transform = new RenderTransform(Matrix4x4.CreateTranslation(1, 1, 1)) })]);
+        Assert.True(query.TryGetRevisionByLocalEntityId(0x1001, out _, out _, out ulong firstAfterRegister));
+        Assert.True(firstAfterRegister > firstAfterUpdate);
+        scene.Apply([RenderProjectionDelta.Unregister(generation, 5, second.Id, second.OwnerIncarnation)]);
+        Assert.False(query.TryGetRevisionByLocalEntityId(0x1002, out _, out _, out _));
+    }
+
+    [Fact]
+    public void BuildingShellRevision_AdvancesOnlyForBuildingShellRecords()
+    {
+        RenderSceneGeneration generation = Generation(1);
+        using var scene = new ArchRenderScene(generation);
+        RenderProjectionRecord ordinary = WithLocalEntityId(
+            Record(id: 20, incarnation: 1, RenderProjectionClass.OutdoorStatic, x: 1),
+            0x2001);
+        RenderProjectionRecord shell = WithLocalEntityId(
+            Record(id: 21, incarnation: 1, RenderProjectionClass.OutdoorStatic, x: 2),
+            0x2002) with
+        {
+            EntityPayload = new RenderEntityPayload() with { IsBuildingShell = true },
+        };
+        RenderSceneQuery query = scene.OpenQuery();
+        ulong initial = query.BuildingShellRevision;
+
+        scene.Apply([RenderProjectionDelta.Register(generation, 1, ordinary)]);
+        Assert.Equal(initial, query.BuildingShellRevision);
+
+        scene.Apply([RenderProjectionDelta.Register(generation, 2, shell)]);
+        ulong afterShellRegister = query.BuildingShellRevision;
+        Assert.True(afterShellRegister > initial);
+
+        scene.Apply(
+        [
+            RenderProjectionDelta.Update(
+                RenderProjectionDeltaKind.UpdateTransform,
+                generation,
+                3,
+                ordinary with { Transform = new RenderTransform(Matrix4x4.CreateTranslation(5, 2, 3)) }),
+        ]);
+        Assert.Equal(afterShellRegister, query.BuildingShellRevision);
+
+        scene.Apply(
+        [
+            RenderProjectionDelta.Update(
+                RenderProjectionDeltaKind.UpdateTransform,
+                generation,
+                4,
+                shell with { Transform = new RenderTransform(Matrix4x4.CreateTranslation(6, 2, 3)) }),
+        ]);
+        ulong afterShellUpdate = query.BuildingShellRevision;
+        Assert.True(afterShellUpdate > afterShellRegister);
+
+        scene.Apply([RenderProjectionDelta.Unregister(generation, 5, shell.Id, shell.OwnerIncarnation)]);
+        Assert.True(query.BuildingShellRevision > afterShellUpdate);
+    }
+
     private static RenderProjectionRecord WithLocalEntityId(
         RenderProjectionRecord record,
         uint localEntityId) =>

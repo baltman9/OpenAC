@@ -15,6 +15,9 @@ internal sealed class FarLandscapeDrawCache(
     {
         public RenderProjectionRecord Record = record;
         public readonly uint CellId = cellId;
+        /// <summary>The scene's write revision of <see cref="Record"/> when it
+        /// was classified; 0 when the world does not report revisions.</summary>
+        public ulong Revision;
         public readonly List<WbDrawDispatcher.WalkClassifiedBatch> Batches = new();
         public readonly List<WbDrawDispatcher.WalkCachedPart> Parts = new();
         public bool[] Visible = [];
@@ -206,7 +209,10 @@ internal sealed class FarLandscapeDrawCache(
             {
                 if (!seen.Add(record.Id))
                     continue;
-                var entity = new Entity(record, cellId);
+                var entity = new Entity(record, cellId)
+                {
+                    Revision = ReadRevision(record.Source.LocalEntityId),
+                };
                 retry |= ClassifyEntity(entity, records.TupleLandblockId);
                 entry.Entities.Add(entity);
             }
@@ -216,13 +222,39 @@ internal sealed class FarLandscapeDrawCache(
         RebuildCount++;
     }
 
+    private ulong ReadRevision(uint localEntityId) =>
+        world.TryGetCurrentProjectionRevision(localEntityId, out _, out _, out ulong revision)
+            ? revision
+            : 0;
+
     private void RefreshEntities(Entry entry)
     {
         bool changed = false;
         bool retry = false;
         foreach (Entity entity in entry.Entities)
         {
-            if (!world.TryGetCurrentProjection(entity.Record.Source.LocalEntityId, out var current)
+            uint localEntityId = entity.Record.Source.LocalEntityId;
+            if (entity.Revision != 0)
+            {
+                // The scene stamps every record write with a revision, so an
+                // unchanged revision proves the record is bit-identical to the
+                // one classified here; only changed or live records are read.
+                if (!world.TryGetCurrentProjectionRevision(
+                        localEntityId,
+                        out RenderProjectionId id,
+                        out RenderOwnerIncarnation ownerIncarnation,
+                        out ulong revision)
+                    || id != entity.Record.Id
+                    || ownerIncarnation != entity.Record.OwnerIncarnation)
+                {
+                    Rebuild(entry);
+                    return;
+                }
+                if (revision == entity.Revision && !IsDynamic(entity.Record))
+                    continue;
+                entity.Revision = revision;
+            }
+            if (!world.TryGetCurrentProjection(localEntityId, out var current)
                 || current.Id != entity.Record.Id
                 || current.OwnerIncarnation != entity.Record.OwnerIncarnation)
             {

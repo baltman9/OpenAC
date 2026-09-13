@@ -23,11 +23,32 @@ public sealed partial class WalkStaticStreamPopulatorTests
         public readonly Dictionary<uint, RenderProjectionRecord[]> Cells = new();
         public readonly Dictionary<uint, RenderProjectionRecord> Current = new();
         public bool SupportsRevisions = true;
+        public bool SupportsRecordRevisions;
+        public readonly Dictionary<uint, ulong> RecordRevisions = new();
         public bool IsComplete = true;
         public int Reads;
+        public int CurrentReads;
         public uint? ThrowOnceForCell;
         public ulong? GetOutdoorCellRenderRevision(uint cellId) => SupportsRevisions ? Revisions.GetValueOrDefault(cellId) : null;
-        public bool TryGetCurrentProjection(uint id, out RenderProjectionRecord record) => Current.TryGetValue(id, out record);
+        public bool TryGetCurrentProjection(uint id, out RenderProjectionRecord record)
+        {
+            CurrentReads++;
+            return Current.TryGetValue(id, out record);
+        }
+        public bool TryGetCurrentProjectionRevision(uint id, out RenderProjectionId projectionId, out RenderOwnerIncarnation ownerIncarnation, out ulong revision)
+        {
+            if (SupportsRecordRevisions && Current.TryGetValue(id, out RenderProjectionRecord record))
+            {
+                projectionId = record.Id;
+                ownerIncarnation = record.OwnerIncarnation;
+                revision = RecordRevisions.GetValueOrDefault(id, 1UL);
+                return true;
+            }
+            projectionId = default;
+            ownerIncarnation = default;
+            revision = 0;
+            return false;
+        }
         public void Set(params RenderProjectionRecord[] records)
         {
             Cells[RetainedCell] = records;
@@ -93,6 +114,47 @@ public sealed partial class WalkStaticStreamPopulatorTests
             return stream;
         }
         finally { fx.Dispatcher.EndWalkPartFrame(); }
+    }
+
+    [Fact]
+    public void RetainedCells_UnchangedRecordRevisionsSkipRecordReadsAndReclassification()
+    {
+        using var fx = new DispatcherFixture();
+        InstallRetainedMesh(fx);
+        InstallRetainedMesh(fx, RetainedMesh + 1, 12);
+        var world = new RetainedWorld { SupportsRecordRevisions = true };
+        world.Set(RetainedRecord(1), RetainedRecord(2), RetainedRecord(3));
+        var cache = new FarLandscapeDrawCache(fx.Dispatcher, world);
+        var first = AppendRetainedFrame(fx, cache);
+        Assert.Equal(new[] { 3u, 3u, 3u }, first.Keys.Select(key => key.FirstIndex));
+        int classified = cache.EntityClassificationCount;
+        int currentReads = world.CurrentReads;
+
+        var second = AppendRetainedFrame(fx, cache);
+        Assert.Equal(first.Keys, second.Keys);
+        Assert.Equal(first.Transforms, second.Transforms);
+        Assert.Equal(classified, cache.EntityClassificationCount);
+        Assert.Equal(currentReads, world.CurrentReads);
+
+        // The revision is the contract: a record rewritten without a bump is unchanged.
+        world.Current[2] = RetainedRecord(2, RetainedMesh + 1);
+        Assert.Equal(new[] { 3u, 3u, 3u }, AppendRetainedFrame(fx, cache).Keys.Select(key => key.FirstIndex));
+        Assert.Equal(classified, cache.EntityClassificationCount);
+        Assert.Equal(currentReads, world.CurrentReads);
+
+        world.RecordRevisions[2] = 2;
+        var updated = AppendRetainedFrame(fx, cache);
+        Assert.Equal(new[] { 3u, 3u, 12u }, updated.Keys.Select(key => key.FirstIndex));
+        Assert.Equal(classified + 1, cache.EntityClassificationCount);
+        Assert.Equal(currentReads + 1, world.CurrentReads);
+        Assert.Equal(1, cache.RebuildCount);
+
+        // A replaced owner incarnation still forces the entry to rebuild.
+        RenderProjectionRecord reincarnated = RetainedRecord(3) with { OwnerIncarnation = RenderOwnerIncarnation.FromRaw(2) };
+        world.Cells[RetainedCell] = [RetainedRecord(1), RetainedRecord(2, RetainedMesh + 1), reincarnated];
+        world.Current[3] = reincarnated;
+        Assert.Equal(new[] { 3u, 3u, 12u }, AppendRetainedFrame(fx, cache).Keys.Select(key => key.FirstIndex));
+        Assert.Equal(2, cache.RebuildCount);
     }
 
     [Fact]

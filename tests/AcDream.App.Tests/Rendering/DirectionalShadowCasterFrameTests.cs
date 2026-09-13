@@ -780,6 +780,21 @@ public sealed class DirectionalShadowCasterFrameTests
 
         public ulong GetIndexRevision(RenderSceneGeneration generation) => 1;
 
+        public ulong GetBuildingShellRevision(RenderSceneGeneration generation) => 1;
+
+        public bool TryGetRevisionByLocalEntityId(
+            RenderSceneGeneration generation,
+            uint localEntityId,
+            out RenderProjectionId id,
+            out RenderOwnerIncarnation ownerIncarnation,
+            out ulong revision)
+        {
+            id = default;
+            ownerIncarnation = default;
+            revision = 0;
+            return false;
+        }
+
         public ulong GetDirectionalShadowTopologyRevision(
             RenderSceneGeneration generation) => TopologyRevision;
 

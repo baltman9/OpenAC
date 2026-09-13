@@ -31,6 +31,10 @@ internal sealed class WalkProductionWorldData : IWalkFrameWorldData
     private RenderProjectionRecord[] _arena = new RenderProjectionRecord[4096];
     private int _arenaLength;
 
+    private bool _shellBucketsBuilt;
+    private RenderSceneGeneration _shellBucketGeneration;
+    private ulong _shellBucketRevision;
+
     internal WalkProductionWorldData(
         WalkBuildingRegistry buildings,
         ShadowObjectRegistry shadows)
@@ -50,6 +54,18 @@ internal sealed class WalkProductionWorldData : IWalkFrameWorldData
     public bool TryGetCurrentProjection(uint localEntityId, out RenderProjectionRecord record) =>
         _scene.TryGetByLocalEntityId(localEntityId, out record);
 
+    public bool TryGetCurrentProjectionRevision(
+        uint localEntityId,
+        out RenderProjectionId id,
+        out RenderOwnerIncarnation ownerIncarnation,
+        out ulong revision) =>
+        _scene.TryGetRevisionByLocalEntityId(
+            localEntityId, out id, out ownerIncarnation, out revision);
+
+    /// <summary>How many times the building-shell buckets were rebuilt from the
+    /// scene; they persist across frames until a shell record changes.</summary>
+    internal int BuildingShellRebuildCount { get; private set; }
+
     internal void BeginFrame(
         RenderSceneQuery scene,
         uint tupleLandblockId,
@@ -68,8 +84,25 @@ internal sealed class WalkProductionWorldData : IWalkFrameWorldData
         _arenaLength = 0;
         UnregisteredRenderMembershipCount = 0;
         _unregisteredEntitiesThisFrame.Clear();
+
+        // Building shells only change when a shell record registers, moves,
+        // or unregisters; the scene's shell revision says when. Every other
+        // frame keeps the last buckets instead of copying the whole outdoor
+        // static index to find a handful of shells.
+        ulong shellRevision = _scene.BuildingShellRevision;
+        if (_shellBucketsBuilt
+            && _shellBucketGeneration == _scene.Generation
+            && _shellBucketRevision == shellRevision)
+        {
+            return;
+        }
+
         foreach (List<RenderProjectionRecord> bucket in _shellsByAnchor.Values)
             bucket.Clear();
+        _shellBucketsBuilt = true;
+        _shellBucketGeneration = _scene.Generation;
+        _shellBucketRevision = shellRevision;
+        BuildingShellRebuildCount++;
 
         int required = _scene.IndexCounts.For(RenderSceneIndex.OutdoorStatic);
         if (required > _sweepScratch.Length)

@@ -127,12 +127,26 @@ public sealed partial class WbDrawDispatcher
         out uint indoorFlag,
         out Vector2 selection)
     {
-        RenderInstanceCandidate entity = RenderInstanceCandidate.FromProjection(
-            in record, tupleLandblockId, animated: false);
-        ResolveWalkLightSet(in entity, out lights, out bool indoor);
+        // Point lights only reach indoor objects, so an outdoor record needs
+        // neither the candidate projection nor the light selection.
+        uint parentCellId = record.Source.ParentCellId;
+        bool indoor = IndoorObjectReceivesTorches(
+            parentCellId == 0 ? null : parentCellId);
+        if (indoor)
+        {
+            RenderInstanceCandidate entity = RenderInstanceCandidate.FromProjection(
+                in record, tupleLandblockId, animated: false);
+            ResolveWalkLightSet(in entity, out lights, out _);
+        }
+        else
+        {
+            lights = InstanceLightSet.Disabled;
+        }
         indoorFlag = indoor ? 1u : 0u;
         selection = _selectionLighting?.TryGetLighting(
-            entity.ServerGuid, entity.LocalEntityId, out RetailSelectionLighting lighting) == true
+            record.Source.ServerGuid,
+            record.Source.LocalEntityId,
+            out RetailSelectionLighting lighting) == true
             ? new Vector2(lighting.Luminosity, lighting.Diffuse)
             : new Vector2(0f, 1f);
     }
