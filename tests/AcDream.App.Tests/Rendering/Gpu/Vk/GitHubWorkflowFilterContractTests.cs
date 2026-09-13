@@ -45,6 +45,39 @@ public sealed class GitHubWorkflowFilterContractTests
         string expectedMac = string.Join('&', expected.Split('&').Where(term =>
             term is not "Lane!=MacOS" and not "Lane!=Unix"));
         Assert.Equal(expectedMac, mac.Groups["filter"].Value);
+
+        // osx-x64: the Intel job runs the same macOS lane filter.
+        string intelBody = JobBody(workflow, "macos-intel", "vulkan-hardware");
+        Match intel = Regex.Match(
+            intelBody,
+            "\\$filter\\s*=\\s*'(?<filter>[^']+)'",
+            RegexOptions.CultureInvariant);
+        Assert.True(intel.Success, "Could not locate the Intel macOS test filter in ci.yml.");
+        Assert.Equal(expectedMac, intel.Groups["filter"].Value);
+    }
+
+    [Fact]
+    public void ReleaseJob_DoesNotHardGateOnMacosIntel()
+    {
+        string workflow = File.ReadAllText(Path.Combine(
+            RepositoryRoot(), ".github", "workflows", "ci.yml"));
+        int start = workflow.IndexOf("\n  release:", StringComparison.Ordinal);
+        Assert.True(start >= 0, "Could not locate the release job.");
+        int stepsStart = workflow.IndexOf("\n    steps:", start, StringComparison.Ordinal);
+        Assert.True(stepsStart > start, "Could not locate the release job's steps.");
+        string header = workflow[start..stepsStart];
+
+        Assert.Contains("!cancelled()", header, StringComparison.Ordinal);
+        foreach (string required in new[] { "windows-gate", "linux-portable", "macos-portable", "vulkan-hardware" })
+            Assert.Contains($"needs.{required}.result == 'success'", header, StringComparison.Ordinal);
+        Assert.DoesNotContain("needs.macos-intel.result", header, StringComparison.Ordinal);
+
+        // osx-x64: a failed Intel attach never fails the release job.
+        int attach = workflow.IndexOf("- name: Attach the Intel macOS assets", start, StringComparison.Ordinal);
+        Assert.True(attach > start, "Could not locate the Intel attach step.");
+        int nextStep = workflow.IndexOf("\n      - ", attach, StringComparison.Ordinal);
+        string attachStep = nextStep > attach ? workflow[attach..nextStep] : workflow[attach..];
+        Assert.Contains("continue-on-error: true", attachStep, StringComparison.Ordinal);
     }
 
     [Fact]
