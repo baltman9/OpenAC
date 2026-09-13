@@ -423,12 +423,6 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 return;
             }
 
-            // The controlled graph deliberately starts life as a native .met
-            // in plugin imports. Loading it here exercises the same importer a
-            // player uses and leaves the ordinary proof's autostart untouched.
-            if (rynthify.Enabled)
-                Stage("/vt meta load " + RynthifyMetaProfileName + ".met");
-
             // The channels came up with autostart, before the first pass.
             // Re-asserting them from here would be harmless and would also
             // be too late, so this only gives the autostart edge a tick or
@@ -436,81 +430,11 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
             Pump(TimeSpan.FromSeconds(3d));
             Stage("/vt log");
 
-            // ---- P2: the three fixture profiles are loaded ---------------------
-            {
-                string[] pluginMessages = PluginMessages(diagnosticsOutput.ToString());
-                string[] autostartLines = pluginMessages
-                    .Where(static line => line.Contains("Autostart:", StringComparison.Ordinal))
-                    .ToArray();
-                string[] chat = observed.SnapshotChat();
-                bool NamesProfile(string profile) =>
-                    pluginMessages.Concat(chat).Any(line =>
-                        line.Contains(profile, StringComparison.OrdinalIgnoreCase)
-                        && line.Contains("oaded", StringComparison.Ordinal));
-                var selectedProfiles = new List<string>
-                {
-                    SettingsProfileName + ".usd",
-                    rynthify.LootProfileName + ".utl",
-                    RouteProfileName + ".af",
-                };
-                if (rynthify.Enabled)
-                    selectedProfiles.Add(RynthifyMetaProfileName + ".af");
-                string[] unreported = selectedProfiles
-                    .Where(profile =>
-                    {
-                        string bare = Path.GetFileNameWithoutExtension(profile);
-                        if (NamesProfile(bare))
-                            return false;
-                        return !rynthify.Enabled
-                            || !bare.Equals(RynthifyMetaProfileName, StringComparison.Ordinal)
-                            || !pluginMessages.Concat(chat).Any(line =>
-                                line.Contains(
-                                    "Imported VTank Meta profile",
-                                    StringComparison.Ordinal)
-                                && line.Contains(bare, StringComparison.Ordinal));
-                    })
-                    .ToArray();
-                if (unreported.Length == 0 && autostartLines.Length == 0)
-                {
-                    ledger.Pass(
-                        "P2",
-                        "the fixture settings, loot and route profiles are loaded",
-                        "each profile reported a load line");
-                }
-                else
-                {
-                    ledger.Fail(
-                        "P2",
-                        "the fixture settings, loot and route profiles are loaded",
-                        unreported.Length > 0
-                            ? $"no load line for: {string.Join(", ", unreported)}"
-                            : "the plugin reported an autostart problem",
-                        (autostartLines.Length > 0
-                            ? "autostart lines:" + Environment.NewLine
-                                + Indent(autostartLines) + Environment.NewLine
-                            : string.Empty)
-                            + Evidence());
-                }
-            }
-
             string? rynthBeforeBoost = null;
             string? rynthApproach = null;
             bool rynthArenaReach = false;
-            if (rynthify.Enabled)
-            {
-                rynthBeforeBoost = ReadOption("LootPriorityBoost");
-                // This is a controlled-arena reach, not a compatibility claim
-                // about the owner's ordinary approach profile. It keeps both
-                // staged corpses eligible after the character is stepped away.
-                Stage("/vt opt set CorpseApproachRange-Max 0.08");
-                rynthApproach = ReadOption("CorpseApproachRange-Max");
-                rynthArenaReach = double.TryParse(
-                    rynthApproach,
-                    NumberStyles.Float,
-                    CultureInfo.InvariantCulture,
-                    out double approachLandblocks)
-                    && (approachLandblocks * 240d) > 15d;
-            }
+            string? rynthSelectedBeforeStart = null;
+            VtProofProfileBinding rynthBindingBeforeStart = default;
 
             // ---- stage the arena ----------------------------------------------
             // The proof character is a privileged one, and the server spells
@@ -522,7 +446,158 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
             // as an ordinary player, which drops the marker from the name
             // everywhere; it is remembered across logins, so the run asks for
             // it every time and it costs nothing once it is set.
-            Stage("@cloak player");
+            IAutomationSurface profileAutomation =
+                session.Plugins.Host.Automation;
+            string identityBefore = VtProofProfileIdentity.Describe(profileAutomation);
+            // The automation surface can become available before its complete
+            // character identity arrives, and the cloak command may also
+            // change the displayed name. RYNTHIFY waits for that final identity
+            // before making its one deliberate set of profile selections.
+            int chatBeforeStableProfiles = observed.ChatCount;
+            bool identityStable = true;
+            if (rynthify.Enabled)
+            {
+                Stage("@cloak player");
+                identityStable = WaitUntil(
+                    TimeSpan.FromSeconds(10d),
+                    () => VtProofProfileIdentity.IsReady(
+                        profileAutomation,
+                        plainCharacter));
+                staged.Add(
+                    $"profile identity {identityBefore} -> "
+                        + VtProofProfileIdentity.Describe(profileAutomation)
+                        + $"; stable={identityStable}");
+                chatBeforeStableProfiles = observed.ChatCount;
+                if (identityStable)
+                {
+                    // RYNTHIFY makes one deliberate selection after the final
+                    // character binding. The ordinary proof continues to
+                    // judge the selections made by autostart.
+                    Stage("/vt settings load " + SettingsProfileName + ".usd");
+                    Stage("/vt loot load " + rynthify.LootProfileName + ".utl");
+                    Stage("/vt nav load " + RouteProfileName + ".af");
+                    // The controlled graph deliberately starts life as a native
+                    // .met in plugin imports. Loading it here exercises the same
+                    // importer a player uses, after character rebinding is done.
+                    Stage("/vt meta load " + RynthifyMetaProfileName + ".met");
+                    rynthSelectedBeforeStart = ReadMetaProfile();
+                    rynthBindingBeforeStart = VtProofProfileBinding.Read(
+                        vtankRoot,
+                        profileAutomation.Character.WorldName,
+                        profileAutomation.Character.Name);
+                    rynthBeforeBoost = ReadOption("LootPriorityBoost");
+                    // This is a controlled-arena reach, not a compatibility
+                    // claim about the owner's ordinary approach profile.
+                    Stage("/vt opt set CorpseApproachRange-Max 0.08");
+                    rynthApproach = ReadOption("CorpseApproachRange-Max");
+                    rynthArenaReach = double.TryParse(
+                        rynthApproach,
+                        NumberStyles.Float,
+                        CultureInfo.InvariantCulture,
+                        out double approachLandblocks)
+                        && (approachLandblocks * 240d) > 15d;
+                }
+            }
+
+            // ---- P2: the selected fixture profiles are active -----------------
+            {
+                string[] pluginMessages = PluginMessages(diagnosticsOutput.ToString());
+                string[] autostartLines = pluginMessages
+                    .Where(static line => line.Contains("Autostart:", StringComparison.Ordinal))
+                    .ToArray();
+                string[] profileChat = rynthify.Enabled
+                    ? observed.SnapshotChat().Skip(chatBeforeStableProfiles).ToArray()
+                    : observed.SnapshotChat();
+                bool NamesProfile(string profile) =>
+                    pluginMessages.Concat(profileChat).Any(line =>
+                        line.Contains(profile, StringComparison.OrdinalIgnoreCase)
+                        && (line.Contains("oaded", StringComparison.Ordinal)
+                            || line.Contains("Imported", StringComparison.Ordinal)));
+                var selectedProfiles = new List<string>
+                {
+                    SettingsProfileName + ".usd",
+                    rynthify.LootProfileName + ".utl",
+                    RouteProfileName + ".af",
+                };
+                string[] unreported = selectedProfiles
+                    .Where(profile => !NamesProfile(
+                        Path.GetFileNameWithoutExtension(profile)))
+                    .ToArray();
+                bool selectedMeta = !rynthify.Enabled
+                    || string.Equals(
+                        rynthSelectedBeforeStart,
+                        RynthifyMetaProfileName,
+                        StringComparison.Ordinal);
+                bool selectedBinding = !rynthify.Enabled
+                    || rynthBindingBeforeStart.Matches(
+                        SettingsProfileName + ".usd",
+                        rynthify.LootProfileName + ".utl",
+                        "navs/" + RouteProfileName + ".af",
+                        "metas/" + RynthifyMetaProfileName + ".af");
+                if (identityStable
+                    && unreported.Length == 0
+                    && selectedMeta
+                    && selectedBinding
+                    && autostartLines.Length == 0)
+                {
+                    ledger.Pass(
+                        "P2",
+                        "the fixture settings, loot and route profiles are loaded",
+                        rynthify.Enabled
+                            ? "stable character identity; selected binding="
+                                + $"{rynthBindingBeforeStart}; "
+                                + $"meta query={rynthSelectedBeforeStart}"
+                            : "each autostart profile reported a load line");
+                }
+                else
+                {
+                    string problem = !identityStable
+                        ? "plain-player identity was not observed"
+                        : unreported.Length > 0
+                            ? $"no post-identity load line for: {string.Join(", ", unreported)}"
+                            : !selectedMeta
+                                ? $"selected meta was {rynthSelectedBeforeStart ?? "unread"}"
+                                : !selectedBinding
+                                    ? $"selected binding was {rynthBindingBeforeStart}"
+                                : "the plugin reported an autostart problem";
+                    ledger.Fail(
+                        "P2",
+                        "the fixture settings, loot and route profiles are loaded",
+                        problem,
+                        (autostartLines.Length > 0
+                            ? "autostart lines:" + Environment.NewLine
+                                + Indent(autostartLines) + Environment.NewLine
+                            : string.Empty)
+                            + Evidence());
+                }
+            }
+
+            if (rynthify.Enabled && ledger.Failed("P2"))
+            {
+                rynthifyProgress.MetaEvidence =
+                    $"profile readiness failed; identity {identityBefore} -> "
+                    + VtProofProfileIdentity.Describe(profileAutomation)
+                    + $"; selected before start="
+                    + (rynthSelectedBeforeStart ?? "unread");
+                foreach ((string id, string title) in RemainingMilestones("P2"))
+                {
+                    ledger.NotReached(
+                        id,
+                        title,
+                        "the opt-in profile identity or selection was not ready");
+                }
+                FinishAndReport(
+                    session,
+                    statusPath,
+                    ledger,
+                    Evidence,
+                    output,
+                    rynthifyProgress);
+                return;
+            }
+
+            if (!rynthify.Enabled)
+                Stage("@cloak player");
 
             // The proof runs against a live server and has to leave it the way
             // it found it. Every death used to leave a corpse standing in the
@@ -659,8 +734,16 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                         StringComparison.Ordinal));
                 string? state = ReadMetaState();
                 string? selected = ReadMetaProfile();
+                VtProofProfileBinding bindingAfterStart = VtProofProfileBinding.Read(
+                    vtankRoot,
+                    profileAutomation.Character.WorldName,
+                    profileAutomation.Character.Name);
                 rynthifyProgress.MetaExecuted = changed
                     && string.Equals(state, "RynthReady", StringComparison.Ordinal)
+                    && string.Equals(
+                        rynthSelectedBeforeStart,
+                        RynthifyMetaProfileName,
+                        StringComparison.Ordinal)
                     && string.Equals(
                         selected,
                         RynthifyMetaProfileName,
@@ -669,10 +752,13 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                         rynthBeforeBoost,
                         "False",
                         StringComparison.Ordinal)
+                    && bindingAfterStart.Equals(rynthBindingBeforeStart)
                     && rynthArenaReach;
                 rynthifyProgress.MetaEvidence =
                     $"native {RynthifyMetaProfileName}.met; selected="
+                    + $"{rynthSelectedBeforeStart ?? "unread"}->"
                     + $"{selected ?? "unread"}; state={state ?? "unread"}; "
+                    + $"binding={rynthBindingBeforeStart}->{bindingAfterStart}; "
                     + $"LootPriorityBoost={rynthBeforeBoost ?? "unread"}->"
                     + (changed ? "True" : ReadOption("LootPriorityBoost") ?? "unread")
                     + $"; controlled arena corpse approach={rynthApproach ?? "unread"}";
@@ -683,6 +769,26 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 rynthifyProgress.MetaEvidence =
                     $"native {RynthifyMetaProfileName}.met was imported, but the "
                     + "macro start was not observed; meta was not enabled";
+            }
+
+            if (rynthify.Enabled && !rynthifyProgress.MetaExecuted)
+            {
+                Stage("/vt stop");
+                foreach ((string id, string title) in RemainingMilestones("P2"))
+                {
+                    ledger.NotReached(
+                        id,
+                        title,
+                        "the opt-in native meta did not reach its required state and option");
+                }
+                FinishAndReport(
+                    session,
+                    statusPath,
+                    ledger,
+                    Evidence,
+                    output,
+                    rynthifyProgress);
+                return;
             }
 
             // ---- P3: buff spells are cast until nothing is due -----------------
@@ -860,13 +966,23 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 // that does not.
                 ILootAutomation lootSurface =
                     session.Plugins.Host.Automation.Loot;
+                PluginLootContainer[] RelevantCorpses() => lootSurface
+                    .CaptureCorpses(float.MaxValue)
+                    .Where(corpse => !rynthify.Enabled
+                        || rynthFightCorpseIds.Contains(corpse.ObjectId))
+                    .ToArray();
                 // The corpse has to be PLACED before there is anything to step
                 // away from: it falls a moment after the kill line, and the
                 // client learns where it lies a moment after that.
                 bool corpsePlaced = WaitUntil(
                     TimeSpan.FromSeconds(20d),
-                    () => lootSurface.CaptureCorpses(float.MaxValue)
-                        .Any(static corpse => corpse.HasPosition));
+                    () => rynthify.Enabled
+                        ? RelevantCorpses()
+                            .Where(static corpse => corpse.HasPosition)
+                            .Select(static corpse => corpse.ObjectId)
+                            .Distinct()
+                            .Count() >= 2
+                        : RelevantCorpses().Any(static corpse => corpse.HasPosition));
                 staged.Add($"corpse placed before the step -> {corpsePlaced}");
                 RuntimeMovementSnapshot stood =
                     session.Runtime.Movement.Snapshot;
@@ -874,7 +990,7 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                     .Automation.Navigation.Snapshot.Position;
                 if (VtProofArena.StepAwayFromCorpse(
                         standingAt,
-                        lootSurface.CaptureCorpses(float.MaxValue),
+                        RelevantCorpses(),
                         CorpseStepBackMeters,
                         out double awayX,
                         out double awayY))
@@ -890,14 +1006,19 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                     double wantedApart = CorpseStepBackMeters - 0.5d;
                     bool stepLanded = WaitUntil(
                         TimeSpan.FromSeconds(20d),
-                        () => lootSurface.CaptureCorpses(float.MaxValue)
-                            .Where(static corpse => corpse.HasPosition)
-                            .All(corpse => corpse.Distance >= wantedApart));
+                        () =>
+                        {
+                            PluginLootContainer[] placed = RelevantCorpses()
+                                .Where(static corpse => corpse.HasPosition)
+                                .ToArray();
+                            return (!rynthify.Enabled || placed.Length >= 2)
+                                && placed.All(corpse => corpse.Distance >= wantedApart);
+                        });
                     staged.Add(string.Create(
                         CultureInfo.InvariantCulture,
                         $"stepped {Math.Sqrt((awayX * awayX) + (awayY * awayY)):0.00} m away from the nearest corpse; "
                             + $"landed -> {stepLanded}; nearest corpse now "
-                            + $"{lootSurface.CaptureCorpses(float.MaxValue).Where(static c => c.HasPosition).Select(static c => (double)c.Distance).DefaultIfEmpty(-1d).Min():0.00} m"));
+                            + $"{RelevantCorpses().Where(static c => c.HasPosition).Select(static c => (double)c.Distance).DefaultIfEmpty(-1d).Min():0.00} m"));
                 }
                 else
                 {
@@ -910,6 +1031,7 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 // walk is not what this milestone is for.
                 var layAt = new Dictionary<uint, double>();
                 var pickupReceipts = new VtProofPickupReceipts();
+                int requiredCorpses = rynthify.Enabled ? 2 : 1;
                 void SampleLootState()
                 {
                     foreach (PluginLootContainer corpse in
@@ -927,50 +1049,96 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 // matters: a fast first pickup must retain the corpse that
                 // held its exact source item.
                 SampleLootState();
-                Stage("/vt opt set EnableLooting True", SampleLootState);
-                int requiredCorpses = rynthify.Enabled ? 2 : 1;
-                bool opened = WaitUntil(
-                    rynthify.Enabled
-                        ? TimeSpan.FromSeconds(180d)
-                        : TimeSpan.FromSeconds(120d),
-                    () =>
-                    {
-                        SampleLootState();
-                        string[] chat = Slice();
-                        return rynthify.Enabled
-                            ? VtProofLootEvidence.OpenedCorpseIds(chat).Count
-                                >= requiredCorpses
-                            : MentionsAny(chat, "LootCorpse: opening ");
-                    });
-                bool decided = opened
-                    && WaitUntil(
-                        TimeSpan.FromSeconds(45d),
-                        () =>
-                        {
-                            SampleLootState();
-                            return CountMentioning(Slice(), "LootDecision: ")
-                                >= requiredCorpses;
-                        });
-                bool taken = decided
-                    && WaitUntil(
+                string? activeApproach = rynthify.Enabled
+                    ? ReadOption("CorpseApproachRange-Max")
+                    : null;
+                bool hasActiveRange = double.TryParse(
+                    activeApproach,
+                    NumberStyles.Float,
+                    CultureInfo.InvariantCulture,
+                    out double activeApproachLandblocks);
+                double activeApproachMeters = hasActiveRange
+                    ? activeApproachLandblocks * 240d
+                    : -1d;
+                bool controlledRangeActive = hasActiveRange
+                    && Math.Abs(activeApproachMeters - 19.2d) < 0.01d;
+                PluginLootContainer[] beforeLoot = lootSurface
+                    .CaptureCorpses(float.MaxValue)
+                    .Where(corpse => rynthFightCorpseIds.Contains(corpse.ObjectId))
+                    .ToArray();
+                bool lootSetupReady = !rynthify.Enabled
+                    || (controlledRangeActive
+                        && rynthFightCorpseIds.Distinct().Count() >= requiredCorpses
+                        && beforeLoot.Select(static corpse => corpse.ObjectId)
+                            .Distinct().Count() >= requiredCorpses
+                        && beforeLoot.All(corpse => corpse.HasPosition
+                            && corpse.Distance <= activeApproachMeters));
+                string beforeLootEvidence = rynthify.Enabled
+                    ? $"active approach={activeApproach ?? "unread"} "
+                        + $"({activeApproachMeters:0.00}m); "
+                        + VtProofLootEvidence.DescribeCorpses(
+                            beforeLoot,
+                            rynthFightCorpseIds,
+                            lootSurface.CurrentContainerId,
+                            lootSurface.Appraisal)
+                    : string.Empty;
+                staged.Add("loot setup before enable -> "
+                    + (lootSetupReady ? "ready" : "not ready")
+                    + (rynthify.Enabled ? "; " + beforeLootEvidence : string.Empty));
+
+                bool opened = false;
+                bool decided = false;
+                bool taken = false;
+                if (lootSetupReady)
+                {
+                    Stage("/vt opt set EnableLooting True", SampleLootState);
+                    opened = WaitUntil(
                         rynthify.Enabled
-                            ? TimeSpan.FromSeconds(90d)
-                            : TimeSpan.FromSeconds(45d),
+                            ? TimeSpan.FromSeconds(180d)
+                            : TimeSpan.FromSeconds(120d),
                         () =>
                         {
                             SampleLootState();
+                            string[] chat = Slice();
                             return rynthify.Enabled
-                                ? pickupReceipts.CompletedCorpseIds.Count
-                                        >= requiredCorpses
-                                    && CountMentioning(Slice(), "LootPickup: took ")
-                                        >= requiredCorpses
-                                : MentionsAny(Slice(), "LootPickup: took ");
+                                ? VtProofLootEvidence.OpenedCorpseIds(chat).Count
+                                    >= requiredCorpses
+                                : MentionsAny(chat, "LootCorpse: opening ");
                         });
+                    decided = opened
+                        && WaitUntil(
+                            TimeSpan.FromSeconds(45d),
+                            () =>
+                            {
+                                SampleLootState();
+                                return CountMentioning(Slice(), "LootDecision: ")
+                                    >= requiredCorpses;
+                            });
+                    taken = decided
+                        && WaitUntil(
+                            rynthify.Enabled
+                                ? TimeSpan.FromSeconds(90d)
+                                : TimeSpan.FromSeconds(45d),
+                            () =>
+                            {
+                                SampleLootState();
+                                return rynthify.Enabled
+                                    ? pickupReceipts.CompletedCorpseIds.Count
+                                            >= requiredCorpses
+                                        && CountMentioning(Slice(), "LootPickup: took ")
+                                            >= requiredCorpses
+                                    : MentionsAny(Slice(), "LootPickup: took ");
+                            });
+                }
                 // The looter is put down for the rest of the run, the same
                 // reason the arena is cleared of monsters below: nothing after
                 // this milestone loots, and a looter still working a corpse
                 // would spend the route's window on it.
                 Stage("/vt opt set EnableLooting False", SampleLootState);
+                PluginLootContainer[] afterLoot = lootSurface
+                    .CaptureCorpses(float.MaxValue)
+                    .Where(corpse => rynthFightCorpseIds.Contains(corpse.ObjectId))
+                    .ToArray();
                 string[] lootChat = Slice();
                 uint[] openedCorpseIds =
                     [.. VtProofLootEvidence.OpenedCorpseIds(lootChat)];
@@ -987,7 +1155,13 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                             completedCorpseIds,
                             pickupReceipts.SuccessfulPickupCount);
                     rynthifyProgress.LootEvidence =
-                        $"opened corpse ids={VtProofLootEvidence.Hex(openedCorpseIds)}; "
+                        $"setup ready={lootSetupReady}; {beforeLootEvidence}; after: "
+                        + VtProofLootEvidence.DescribeCorpses(
+                            afterLoot,
+                            rynthFightCorpseIds,
+                            lootSurface.CurrentContainerId,
+                            lootSurface.Appraisal)
+                        + $"; opened corpse ids={VtProofLootEvidence.Hex(openedCorpseIds)}; "
                         + $"server-success pickup corpse ids="
                         + VtProofLootEvidence.Hex(completedCorpseIds)
                         + $"; acknowledgements={pickupReceipts.SuccessfulPickupCount}";
@@ -1024,7 +1198,9 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                         "P5",
                         "a corpse is opened and at least one loot decision is made",
                         !opened
-                            ? "no corpse was opened"
+                            ? VtProofLootEvidence.OpenedCountFailure(
+                                openedCorpseIds.Length,
+                                requiredCorpses)
                             : !decided
                                 ? "the corpse was opened but no item was judged"
                                 : !taken
@@ -2098,6 +2274,83 @@ internal readonly record struct RynthifyProofInput(bool Enabled, string? LootPat
     }
 }
 
+internal static class VtProofProfileIdentity
+{
+    internal static bool IsReady(
+        IAutomationSurface automation,
+        string expectedCharacter) =>
+        IsReady(
+            automation.IsAvailable,
+            automation.Character.Name,
+            automation.Character.WorldName,
+            expectedCharacter);
+
+    internal static bool IsReady(
+        bool automationAvailable,
+        string characterName,
+        string worldName,
+        string expectedCharacter) =>
+        automationAvailable
+        && string.Equals(
+            characterName,
+            expectedCharacter,
+            StringComparison.Ordinal)
+        && !string.IsNullOrWhiteSpace(worldName);
+
+    internal static string Describe(IAutomationSurface automation) =>
+        $"available={automation.IsAvailable}, name="
+        + $"'{automation.Character.Name}', world='{automation.Character.WorldName}'";
+}
+
+internal readonly record struct VtProofProfileBinding(
+    string? Settings,
+    string? Loot,
+    string? Route,
+    string? Meta)
+{
+    internal static VtProofProfileBinding Read(
+        string profileRoot,
+        string world,
+        string character)
+    {
+        if (string.IsNullOrWhiteSpace(world)
+            || string.IsNullOrWhiteSpace(character))
+        {
+            return default;
+        }
+        string path = Path.Combine(profileRoot, $"{world}_{character}.cdf");
+        if (!File.Exists(path))
+            return default;
+        string[] lines = File.ReadAllText(path)
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Split('\n');
+        if (lines.Length < 4
+            || !string.Equals(lines[0], "uTank2 CDF 1.0", StringComparison.Ordinal))
+        {
+            return default;
+        }
+        return new VtProofProfileBinding(
+            lines[1],
+            lines[2],
+            lines[3],
+            lines.Length >= 5 && lines[4].Length > 0 ? lines[4] : null);
+    }
+
+    internal bool Matches(
+        string settings,
+        string loot,
+        string route,
+        string meta) =>
+        string.Equals(Settings, settings, StringComparison.Ordinal)
+        && string.Equals(Loot, loot, StringComparison.Ordinal)
+        && string.Equals(Route, route, StringComparison.Ordinal)
+        && string.Equals(Meta, meta, StringComparison.Ordinal);
+
+    public override string ToString() =>
+        $"settings={Settings ?? "unread"},loot={Loot ?? "unread"},"
+        + $"route={Route ?? "unread"},meta={Meta ?? "unread"}";
+}
+
 /// <summary>The four extra outcomes required by the opt-in full workflow.</summary>
 internal sealed class RynthifyProofProgress
 {
@@ -2225,6 +2478,38 @@ internal static class VtProofLootEvidence
             .ToArray();
         return values.Length == 0 ? "(none)" : string.Join(",", values);
     }
+
+    internal static string OpenedCountFailure(int actual, int required) =>
+        $"{actual} of {required} required corpse(s) opened";
+
+    internal static string DescribeCorpses(
+        IEnumerable<PluginLootContainer> corpses,
+        IEnumerable<uint> expectedIds,
+        uint currentContainerId,
+        PluginAppraisalState appraisal)
+    {
+        Dictionary<uint, PluginLootContainer> byId = corpses
+            .GroupBy(static corpse => corpse.ObjectId)
+            .ToDictionary(static group => group.Key, static group => group.First());
+        string[] details = expectedIds
+            .Distinct()
+            .Order()
+            .Select(id => byId.TryGetValue(id, out PluginLootContainer corpse)
+                ? string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"0x{id:X8}[position={corpse.HasPosition},distance={corpse.Distance:0.00}m,identified={corpse.IsIdentified},description='{Clean(corpse.LongDescription)}',opened={corpse.HasBeenOpened},requested={corpse.IsRequested},current={corpse.IsCurrent}]")
+                : $"0x{id:X8}[missing]")
+            .ToArray();
+        return "currentContainer=" + $"0x{currentContainerId:X8}; "
+            + $"appraisal[awaiting=0x{appraisal.AwaitingObjectId:X8},"
+            + $"current=0x{appraisal.CurrentObjectId:X8}]; corpses="
+            + (details.Length == 0 ? "(none expected)" : string.Join(" / ", details));
+    }
+
+    private static string Clean(string value) => value
+        .Replace('\r', ' ')
+        .Replace('\n', ' ')
+        .Replace('\'', '`');
 }
 
 /// <summary>
@@ -2927,6 +3212,28 @@ public sealed class VtSessionProofHarnessTests
             macroStarted: true));
     }
 
+    [Theory]
+    [InlineData(false, "Acdream", "Coldeve")]
+    [InlineData(true, "", "Coldeve")]
+    [InlineData(true, "Acdream", "")]
+    [InlineData(true, "+Acdream", "Coldeve")]
+    public void ProfileSelectionWaitsForTheCompletePlainCharacterIdentity(
+        bool available,
+        string character,
+        string world)
+    {
+        Assert.False(VtProofProfileIdentity.IsReady(
+            available,
+            character,
+            world,
+            expectedCharacter: "Acdream"));
+        Assert.True(VtProofProfileIdentity.IsReady(
+            automationAvailable: true,
+            characterName: "Acdream",
+            worldName: "Coldeve",
+            expectedCharacter: "Acdream"));
+    }
+
     [Fact]
     public void PickupReceiptsAreAttributedToTwoDistinctOpenedCorpses()
     {
@@ -2994,6 +3301,40 @@ public sealed class VtSessionProofHarnessTests
         Assert.Equal(
             [0x81000001u, 0x81000002u],
             VtProofLootEvidence.OpenedCorpseIds(chat).Order());
+        Assert.Equal(
+            "1 of 2 required corpse(s) opened",
+            VtProofLootEvidence.OpenedCountFailure(actual: 1, required: 2));
+
+        var corpse = new PluginLootContainer(
+            0x81000001u,
+            7u,
+            "Corpse of Drudge",
+            4.5f,
+            HasBeenOpened: false,
+            IsRequested: true,
+            IsCurrent: false)
+        {
+            HasPosition = true,
+            IsIdentified = true,
+            LongDescription = "Killed by Acdream",
+        };
+        string state = VtProofLootEvidence.DescribeCorpses(
+            [corpse],
+            [0x81000001u, 0x81000002u],
+            currentContainerId: 0u,
+            new PluginAppraisalState(
+                Revision: 5,
+                AwaitingObjectId: 0x81000002u,
+                CurrentObjectId: 0x81000001u));
+
+        Assert.Contains("distance=4.50m", state, StringComparison.Ordinal);
+        Assert.Contains("identified=True", state, StringComparison.Ordinal);
+        Assert.Contains("description='Killed by Acdream'", state, StringComparison.Ordinal);
+        Assert.Contains(
+            "appraisal[awaiting=0x81000002,current=0x81000001]",
+            state,
+            StringComparison.Ordinal);
+        Assert.Contains("0x81000002[missing]", state, StringComparison.Ordinal);
     }
 
     [Fact]
