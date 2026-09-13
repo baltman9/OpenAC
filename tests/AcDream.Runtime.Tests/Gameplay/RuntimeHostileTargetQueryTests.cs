@@ -43,15 +43,23 @@ public sealed class RuntimeHostileTargetQueryTests
 
         Assert.Equal(
             0x50000010u,
-            RuntimeHostileTargetQuery.FindClosest(runtime));
+            RuntimeHostileTargetQuery.FindClosest(
+                runtime,
+                HostileTargetScope.Selectable));
         Assert.True(
             RuntimeHostileTargetQuery.IsHostile(
                 runtime,
-                0x50000010u));
+                0x50000010u,
+                HostileTargetScope.Classified));
     }
 
+    /// <summary>
+    /// Mutation: drop the <c>scope == Classified</c> early return from
+    /// <c>IsEligible</c> and the hidden, no-draw and dead monsters disappear
+    /// from the automation view.
+    /// </summary>
     [Fact]
-    public void Query_KeepsHiddenNoDrawAndZeroHealthMonsters()
+    public void ClassifiedScope_KeepsHiddenNoDrawAndZeroHealthMonsters()
     {
         using GameRuntime runtime = Create();
         runtime.PlayerIdentity.ServerGuid = Player;
@@ -83,18 +91,92 @@ public sealed class RuntimeHostileTargetQueryTests
 
         Assert.Equal(
             [0x50000010u, 0x50000011u, 0x50000012u],
-            RuntimeHostileTargetQuery.Capture(runtime, 10f)
+            RuntimeHostileTargetQuery
+                .Capture(runtime, 10f, HostileTargetScope.Classified)
                 .Select(static target => target.ObjectId)
                 .Order());
         Assert.Equal(
             0x50000010u,
-            RuntimeHostileTargetQuery.FindClosest(runtime));
-        Assert.True(
-            RuntimeHostileTargetQuery.IsHostile(runtime, 0x50000010u));
-        Assert.True(
-            RuntimeHostileTargetQuery.IsHostile(runtime, 0x50000011u));
-        Assert.True(
-            RuntimeHostileTargetQuery.IsHostile(runtime, 0x50000012u));
+            RuntimeHostileTargetQuery.FindClosest(
+                runtime,
+                HostileTargetScope.Classified));
+        foreach (uint objectId in
+            (uint[])[0x50000010u, 0x50000011u, 0x50000012u])
+        {
+            Assert.True(RuntimeHostileTargetQuery.IsHostile(
+                runtime,
+                objectId,
+                HostileTargetScope.Classified));
+        }
+    }
+
+    /// <summary>
+    /// The selectable scope is what a select-nearest key and a bot's
+    /// auto-target mean by "a monster".
+    /// Mutation: answer <c>true</c> unconditionally after the classification
+    /// in <c>IsEligible</c> and the hidden monster wins the pick.
+    /// </summary>
+    [Fact]
+    public void SelectableScope_SkipsHiddenNoDrawAndZeroHealthMonsters()
+    {
+        using GameRuntime runtime = Create();
+        runtime.PlayerIdentity.ServerGuid = Player;
+        Add(runtime, Player, 0x01010001u, 10f, 10f, PlayerObject(Player));
+        Add(
+            runtime,
+            0x50000010u,
+            0x01010001u,
+            11f,
+            10f,
+            Hostile(0x50000010u),
+            PhysicsStateFlags.Hidden);
+        Add(
+            runtime,
+            0x50000011u,
+            0x01010001u,
+            12f,
+            10f,
+            Hostile(0x50000011u),
+            PhysicsStateFlags.NoDraw);
+        Add(
+            runtime,
+            0x50000012u,
+            0x01010001u,
+            13f,
+            10f,
+            Hostile(0x50000012u));
+        runtime.ActionOwner.Combat.OnUpdateHealth(0x50000012u, 0f);
+        Add(
+            runtime,
+            0x50000013u,
+            0x01010001u,
+            14f,
+            10f,
+            Hostile(0x50000013u));
+
+        Assert.Equal(
+            [0x50000013u],
+            RuntimeHostileTargetQuery
+                .Capture(runtime, 10f, HostileTargetScope.Selectable)
+                .Select(static target => target.ObjectId)
+                .Order());
+        Assert.Equal(
+            0x50000013u,
+            RuntimeHostileTargetQuery.FindClosest(
+                runtime,
+                HostileTargetScope.Selectable));
+        foreach (uint refused in
+            (uint[])[0x50000010u, 0x50000011u, 0x50000012u])
+        {
+            Assert.False(RuntimeHostileTargetQuery.IsHostile(
+                runtime,
+                refused,
+                HostileTargetScope.Selectable));
+        }
+        Assert.True(RuntimeHostileTargetQuery.IsHostile(
+            runtime,
+            0x50000013u,
+            HostileTargetScope.Selectable));
     }
 
     [Fact]
@@ -113,9 +195,15 @@ public sealed class RuntimeHostileTargetQueryTests
             z: 9f);
 
         RuntimeHostileTargetSnapshot target = Assert.Single(
-            RuntimeHostileTargetQuery.Capture(runtime, 10f));
+            RuntimeHostileTargetQuery.Capture(
+                runtime,
+                10f,
+                HostileTargetScope.Classified));
         Assert.Equal(5f, target.Distance, 3);
-        Assert.Empty(RuntimeHostileTargetQuery.Capture(runtime, 4.9f));
+        Assert.Empty(RuntimeHostileTargetQuery.Capture(
+            runtime,
+            4.9f,
+            HostileTargetScope.Classified));
     }
 
     [Fact]
@@ -172,24 +260,33 @@ public sealed class RuntimeHostileTargetQueryTests
 
         Assert.Equal(
             0x50000017u,
-            RuntimeHostileTargetQuery.FindClosest(runtime));
-        Assert.False(RuntimeHostileTargetQuery.IsHostile(runtime, 0u));
+            RuntimeHostileTargetQuery.FindClosest(
+                runtime,
+                HostileTargetScope.Selectable));
+        Assert.False(RuntimeHostileTargetQuery.IsHostile(
+            runtime,
+            0u,
+            HostileTargetScope.Classified));
         Assert.False(
             RuntimeHostileTargetQuery.IsHostile(
                 runtime,
-                0x50000013u));
+                0x50000013u,
+                HostileTargetScope.Classified));
         Assert.False(
             RuntimeHostileTargetQuery.IsHostile(
                 runtime,
-                0x50000015u));
+                0x50000015u,
+                HostileTargetScope.Classified));
         Assert.False(
             RuntimeHostileTargetQuery.IsHostile(
                 runtime,
-                0x50000014u));
+                0x50000014u,
+                HostileTargetScope.Classified));
         Assert.True(
             RuntimeHostileTargetQuery.IsHostile(
                 runtime,
-                0x50000017u));
+                0x50000017u,
+                HostileTargetScope.Classified));
     }
 
     [Fact]
@@ -199,7 +296,9 @@ public sealed class RuntimeHostileTargetQueryTests
         runtime.PlayerIdentity.ServerGuid = Player;
         runtime.InventoryOwner.Objects.AddOrUpdate(PlayerObject(Player));
 
-        Assert.Null(RuntimeHostileTargetQuery.FindClosest(runtime));
+        Assert.Null(RuntimeHostileTargetQuery.FindClosest(
+                runtime,
+                HostileTargetScope.Selectable));
 
         Add(runtime, Player, 0x01010001u, 10f, 10f, PlayerObject(Player));
         Add(
@@ -214,7 +313,9 @@ public sealed class RuntimeHostileTargetQueryTests
                 Type = ItemType.Creature,
             });
 
-        Assert.Null(RuntimeHostileTargetQuery.FindClosest(runtime));
+        Assert.Null(RuntimeHostileTargetQuery.FindClosest(
+                runtime,
+                HostileTargetScope.Selectable));
     }
 
     [Fact]
@@ -238,7 +339,10 @@ public sealed class RuntimeHostileTargetQueryTests
         runtime.ActionOwner.Combat.OnUpdateHealth(east.ObjectId, 0.75f);
 
         IReadOnlyList<RuntimeHostileTargetSnapshot> captured =
-            RuntimeHostileTargetQuery.Capture(runtime, 4f);
+            RuntimeHostileTargetQuery.Capture(
+                runtime,
+                4f,
+                HostileTargetScope.Classified);
 
         RuntimeHostileTargetSnapshot target = Assert.Single(captured);
         Assert.Equal(east.ObjectId, target.ObjectId);
@@ -251,7 +355,10 @@ public sealed class RuntimeHostileTargetQueryTests
         Assert.Equal(4, target.SpeciesId);
         Assert.True(target.HasShield);
         Assert.Equal(0, target.MaximumHealth);
-        Assert.Empty(RuntimeHostileTargetQuery.Capture(runtime, 2.9f));
+        Assert.Empty(RuntimeHostileTargetQuery.Capture(
+            runtime,
+            2.9f,
+            HostileTargetScope.Classified));
     }
 
     private static GameRuntime Create()

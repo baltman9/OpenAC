@@ -218,8 +218,12 @@ public sealed class DirectGameRuntimeCommandAdapter
         {
             case RuntimeSelectionCommand.SelectClosestHostile:
             {
-                uint? closest =
-                    RuntimeHostileTargetQuery.FindClosest(_runtime);
+                // The key means "the nearest monster worth selecting", so a
+                // creature the player cannot see, or one already dead, is not
+                // a candidate for it.
+                uint? closest = RuntimeHostileTargetQuery.FindClosest(
+                    _runtime,
+                    HostileTargetScope.Selectable);
                 if (closest is { } objectId)
                 {
                     selection.Select(

@@ -3423,7 +3423,10 @@ internal sealed class AppAutomationSurface
             return Array.Empty<PluginCombatTarget>();
 
         IReadOnlyList<RuntimeHostileTargetSnapshot> captured =
-            RuntimeHostileTargetQuery.Capture(runtime, maximumDistance);
+            RuntimeHostileTargetQuery.Capture(
+                runtime,
+                maximumDistance,
+                HostileTargetScope.Classified);
         if (captured.Count == 0)
             return Array.Empty<PluginCombatTarget>();
 
@@ -3530,8 +3533,16 @@ internal sealed class AppAutomationSurface
             runtime = _runtime;
         if (runtime is null || !IsAvailable)
             return new(PluginCombatCommandStatus.Unavailable);
-        if (!RuntimeHostileTargetQuery.IsHostile(runtime, targetObjectId))
+        // A plugin sees every classified monster, including one the client
+        // can no longer draw or whose health has reached zero: deciding what
+        // to do about those is the plugin's own job.
+        if (!RuntimeHostileTargetQuery.IsHostile(
+                runtime,
+                targetObjectId,
+                HostileTargetScope.Classified))
+        {
             return new(PluginCombatCommandStatus.InvalidTarget);
+        }
         if (!CombatInputPlanner.SupportsTargetedAttack(
                 runtime.ActionOwner.Combat.CurrentMode))
         {
