@@ -115,6 +115,11 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                     ["lootProfile"] = LootProfileName,
                     ["navProfile"] = RouteProfileName,
                     ["enableMeta"] = "false",
+                    // Before the macro, not after it: several of the
+                    // plugin's most useful lines are emitted once per run,
+                    // so a channel this run opened from outside would have
+                    // missed them.
+                    ["logChannels"] = string.Join(',', LogChannels),
                     ["startMacro"] = "true",
                 },
             },
@@ -242,11 +247,12 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 return;
             }
 
-            // Give the plugin's autostart edge a tick or two, then open every
-            // log channel the plugin knows about so its work becomes observable.
+            // The channels came up with autostart, before the first pass.
+            // Re-asserting them from here would be harmless and would also
+            // be too late, so this only gives the autostart edge a tick or
+            // two and then reads the state back into the record.
             Pump(TimeSpan.FromSeconds(3d));
-            foreach (string channel in LogChannels)
-                Stage($"/vt log {channel} on");
+            Stage("/vt log");
 
             // ---- P2: the three fixture profiles are loaded ---------------------
             {
