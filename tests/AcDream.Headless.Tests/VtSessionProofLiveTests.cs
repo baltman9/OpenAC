@@ -817,9 +817,16 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 // too.
                 Stage("@heal");
                 Stage(ArenaTeleport);
-                _ = WaitUntil(
+                // The teleport has to have LANDED before the macro is started:
+                // the anchor is taken from where the character stands at the
+                // start, and "within forty metres" is already true up the
+                // corridor the route walked. The arena teleport puts the
+                // character within a metre of the arena point.
+                bool backAtArena = WaitUntil(
                     TimeSpan.FromSeconds(20d),
-                    () => DistanceMetersFromArena(session) < 40d);
+                    () => DistanceMetersFromArena(session) < 3d);
+                staged.Add($"back at the arena before the start -> {backAtArena} "
+                    + $"({DistanceMetersFromArena(session):0.0} m)");
 
                 // Starting again anchors the round to the nearest point the
                 // character could walk to from where it stands — not to where
