@@ -194,6 +194,18 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                         || line.StartsWith("plugin-error:", StringComparison.Ordinal))
                     .Distinct(StringComparer.Ordinal)
                     .ToArray();
+                // The scheduler prints a header and a winner line every
+                // 0.293 s. At roughly 1,200 lines per run that crowds every
+                // other channel out of any fixed tail, which is exactly what
+                // hid the rules' own reasons last time — so the pass spam
+                // gets its own small window and everything else keeps a full
+                // one.
+                bool IsPassSpam(string line) =>
+                    line.Contains("Primary logic loop started", StringComparison.Ordinal)
+                    || line.Contains("All rules inactive.", StringComparison.Ordinal)
+                    || line.Contains(") Running", StringComparison.Ordinal)
+                    || line.Contains("Picked ", StringComparison.Ordinal);
+                string[] chat = observed.SnapshotChat();
                 return string.Join(
                     Environment.NewLine,
                     "the character the plugin can see:",
@@ -202,10 +214,14 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                     Indent(staged),
                     "plugin warnings and errors:",
                     Indent(problems),
-                    "last 30 chat lines:",
-                    Indent(Tail(observed.SnapshotChat(), 30)),
-                    "last 30 plugin messages:",
-                    Indent(Tail(pluginMessages, 30)));
+                    "last 6 scheduler pass lines:",
+                    Indent(Tail([.. chat.Where(IsPassSpam)], 6)),
+                    "last 30 other chat lines:",
+                    Indent(Tail([.. chat.Where(line => !IsPassSpam(line))], 30)),
+                    "last 30 other plugin messages:",
+                    Indent(Tail(
+                        [.. pluginMessages.Where(line => !IsPassSpam(line))],
+                        30)));
             }
 
             _ = session.Start();
