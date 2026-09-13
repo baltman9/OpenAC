@@ -2,7 +2,11 @@ namespace AcDream.Content.Pak;
 
 internal sealed class PakTexturePayloadCache
 {
-    internal const long DefaultMaximumBytes = 64L * 1024 * 1024;
+    // The payloads come from the memory-mapped pak, so a miss is a page-cache
+    // copy (plus a decode for the few compressed entries), not disk I/O. The
+    // cache only needs to cover the textures shared by the meshes of one
+    // streaming batch; 16 MiB does that and stays small per client.
+    internal const long DefaultMaximumBytes = 16L * 1024 * 1024;
     internal const int DefaultMaximumEntries = 1_024;
 
     private readonly long _maximumBytes;
