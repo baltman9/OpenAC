@@ -201,6 +201,77 @@ public sealed class EnchantmentMathTests
     }
 
     [Fact]
+    public void GetMod_MultipleStatKeyZero_AppliesAdditiveToEveryAttributeKey()
+    {
+        var table = SpellTable.Create([TestSpell(70u, family: 900u), TestSpell(71u, family: 901u)]);
+        uint blessingType = (uint)(EnchantmentMath.EnchantmentTypeFlag.Attribute
+            | EnchantmentMath.EnchantmentTypeFlag.MultipleStat);
+        var enchantments = new[]
+        {
+            MakeTypedAddRecord(spellId: 70, layer: 1, statKey: 1u,
+                statModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Attribute, val: 40f),
+            MakeTypedAddRecord(spellId: 71, layer: 2, statKey: 0u, statModType: blessingType, val: 9f),
+        };
+
+        for (uint key = 1; key <= 6; key++)
+        {
+            var mod = EnchantmentMath.GetMod(enchantments, table, statKey: key,
+                EnchantmentMath.EnchantmentTypeFlag.Attribute);
+            Assert.Equal(key == 1u ? 49f : 9f, mod.Additive);
+        }
+    }
+
+    [Fact]
+    public void GetMod_KeyZeroWithoutMultipleStat_DoesNotContribute()
+    {
+        var table = SpellTable.Create([TestSpell(72u, family: 902u)]);
+        var enchantments = new[]
+        {
+            MakeTypedAddRecord(spellId: 72, layer: 1, statKey: 0u,
+                statModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Attribute,
+                val: 9f),
+        };
+        var mod = EnchantmentMath.GetMod(enchantments, table, statKey: 1u,
+            EnchantmentMath.EnchantmentTypeFlag.Attribute);
+        Assert.Equal(EnchantmentMath.VitalMod.Identity, mod);
+    }
+
+    [Fact]
+    public void GetMod_MultipleStatTypedAttribute_DoesNotLeakIntoSecondAttOrSkillQuery()
+    {
+        var table = SpellTable.Create([TestSpell(73u, family: 903u)]);
+        var enchantments = new[]
+        {
+            MakeTypedAddRecord(spellId: 73, layer: 1, statKey: 0u,
+                statModType: (uint)(EnchantmentMath.EnchantmentTypeFlag.Attribute
+                    | EnchantmentMath.EnchantmentTypeFlag.MultipleStat),
+                val: 9f),
+        };
+
+        var secondAttMod = EnchantmentMath.GetMod(enchantments, table, statKey: 1u,
+            EnchantmentMath.EnchantmentTypeFlag.SecondAtt);
+        Assert.Equal(EnchantmentMath.VitalMod.Identity, secondAttMod);
+
+        var skillMod = EnchantmentMath.GetSkillMod(enchantments, table, skillId: 1u);
+        Assert.Equal(EnchantmentMath.VitalMod.Identity, skillMod);
+    }
+
+    [Fact]
+    public void GetMod_KeyZeroWithoutRequiredType_DoesNotContribute()
+    {
+        var table = SpellTable.Create([TestSpell(74u, family: 904u)]);
+        var enchantments = new[]
+        {
+            MakeTypedAddRecord(spellId: 74, layer: 1, statKey: 0u,
+                statModType: (uint)(EnchantmentMath.EnchantmentTypeFlag.Attribute
+                    | EnchantmentMath.EnchantmentTypeFlag.MultipleStat),
+                val: 9f),
+        };
+        var mod = EnchantmentMath.GetMod(enchantments, table, statKey: 1u);
+        Assert.Equal(EnchantmentMath.VitalMod.Identity, mod);
+    }
+
+    [Fact]
     public void GetMod_IncludeVitaeFalse_ExcludesVitaeEvenWhenActive()
     {
         var table = LoadTable((60u, "Vitae", 0u));
@@ -313,6 +384,16 @@ public sealed class EnchantmentMathTests
 
     private static ActiveEnchantmentRecord MakeAddRecord(uint spellId, uint layer, uint statKey, float val) =>
         new(spellId, layer, 60f, 0u, StatModType: 0, StatModKey: statKey, StatModValue: val, Bucket: 2u);
+
+    private static ActiveEnchantmentRecord MakeTypedAddRecord(
+        uint spellId, uint layer, uint statKey, uint statModType, float val) =>
+        new(spellId, layer, 60f, 0u, StatModType: statModType, StatModKey: statKey,
+            StatModValue: val, Bucket: 2u);
+
+    private static SpellMetadata TestSpell(uint spellId, uint family) => new(
+        spellId, "Test", "War Magic", family, 0u, "", 0f, 0,
+        false, false, "", 0, 0, 0u, 0, false, false, true,
+        0f, 0u, 0u, 0u, 0);
 
     private static ActiveEnchantmentRecord MakeVitaeRecord(uint spellId, uint layer, uint statKey, float val) =>
         new(spellId, layer, -1f, 0u, StatModType: 0, StatModKey: statKey, StatModValue: val, Bucket: 4u);
