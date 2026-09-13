@@ -154,8 +154,8 @@ internal static class AutomationSurfaceParityScript
         _ = objects.MoveItem(CarriedId, player);
         _ = objects.MoveItem(WieldableId, player);
 
-        // The corpse is the open container: retail only lets a plugin lift
-        // what the player is actually looking into.
+        // The corpse is the open container: a plugin may only lift what the
+        // player is actually looking into.
         _ = runtime.InventoryOwner.ExternalContainers.RequestOpen(
             CorpseId,
             isCorpse: true);
