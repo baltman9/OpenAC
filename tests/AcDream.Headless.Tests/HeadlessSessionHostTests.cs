@@ -593,8 +593,7 @@ public sealed class HeadlessSessionHostTests
                     credentialReference: "probe-password"),
             ],
         };
-        HeadlessPathSet paths = HeadlessPathSet.Resolve(
-            new HeadlessPathOverrides());
+        HeadlessPathSet paths = IsolatedHeadlessPaths.Create();
         using var diagnostics = new StringWriter();
         var operations = new FixtureSessionOperations();
         using var host = new HeadlessProcessHost(
@@ -639,7 +638,7 @@ public sealed class HeadlessSessionHostTests
             using var diagnostics = new StringWriter();
             using var host = new HeadlessProcessHost(
                 configuration,
-                HeadlessPathSet.Resolve(new HeadlessPathOverrides()),
+                IsolatedHeadlessPaths.Create(),
                 new System.IO.StringReader(
                     "probe-password" + Environment.NewLine),
                 diagnostics,
@@ -702,8 +701,7 @@ public sealed class HeadlessSessionHostTests
                     "play-password"),
             ],
         };
-        HeadlessPathSet paths = HeadlessPathSet.Resolve(
-            new HeadlessPathOverrides());
+        HeadlessPathSet paths = IsolatedHeadlessPaths.Create();
         using var diagnostics = new StringWriter();
         var operations = new FixtureSessionOperations();
         using var host = new HeadlessProcessHost(
@@ -751,8 +749,7 @@ public sealed class HeadlessSessionHostTests
                         statusFile: statusPath),
                 ],
             };
-            HeadlessPathSet paths = HeadlessPathSet.Resolve(
-                new HeadlessPathOverrides());
+            HeadlessPathSet paths = IsolatedHeadlessPaths.Create();
             using var diagnostics = new StringWriter();
             var operations = new FixtureSessionOperations();
             using var host = new HeadlessProcessHost(
@@ -847,8 +844,7 @@ public sealed class HeadlessSessionHostTests
             Version = 1,
             Sessions = [Descriptor()],
         };
-        HeadlessPathSet paths = HeadlessPathSet.Resolve(
-            new HeadlessPathOverrides());
+        HeadlessPathSet paths = IsolatedHeadlessPaths.Create();
         using var diagnostics = new StringWriter();
         var operations = new FixtureSessionOperations();
         using var host = new HeadlessProcessHost(
@@ -888,8 +884,7 @@ public sealed class HeadlessSessionHostTests
                 }),
             ],
         };
-        HeadlessPathSet paths = HeadlessPathSet.Resolve(
-            new HeadlessPathOverrides());
+        HeadlessPathSet paths = IsolatedHeadlessPaths.Create();
         using var diagnostics = new StringWriter();
         var operations = new FixtureSessionOperations();
         using var host = new HeadlessProcessHost(

@@ -6,6 +6,7 @@ using AcDream.Content;
 using AcDream.Core.Chat;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
+using AcDream.Core.Plugins;
 using AcDream.Headless.Configuration;
 using AcDream.Headless.Credentials;
 using AcDream.Headless.Diagnostics;
@@ -618,6 +619,41 @@ public sealed class HeadlessPluginSessionTests
         Assert.False(session.Plugins.Host.Automation.Spells.TryGetComponent(
             4200u,
             out _));
+    }
+
+    [Fact]
+    public void PluginStorageWrittenThroughAScopedHostReadsBackThroughAFreshSessionOverTheSameDirectory()
+    {
+        using var temporary = new TemporaryDirectory();
+        using var storageRoot = new TemporaryDirectory();
+        using (var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            new HeadlessCredentialSecret("fixture", "password"),
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path],
+            storage: new FilePluginStorage(storageRoot.Path)))
+        {
+            var scope = new ScopedPluginHost(
+                session.Plugins.Host,
+                "acdream.test.storage",
+                "Storage fixture");
+            scope.Storage.WriteText("settings.json", "hello");
+        }
+
+        using var fresh = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "fresh-status.jsonl")),
+            new HeadlessCredentialSecret("fixture", "password"),
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path],
+            storage: new FilePluginStorage(storageRoot.Path));
+        var freshScope = new ScopedPluginHost(
+            fresh.Plugins.Host,
+            "acdream.test.storage",
+            "Storage fixture");
+
+        Assert.Equal("hello", freshScope.Storage.ReadText("settings.json"));
     }
 
     private static HeadlessContentDescriptor ContentDescriptor() => new()

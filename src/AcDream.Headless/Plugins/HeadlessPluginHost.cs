@@ -45,6 +45,7 @@ internal sealed class HeadlessPluginHost
         GameRuntime runtime,
         IPluginLogger logger,
         IPluginCommandRegistry? commands = null,
+        IPluginStorage? storage = null,
         IPluginStorage? vtankProfiles = null,
         IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
         Func<string, bool>? submitChatText = null,
@@ -54,6 +55,7 @@ internal sealed class HeadlessPluginHost
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         Log = logger ?? throw new ArgumentNullException(nameof(logger));
         Commands = commands ?? NoOpPluginCommandRegistry.Instance;
+        Storage = storage ?? NoOpPluginStorage.Instance;
         VtankProfiles = vtankProfiles ?? NoOpPluginStorage.Instance;
         _sessionSettingsByPlugin = CopySessionSettings(sessionSettings);
         _automation = new RuntimeAutomationSurface();
@@ -97,6 +99,7 @@ internal sealed class HeadlessPluginHost
     public bool HasUi => false;
     public IPluginLogger Log { get; }
     public IPluginCommandRegistry Commands { get; }
+    public IPluginStorage Storage { get; }
     public IPluginStorage VtankProfiles { get; }
     public IGameState State => this;
     public IEvents Events => this;
