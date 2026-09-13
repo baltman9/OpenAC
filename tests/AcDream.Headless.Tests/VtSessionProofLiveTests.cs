@@ -858,7 +858,12 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 if (restarted)
                 {
                     Stage("/vt opt set EnableBuffing false");
-                    int chatBeforeRoute = observed.ChatCount;
+                    // The start says where it put the round before the mover
+                    // takes a step, so the reading begins at the start, not
+                    // after the buff pause: a character that runs faster than
+                    // the pass can log would otherwise be read at the point
+                    // AFTER the one it anchored to.
+                    int chatBeforeRoute = chatBeforeStart;
                     _ = WaitUntil(
                         TimeSpan.FromSeconds(60d),
                         () => FirstRouteWaypointIndex(
