@@ -8,6 +8,7 @@ public sealed class PayloadExecutableNamesTests
     [InlineData("win-x64", "AcDream.App")]
     [InlineData("linux-x64", "AcDream.App")]
     [InlineData("osx-arm64", "acdream-client")]
+    [InlineData("osx-x64", "acdream-client")]
     public void GraphicalHostSelectionKeepsExistingPlatformsAndRenamesMac(string rid, string expected)
     {
         Assert.Equal(expected, PayloadExecutableNames.GraphicalHostForRid(rid));
