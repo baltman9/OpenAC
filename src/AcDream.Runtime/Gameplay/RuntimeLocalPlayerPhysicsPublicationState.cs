@@ -388,7 +388,7 @@ internal sealed class RuntimeLocalPlayerPhysicsPublicationState : IDisposable
     /// research note on the headless navigation slice.
     /// </para>
     /// </remarks>
-    private static void CompleteDispatchedMotions(MotionInterpreter motion)
+    internal static void CompleteDispatchedMotions(MotionInterpreter motion)
     {
         for (int completed = 0;
              completed < MaximumMotionCompletionsPerPass;
@@ -396,9 +396,16 @@ internal sealed class RuntimeLocalPlayerPhysicsPublicationState : IDisposable
         {
             if (motion.PendingMotionHead is not { } head)
                 return;
+            // The queue's own length is the only honest measure of progress
+            // here. Two queued motions can be identical -- a stop always
+            // queues the same "ready" alongside whatever it cancels, and an
+            // arrival issues two of them -- so comparing the head before and
+            // after would read a second identical entry as the first refusing
+            // to leave, and stop with the queue still occupied.
+            int outstanding = motion.PendingMotionCount;
             motion.MotionDone(head.Motion, success: true);
-            if (motion.PendingMotionHead == head)
-                return; // The head refused to leave; nothing more to do.
+            if (motion.PendingMotionCount >= outstanding)
+                return; // Nothing was taken off; stop rather than spin.
         }
     }
 

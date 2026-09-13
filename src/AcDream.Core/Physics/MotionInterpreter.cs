@@ -248,6 +248,13 @@ public sealed class MotionInterpreter : IMotionDoneSink
     /// </summary>
     public MotionNode? PendingMotionHead => _pendingMotions.First?.Value;
 
+    /// <summary>
+    /// How many motions are outstanding. Two queued motions can hold the same
+    /// values, so a caller draining the queue has to watch this rather than
+    /// compare heads: identical adjacent nodes are indistinguishable by value.
+    /// </summary>
+    public int PendingMotionCount => _pendingMotions.Count;
+
     public Action? UnstickFromObject { get; set; }
 
     public Action? InterruptCurrentMovement { get; set; }
