@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Numerics;
 using System.Text;
 using System.Text.Json;
+using AcDream.Core.Items;
 using AcDream.Core.Physics;
 using AcDream.Core.Player;
 using AcDream.Headless.Configuration;
@@ -374,6 +375,39 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
             staged.Add(
                 $"caster '{CasterItemName}' owned -> {casterOwned}; "
                     + $"equipment now: {string.Join(", ", OwnedEquipmentNames(session))}");
+
+            // ---- dress the character -------------------------------------------
+            // A Bane cast at the character is not worn by the character: the
+            // server puts it on the armour and clothing the character has on,
+            // and a character wearing none is answered with nothing at all —
+            // no enchantment, no result line, not even a refusal. The buff
+            // rule can then never record coverage for that row, re-casts it
+            // on the next pass, and the buff pass has no way to settle. So
+            // the run dresses the character for the same reason it stages the
+            // wand, and says so when it could not.
+            foreach (PluginEquipmentItem piece in
+                VtProofVestments.NotYetWorn(OwnedEquipment(session)))
+            {
+                PluginEquipmentCommandResult worn =
+                    session.Plugins.Host.Automation.Equipment.Equip(piece.ObjectId);
+                uint pieceId = piece.ObjectId;
+                _ = WaitUntil(
+                    TimeSpan.FromSeconds(10d),
+                    () => OwnedEquipment(session)
+                        .Any(item => item.ObjectId == pieceId && item.IsEquipped));
+                staged.Add($"wear '{piece.Name}' -> {worn.Status}");
+            }
+            staged.Add(
+                "vestments worn -> "
+                    + VtProofVestments.IsDressed(OwnedEquipment(session))
+                    + "; "
+                    + string.Join(
+                        ", ",
+                        OwnedEquipment(session)
+                            .Where(VtProofVestments.IsWorn)
+                            .Select(static item => item.Name)
+                            .DefaultIfEmpty("nothing")));
+
             Stage("/vt start");
             bool macroStarted = WaitUntil(
                 TimeSpan.FromSeconds(20d),
@@ -720,6 +754,13 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
     /// wield. The profile's Items page is matched against these names, so a
     /// staged item that never shows up here is invisible to every rule.
     /// </summary>
+    private static IReadOnlyList<PluginEquipmentItem> OwnedEquipment(
+        HeadlessSessionHost session)
+    {
+        IEquipmentAutomation equipment = session.Plugins.Host.Automation.Equipment;
+        return equipment.IsAvailable ? equipment.CaptureOwnedEquipment() : [];
+    }
+
     private static string[] OwnedEquipmentNames(HeadlessSessionHost session)
     {
         IEquipmentAutomation equipment = session.Plugins.Host.Automation.Equipment;
@@ -1368,6 +1409,66 @@ internal readonly record struct VtProofCastEvidence(
                 + CastLine
             : "the buff pass never reported that nothing was due; last it "
                 + "said: " + CastLine;
+}
+
+/// <summary>
+/// What a character has to be wearing before an item-enchantment buff row
+/// can settle.
+/// <para>
+/// The buff profile's Bane rows are aimed at the character, and the server
+/// redirects each one onto the armour and clothing the character is wearing.
+/// With nothing worn there is nothing to enchant: the server applies nothing
+/// and answers nothing, so the cast's result never arrives, the row records
+/// no coverage, and the next pass asks for it again. That is a buff pass
+/// with no end, which is why the run dresses the character before it starts
+/// the macro.
+/// </para>
+/// </summary>
+internal static class VtProofVestments
+{
+    /// <summary>
+    /// The slots a redirected item enchantment can land in: clothing, armour
+    /// and the shield hand. Deliberately not the jewellery, weapon, ammunition
+    /// or held slots — nothing a Bane is redirected to lives there.
+    /// </summary>
+    internal const uint Locations =
+        (uint)(EquipMask.Clothing | EquipMask.Armor | EquipMask.Shield);
+
+    internal static bool IsVestment(in PluginEquipmentItem item) =>
+        (item.ValidLocations & Locations) != 0u;
+
+    internal static bool IsWorn(PluginEquipmentItem item) =>
+        item.IsEquipped && IsVestment(item);
+
+    /// <summary>Is anything a Bane could land on actually being worn?</summary>
+    internal static bool IsDressed(IReadOnlyList<PluginEquipmentItem> owned)
+    {
+        ArgumentNullException.ThrowIfNull(owned);
+        foreach (PluginEquipmentItem item in owned)
+        {
+            if (IsWorn(item))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// The owned vestments that are not on yet, in the projection's own
+    /// order. Pieces whose slots overlap will refuse each other, and that is
+    /// fine — one piece is all a Bane needs.
+    /// </summary>
+    internal static IReadOnlyList<PluginEquipmentItem> NotYetWorn(
+        IReadOnlyList<PluginEquipmentItem> owned)
+    {
+        ArgumentNullException.ThrowIfNull(owned);
+        var pending = new List<PluginEquipmentItem>();
+        foreach (PluginEquipmentItem item in owned)
+        {
+            if (IsVestment(item) && !item.IsEquipped)
+                pending.Add(item);
+        }
+        return pending;
+    }
 }
 
 internal readonly record struct VtProofRoutePoint(
