@@ -51,7 +51,7 @@ public sealed class RuntimeHostileTargetQueryTests
     }
 
     [Fact]
-    public void Query_RejectsHiddenNoDrawDeadPlayersPetsNpcsAndNonCreatures()
+    public void Query_KeepsHiddenNoDrawAndZeroHealthMonsters()
     {
         using GameRuntime runtime = Create();
         runtime.PlayerIdentity.ServerGuid = Player;
@@ -80,6 +80,50 @@ public sealed class RuntimeHostileTargetQueryTests
             10f,
             Hostile(0x50000012u));
         runtime.ActionOwner.Combat.OnUpdateHealth(0x50000012u, 0f);
+
+        Assert.Equal(
+            [0x50000010u, 0x50000011u, 0x50000012u],
+            RuntimeHostileTargetQuery.Capture(runtime, 10f)
+                .Select(static target => target.ObjectId)
+                .Order());
+        Assert.Equal(
+            0x50000010u,
+            RuntimeHostileTargetQuery.FindClosest(runtime));
+        Assert.True(
+            RuntimeHostileTargetQuery.IsHostile(runtime, 0x50000010u));
+        Assert.True(
+            RuntimeHostileTargetQuery.IsHostile(runtime, 0x50000011u));
+        Assert.True(
+            RuntimeHostileTargetQuery.IsHostile(runtime, 0x50000012u));
+    }
+
+    [Fact]
+    public void Capture_MeasuresTheVerticalSeparationToo()
+    {
+        using GameRuntime runtime = Create();
+        runtime.PlayerIdentity.ServerGuid = Player;
+        Add(runtime, Player, 0x01010001u, 10f, 10f, PlayerObject(Player));
+        Add(
+            runtime,
+            0x50000030u,
+            0x01010001u,
+            13f,
+            10f,
+            Hostile(0x50000030u),
+            z: 9f);
+
+        RuntimeHostileTargetSnapshot target = Assert.Single(
+            RuntimeHostileTargetQuery.Capture(runtime, 10f));
+        Assert.Equal(5f, target.Distance, 3);
+        Assert.Empty(RuntimeHostileTargetQuery.Capture(runtime, 4.9f));
+    }
+
+    [Fact]
+    public void Query_RejectsPlayersPetsNpcsAndNonCreatures()
+    {
+        using GameRuntime runtime = Create();
+        runtime.PlayerIdentity.ServerGuid = Player;
+        Add(runtime, Player, 0x01010001u, 10f, 10f, PlayerObject(Player));
         Add(
             runtime,
             0x50000013u,
@@ -133,11 +177,11 @@ public sealed class RuntimeHostileTargetQueryTests
         Assert.False(
             RuntimeHostileTargetQuery.IsHostile(
                 runtime,
-                0x50000010u));
+                0x50000013u));
         Assert.False(
             RuntimeHostileTargetQuery.IsHostile(
                 runtime,
-                0x50000012u));
+                0x50000015u));
         Assert.False(
             RuntimeHostileTargetQuery.IsHostile(
                 runtime,
@@ -246,11 +290,12 @@ public sealed class RuntimeHostileTargetQueryTests
         float x,
         float y,
         ClientObject item,
-        PhysicsStateFlags state = 0)
+        PhysicsStateFlags state = 0,
+        float z = 5f)
     {
         RuntimeEntityRecord record = runtime.EntityObjects
             .RegisterEntity(
-                Spawn(guid, landblock, x, y, state))
+                Spawn(guid, landblock, x, y, state, z))
             .Canonical!;
         Assert.True(runtime.EntityObjects.ApplyAcceptedSpawn(
             record,
@@ -265,13 +310,14 @@ public sealed class RuntimeHostileTargetQueryTests
         uint landblock,
         float x,
         float y,
-        PhysicsStateFlags state)
+        PhysicsStateFlags state,
+        float z)
     {
         var position = new CreateObject.ServerPosition(
             landblock,
             x,
             y,
-            5f,
+            z,
             1f,
             0f,
             0f,
