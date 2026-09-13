@@ -160,6 +160,8 @@ public sealed class ClientObjectTable
     public const uint SharedCooldownPropertyId = 280u;
     public const uint CooldownDurationPropertyId = 167u;
     public const uint PlayerKillerStatusPropertyId = 134u;
+    public const uint MaxStructurePropertyId = 91u;
+    public const uint StructurePropertyId = 92u;
 
     public int ObjectCount => _objects.Count;
     public int ContainerCount => _containers.Count;
@@ -633,6 +635,8 @@ public sealed class ClientObjectTable
             item.CurrentlyEquippedLocation = (EquipMask)(uint)value;
         if (propertyId == HookTypePropertyId) item.HookType = (uint)value;
         if (propertyId == HookItemTypesPropertyId) item.HookItemTypes = (uint)value;
+        if (propertyId == MaxStructurePropertyId) item.MaxStructure = value;
+        if (propertyId == StructurePropertyId) item.Structure = value;
         if (propertyId == PlayerKillerStatusPropertyId)
         {
             item.PublicWeenieBitfield = PlayerKillerStatusBitfield.Apply(

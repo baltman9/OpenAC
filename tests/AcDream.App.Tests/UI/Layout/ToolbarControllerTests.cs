@@ -122,6 +122,87 @@ public class ToolbarControllerTests
     }
 
     [Fact]
+    public void Populate_partlyUsedItem_setsSlotStructureFill()
+    {
+        var (layout, slots, _) = FakeToolbar();
+        var repo = new ClientObjectTable();
+        repo.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 0x5001u, WeenieClassId = 1u, IconId = 0x06001234u,
+            Structure = 5, MaxStructure = 10,
+        });
+        var shortcuts = new List<ShortcutEntry>
+        { new(Index: 0, ObjectId: 0x5001u, SpellId: 0) };
+
+        ToolbarController.Bind(layout, repo, Store(shortcuts),
+            iconIds: (_,_,_,_,_) => 0x77u, useItem: _ => { });
+
+        Assert.Equal(0.5f, slots[Row1[0]].Cell.StructureFill);
+    }
+
+    [Fact]
+    public void LiveStructureUpdate_refreshesSlotFillWithoutRebind()
+    {
+        var (layout, slots, _) = FakeToolbar();
+        var repo = new ClientObjectTable();
+        repo.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 0x5001u, WeenieClassId = 1u, IconId = 0x06001234u,
+            Structure = 5, MaxStructure = 10,
+        });
+        var shortcuts = new List<ShortcutEntry>
+        { new(Index: 0, ObjectId: 0x5001u, SpellId: 0) };
+
+        ToolbarController.Bind(layout, repo, Store(shortcuts),
+            iconIds: (_,_,_,_,_) => 0x77u, useItem: _ => { });
+        repo.UpdateIntProperty(0x5001u, 92u, 2);
+
+        Assert.Equal(0.2f, slots[Row1[0]].Cell.StructureFill);
+    }
+
+    [Fact]
+    public void Populate_fullItem_hidesStructureFill()
+    {
+        var (layout, slots, _) = FakeToolbar();
+        var repo = new ClientObjectTable();
+        repo.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 0x5001u, WeenieClassId = 1u, IconId = 0x06001234u,
+            Structure = 10, MaxStructure = 10,
+        });
+        var shortcuts = new List<ShortcutEntry>
+        { new(Index: 0, ObjectId: 0x5001u, SpellId: 0) };
+        var store = Store(shortcuts);
+
+        ToolbarController.Bind(layout, repo, store,
+            iconIds: (_,_,_,_,_) => 0x77u, useItem: _ => { });
+        Assert.Equal(-1f, slots[Row1[0]].Cell.StructureFill);
+    }
+
+    [Fact]
+    public void Populate_removedShortcut_clearsStructureFillOfHalfUsedItem()
+    {
+        var (layout, slots, _) = FakeToolbar();
+        var repo = new ClientObjectTable();
+        repo.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 0x5001u, WeenieClassId = 1u, IconId = 0x06001234u,
+            Structure = 5, MaxStructure = 10,
+        });
+        var shortcuts = new List<ShortcutEntry>
+        { new(Index: 0, ObjectId: 0x5001u, SpellId: 0) };
+        var store = Store(shortcuts);
+
+        ToolbarController.Bind(layout, repo, store,
+            iconIds: (_,_,_,_,_) => 0x77u, useItem: _ => { });
+        Assert.Equal(0.5f, slots[Row1[0]].Cell.StructureFill);
+
+        store.Load(Array.Empty<ShortcutEntry>());
+
+        Assert.Equal(-1f, slots[Row1[0]].Cell.StructureFill);
+    }
+
+    [Fact]
     public void SessionTableClearRemovesResolvedShortcutPresentation()
     {
         var (layout, slots, _) = FakeToolbar();

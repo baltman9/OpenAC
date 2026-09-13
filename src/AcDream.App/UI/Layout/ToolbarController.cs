@@ -312,7 +312,12 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
 
     public void Populate()
     {
-        foreach (var list in _slots) list?.Cell.Clear();
+        foreach (var list in _slots)
+        {
+            if (list is null) continue;
+            list.Cell.Clear();
+            list.Cell.SetStructure(0, 0);
+        }
 
         for (int slot = 0; slot < _slots.Length; slot++)
         {
@@ -327,6 +332,7 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
             uint dragTex = _dragIconIds?.Invoke(
                 item.Type, item.IconId, item.IconUnderlayId, item.IconOverlayId, item.Effects) ?? 0u;
             list.Cell.SetItem(guid, tex, entry, dragTex);
+            list.Cell.SetStructure(item.Structure, item.MaxStructure);
         }
 
         RestampShortcutNumbers();
