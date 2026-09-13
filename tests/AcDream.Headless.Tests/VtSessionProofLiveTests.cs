@@ -565,14 +565,28 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
             // takes to get the rules running, and the route carries on from
             // the waypoint the death interrupted instead of the first one.
             {
+                // What the four settings read BEFORE the death, so "untouched"
+                // can mean untouched rather than "all four happen to be on".
+                string[] deathSettings =
+                    ["EnableBuffing", "EnableCombat", "EnableNav", "EnableLooting"];
+                var beforeDeath = new Dictionary<string, string?>(StringComparer.Ordinal);
+                foreach (string name in deathSettings)
+                    beforeDeath[name] = ReadOption(name);
+
                 Stage("@setvital health 1");
+                // Everything below reads the chat from here on. The run has
+                // already fought a monster by this point, and a kill line from
+                // that fight would otherwise satisfy the death wait before the
+                // smite has even landed.
                 int chatBeforeDeath = observed.ChatCount;
                 Stage("@smite " + character);
 
                 bool died = WaitUntil(
                     TimeSpan.FromSeconds(45d),
                     () => IsDead(session)
-                        || MentionsAny(observed.SnapshotChat(), "You were killed by"));
+                        || MentionsAny(
+                            [.. observed.SnapshotChat().Skip(chatBeforeDeath)],
+                            "You were killed by"));
 
                 // Read last, not first: the route can still advance a waypoint
                 // in the seconds before the death, and nothing advances it
@@ -587,8 +601,9 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 bool stopAnnounced = died
                     && WaitUntil(
                         TimeSpan.FromSeconds(30d),
-                        () => observed.SnapshotChat().Any(static line =>
-                            line.Contains(
+                        () => observed.SnapshotChat()
+                            .Skip(chatBeforeDeath)
+                            .Any(static line => line.Contains(
                                 "Macro stopped because the character died.",
                                 StringComparison.Ordinal)));
 
@@ -611,11 +626,11 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                     .ToArray();
                 bool passStopped = recovered && passesAfterDeath.Length == 0;
 
-                // (c) nothing was reconfigured behind the player's back. The
-                // four settings a death must not touch, read back through the
-                // plugin's own option command.
-                string[] deathSettings =
-                    ["EnableBuffing", "EnableCombat", "EnableNav", "EnableLooting"];
+                // (c) nothing was reconfigured behind the player's back — the
+                // same four settings read the same either side of the death,
+                // through the plugin's own option command. Compared, not
+                // assumed: an earlier milestone leaving one of them off must
+                // not read as the death having turned it off.
                 var afterDeath = new Dictionary<string, string?>(StringComparer.Ordinal);
                 if (recovered)
                 {
@@ -624,7 +639,9 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 }
                 string[] changed = deathSettings
                     .Where(name => !string.Equals(
-                        afterDeath.GetValueOrDefault(name), "True", StringComparison.Ordinal))
+                        afterDeath.GetValueOrDefault(name),
+                        beforeDeath.GetValueOrDefault(name),
+                        StringComparison.Ordinal))
                     .ToArray();
                 bool settingsUntouched = recovered && changed.Length == 0;
 
@@ -737,7 +754,8 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                                 + string.Join(
                                     ", ",
                                     changed.Select(name =>
-                                        $"{name}={afterDeath.GetValueOrDefault(name) ?? "unread"}"))
+                                        $"{name} {beforeDeath.GetValueOrDefault(name) ?? "unread"}"
+                                            + $" -> {afterDeath.GetValueOrDefault(name) ?? "unread"}"))
                         : !restarted
                             ? "no rule was picked after the macro was started again"
                         : "the route did not resume on the waypoint it had";
