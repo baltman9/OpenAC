@@ -674,6 +674,16 @@ internal sealed class FrameRootCompositionPhase
                         return d.Settings.Display.PotatoMode == enabled
                             ? (true, string.Empty)
                             : (false, $"potato mode '{enabled}' was not persisted");
+                    },
+                    setUiOnly: enabled =>
+                    {
+                        d.Settings.SaveDisplay(d.Settings.Display with
+                        {
+                            UiOnly = enabled,
+                        });
+                        return d.Settings.Display.UiOnly == enabled
+                            ? (true, string.Empty)
+                            : (false, $"ui-only '{enabled}' was not persisted");
                     });
             bindings.Adopt(
                 "world lifecycle automation owner",

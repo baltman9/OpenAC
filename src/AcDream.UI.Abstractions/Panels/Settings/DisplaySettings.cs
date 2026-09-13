@@ -128,7 +128,8 @@ public sealed record DisplaySettings(
     bool BuildingDetailTextures = true,
     bool MultiPassAlpha = false,
     bool KeepDistantBuildings = true,
-    bool PotatoMode = false)
+    bool PotatoMode = false,
+    bool UiOnly = false)
 {
     public RenderPackSelectionSettings RenderPack { get; init; } =
         RenderPackSelectionSettings.Retail;

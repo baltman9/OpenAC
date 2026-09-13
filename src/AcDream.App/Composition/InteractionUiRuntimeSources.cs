@@ -807,6 +807,14 @@ internal sealed class DeferredWorldLifecycleAutomationRuntime
         return false;
     }
 
+    public bool TrySetUiOnly(bool enabled, out string error)
+    {
+        if (!_deactivated && _target is { } target)
+            return target.TrySetUiOnly(enabled, out error);
+        error = "world lifecycle automation is not bound";
+        return false;
+    }
+
     public bool TryResetRenderPackPerformance(out string error)
     {
         if (!_deactivated && _target is { } target)

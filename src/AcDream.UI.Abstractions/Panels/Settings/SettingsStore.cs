@@ -71,7 +71,8 @@ public sealed class SettingsStore
                 BuildingDetailTextures:  ReadBool (disp, "buildingDetailTextures",  d.BuildingDetailTextures),
                 MultiPassAlpha:          ReadBool (disp, "multiPassAlpha",          d.MultiPassAlpha),
                 KeepDistantBuildings:    ReadBool (disp, "keepDistantBuildings",    d.KeepDistantBuildings),
-                PotatoMode:              ReadBool (disp, "potatoMode",              d.PotatoMode))
+                PotatoMode:              ReadBool (disp, "potatoMode",              d.PotatoMode),
+                UiOnly:                  ReadBool (disp, "uiOnly",                  d.UiOnly))
             {
                 RenderPack = ReadRenderPackSelection(disp, d.RenderPack),
             };
@@ -707,6 +708,7 @@ public sealed class SettingsStore
             ["multiPassAlpha"]           = d.MultiPassAlpha,
             ["particleRange"] = d.ParticleRange.ToString(),
             ["potatoMode"]  = d.PotatoMode,
+            ["uiOnly"]      = d.UiOnly,
             ["quality"]     = d.Quality.ToString(),
             ["renderPack"]  = BuildRenderPackObject(d.RenderPack),
             ["resolution"]  = d.Resolution,

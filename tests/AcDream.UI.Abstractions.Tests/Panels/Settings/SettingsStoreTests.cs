@@ -28,6 +28,16 @@ public sealed class SettingsStoreTests : System.IDisposable
     }
 
     [Fact]
+    public void UiOnly_round_trips_as_its_own_flag()
+    {
+        var store = new SettingsStore(_tempPath);
+        store.SaveDisplay(DisplaySettings.Default with { UiOnly = true });
+
+        Assert.True(store.LoadDisplay().UiOnly);
+        Assert.False(DisplaySettings.Default.UiOnly);
+    }
+
+    [Fact]
     public void PotatoMode_round_trips_as_its_own_flag_beside_the_stored_quality()
     {
         var store = new SettingsStore(_tempPath);

@@ -1079,6 +1079,27 @@ public static class ConfigOptionsPageController
                 + "Texture detail, anti-aliasing and the memory pools change at "
                 + "the next start.");
 
+        // UI Only: the world is not drawn and the streaming window shrinks to
+        // the landblocks the simulation needs; panels, chat, radar and plugins
+        // keep working. For the clients of an army that nobody is looking at.
+        BuildExplicitToggleRow(
+            listBox,
+            "UI Only",
+            DisplaySettings.Default.UiOnly,
+            page,
+            read: () => bindings.LoadDisplay().UiOnly,
+            apply: value =>
+            {
+                bindings.SaveDisplay(bindings.LoadDisplay() with { UiOnly = value });
+                return true;
+            },
+            isCurrent: static () => true,
+            tooltip:
+                "Stop drawing the world and keep only the landblocks around you "
+                + "loaded; the panels, chat, radar and plugins keep working. For "
+                + "a client nobody is watching. Off again brings the world back "
+                + "as it streams in.");
+
         display = bindings.LoadDisplay();
     }
 

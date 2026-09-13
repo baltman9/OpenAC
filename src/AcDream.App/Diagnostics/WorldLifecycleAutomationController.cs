@@ -229,6 +229,7 @@ internal sealed class WorldLifecycleAutomationController :
     private readonly Func<RetailUiAutomationRenderPackStatus>
         _getRenderPackStatus;
     private readonly Func<bool, (bool Succeeded, string Error)> _setPotatoMode;
+    private readonly Func<bool, (bool Succeeded, string Error)> _setUiOnly;
     private readonly Func<string, (bool Succeeded, string Error)>
         _selectRenderPack;
     private readonly Func<(bool Succeeded, string Error)>?
@@ -273,7 +274,8 @@ internal sealed class WorldLifecycleAutomationController :
         Func<(int Width, int Height)>? getFramebufferSize = null,
         Func<int, int, (bool Succeeded, string Error)>? resizeFramebuffer = null,
         Action? requestClientClose = null,
-        Func<bool, (bool Succeeded, string Error)>? setPotatoMode = null)
+        Func<bool, (bool Succeeded, string Error)>? setPotatoMode = null,
+        Func<bool, (bool Succeeded, string Error)>? setUiOnly = null)
     {
         _getReveal = getReveal ?? throw new ArgumentNullException(nameof(getReveal));
         _getEnvironmentOwnership = getEnvironmentOwnership
@@ -300,6 +302,8 @@ internal sealed class WorldLifecycleAutomationController :
         _requestClientClose = requestClientClose;
         _setPotatoMode = setPotatoMode
             ?? (_ => (false, "potato-mode automation is unavailable"));
+        _setUiOnly = setUiOnly
+            ?? (_ => (false, "ui-only automation is unavailable"));
         _captureResources = captureResources ?? throw new ArgumentNullException(nameof(captureResources));
         _screenshots = screenshots ?? throw new ArgumentNullException(nameof(screenshots));
         _artifactDirectory = string.IsNullOrWhiteSpace(artifactDirectory)
@@ -322,6 +326,13 @@ internal sealed class WorldLifecycleAutomationController :
     public bool TrySetPotatoMode(bool enabled, out string error)
     {
         (bool succeeded, string failure) = _setPotatoMode(enabled);
+        error = succeeded ? string.Empty : failure;
+        return succeeded;
+    }
+
+    public bool TrySetUiOnly(bool enabled, out string error)
+    {
+        (bool succeeded, string failure) = _setUiOnly(enabled);
         error = succeeded ? string.Empty : failure;
         return succeeded;
     }

@@ -157,7 +157,8 @@ internal sealed class RuntimeSettingsController :
         _resolveQuality = resolveQuality
             ?? (preset => ResolveQuality(
                 preset,
-                EffectiveDisplay.LandscapeDrawDistance));
+                EffectiveDisplay.LandscapeDrawDistance,
+                EffectiveDisplay.UiOnly));
         _log = log ?? Console.WriteLine;
         _characterOptionValue = characterOptionValue;
 
@@ -558,13 +559,32 @@ internal sealed class RuntimeSettingsController :
 
     private static QualitySettings ResolveQuality(
         QualityPreset preset,
-        int landscapeDrawDistance)
+        int landscapeDrawDistance,
+        bool uiOnly = false)
     {
         QualitySettings quality = ApplyLandscapeDrawDistance(
             QualitySettings.From(preset),
             landscapeDrawDistance);
-        return QualitySettings.WithEnvOverrides(quality);
+        return ApplyUiOnly(QualitySettings.WithEnvOverrides(quality), uiOnly);
     }
+
+    /// <summary>The smallest window that still keeps the player's own landblock and its neighbours resident for collision and movement.</summary>
+    internal const int UiOnlyStreamingRadius = 1;
+
+    /// <summary>
+    /// With the world not drawn, the streaming window shrinks to the 3x3 around
+    /// the player: enough for collision, movement and the objects the server
+    /// keeps talking about, and nothing rendered is kept for the eye. Turning
+    /// the switch off restores the preset's window and the world streams back.
+    /// </summary>
+    internal static QualitySettings ApplyUiOnly(QualitySettings quality, bool uiOnly) =>
+        uiOnly
+            ? quality with
+            {
+                NearRadius = Math.Min(quality.NearRadius, UiOnlyStreamingRadius),
+                FarRadius = UiOnlyStreamingRadius,
+            }
+            : quality;
 
     internal static QualitySettings ApplyLandscapeDrawDistance(
         QualitySettings quality,

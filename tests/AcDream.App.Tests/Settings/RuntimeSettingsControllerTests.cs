@@ -47,6 +47,44 @@ public sealed partial class RuntimeSettingsControllerTests
     }
 
     [Fact]
+    public void UiOnly_ShrinksTheStreamingWindowToTheNeighboursOnly_AndOffRestoresIt()
+    {
+        QualitySettings ultra = QualitySettings.From(QualityPreset.Ultra);
+
+        QualitySettings uiOnly = RuntimeSettingsController.ApplyUiOnly(ultra, uiOnly: true);
+        Assert.Equal(1, uiOnly.NearRadius);
+        Assert.Equal(1, uiOnly.FarRadius);
+        Assert.Equal(ultra.MsaaSamples, uiOnly.MsaaSamples);
+        Assert.Equal(ultra, RuntimeSettingsController.ApplyUiOnly(ultra, uiOnly: false));
+
+        // Potato's near 1 is already the floor; far still drops from 3 to 1.
+        QualitySettings potato = RuntimeSettingsController.ApplyUiOnly(
+            QualitySettings.From(QualityPreset.Potato), uiOnly: true);
+        Assert.Equal(1, potato.NearRadius);
+        Assert.Equal(1, potato.FarRadius);
+    }
+
+    [Fact]
+    public void UiOnlySwitch_ReappliesTheWindowLive_ThroughTheRuntimeTargets()
+    {
+        var storage = new FakeStorage();
+        var events = new List<string>();
+        var controller = new RuntimeSettingsController(storage, log: _ => { });
+        controller.BindRuntimeTargets(new FakeRuntimeTargets(events));
+
+        controller.SaveDisplay(controller.Display with { UiOnly = true });
+        Assert.Equal(1, controller.ResolvedQuality.FarRadius);
+        Assert.Contains("target-quality", events);
+
+        controller.SaveDisplay(controller.Display with { UiOnly = false });
+        Assert.Equal(
+            RuntimeSettingsController.ApplyLandscapeDrawDistance(
+                QualitySettings.From(DisplaySettings.Default.Quality),
+                DisplaySettings.Default.LandscapeDrawDistance).FarRadius,
+            controller.ResolvedQuality.FarRadius);
+    }
+
+    [Fact]
     public void PotatoMode_RunsTheCheapestSettings_WhileTheStoredChoicesStayTheUsers()
     {
         var pack = new RenderPackSelectionSettings("pack.alpha", "1.0.0", "high");

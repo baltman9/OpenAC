@@ -87,6 +87,11 @@ public interface IRetailUiAutomationRuntime
         error = "potato-mode automation is unavailable";
         return false;
     }
+    bool TrySetUiOnly(bool enabled, out string error)
+    {
+        error = "ui-only automation is unavailable";
+        return false;
+    }
     bool TryRequestClientClose(out string error)
     {
         error = "client-close automation is unavailable";
@@ -275,6 +280,7 @@ public sealed class RetailUiAutomationScriptRunner : IDisposable
             "checkpoint" => DoCheckpoint(command),
             "renderpack" => DoRenderPack(command),
             "potato" => DoPotato(command),
+            "uionly" => DoUiOnly(command),
             "resize" => DoResize(command),
             "screenshot" => DoScreenshot(command),
             "close-client" => DoCloseClient(command),
@@ -567,6 +573,22 @@ public sealed class RetailUiAutomationScriptRunner : IDisposable
                 || Stop(command, error);
         }
         return Stop(command, "usage: potato on|off");
+    }
+
+    private bool DoUiOnly(ScriptCommand command)
+    {
+        if (_runtime is null)
+            return Stop(command, "ui-only automation is unavailable");
+        var p = command.Parts;
+        if (p.Length == 2
+            && (string.Equals(p[1], "on", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(p[1], "off", StringComparison.OrdinalIgnoreCase)))
+        {
+            bool enabled = string.Equals(p[1], "on", StringComparison.OrdinalIgnoreCase);
+            return _runtime.TrySetUiOnly(enabled, out string error)
+                || Stop(command, error);
+        }
+        return Stop(command, "usage: uionly on|off");
     }
 
     private bool DoRenderPack(ScriptCommand command)
