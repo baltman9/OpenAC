@@ -981,6 +981,21 @@ public sealed class MotionInterpreter : IMotionDoneSink
     }
 
 
+    /// <summary>
+    /// Records the run-hold key WITHOUT re-deriving the motion state from the
+    /// raw key state.
+    /// </summary>
+    /// <remarks>
+    /// This is for establishing the hold key that was already true before
+    /// anything was watching — a first observation, not a key edge. Going
+    /// through the edge path there would re-derive the interpreted state from
+    /// the raw keys, and the raw keys know nothing about a motion the move-to
+    /// layer owns: a turn already under way would be silently discarded while
+    /// the move-to went on believing it was turning.
+    /// </remarks>
+    public void SeedHoldRun(bool holdingRun) =>
+        RawState.CurrentHoldKey = holdingRun ? HoldKey.Run : HoldKey.None;
+
     public void set_hold_run(bool holdingRun, bool interrupt)
     {
         bool runKeyUp = !holdingRun;

@@ -1582,7 +1582,12 @@ public sealed class PlayerMovementController
             _hasInputSnapshot = true;
             _prevRunHeld = input.Run;
             _prevRunHold = input.Run;
-            _motion.set_hold_run(input.Run, interrupt: false);
+            // The first input this controller ever sees is an observation, not
+            // a key edge: nobody pressed anything, we simply had not looked
+            // before. Recording it is all that is wanted. Treating it as an
+            // edge would re-derive the motion state from raw keys that hold no
+            // turn, discarding one the move-to layer had already started.
+            _motion.SeedHoldRun(input.Run);
         }
 
         bool externallyRequestedMovementEvent =
