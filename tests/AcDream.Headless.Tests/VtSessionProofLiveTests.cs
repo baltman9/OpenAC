@@ -424,13 +424,16 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                         "Picked Attack P:", "(Attack) Running"));
                 bool killed = WaitUntil(
                     TimeSpan.FromSeconds(45d),
-                    () => observed.SnapshotChat().Any(IsKillLine));
+                    () => VtProofKillEvidence.FirstKillLine(
+                        observed.SnapshotChat()) is not null);
                 if (attackRule && killed)
                 {
                     ledger.Pass(
                         "P4",
                         "the attack rule wins the loop and a kill is observed",
-                        "attack rule active and a kill line reached the chat log");
+                        "attack rule active; "
+                            + VtProofKillEvidence.FirstKillLine(
+                                observed.SnapshotChat()));
                 }
                 else
                 {
@@ -711,12 +714,6 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
     // ======================================================================
     // Live observation helpers.
     // ======================================================================
-
-    private static bool IsKillLine(string line) =>
-        line.StartsWith("You killed ", StringComparison.Ordinal)
-        || line.StartsWith("You obliterate ", StringComparison.Ordinal)
-        || line.StartsWith("You destroy ", StringComparison.Ordinal)
-        || line.Contains(" by your attack!", StringComparison.Ordinal);
 
     /// <summary>
     /// What the plugin's equipment surface says the character owns and could
@@ -1278,6 +1275,44 @@ internal sealed class VtProofLedger
 }
 
 /// <summary>
+/// Whether a run killed anything, taken from the plugin's own verdict
+/// rather than from a list of death sentences kept here.
+/// <para>
+/// The server announces a death in one of dozens of ways — "You run it
+/// through!", "its death is preceded by a sharp, stabbing pain!" — and the
+/// plugin already owns the table that recognises all of them, because
+/// recognising them is part of what it does: a kill resets the target's
+/// attempt count and retires it. A second, shorter list here watched for
+/// four sentences the server never sent, so the milestone reported nothing
+/// died in a run where both monsters did. So the milestone reads the
+/// verdict, and the verdict quotes the sentence it was reached from.
+/// </para>
+/// </summary>
+internal static class VtProofKillEvidence
+{
+    /// <summary>The caster's verdict and the attack executor's, in that order.</summary>
+    private static readonly string[] Verdicts =
+    [
+        "SpellCaster: Spell kill reset (",
+        "AttackExecutor: Kill blow (",
+    ];
+
+    internal static string? FirstKillLine(IReadOnlyList<string> chat)
+    {
+        ArgumentNullException.ThrowIfNull(chat);
+        foreach (string line in chat)
+        {
+            foreach (string verdict in Verdicts)
+            {
+                if (line.Contains(verdict, StringComparison.Ordinal))
+                    return line;
+            }
+        }
+        return null;
+    }
+}
+
+/// <summary>
 /// Whether a run's chat shows a buff pass that really ran and really
 /// finished, read out of three of the plugin's own lines.
 /// <para>
@@ -1596,6 +1631,42 @@ public sealed class VtSessionProofHarnessTests
             "never began tracking it",
             evidence.Explain(),
             StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The two sentences a live run really produced, and the verdict the
+    /// plugin reached from each. Neither sentence is in any list the harness
+    /// keeps, which is the point: the harness reads the verdict.
+    /// </summary>
+    [Theory]
+    [InlineData(
+        "[MossTank] SpellCaster: Spell kill reset (Drudge Skulker's death is "
+            + "preceded by a sharp, stabbing pain!)")]
+    [InlineData(
+        "[MossTank] AttackExecutor: Kill blow (You run Drudge Skulker through!)")]
+    public void ThePluginsOwnKillVerdictIsWhatCountsAsAKill(string line)
+    {
+        string[] chat =
+        [
+            "[MossTank] Casting: Incantation of Force Bolt on 2147504356 (Drudge Skulker)",
+            "Drudge Skulker's death is preceded by a sharp, stabbing pain!",
+            line,
+        ];
+
+        Assert.Equal(line, VtProofKillEvidence.FirstKillLine(chat));
+    }
+
+    [Fact]
+    public void TheServersOwnDeathSentenceAloneIsNotAKillVerdict()
+    {
+        string[] chat =
+        [
+            "[MossTank] Casting: Incantation of Force Bolt on 2147504356 (Drudge Skulker)",
+            "You run Drudge Skulker through!",
+            "[MossTank] SpellCaster: Cast result timeout",
+        ];
+
+        Assert.Null(VtProofKillEvidence.FirstKillLine(chat));
     }
 
     [Fact]
