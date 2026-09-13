@@ -134,6 +134,53 @@ public sealed class AppAutomationSurfaceTests
     }
 
     /// <summary>
+    /// The order is a contract of the projection, not of the comparator that
+    /// happens to implement it, so it is read off the list the projection
+    /// builds rather than off a list the test sorted itself.
+    /// Mutation: delete the sort at the end of <c>BuildOwnedEquipment</c> and
+    /// this fails while the comparator pin above stays green.
+    /// </summary>
+    [Fact]
+    public void TheEquipmentProjectionHandsBackThatOrder()
+    {
+        const uint player = 0x50000001u;
+        var objects = new ClientObjectTable();
+        // The held one has the HIGHEST id and the last name, so neither the
+        // table's own order nor any single term can produce this answer by
+        // accident.
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 0x70000003u,
+            Name = "Alpha Wand",
+            ValidLocations = EquipMask.Held,
+            ContainerId = player,
+        });
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 0x70000002u,
+            Name = "Alpha Wand",
+            ValidLocations = EquipMask.Held,
+            ContainerId = player,
+        });
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 0x70000009u,
+            Name = "Zeta Wand",
+            ValidLocations = EquipMask.Held,
+            CurrentlyEquippedLocation = EquipMask.Held,
+            WielderId = player,
+        });
+
+        List<PluginEquipmentItem> projected =
+            AppAutomationSurface.BuildOwnedEquipment(objects, player);
+
+        Assert.Equal(
+            [0x70000009u, 0x70000002u, 0x70000003u],
+            projected.Select(static item => item.ObjectId));
+        Assert.True(projected[0].IsEquipped);
+    }
+
+    /// <summary>
     /// A plugin has to be able to tell the character's own combat log from
     /// somebody typing the same words, so the line's log-text type reaches it.
     /// Mutation: stop copying it in <c>OnChat</c> and this fails.

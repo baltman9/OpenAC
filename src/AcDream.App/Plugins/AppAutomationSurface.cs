@@ -2107,7 +2107,19 @@ internal sealed class AppAutomationSurface
         uint playerId = runtime.PlayerIdentity.ServerGuid;
         if (playerId == 0u)
             return Array.Empty<PluginEquipmentItem>();
-        ClientObjectTable objects = runtime.InventoryOwner.Objects;
+        return BuildOwnedEquipment(runtime.InventoryOwner.Objects, playerId);
+    }
+
+    /// <summary>
+    /// The equipment projection, ordering included: what is held first, then
+    /// by name, then by object id. The order is part of what a client reads
+    /// off this list, so it belongs to the projection rather than to a sort
+    /// the caller has to remember.
+    /// </summary>
+    internal static List<PluginEquipmentItem> BuildOwnedEquipment(
+        ClientObjectTable objects,
+        uint playerId)
+    {
         var built = new List<PluginEquipmentItem>();
         foreach (ClientObject item in objects.Objects)
         {
