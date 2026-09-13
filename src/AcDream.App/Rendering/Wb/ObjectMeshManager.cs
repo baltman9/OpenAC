@@ -108,7 +108,7 @@ namespace AcDream.App.Rendering.Wb
         // The texture-detail choice the world started with; mesh textures are
         // reduced to it once per texture key here, before they enter an array.
         private readonly WorldTextureDetail _textureDetail;
-        private readonly Dictionary<TextureKey, WorldTextureDetail.ReducedTexture> _reducedTextures = new();
+        private readonly Dictionary<(TextureKey Key, (int Width, int Height, TextureFormat Format) Format), WorldTextureDetail.ReducedTexture> _reducedTextures = new();
         private const int ReducedTextureCacheEntries = 8192;
 
         internal WorldTextureDetail TextureDetail => _textureDetail;
@@ -117,16 +117,21 @@ namespace AcDream.App.Rendering.Wb
             (int Width, int Height, TextureFormat Format) format,
             TextureBatchData batch)
         {
-            if (!_textureDetail.ReducesAnything)
-                return new WorldTextureDetail.ReducedTexture(
-                    format, batch.TextureData, batch.UploadPixelFormat, batch.UploadPixelType);
-            if (_reducedTextures.TryGetValue(batch.Key, out WorldTextureDetail.ReducedTexture cached))
+            var unchanged = new WorldTextureDetail.ReducedTexture(
+                format, batch.TextureData, batch.UploadPixelFormat, batch.UploadPixelType);
+            if (_textureDetail.Environment == AcDream.Core.Textures.ImageScale.Full)
+                return unchanged;
+            if (_reducedTextures.TryGetValue((batch.Key, format), out WorldTextureDetail.ReducedTexture cached))
                 return cached;
             WorldTextureDetail.ReducedTexture reduced = _textureDetail.ReduceEnvironment(
                 format, batch.TextureData, batch.UploadPixelFormat, batch.UploadPixelType);
+            // Only a real reduction is worth remembering; an unchanged layer
+            // would pin the full-size bytes the mesh cache is free to drop.
+            if (ReferenceEquals(reduced.Data, batch.TextureData))
+                return unchanged;
             if (_reducedTextures.Count >= ReducedTextureCacheEntries)
                 _reducedTextures.Clear();
-            _reducedTextures[batch.Key] = reduced;
+            _reducedTextures[(batch.Key, format)] = reduced;
             return reduced;
         }
 

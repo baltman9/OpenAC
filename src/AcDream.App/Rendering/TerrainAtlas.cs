@@ -546,7 +546,9 @@ public sealed class TerrainAtlas : IDisposable
     /// <summary>Box-averages a layer that shrinks; nearest-neighbour for one that grows or matches.</summary>
     private static byte[] ResampleRgba8(DecodedTexture src, int dstW, int dstH)
     {
-        if (dstW < src.Width && dstH < src.Height)
+        bool growsOnASide = dstW > src.Width || dstH > src.Height;
+        bool shrinksOnASide = dstW < src.Width || dstH < src.Height;
+        if (!growsOnASide && shrinksOnASide)
             return TexturePixels.DownsampleBox(src.Rgba8, src.Width, src.Height, 4, dstW, dstH);
         return ResizeRgba8Nearest(src, dstW, dstH);
     }

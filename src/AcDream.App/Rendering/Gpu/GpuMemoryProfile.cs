@@ -34,14 +34,16 @@ internal sealed record GpuMemoryProfile(
 
     /// <summary>Many clients on one GPU (the Potato profile): 16 MiB blocks so
     /// a small world does not hold a 128 MiB block per memory type, 8 MiB of
-    /// staging (a payload that does not fit takes a temporary buffer), 8 MiB
-    /// per frame ring, and an arena that starts at a quarter of the default.</summary>
+    /// staging (a payload that does not fit takes a temporary buffer), and an
+    /// arena that starts at a quarter of the default. The per-frame ring keeps
+    /// the default size: it has no fallback when a frame does not fit, and one
+    /// measured peak is not enough to shrink it.</summary>
     public static GpuMemoryProfile Compact { get; } = new(
         Name: "compact",
         BlockSizeBytes: 16 * MiB,
         DedicatedThresholdBytes: 8 * MiB,
         StagingCapacityBytes: 8 * MiB,
-        RingCapacityBytesPerSlot: 8 * 1024 * 1024,
+        RingCapacityBytesPerSlot: 16 * 1024 * 1024,
         MeshArenaInitialVertices: 256 * 1024,
         MeshArenaInitialIndices: 1024 * 1024);
 

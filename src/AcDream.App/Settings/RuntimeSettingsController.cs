@@ -181,7 +181,18 @@ internal sealed class RuntimeSettingsController :
 
     public string ActiveToonKey { get; private set; } = DefaultToonKey;
 
-    public DisplaySettings Display { get; private set; }
+    private DisplaySettings _display = null!;
+    private DisplaySettings _effectiveDisplay = null!;
+
+    public DisplaySettings Display
+    {
+        get => _display;
+        private set
+        {
+            _display = value;
+            _effectiveDisplay = value.Effective;
+        }
+    }
 
     /// <summary>
     /// What the runtime runs with: <see cref="Display"/> with Potato Mode
@@ -189,7 +200,7 @@ internal sealed class RuntimeSettingsController :
     /// the Options panel binds to <see cref="Display"/> and the renderer,
     /// streaming, particles and render pack read this.
     /// </summary>
-    public DisplaySettings EffectiveDisplay => Display.Effective;
+    public DisplaySettings EffectiveDisplay => _effectiveDisplay;
 
     public AudioSettings Audio { get; private set; }
 
@@ -222,8 +233,11 @@ internal sealed class RuntimeSettingsController :
         if (!_startupDisplayApplied)
         {
             RuntimeDisplayApplyResult result = target.ApplyDisplay(Startup.Display);
-            DisplaySettings applied = ReconcileDisplayResult(Startup.Display, result);
-            if (!ReferenceEquals(applied, Startup.Display))
+            // Reconcile the STORED record: the startup snapshot is the Potato
+            // overlay when the switch is on, and the reconciled fullscreen flag
+            // must never carry the overlay's values into the file.
+            DisplaySettings applied = ReconcileDisplayResult(Display, result);
+            if (!ReferenceEquals(applied, Display))
             {
                 _storage.SaveDisplay(applied);
                 Display = applied;

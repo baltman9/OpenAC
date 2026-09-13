@@ -1076,7 +1076,8 @@ public static class ConfigOptionsPageController
                 + "building detail textures, the plain render pack, retail "
                 + "particle range, and compact video-memory pools. Your other "
                 + "settings are kept and come back when this is off. "
-                + "Anti-aliasing and the memory pools change at the next start.");
+                + "Texture detail, anti-aliasing and the memory pools change at "
+                + "the next start.");
 
         display = bindings.LoadDisplay();
     }
@@ -1161,7 +1162,7 @@ public static class ConfigOptionsPageController
             listBox, "ID_Graphics_EnvironmentTextureDetail", TextureDetailChoices, page, resolveString,
             read: () => bindings.LoadDisplay().EnvironmentTextureDetail,
             apply: value => bindings.SaveDisplay(bindings.LoadDisplay() with { EnvironmentTextureDetail = value }),
-            defaultValue: 1,
+            defaultValue: DisplaySettings.Default.EnvironmentTextureDetail,
             storeOnly: false,
             resolveSprite, datFont, debugFont);
 

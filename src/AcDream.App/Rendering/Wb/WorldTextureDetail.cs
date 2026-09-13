@@ -115,7 +115,9 @@ internal sealed record WorldTextureDetail(ImageScale Landscape, ImageScale Envir
                 }
                 byte[] reduced = TexturePixels.DownsampleBox(
                     rgba, format.Width, format.Height, 4, width, height);
-                byte[] encoded = new BcEncoder(compression).EncodeToRawBytes(
+                var encoder = new BcEncoder(compression);
+                encoder.OutputOptions.GenerateMipMaps = false;
+                byte[] encoded = encoder.EncodeToRawBytes(
                     reduced,
                     width,
                     height,

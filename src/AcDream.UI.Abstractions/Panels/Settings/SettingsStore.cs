@@ -15,13 +15,11 @@ public sealed class SettingsStore
 {
     private const int CurrentSchemaVersion = 4;
 
-    /// <summary>
-    /// The landscape texture-detail value every settings file carried while the
-    /// row had no effect (the retail default, half size). Now that the row is
-    /// live, a pre-v4 file's untouched default reads as full detail, so nobody
-    /// gets reduced textures without having chosen them.
-    /// </summary>
-    internal const int LegacyDefaultLandscapeTextureDetail = 2;
+    // Before v4 the two texture-detail rows had no effect and their labels ran
+    // the other way round (0 was "Very Low"). Whatever a pre-v4 file holds for
+    // them was never seen on screen, so both reset to their defaults when the
+    // file is first read or re-saved at v4; a v4 value is a real choice.
+    private const int TextureDetailRowsLiveSchemaVersion = 4;
     private readonly string _path;
 
     public SettingsStore(string path)
@@ -45,10 +43,13 @@ public sealed class SettingsStore
             float fieldOfView = ReadFloat(disp, "fieldOfView", d.FieldOfView);
             if (ReadSchemaVersion(root) < 3 && disp.TryGetProperty("fieldOfView", out _))
                 fieldOfView = MigrateLegacyVerticalFovDegrees(fieldOfView);
-            int landscapeTextureDetail = ReadInt(disp, "landscapeTextureDetail", d.LandscapeTextureDetail);
-            if (ReadSchemaVersion(root) < 4
-                && landscapeTextureDetail == LegacyDefaultLandscapeTextureDetail)
-                landscapeTextureDetail = d.LandscapeTextureDetail;
+            bool textureDetailRowsWereDead = ReadSchemaVersion(root) < TextureDetailRowsLiveSchemaVersion;
+            int landscapeTextureDetail = textureDetailRowsWereDead
+                ? d.LandscapeTextureDetail
+                : ReadInt(disp, "landscapeTextureDetail", d.LandscapeTextureDetail);
+            int environmentTextureDetail = textureDetailRowsWereDead
+                ? d.EnvironmentTextureDetail
+                : ReadInt(disp, "environmentTextureDetail", d.EnvironmentTextureDetail);
             return new DisplaySettings(
                 Resolution:  ReadString      (disp, "resolution",  d.Resolution),
                 Fullscreen:  ReadBool        (disp, "fullscreen",  d.Fullscreen),
@@ -64,7 +65,7 @@ public sealed class SettingsStore
                 GraphicsPerformance:     ReadFloat(disp, "graphicsPerformance",     d.GraphicsPerformance),
                 DegradeDistance:         ReadFloat(disp, "degradeDistance",         d.DegradeDistance),
                 LandscapeTextureDetail:  landscapeTextureDetail,
-                EnvironmentTextureDetail:ReadInt  (disp, "environmentTextureDetail",d.EnvironmentTextureDetail),
+                EnvironmentTextureDetail:environmentTextureDetail,
                 TextureFiltering:        ReadInt  (disp, "textureFiltering",        d.TextureFiltering),
                 LandscapeDrawDistance:   ReadInt  (disp, "landscapeDrawDistance",   d.LandscapeDrawDistance),
                 BuildingDetailTextures:  ReadBool (disp, "buildingDetailTextures",  d.BuildingDetailTextures),
@@ -611,15 +612,10 @@ public sealed class SettingsStore
     private static void MigrateSectionsInPlace(JsonObject root)
     {
         int version = root["version"] is JsonValue value && value.TryGetValue(out int stored) ? stored : 1;
-        if (version >= 4)
+        if (version >= TextureDetailRowsLiveSchemaVersion)
             return;
-        if (root["display"] is JsonObject display
-            && display["landscapeTextureDetail"] is JsonValue detail
-            && detail.TryGetValue(out int landscapeTextureDetail)
-            && landscapeTextureDetail == LegacyDefaultLandscapeTextureDetail)
-        {
-            display["landscapeTextureDetail"] = DisplaySettings.Default.LandscapeTextureDetail;
-        }
+        if (root["display"] is JsonObject display)
+            ResetDeadTextureDetailRows(display);
     }
 
     private void WriteMutableRoot(JsonObject root)
@@ -837,13 +833,16 @@ public sealed class SettingsStore
     {
         if (JsonNode.Parse(display.GetRawText()) is not JsonObject node)
             return display.GetRawText();
-        if (node["landscapeTextureDetail"] is JsonValue detail
-            && detail.TryGetValue(out int landscapeTextureDetail)
-            && landscapeTextureDetail == LegacyDefaultLandscapeTextureDetail)
-        {
-            node["landscapeTextureDetail"] = DisplaySettings.Default.LandscapeTextureDetail;
-        }
+        ResetDeadTextureDetailRows(node);
         return node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }).Replace("\n", "\n  ");
+    }
+
+    private static void ResetDeadTextureDetailRows(JsonObject display)
+    {
+        if (display.ContainsKey("landscapeTextureDetail"))
+            display["landscapeTextureDetail"] = DisplaySettings.Default.LandscapeTextureDetail;
+        if (display.ContainsKey("environmentTextureDetail"))
+            display["environmentTextureDetail"] = DisplaySettings.Default.EnvironmentTextureDetail;
     }
 
     private static RenderPackSelectionSettings ReadRenderPackSelection(

@@ -66,7 +66,7 @@ public sealed class ConfigOptionsPageControllerTests
         Assert.False(d.AutomaticDegrades);
         Assert.Equal(0f, d.GraphicsPerformance);
         Assert.Equal(50f, d.DegradeDistance);
-        // Retail defaults landscape detail to 2 (half size). acdream keeps full
+        // The game's own client defaulted landscape detail to 2 (half size). acdream keeps full
         // detail unless chosen or in Potato Mode (owner direction, 2026-09-13);
         // the register row carries the deviation.
         Assert.Equal(0, d.LandscapeTextureDetail);
@@ -1036,7 +1036,7 @@ public sealed class ConfigOptionsPageControllerTests
             "High",             // 24 Graphics Profile (acdream-only)
             false,              // 25 Potato Mode (acdream-only)
 
-            0,                  // 26 Landscape Texture Detail (acdream: full; the retail 2 is half size)
+            0,                  // 26 Landscape Texture Detail (acdream: full; the original 2 is half size)
             1,                  // 27 Environment Texture Detail
             1,                  // 28 Texture Filtering
             8,

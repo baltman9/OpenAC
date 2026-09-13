@@ -22,7 +22,7 @@ public sealed class GpuMemoryProfileTests
     }
 
     [Fact]
-    public void Compact_ReservesLessThanDefaultOnEveryAxis_AndBothKeepDedicatedBelowBlock()
+    public void Compact_ReservesLessThanDefault_ExceptTheFrameRing_AndBothKeepDedicatedBelowBlock()
     {
         GpuMemoryProfile compact = GpuMemoryProfile.Compact;
         GpuMemoryProfile standard = GpuMemoryProfile.Default;
@@ -30,7 +30,8 @@ public sealed class GpuMemoryProfileTests
         Assert.True(compact.BlockSizeBytes < standard.BlockSizeBytes);
         Assert.True(compact.DedicatedThresholdBytes < standard.DedicatedThresholdBytes);
         Assert.True(compact.StagingCapacityBytes < standard.StagingCapacityBytes);
-        Assert.True(compact.RingCapacityBytesPerSlot < standard.RingCapacityBytesPerSlot);
+        // The per-frame ring is the one pool without a fallback; it stays.
+        Assert.Equal(standard.RingCapacityBytesPerSlot, compact.RingCapacityBytesPerSlot);
         Assert.True(compact.MeshArenaInitialVertices < standard.MeshArenaInitialVertices);
         Assert.True(compact.MeshArenaInitialIndices < standard.MeshArenaInitialIndices);
 
@@ -46,7 +47,7 @@ public sealed class GpuMemoryProfileTests
         Assert.Equal(16UL * 1024 * 1024, compact.BlockSizeBytes);
         Assert.Equal(8UL * 1024 * 1024, compact.DedicatedThresholdBytes);
         Assert.Equal(8UL * 1024 * 1024, compact.StagingCapacityBytes);
-        Assert.Equal(8 * 1024 * 1024, compact.RingCapacityBytesPerSlot);
+        Assert.Equal(16 * 1024 * 1024, compact.RingCapacityBytesPerSlot);
         Assert.Equal(256 * 1024, compact.MeshArenaInitialVertices);
         Assert.Equal(1024 * 1024, compact.MeshArenaInitialIndices);
     }

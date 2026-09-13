@@ -222,20 +222,24 @@ public sealed class SettingsStoreTests : System.IDisposable
     }
 
     [Theory]
-    [InlineData(3, 2, 0)]   // the dead-row default becomes full detail
-    [InlineData(3, 3, 3)]   // a value someone chose survives
-    [InlineData(4, 2, 2)]   // a v4 file's 2 is a real choice
-    public void LoadDisplay_pre_v4_default_landscape_detail_reads_as_full(int version, int stored, int expected)
+    [InlineData(3, 2, 4, 0, 1)]   // the dead rows reset: labels ran the other way before v4
+    [InlineData(3, 4, 4, 0, 1)]   // "Very High" under the old labels would now mean an eighth
+    [InlineData(2, 0, 0, 0, 1)]
+    [InlineData(4, 2, 4, 2, 4)]   // a v4 file's values are real choices
+    public void LoadDisplay_pre_v4_texture_detail_rows_reset_to_defaults(
+        int version, int storedLandscape, int storedEnvironment, int expectedLandscape, int expectedEnvironment)
     {
         File.WriteAllText(_tempPath, $$"""
             {
               "version": {{version}},
-              "display": { "landscapeTextureDetail": {{stored}} }
+              "display": { "landscapeTextureDetail": {{storedLandscape}}, "environmentTextureDetail": {{storedEnvironment}} }
             }
             """);
         var store = new SettingsStore(_tempPath);
 
-        Assert.Equal(expected, store.LoadDisplay().LandscapeTextureDetail);
+        DisplaySettings display = store.LoadDisplay();
+        Assert.Equal(expectedLandscape, display.LandscapeTextureDetail);
+        Assert.Equal(expectedEnvironment, display.EnvironmentTextureDetail);
     }
 
     [Fact]
@@ -244,7 +248,7 @@ public sealed class SettingsStoreTests : System.IDisposable
         File.WriteAllText(_tempPath, """
             {
               "version": 3,
-              "display": { "landscapeTextureDetail": 2, "resolution": "1920x1080" }
+              "display": { "landscapeTextureDetail": 4, "environmentTextureDetail": 4, "resolution": "1920x1080" }
             }
             """);
         var store = new SettingsStore(_tempPath);
@@ -253,6 +257,7 @@ public sealed class SettingsStoreTests : System.IDisposable
 
         DisplaySettings display = store.LoadDisplay();
         Assert.Equal(0, display.LandscapeTextureDetail);
+        Assert.Equal(1, display.EnvironmentTextureDetail);
         Assert.Equal("1920x1080", display.Resolution);
     }
 
