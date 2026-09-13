@@ -45,6 +45,48 @@ public sealed class VulkanBindingScopeArenaTests
     }
 
     [Fact]
+    public void Seeding_ResetsTheDynamicOffsets_SoADummyBindingNeverCarriesAnOldOffset()
+    {
+        VulkanBindingScopeArena arena = CreateArena();
+        arena.BeginFrame();
+        arena.SetUniform(GpuBindingModel.UniformSceneLighting, DispatcherBuffer, 832, 4096);
+        arena.SetStorage(GpuBindingModel.StorageInstances, DispatcherBuffer, 4096, 4096);
+        Assert.Equal(832u, arena.UniformOffset(GpuBindingModel.UniformSceneLighting));
+
+        arena.SeedUniform(GpuBindingModel.UniformSceneLighting, DummyBuffer, 65536);
+        arena.SeedStorage(GpuBindingModel.StorageInstances, DummyBuffer, 0, 65536);
+
+        Assert.Equal(0u, arena.UniformOffset(GpuBindingModel.UniformSceneLighting));
+        Assert.Equal(0u, arena.StorageOffset(GpuBindingModel.StorageInstances));
+    }
+
+    [Fact]
+    public void InvalidateMaterialized_RewritesAMatchingEntryOnce_ThenReusesIt()
+    {
+        VulkanBindingScopeArena arena = CreateArena();
+        arena.BeginFrame();
+        arena.SetStorage(GpuBindingModel.StorageInstances, DispatcherBuffer, 0, 4096);
+        (int index, _, bool firstWrite) = arena.Resolve();
+        arena.AssignSlot(index, slot: 0);
+        Assert.True(firstWrite);
+
+        // A buffer died somewhere: the next frame's matching state must be
+        // written again, and only that once.
+        arena.BeginFrame();
+        arena.InvalidateMaterialized();
+        arena.SetStorage(GpuBindingModel.StorageInstances, DispatcherBuffer, 0, 4096);
+        (int again, int slot, bool rewrite) = arena.Resolve();
+        Assert.Equal(index, again);
+        Assert.Equal(0, slot);
+        Assert.True(rewrite);
+
+        arena.BeginFrame();
+        arena.SetStorage(GpuBindingModel.StorageInstances, DispatcherBuffer, 0, 4096);
+        (_, _, bool third) = arena.Resolve();
+        Assert.False(third);
+    }
+
+    [Fact]
     public void ReturningToAnEarlierRenderersBuffersReusesItsEntryWithoutRewriting()
     {
         VulkanBindingScopeArena arena = CreateArena();

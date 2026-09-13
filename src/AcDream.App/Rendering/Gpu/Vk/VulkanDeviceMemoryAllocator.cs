@@ -96,6 +96,10 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
     private readonly Dictionary<(uint TypeIndex, int BlockIndex, ulong OffsetBytes), string> _ownerByRange = [];
 
     private bool _disposed;
+    private long _releaseGeneration;
+
+    /// <summary>Counts every release; a frame start compares it to know whether any buffer or image it once bound may be gone.</summary>
+    internal long ReleaseGeneration => Interlocked.Read(ref _releaseGeneration);
 
     private readonly record struct BlockMemory(DeviceMemory Memory, nint Mapped, ulong CapacityBytes);
 
@@ -282,6 +286,7 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
                 return;
 
             AllocatedBytes -= Math.Min(AllocatedBytes, allocation.Range.SizeBytes);
+            Interlocked.Increment(ref _releaseGeneration);
             if (_ownerByRange.Remove(
                     (allocation.MemoryTypeIndex, allocation.Range.BlockIndex, allocation.Range.OffsetBytes),
                     out string? owner)

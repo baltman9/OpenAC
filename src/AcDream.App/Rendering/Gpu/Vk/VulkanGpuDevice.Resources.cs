@@ -393,6 +393,35 @@ internal sealed unsafe partial class VulkanGpuDevice
             vulkanTexture.SampledLayout);
     }
 
+    public GpuTextureSlot ReplaceTextureSlot(GpuTextureSlot slot, IGpuTexture texture, IGpuSampler sampler)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(texture);
+        ArgumentNullException.ThrowIfNull(sampler);
+        if (!slot.IsAssigned)
+            return RegisterTexture(texture, sampler);
+        if (texture is not VulkanGpuTexture vulkanTexture)
+            throw new ArgumentException("The Vulkan backend can only register a Vulkan texture.", nameof(texture));
+        if (sampler is not VulkanGpuSampler vulkanSampler)
+            throw new ArgumentException("The Vulkan backend can only register a Vulkan sampler.", nameof(sampler));
+        if (!vulkanTexture.IsSampleable || vulkanTexture.SampledView.Handle == 0)
+        {
+            throw new ArgumentException(
+                $"Texture '{vulkanTexture.Name}' is an attachment-only image and has no sampled view.",
+                nameof(texture));
+        }
+
+        // The table is update-after-bind, so the slot can be rewritten while
+        // frames that sample it are in flight; they see the old or the new pair,
+        // and both stay alive until the caller retires them.
+        TextureTable.Rewrite(
+            slot,
+            vulkanTexture.SampledView,
+            vulkanSampler.Handle,
+            vulkanTexture.SampledLayout);
+        return slot;
+    }
+
     public void ReleaseTextureSlot(GpuTextureSlot slot)
     {
         ThrowIfDisposed();

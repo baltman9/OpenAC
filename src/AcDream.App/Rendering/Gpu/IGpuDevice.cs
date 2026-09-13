@@ -46,6 +46,20 @@ internal interface IGpuDevice : IDisposable
 
     void ReleaseTextureSlot(GpuTextureSlot slot);
 
+    /// <summary>
+    /// Points an already-published slot at a new (texture, sampler) pair and
+    /// returns the slot to keep using. Draw data that baked the slot's index
+    /// (terrain tiles, cached draws) stays valid, which a release followed by a
+    /// fresh registration would not give: the freed index is scrubbed and can
+    /// be handed to the next texture. A stand-in may fall back to that shape.
+    /// </summary>
+    GpuTextureSlot ReplaceTextureSlot(GpuTextureSlot slot, IGpuTexture texture, IGpuSampler sampler)
+    {
+        if (slot.IsAssigned)
+            ReleaseTextureSlot(slot);
+        return RegisterTexture(texture, sampler);
+    }
+
     /// <summary>Opens the next frame, waiting for its flight slot to retire first.</summary>
     IGpuFrame BeginFrame();
 

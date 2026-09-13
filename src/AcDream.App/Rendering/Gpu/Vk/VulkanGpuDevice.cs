@@ -294,7 +294,7 @@ internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineF
 
         _uploads.ReleaseCompleted(CompletedSerial());
         _ringStates[slot].Reset();
-        FrameBindingsAt(slot).BeginFrame();
+        FrameBindingsAt(slot).BeginFrame(_allocator.ReleaseGeneration);
 
         _acquiredImageIndex = null;
         if (_backbuffer is not null)

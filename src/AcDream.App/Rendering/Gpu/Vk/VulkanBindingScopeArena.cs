@@ -26,6 +26,9 @@ internal sealed class VulkanBindingScopeArena
         public ulong[] UniformBuffers { get; } = new ulong[uniformBindingCount];
         public uint[] UniformRanges { get; } = new uint[uniformBindingCount];
         public int Slot { get; set; } = -1;
+
+        /// <summary>The descriptor set behind this entry may name a buffer that no longer exists; write it again before binding it.</summary>
+        public bool Stale { get; set; }
     }
 
     internal VulkanBindingScopeArena(
@@ -62,6 +65,7 @@ internal sealed class VulkanBindingScopeArena
     internal void SeedUniform(uint binding, ulong buffer, uint rangeBytes)
     {
         _uniformBuffers[binding] = buffer;
+        _uniformOffsets[binding] = 0;
         _uniformRanges[binding] = rangeBytes;
     }
 
@@ -70,6 +74,17 @@ internal sealed class VulkanBindingScopeArena
         _liveCount = 0;
         _active = -1;
         _dirty = true;
+    }
+
+    /// <summary>
+    /// A buffer was destroyed since these descriptor sets were written. Every
+    /// materialised set may still name it, so each is rewritten the next time
+    /// its state is resolved; the state cache itself is kept.
+    /// </summary>
+    internal void InvalidateMaterialized()
+    {
+        foreach (Entry entry in _entries)
+            entry.Stale = true;
     }
 
     internal void SetStorage(uint binding, ulong buffer, uint offsetBytes, uint rangeBytes)
@@ -137,7 +152,10 @@ internal sealed class VulkanBindingScopeArena
             }
 
             _dirty = false;
-            return (_active, _entries[_active].Slot, false);
+            Entry matched = _entries[_active];
+            bool needsWrite = matched.Stale;
+            matched.Stale = false;
+            return (_active, matched.Slot, needsWrite);
         }
 
         while (_entries.Count <= _liveCount)
@@ -180,6 +198,7 @@ internal sealed class VulkanBindingScopeArena
 
     private void Adopt(Entry entry)
     {
+        entry.Stale = false;
         Array.Copy(_storageBuffers, entry.StorageBuffers, _storageBindingCount);
         Array.Copy(_storageOffsets, entry.StorageOffsets, _storageBindingCount);
         Array.Copy(_storageRanges, entry.StorageRanges, _storageBindingCount);

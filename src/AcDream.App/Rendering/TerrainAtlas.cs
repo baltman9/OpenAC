@@ -513,10 +513,12 @@ public sealed class TerrainAtlas : IDisposable
         if (ReferenceEquals(rhi.TerrainSampler, sampler) && rhi.TerrainSlot.IsAssigned)
             return;
 
-        if (rhi.TerrainSlot.IsAssigned)
-            rhi.Device.ReleaseTextureSlot(rhi.TerrainSlot);
+        // Every built terrain tile carries this slot's index in its instance
+        // data, so the slot is rewritten in place rather than released: a
+        // released index is scrubbed and reused, and the tiles would sample
+        // whatever texture took it next.
         rhi.TerrainSampler = sampler;
-        rhi.TerrainSlot = rhi.Device.RegisterTexture(rhi.Terrain, sampler);
+        rhi.TerrainSlot = rhi.Device.ReplaceTextureSlot(rhi.TerrainSlot, rhi.Terrain, sampler);
     }
 
     private static bool TryDecodeAlphaMap(IDatReaderWriter dats, uint surfaceTextureId, out DecodedTexture decoded)

@@ -74,6 +74,18 @@ internal sealed unsafe class VulkanFrameBindings : IDisposable
             UniformBindingCount,
             VulkanPipelineLayouts.IsDynamicStorageBinding);
 
+        SeedEveryBindingWithTheDummy();
+    }
+
+    /// <summary>
+    /// Every binding points at the always-alive dummy buffer until a renderer
+    /// binds something this frame. Done at construction and again at every
+    /// frame start, so a buffer bound in an earlier frame and destroyed since
+    /// can never be carried into a descriptor write.
+    /// </summary>
+    private void SeedEveryBindingWithTheDummy()
+    {
+        VulkanGpuBuffer dummy = Dummy;
         uint dummyStorageRange = (uint)Math.Min(dummy.SizeBytes, _maxStorageBufferRangeBytes);
         for (uint binding = 0; binding < GpuBindingModel.StorageBindingCount; binding++)
             _arena.SeedStorage(binding, dummy.Handle.Handle, offsetBytes: 0, dummyStorageRange);
@@ -84,6 +96,7 @@ internal sealed unsafe class VulkanFrameBindings : IDisposable
         for (int binding = 0; binding < _packBuffers.Length; binding++)
         {
             _packBuffers[binding] = dummy.Handle.Handle;
+            _packOffsets[binding] = 0;
             _packRanges[binding] = dummyUniformRange;
         }
     }
@@ -99,9 +112,22 @@ internal sealed unsafe class VulkanFrameBindings : IDisposable
     /// previous submission has retired before <c>BeginFrame</c> returns, which is
     /// the same guarantee that lets the ring rewind.
     /// </summary>
-    internal void BeginFrame()
+    private long _seenReleaseGeneration = -1;
+
+    /// <param name="releaseGeneration">
+    /// The allocator's count of device-memory releases. When it moved since
+    /// this slot's previous frame, a buffer some materialised descriptor set
+    /// names may be gone, so every set is written again before it is bound.
+    /// </param>
+    internal void BeginFrame(long releaseGeneration = -1)
     {
         _arena.BeginFrame();
+        SeedEveryBindingWithTheDummy();
+        if (releaseGeneration != _seenReleaseGeneration)
+        {
+            _seenReleaseGeneration = releaseGeneration;
+            _arena.InvalidateMaterialized();
+        }
         _packSlotsByState.Clear();
         _packLiveCount = 0;
     }
