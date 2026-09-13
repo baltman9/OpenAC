@@ -2290,6 +2290,111 @@ public sealed class HeadlessSessionHostTests
         Assert.Equal(0, firstEntry.PendingCount);
     }
 
+    /// <summary>
+    /// A host that plays no animations still has to finish the motions it
+    /// dispatches, otherwise a motion stays outstanding forever and suspends
+    /// the whole move-to layer - a turn-to-heading is accepted and then never
+    /// starts, so a route that turns before it walks stands still. See the
+    /// research note on the headless navigation slice.
+    /// </summary>
+    [Fact]
+    public void PublishedHeadlessPlayer_TurnToHeadingReachesTheRequestedHeading()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        GameRuntime runtime = host.Runtime;
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+
+        PlayerMovementController controller = PublishFlatGroundPlayer(
+            host,
+            runtime,
+            0x50000015u);
+        Assert.Equal(0f, Heading(controller), 1);
+
+        // Driven by hand because the fixture session has no socket to send the
+        // movement event on.
+        var frame = new RuntimeLocalPlayerFrameController(
+            new HeadlessLocalPlayerFrameHost(
+                runtime,
+                CreateInertLiveSessionHost()),
+            new HeadlessMovementInputSource(runtime.MovementOwner));
+
+        Assert.True(host.Commands.Movement.TurnToHeading(
+            runtime.Generation,
+            90f).Accepted);
+        for (int tick = 0; tick < 120 && Heading(controller) < 89.5f; tick++)
+        {
+            frame.AdvanceBeforeNetwork(0.05f);
+        }
+
+        Assert.Equal(90f, Heading(controller), 1);
+        Assert.False(
+            controller.Motion.MotionsPending(),
+            "the turn finished but a dispatched motion is still outstanding, "
+                + "so the next move-to operation would never start.");
+
+        static float Heading(PlayerMovementController controller) =>
+            AcDream.Core.Physics.Motion.MoveToMath.GetHeading(
+                controller.CurrentCellPosition.Frame.Orientation);
+    }
+
+    private static PlayerMovementController PublishFlatGroundPlayer(
+        HeadlessSessionHost host,
+        GameRuntime runtime,
+        uint player)
+    {
+        runtime.PlayerIdentity.ServerGuid = player;
+        runtime.EntityObjects.Physics.SetPosition.BeginCollisionGeneration(
+            0xA9B40000u,
+            1UL);
+        AddFlatLandblock(runtime.EntityObjects.Physics.Engine);
+        runtime.EntityObjects.Physics.SetPosition.CommitCollisionGeneration(
+            0xA9B40000u,
+            1UL,
+            ready: true);
+        RuntimeFirstEntryDriveController firstEntry =
+            CreateFirstEntryDrive(runtime);
+        RuntimeEntityRecord record = runtime.EntityObjects
+            .RegisterEntityWithInitialResidence(
+                Spawn(player),
+                isLocalPlayer: true)
+            .Canonical!;
+        Assert.True(runtime.EntityObjects.ApplyAcceptedSpawn(
+            record,
+            record.CreateIntegrationVersion,
+            record.Snapshot,
+            replaceGeneration: false));
+
+        var projection = new HeadlessSessionWorldProjection(
+            runtime,
+            new GateControllableCollisionNeighborhood
+            {
+                QuiescentOverride = true,
+            },
+            firstEntry);
+        projection.ProjectSpawn(record, isLocalPlayer: true);
+        for (int tick = 0;
+             tick < 200
+             && runtime.MovementOwner.Controller is not
+                 { IsRuntimePublished: true };
+             tick++)
+        {
+            projection.PumpFirstEntry();
+        }
+
+        return Assert.IsType<PlayerMovementController>(
+            runtime.MovementOwner.Controller);
+    }
+
     [Fact]
     public void PublishedHeadlessPlayer_ChargedCommandJumpBecomesAirborne()
     {

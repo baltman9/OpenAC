@@ -241,6 +241,13 @@ public sealed class MotionInterpreter : IMotionDoneSink
 
     public IEnumerable<MotionNode> PendingMotions => _pendingMotions;
 
+    /// <summary>
+    /// The motion at the head of the pending queue, or null when nothing is
+    /// outstanding. Reading it costs nothing, unlike walking
+    /// <see cref="PendingMotions"/>, so a per-frame caller can use it.
+    /// </summary>
+    public MotionNode? PendingMotionHead => _pendingMotions.First?.Value;
+
     public Action? UnstickFromObject { get; set; }
 
     public Action? InterruptCurrentMovement { get; set; }

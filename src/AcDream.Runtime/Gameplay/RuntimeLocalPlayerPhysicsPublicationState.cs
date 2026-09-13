@@ -279,6 +279,8 @@ internal sealed class RuntimeLocalPlayerPhysicsPublicationState : IDisposable
                 movement.CancelMoveTo(WeenieError.ActionCancelled);
             });
         movement.MakeMoveToManager();
+        motion.CheckForCompletedMotions ??=
+            () => CompleteDispatchedMotions(motion);
         motion.UnstickFromObject = physicsHost.PositionManager.UnStick;
         motion.InterruptCurrentMovement = () =>
         {
@@ -357,6 +359,47 @@ internal sealed class RuntimeLocalPlayerPhysicsPublicationState : IDisposable
         if (float.IsNaN(value) || value <= 0f)
             return 0f;
         return MathF.Min(value, 0.1f);
+    }
+
+    /// <summary>
+    /// A ceiling on one pass. The queue takes one entry per dispatched motion
+    /// and is drained every frame, so this is only reached if something refuses
+    /// to complete, and then stopping beats spinning.
+    /// </summary>
+    private const int MaximumMotionCompletionsPerPass = 64;
+
+    /// <summary>
+    /// Finishes the motions the local player has dispatched, for a host that
+    /// plays no animations.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A dispatched motion stays outstanding until whatever plays the animation
+    /// reports it finished. A host that draws the world has one of those and
+    /// replaces this with it; a host that does not would otherwise leave every
+    /// motion outstanding forever.
+    /// </para>
+    /// <para>
+    /// That is not a cosmetic difference: an outstanding motion suspends the
+    /// whole move-to layer, so a turn-to-heading is accepted and then never
+    /// starts and route steering that turns before it walks stands on the spot.
+    /// An object that plays no animations does not keep a dispatched motion
+    /// outstanding at all, so completing it here restores that. See the
+    /// research note on the headless navigation slice.
+    /// </para>
+    /// </remarks>
+    private static void CompleteDispatchedMotions(MotionInterpreter motion)
+    {
+        for (int completed = 0;
+             completed < MaximumMotionCompletionsPerPass;
+             completed++)
+        {
+            if (motion.PendingMotionHead is not { } head)
+                return;
+            motion.MotionDone(head.Motion, success: true);
+            if (motion.PendingMotionHead == head)
+                return; // The head refused to leave; nothing more to do.
+        }
     }
 
     internal RuntimeLocalPlayerPhysicsPublicationStatus Commit(
