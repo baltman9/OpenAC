@@ -1111,6 +1111,8 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         uint open = EffectiveOpen();
         if (guid == open) { ApplyIndicators(); return; }   // already open — just move the square
 
+        _contentsGrid?.Scroll.SetScrollY(0);
+
         uint p = _playerGuid();
         _openContainer = guid;
         if (guid != p)

@@ -428,6 +428,43 @@ public class InventoryControllerTests
     }
 
     [Fact]
+    public void SwitchingBags_resetsContentsScrollToTop()
+    {
+        var (layout, grid, containers, top, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        objects.AddOrUpdate(new ClientObject { ObjectId = Player, ItemsCapacity = 102 });
+        SeedBag(objects, 0xC1, slot: 0, itemsCapacity: 102);
+        SeedBag(objects, 0xC2, slot: 1, itemsCapacity: 102);
+        Bind(layout, objects, uses: new List<uint>());
+
+        grid.Scroll.SetScrollY(40);
+        containers.GetItem(0)!.Clicked!();              // open the first side bag
+        Assert.Equal(0, grid.Scroll.ScrollY);
+
+        grid.Scroll.SetScrollY(40);
+        containers.GetItem(1)!.Clicked!();              // bag to bag, no main pack in between
+        Assert.Equal(0, grid.Scroll.ScrollY);
+
+        grid.Scroll.SetScrollY(40);
+        top.GetItem(0)!.Clicked!();                     // back to the main pack
+        Assert.Equal(0, grid.Scroll.ScrollY);
+    }
+
+    [Fact]
+    public void ReclickingOpenBag_keepsContentsScroll()
+    {
+        var (layout, grid, _, top, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        objects.AddOrUpdate(new ClientObject { ObjectId = Player, ItemsCapacity = 102 });
+        Bind(layout, objects);
+        grid.Scroll.SetScrollY(40);
+
+        top.GetItem(0)!.Clicked!();                     // reclick the main pack, already open
+
+        Assert.Equal(40, grid.Scroll.ScrollY);
+    }
+
+    [Fact]
     public void Contents_grid_pads_empty_slots_to_main_pack_capacity()
     {
         var (layout, grid, _, _, _, _, _, _) = BuildLayout();
