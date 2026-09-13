@@ -821,6 +821,12 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                     TimeSpan.FromSeconds(20d),
                     () => DistanceMetersFromArena(session) < 40d);
 
+                // Starting again anchors the round to the nearest point the
+                // character could walk to from where it stands — not to where
+                // it left off, and not to the first point. So the expected
+                // waypoint is measured here, from the character's own position,
+                // and the death's own waypoint is only context.
+                int expectedAnchor = NearestWaypointWithin(session, route, double.MaxValue);
                 int chatBeforeStart = observed.ChatCount;
                 Stage("/vt start");
                 bool restarted = settingsUntouched
@@ -852,13 +858,13 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                             observed.SnapshotChat(), chatBeforeRoute, route) is not null);
                     waypointAfter = FirstRouteWaypointIndex(
                         observed.SnapshotChat(), chatBeforeRoute, route);
-                    // A round that had not left its first point proves nothing:
-                    // a stop that rewound it to zero would read the same. The
-                    // route milestone has moved the character by now, so the
-                    // waypoint the death interrupted must be a later one.
-                    sameWaypoint = waypointBefore is not null
-                        && waypointBefore != 0
-                        && waypointAfter == waypointBefore;
+                    // The check is against the anchor the rule must pick, not
+                    // against the waypoint before the death: the character has
+                    // been put back at the arena since, and a rewind to the
+                    // first point can only pass this when the first point really
+                    // is the nearest one.
+                    sameWaypoint = expectedAnchor >= 0
+                        && waypointAfter == expectedAnchor;
                     if (waypointAfter is null)
                     {
                         // The navigation rule can only name its waypoint on a
@@ -885,13 +891,14 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                         + $"pass-stopped={Yes(passStopped)}, "
                         + $"settings-untouched={Yes(settingsUntouched)}, "
                         + $"restarted={Yes(restarted)}, "
-                        + $"resumed-on-waypoint={Yes(sameWaypoint)} "
-                        + $"(before={Waypoint(waypointBefore)} "
+                        + $"anchored-to-nearest={Yes(sameWaypoint)} "
+                        + $"(interrupted-at={Waypoint(waypointBefore)} "
+                        + $"nearest={expectedAnchor} "
                         + $"after={Waypoint(waypointAfter)}){routeSilence}");
 
                 const string title =
                     "death stops the macro, changes no setting, and starting "
-                    + "again resumes the same waypoint";
+                    + "again anchors the round to the nearest point";
                 if (died && stopAnnounced && recovered && passStopped
                     && settingsUntouched && restarted && sameWaypoint)
                 {
@@ -916,7 +923,7 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                                             + $" -> {afterDeath.GetValueOrDefault(name) ?? "unread"}"))
                         : !restarted
                             ? "no rule was picked after the macro was started again"
-                        : "the route did not resume on the waypoint it had";
+                        : "the route did not anchor to the point nearest the character";
                     ledger.Fail("P8", title, reason + "; " + verdict, Evidence());
                 }
 
