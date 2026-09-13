@@ -74,6 +74,7 @@ internal sealed class HeadlessPluginHost
                 HeadlessItemAutomation.RefuseGive,
                 HeadlessItemAutomation.RefusePickup,
                 HeadlessItemAutomation.RefuseIdentify);
+            _automation.BindEquipment(items.TryEquip, () => items.EquipmentBusy);
         }
         _eventSubscription = runtime.Subscribe(this);
     }

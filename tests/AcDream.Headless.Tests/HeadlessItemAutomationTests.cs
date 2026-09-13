@@ -246,6 +246,30 @@ public sealed class HeadlessItemAutomationTests
         Assert.False(h.Runtime.InventoryOwner.Transactions.HasPendingRequest);
     }
 
+    [Fact]
+    public void TryUseMoveMergeAndEquip_RefuseWhileAWieldSwitchOutlivesItsFirstRequest()
+    {
+        var h = new Harness();
+        h.AddOwnedItem(Item, ItemUseability.Contained);
+        h.AddOwnedContainer(Container);
+        h.AddOwnedItem(
+            Source, ItemUseability.Undef, stackSize: 3, stackSizeMax: 10, weenieClassId: 7u);
+        h.AddOwnedItem(
+            Target, ItemUseability.Undef, stackSize: 2, stackSizeMax: 10, weenieClassId: 7u);
+        h.BeginWieldSwitchThatOutlivesItsFirstRequest();
+        Assert.True(h.Runtime.InventoryOwner.Transactions.CanBeginRequest);
+        Assert.True(h.AutoWield!.IsBusy);
+
+        Assert.False(h.Automation.TryMove(Item, Container, amount: 0u, placement: 0));
+        Assert.False(h.Automation.TryMerge(Source, Target, amount: 0u));
+        Assert.False(h.Automation.TryUse(Item));
+        Assert.False(h.Automation.TryEquip(0u, (uint)EquipMask.Held));
+
+        Assert.Empty(h.Puts);
+        Assert.Empty(h.Merges);
+        Assert.Empty(h.Transport.UseCalls);
+    }
+
     private sealed class FakeTransport : IRuntimeInteractionTransport
     {
         internal bool SendUseSucceeds { get; set; } = true;
@@ -273,6 +297,10 @@ public sealed class HeadlessItemAutomationTests
 
     private sealed class Harness
     {
+        private const uint WieldSwitchBlocker = 0x50000D01u;
+        private const uint WieldSwitchRequested = 0x50000D02u;
+        private const uint WieldSwitchSubPack = 0x50000D03u;
+
         internal readonly GameRuntime Runtime;
         internal readonly FakeTransport Transport = new();
         internal readonly List<(uint Item, uint Container, int Placement)> Puts = [];
@@ -282,6 +310,7 @@ public sealed class HeadlessItemAutomationTests
         internal bool SplitResult = true;
         internal bool MergeResult = true;
         internal readonly HeadlessItemAutomation Automation;
+        internal readonly AutoWieldController? AutoWield;
 
         internal Harness()
         {
@@ -292,6 +321,12 @@ public sealed class HeadlessItemAutomationTests
                 ObjectId = Player,
                 Type = ItemType.Creature,
             });
+            AutoWield = new AutoWieldController(
+                Runtime.InventoryOwner.Objects,
+                () => Runtime.PlayerIdentity.ServerGuid,
+                sendWield: (_, _) => true,
+                sendPutItemInContainer: (item, container, placement) => true,
+                transactions: Runtime.InventoryOwner.Transactions);
             Automation = new HeadlessItemAutomation(
                 Runtime,
                 Transport,
@@ -309,7 +344,38 @@ public sealed class HeadlessItemAutomationTests
                 {
                     Merges.Add((source, target, amount));
                     return MergeResult;
-                });
+                },
+                isComponentPack: null,
+                autoWield: AutoWield);
+        }
+
+        // The blocker's confirmed move lands it in a sub-pack rather than the
+        // root inventory the switch expects, so the switch survives the
+        // request that freed the transaction.
+        internal void BeginWieldSwitchThatOutlivesItsFirstRequest()
+        {
+            AddOwnedContainer(WieldSwitchSubPack);
+            Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+            {
+                ObjectId = WieldSwitchBlocker,
+                Type = ItemType.MeleeWeapon,
+                ValidLocations = EquipMask.MeleeWeapon,
+            });
+            Runtime.InventoryOwner.Objects.MoveItem(
+                WieldSwitchBlocker, Player, newSlot: -1, newEquipLocation: EquipMask.MeleeWeapon);
+            Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+            {
+                ObjectId = WieldSwitchRequested,
+                Type = ItemType.MeleeWeapon,
+                ContainerId = Player,
+                ValidLocations = EquipMask.MeleeWeapon,
+            });
+
+            Assert.True(AutoWield!.TryWield(
+                Runtime.InventoryOwner.Objects.Get(WieldSwitchRequested)!,
+                EquipMask.MeleeWeapon));
+            Runtime.InventoryOwner.Objects.ApplyConfirmedServerMove(
+                WieldSwitchBlocker, WieldSwitchSubPack, newWielderId: 0u);
         }
 
         internal void AddOwnedItem(

@@ -13,6 +13,7 @@ internal sealed class HeadlessItemAutomation
     private readonly Func<uint, uint, uint, uint, bool> _sendStackableSplitToContainer;
     private readonly Func<uint, uint, uint, bool> _sendStackableMerge;
     private readonly Func<uint, bool> _isComponentPack;
+    private readonly AutoWieldController? _autoWield;
 
     internal HeadlessItemAutomation(
         GameRuntime runtime,
@@ -20,7 +21,8 @@ internal sealed class HeadlessItemAutomation
         Func<uint, uint, int, bool> sendPutItemInContainer,
         Func<uint, uint, uint, uint, bool> sendStackableSplitToContainer,
         Func<uint, uint, uint, bool> sendStackableMerge,
-        Func<uint, bool>? isComponentPack = null)
+        Func<uint, bool>? isComponentPack = null,
+        AutoWieldController? autoWield = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
@@ -31,12 +33,15 @@ internal sealed class HeadlessItemAutomation
         _sendStackableMerge = sendStackableMerge
             ?? throw new ArgumentNullException(nameof(sendStackableMerge));
         _isComponentPack = isComponentPack ?? (_ => false);
+        _autoWield = autoWield;
     }
 
-    // Mirrors the GUI automation use; approach, secure trade and auto-wield are not driven headless.
+    // Mirrors the GUI automation use, including its auto-wield gate; approach
+    // and secure trade are not driven headless.
     internal bool TryUse(uint itemId)
     {
         if (itemId == 0u
+            || !AutoWieldIdle
             || _runtime.InventoryOwner.Objects.Get(itemId) is not { } item)
         {
             return false;
@@ -97,7 +102,7 @@ internal sealed class HeadlessItemAutomation
 
     internal bool TryMove(uint itemId, uint containerId, uint amount, int placement)
     {
-        if (_runtime.InventoryOwner.Objects.Get(itemId) is not { } item)
+        if (!AutoWieldIdle || _runtime.InventoryOwner.Objects.Get(itemId) is not { } item)
             return false;
 
         InventoryTransactionState inventory = _runtime.InventoryOwner.Transactions;
@@ -122,7 +127,7 @@ internal sealed class HeadlessItemAutomation
             () => _sendPutItemInContainer(itemId, containerId, placement));
     }
 
-    // Planner readiness is CanBeginRequest; there is no auto-wield on headless.
+    // Planner readiness matches the GUI's: no pending request and no auto-wield switch in progress.
     internal bool TryMerge(uint sourceId, uint targetId, uint amount)
     {
         if (_runtime.InventoryOwner.Objects.Get(sourceId) is not { } source
@@ -136,7 +141,7 @@ internal sealed class HeadlessItemAutomation
         StackMergePlan? plan = StackMergePlanner.Plan(
             ToStackMergeItem(source),
             ToStackMergeItem(target),
-            inventory.CanBeginRequest,
+            inventory.CanBeginRequest && AutoWieldIdle,
             requested);
         if (plan is not { } merge)
             return false;
@@ -147,6 +152,26 @@ internal sealed class HeadlessItemAutomation
             () => _sendStackableMerge(
                 merge.SourceObjectId, merge.TargetObjectId, merge.Amount));
     }
+
+    internal bool TryEquip(uint itemId, uint mask)
+    {
+        if (itemId == 0u
+            || _autoWield is null
+            || _autoWield.IsBusy
+            || !_transport.IsInWorld
+            || !_runtime.InventoryOwner.Transactions.CanBeginRequest)
+        {
+            return false;
+        }
+        return _runtime.InventoryOwner.Objects.Get(itemId) is { } item
+            && _autoWield.TryWield(item, (EquipMask)mask);
+    }
+
+    private bool AutoWieldIdle => _autoWield?.IsBusy != true;
+
+    internal bool EquipmentBusy =>
+        _autoWield?.IsBusy == true
+        || !_runtime.InventoryOwner.Transactions.CanBeginRequest;
 
     // The surface requires these bound; not supported on headless yet.
     internal static bool RefuseApply(uint itemId, uint targetId) => false;

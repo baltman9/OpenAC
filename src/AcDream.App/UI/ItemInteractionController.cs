@@ -164,8 +164,10 @@ public sealed class ItemInteractionController : IDisposable
         _autoWield = new AutoWieldController(
             _objects,
             _playerGuid,
-            _sendWield,
-            sendPutItemInContainer,
+            _sendWield is { } wield ? (i, m) => { wield(i, m); return true; } : null,
+            sendPutItemInContainer is { } putInContainer
+                ? (i, c, s) => { putInContainer(i, c, s); return true; }
+                : null,
             _systemMessage,
             combatState,
             sendChangeCombatMode,

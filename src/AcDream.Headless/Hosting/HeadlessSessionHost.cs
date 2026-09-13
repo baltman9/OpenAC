@@ -151,6 +151,7 @@ internal sealed class HeadlessSessionHost : IDisposable
     private readonly IHeadlessBotPolicy _policy;
     private readonly IDisposable _policySubscription;
     private readonly HeadlessPluginSession _pluginSession;
+    private readonly AutoWieldController _autoWield;
     private readonly AcDream.Core.Plugins.PluginCommandRegistry _pluginCommands;
     private readonly LiveChatCommandSurface _chatCommandSurface;
     private readonly LiveSessionHost _liveSession;
@@ -214,6 +215,7 @@ internal sealed class HeadlessSessionHost : IDisposable
         IHeadlessBotPolicy? policy = null;
         IDisposable? policySubscription = null;
         HeadlessPluginSession? pluginSession = null;
+        AutoWieldController? autoWield = null;
         try
         {
             var gameplay = new HeadlessGameplayOperations();
@@ -246,13 +248,23 @@ internal sealed class HeadlessSessionHost : IDisposable
             var commands = new DirectGameRuntimeCommandAdapter(
                 runtime,
                 bridge);
+            autoWield = new AutoWieldController(
+                runtime.InventoryOwner.Objects,
+                () => runtime.PlayerIdentity.ServerGuid,
+                commands.TrySendGetAndWieldItem,
+                commands.TrySendPutItemInContainer,
+                combatState: runtime.ActionOwner.Combat,
+                sendChangeCombatMode: gameplay.SendChangeCombatMode,
+                transactions: runtime.InventoryOwner.Transactions);
+            gameplay.BindAutoWield(autoWield);
             var items = new HeadlessItemAutomation(
                 runtime,
                 commands,
                 commands.TrySendPutItemInContainer,
                 commands.TrySendStackableSplitToContainer,
                 commands.TrySendStackableMerge,
-                contentLease is { } lease ? lease.MagicCatalog.IsComponentPack : null);
+                contentLease is { } lease ? lease.MagicCatalog.IsComponentPack : null,
+                autoWield);
             var statusWriter = new SessionStatusWriter(descriptor.StatusFile);
             var pluginCommands = new AcDream.Core.Plugins.PluginCommandRegistry(
                 (verb, error) => diagnostics.Failure(
@@ -401,10 +413,12 @@ internal sealed class HeadlessSessionHost : IDisposable
             _policy = policy;
             _policySubscription = policySubscription;
             _pluginSession = pluginSession;
+            _autoWield = autoWield;
         }
         catch
         {
             pluginSession?.Dispose();
+            autoWield?.Dispose();
             policySubscription?.Dispose();
             policy?.Dispose();
             hostLease?.Dispose();
@@ -607,22 +621,26 @@ internal sealed class HeadlessSessionHost : IDisposable
                     _disposeStage++;
                     break;
                 case 5:
-                    _hostLease.Dispose();
+                    _autoWield.Dispose();
                     _disposeStage++;
                     break;
                 case 6:
-                    _credential.Dispose();
+                    _hostLease.Dispose();
                     _disposeStage++;
                     break;
                 case 7:
-                    Runtime.Dispose();
+                    _credential.Dispose();
                     _disposeStage++;
                     break;
                 case 8:
-                    _contentLease?.Dispose();
+                    Runtime.Dispose();
                     _disposeStage++;
                     break;
                 case 9:
+                    _contentLease?.Dispose();
+                    _disposeStage++;
+                    break;
+                case 10:
                     _diagnostics.Message(
                         _descriptor.Id,
                         "disposed",
