@@ -314,7 +314,10 @@ internal sealed class RuntimeCommunicationEventStream
                     (int)entry.Kind,
                     entry.Sender,
                     entry.Text,
-                    entry.ChannelName)));
+                    entry.ChannelName)
+                {
+                    LogTextType = entry.LogTextType,
+                }));
             if (_dispatching)
                 return;
             _dispatching = true;

@@ -195,7 +195,18 @@ public readonly record struct PluginChatMessage(
     int Kind,
     string Sender,
     string Text,
-    string ChannelName);
+    string ChannelName)
+{
+    /// <summary>
+    /// The client's own log-text type for this line — the number that decides
+    /// which colour it is printed in and which channel filter it obeys. It is
+    /// what tells "you hit the drudge" (the character's own combat log) from
+    /// somebody typing the same sentence in local chat, so a reader that acts
+    /// on message text should key on this rather than on the words alone.
+    /// Zero is the default type, which is also what an unfilled message says.
+    /// </summary>
+    public uint LogTextType { get; init; }
+}
 
 public interface IPluginChat
 {

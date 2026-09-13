@@ -1086,7 +1086,10 @@ internal sealed class AppAutomationSurface
                 entry.Kind,
                 entry.Sender,
                 entry.Text,
-                entry.ChannelName));
+                entry.ChannelName)
+            {
+                LogTextType = entry.LogTextType,
+            });
             if (_chatMessages.Count > MaximumPluginChatMessages)
             {
                 _chatMessages.RemoveRange(
