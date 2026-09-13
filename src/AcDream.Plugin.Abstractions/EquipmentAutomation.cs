@@ -35,7 +35,9 @@ public readonly record struct PluginEquipmentItem(
 
     /// <summary>
     /// The damage type this weapon cleaves the target's resistance to. Same
-    /// bit layout as <see cref="DamageType"/>.
+    /// bit layout as <see cref="DamageType"/>. The name is the profile
+    /// format's word for it; the client calls the same property a resistance
+    /// modifier type.
     /// </summary>
     public int ResistanceCleaving { get; init; }
 
@@ -45,11 +47,18 @@ public readonly record struct PluginEquipmentItem(
     /// </summary>
     public int SlayerCreatureType { get; init; }
 
-    /// <summary>Rating bonuses a quest weapon can carry.</summary>
+    /// <summary>
+    /// Rating bonuses a quest weapon can carry. Each says only whether the
+    /// weapon has the bonus at all, which is the only thing weapon choice
+    /// asks: a bonus is worth a fixed number of points however large its own
+    /// multiplier happens to be.
+    /// </summary>
     public bool CrushingBlow { get; init; }
 
+    /// <inheritdoc cref="CrushingBlow"/>
     public bool BitingStrike { get; init; }
 
+    /// <inheritdoc cref="CrushingBlow"/>
     public bool ArmorCleaving { get; init; }
 }
 
