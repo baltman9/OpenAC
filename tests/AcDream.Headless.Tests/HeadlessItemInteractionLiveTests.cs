@@ -26,7 +26,7 @@ public sealed class HeadlessItemInteractionLiveTests(ITestOutputHelper output)
 {
     /// <summary>The same recorded flat standing point the session proof uses.</summary>
     private const string ArenaTeleport =
-        "@teleloc A9B40029 133.603592 17.391838 96.330009 1 0 0 0";
+        "@teleloc A9B40029 133.603592 17.391838 94.005005 1 0 0 0";
 
     /// <summary>
     /// A healing kit: an ordinary carryable the server drops at the

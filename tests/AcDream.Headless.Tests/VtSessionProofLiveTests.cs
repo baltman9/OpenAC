@@ -33,9 +33,23 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
     /// The outdoor arena the run stages itself into: a recorded flat standing
     /// point near the starting town. The route fixture's waypoints are the
     /// same point expressed in game coordinates, so the two always agree.
+    /// <para>
+    /// The elevation is the one the character actually stands at there, and
+    /// it has to be: the server places a teleported character exactly where
+    /// it was asked to and never lets it fall, while the client's own physics
+    /// does let it fall. Name a point in the air and the two views are that
+    /// far apart from the first instant, and they only come back together
+    /// when the character next moves -- the client reports where it stands
+    /// once, when it lands, and a server still finishing the teleport throws
+    /// that one report away without a word. Everything the server then places
+    /// relative to the character -- a staged monster among it -- hangs in the
+    /// air with it. The point used to name an elevation 2.33 m above this
+    /// ground, which is why the staged fight sometimes began with two
+    /// monsters out of reach overhead.
+    /// </para>
     /// </summary>
     private const string ArenaTeleport =
-        "@teleloc A9B40029 133.603592 17.391838 96.330009 1 0 0 0";
+        "@teleloc A9B40029 133.603592 17.391838 94.005005 1 0 0 0";
 
     /// <summary>
     /// How many of the character's own corpses one sweep will remove. High
@@ -550,8 +564,30 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
             }
 
             // ---- P4: a fight -- attack rule active, a kill observed ------------
-            Stage("@create " + MonsterWeenie);
-            Stage("@create " + MonsterWeenie);
+            // The server spawns a staged monster where IT believes the
+            // character stands, so the pair of positions below is the only
+            // place the run can see the two views apart. A monster hanging in
+            // the air above the character is the server holding a stale
+            // position, not a combat fault, and reading that off the ledger
+            // beats reconstructing it afterwards.
+            {
+                uint[] before = SpawnedGuids(session);
+                Stage("@create " + MonsterWeenie);
+                Stage("@create " + MonsterWeenie);
+                Pump(TimeSpan.FromSeconds(2d));
+                string report =
+                    "monsters staged -> character at "
+                        + PositionText(session)
+                        + "; spawned: "
+                        + string.Join("; ", SpawnedSince(session, before));
+                staged.Add(report);
+                // Printed whether or not the milestone passes: a pass that
+                // staged the fight in the air is luck, not a pass, and the
+                // only way to tell them apart is to see the two positions.
+                output.WriteLine("VT-PROOF | P4-staging | " + report);
+                Console.Out.WriteLine("VT-PROOF | P4-staging | " + report);
+                Console.Out.Flush();
+            }
             {
                 bool attackRule = WaitUntil(
                     TimeSpan.FromSeconds(45d),
@@ -1187,6 +1223,30 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 + $"entities={session.Runtime.Entities.Count}");
     }
 
+    /// <summary>Every entity the session currently holds.</summary>
+    private static uint[] SpawnedGuids(HeadlessSessionHost session)
+    {
+        var collector = new VtProofEntityCollector();
+        session.Runtime.Entities.Visit(collector);
+        return [.. collector.Guids];
+    }
+
+    /// <summary>
+    /// Where each entity that appeared since the given set stands. This is
+    /// the server's own idea of the character's position made visible: a
+    /// staged monster is placed relative to it.
+    /// </summary>
+    private static string[] SpawnedSince(
+        HeadlessSessionHost session,
+        uint[] before)
+    {
+        var collector = new VtProofEntityCollector(before);
+        session.Runtime.Entities.Visit(collector);
+        return collector.Described.Count == 0
+            ? ["nothing new appeared"]
+            : [.. collector.Described];
+    }
+
     private static string PositionText(HeadlessSessionHost session)
     {
         RuntimeMovementSnapshot movement = session.Runtime.Movement.Snapshot;
@@ -1792,6 +1852,7 @@ internal readonly record struct VtProofCastEvidence(
 /// nothing else: the server refuses to delete a player, but it will happily
 /// delete somebody else's corpse, so the name test is the safety rail.
 /// </summary>
+
 internal static class VtProofArena
 {
     /// <summary>
@@ -2392,5 +2453,34 @@ public sealed class VtSessionProofHarnessTests
         Assert.Equal(0, VtProofRouteProgress.First(lines, 0, ProgressRoute));
         Assert.Equal(1, VtProofRouteProgress.First(lines, 1, ProgressRoute));
         Assert.Null(VtProofRouteProgress.First(["nothing here"], 0, ProgressRoute));
+    }
+}
+
+/// <summary>
+/// Reads the entity view: the guids it holds, and where anything that is not
+/// in a given set stands.
+/// </summary>
+internal sealed class VtProofEntityCollector(uint[]? known = null)
+    : IRuntimeEntityVisitor
+{
+    private readonly uint[] _known = known ?? [];
+
+    internal List<uint> Guids { get; } = [];
+
+    internal List<string> Described { get; } = [];
+
+    public void Visit(in RuntimeEntitySnapshot entity)
+    {
+        Guids.Add(entity.Identity.ServerGuid);
+        if (Array.IndexOf(_known, entity.Identity.ServerGuid) >= 0)
+            return;
+        string where = entity.Position is { } position
+            ? string.Create(
+                CultureInfo.InvariantCulture,
+                $"cell=0x{position.ObjCellId:X8} ({position.Frame.Origin.X:0.000},{position.Frame.Origin.Y:0.000},{position.Frame.Origin.Z:0.000})")
+            : "no position yet";
+        Described.Add(string.Create(
+            CultureInfo.InvariantCulture,
+            $"0x{entity.Identity.ServerGuid:X8} {where}"));
     }
 }
