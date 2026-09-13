@@ -241,6 +241,15 @@ public sealed class InputDispatcher : IDisposable
 
     public bool IsCapturing => _captureCallback is not null;
 
+    /// <summary>
+    /// True while the keyboard is going into text rather than driving the
+    /// character - the chat entry or another text field has it, or a rebind
+    /// capture is open. Every gameplay binding is suppressed while it is set,
+    /// so automation that steers by holding keys has to ask first.
+    /// </summary>
+    public bool WantsTextInput =>
+        _captureCallback is not null || _mouse.WantCaptureKeyboard;
+
     public void BeginCapture(Action<KeyChord> onCaptured)
     {
         _captureCallback = onCaptured ?? throw new ArgumentNullException(nameof(onCaptured));

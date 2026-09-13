@@ -226,6 +226,14 @@ public interface IPluginChat
     /// is no chat entry to type into or the player is already typing in it.
     /// </summary>
     bool Compose(string text) => false;
+
+    /// <summary>
+    /// True while the player is typing into the chat entry, so the keyboard is
+    /// going into text rather than driving the character. Automation that
+    /// steers by holding keys has to fall back to something else while this is
+    /// set. A host with no chat entry answers false.
+    /// </summary>
+    bool IsInputActive => false;
 }
 
 public interface IMagicCommands

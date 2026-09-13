@@ -686,8 +686,13 @@ public sealed class GameWindow :
         PublishCompositionOwner(ref _mouseLookCursor, value, "mouse-look cursor");
 
     void IGameWindowHostInputCameraPublication.PublishInputDispatcher(
-        AcDream.UI.Abstractions.Input.InputDispatcher value) =>
+        AcDream.UI.Abstractions.Input.InputDispatcher value)
+    {
         PublishCompositionOwner(ref _inputDispatcher, value, "input dispatcher");
+        // Automation that steers by holding keys has to know when the keyboard
+        // is going into the chat entry instead of the character.
+        _automation?.BindChatInputActive(() => value.WantsTextInput);
+    }
 
     void IGameWindowHostInputCameraPublication.PublishCameraController(
         CameraController value) =>
