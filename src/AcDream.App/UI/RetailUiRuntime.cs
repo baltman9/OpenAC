@@ -109,7 +109,7 @@ public sealed record ToolbarRuntimeBindings(
     CombatState Combat,
     ItemManaState ItemMana,
     Action ToggleCombat,
-    ItemInteractionController ItemInteraction,
+    RuntimeItemInteraction ItemInteraction,
     Action<ShortcutEntry>? SendAddShortcut,
     Action<uint>? SendRemoveShortcut,
     SelectionState Selection,
@@ -205,7 +205,7 @@ public sealed record InventoryRuntimeBindings(
     Action<uint, uint, int>? SendPutItemInContainer,
     Action<uint, uint, uint, uint>? SendStackableSplitToContainer,
     Action<uint, uint, uint>? SendStackableMerge,
-    ItemInteractionController ItemInteraction,
+    RuntimeItemInteraction ItemInteraction,
     SelectionState Selection);
 
 public sealed record ExternalContainerRuntimeBindings(
@@ -213,7 +213,7 @@ public sealed record ExternalContainerRuntimeBindings(
     ClientObjectTable Objects,
     Func<ItemType, uint, uint, uint, uint, uint> ResolveIcon,
     Func<ItemType, uint, uint, uint, uint, uint> ResolveDragIcon,
-    ItemInteractionController ItemInteraction,
+    RuntimeItemInteraction ItemInteraction,
     SelectionState Selection,
     Action<uint> SendUse,
     Action<uint, uint, int> SendPutItemInContainer,
@@ -256,7 +256,7 @@ public sealed record AppraisalRuntimeBindings(
 public sealed record VendorRuntimeBindings(
     VendorState State,
     Func<ItemType, uint, uint, uint, uint, uint> ResolveIcon,
-    ItemInteractionController ItemInteraction,
+    RuntimeItemInteraction ItemInteraction,
     SelectionState Selection,
     Action<string>? DisplaySystemMessage = null);
 
@@ -505,7 +505,7 @@ public sealed class RetailUiRuntime : IDisposable
 
     public RetailUiAssets Assets => _bindings.Assets;
 
-    public ItemInteractionController ItemInteraction => _bindings.Inventory.ItemInteraction;
+    public RuntimeItemInteraction ItemInteraction => _bindings.Inventory.ItemInteraction;
     public CharacterSheetProvider CharacterSheetProvider => _bindings.Character.Provider;
     public ToolbarController? ToolbarController { get; private set; }
     public ToolbarInputController? ToolbarInputController { get; private set; }

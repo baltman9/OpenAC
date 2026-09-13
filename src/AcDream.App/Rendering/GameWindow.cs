@@ -305,7 +305,7 @@ public sealed class GameWindow :
     private readonly AcDream.App.Combat.CombatFeedbackSlot
         _combatFeedback = new();
     private RuntimeCombatAttackState? _combatAttackController;
-    private AcDream.App.UI.ItemInteractionController? _itemInteractionController;
+    private AcDream.Runtime.Gameplay.RuntimeItemInteraction? _itemInteractionController;
     private AcDream.App.World.ExternalContainerLifecycleController? _externalContainerLifecycle;
     private AcDream.App.Spells.MagicRuntime? _magicRuntime;
     private MagicCatalog? _magicCatalog;
@@ -1640,7 +1640,6 @@ public sealed class GameWindow :
             _cameraPointerInput,
             _retailUiLease,
             _magicRuntime,
-            _itemInteractionController,
             _externalContainerLifecycle,
             _streamer,
             _equippedChildRenderer,

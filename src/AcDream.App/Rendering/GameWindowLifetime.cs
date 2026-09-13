@@ -80,7 +80,7 @@ internal sealed record LiveShutdownRoots(
     CameraPointerInputController? CameraPointer,
     RetailUiRuntimeLease RetailUi,
     MagicRuntime? Magic,
-    ItemInteractionController? ItemInteraction,
+
     ExternalContainerLifecycleController? ExternalContainers,
     LandblockStreamer? Streamer,
     EquippedChildRenderController? EquippedChildren,
@@ -408,7 +408,6 @@ internal static class GameWindowShutdownManifest
                 Hard("mouse capture", () => live.CameraPointer?.ReleaseMouseLookAfterSessionRetirement()),
                 Hard("retail UI", () => DisposeRetailUi(live.RetailUi)),
                 Hard("magic runtime", () => live.Magic?.Dispose()),
-                Hard("item interaction", () => live.ItemInteraction?.Dispose()),
                 Hard("external containers", () => live.ExternalContainers?.Dispose()),
                 Hard("streamer", () => live.Streamer?.Dispose()),
                 Hard("equipped children", () => live.EquippedChildren?.Dispose()),

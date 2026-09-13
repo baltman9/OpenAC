@@ -836,7 +836,7 @@ internal sealed class LivePresentationCompositionPhase
             d.Selection,
             selectionQuery,
             interaction.ItemInteraction,
-            new WorldSessionSelectionInteractionTransport(
+            new AcDream.Runtime.Gameplay.RuntimeSessionInteractionTransport(
                 () => interaction.LateBindings.Session.CurrentSession),
             new PlayerInteractionMovementSink(
                 () => d.PlayerController.Controller,

@@ -2107,7 +2107,7 @@ public sealed class LiveEntityHydrationControllerTests
     private sealed class DropHarness
     {
         public const uint PlayerGuid = 0x50000001u;
-        public readonly ItemInteractionController Interaction;
+        public readonly RuntimeItemInteraction Interaction;
         public readonly InventoryWorldDropProjectionController Projection;
         public readonly StackSplitQuantityState SplitQuantity = new();
         public readonly AcDream.Core.Selection.SelectionState Selection = new();
@@ -2122,7 +2122,7 @@ public sealed class LiveEntityHydrationControllerTests
             });
             var shared = new InventoryTransactionState(fixture.Objects);
             var runtimeTransactions = new RuntimeInteractionTransactionState(shared);
-            Interaction = new ItemInteractionController(
+            Interaction = new RuntimeItemInteraction(
                 fixture.Objects,
                 runtimeTransactions,
                 new InteractionState(),

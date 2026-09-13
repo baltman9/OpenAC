@@ -69,7 +69,7 @@ public sealed class ItemInteractionControllerTests
             RuntimeTransactions = new RuntimeInteractionTransactionState(
                 SharedTransactions);
 
-            Controller = new ItemInteractionController(
+            Controller = new RuntimeItemInteraction(
                 Objects,
                 RuntimeTransactions,
                 new InteractionState(),
@@ -134,7 +134,7 @@ public sealed class ItemInteractionControllerTests
                 });
         }
 
-        public ItemInteractionController Controller { get; }
+        public RuntimeItemInteraction Controller { get; }
 
         public ClientObject AddContained(uint id, Action<ClientObject>? configure = null)
         {
@@ -462,7 +462,7 @@ public sealed class ItemInteractionControllerTests
         using var runtimeTransactions =
             new RuntimeInteractionTransactionState(transactions);
 
-        Assert.Throws<ArgumentException>(() => new ItemInteractionController(
+        Assert.Throws<ArgumentException>(() => new RuntimeItemInteraction(
             objects,
             runtimeTransactions,
             new InteractionState(),
@@ -1913,7 +1913,7 @@ public sealed class ItemInteractionControllerTests
         Assert.Empty(h.BackpackPlacements);
         Assert.False(h.Controller.TryGetPendingBackpackPlacement(item, out _));
         Assert.Equal(
-            new[] { ItemInteractionController.InventoryRequestBusyMessage },
+            new[] { RuntimeItemInteraction.InventoryRequestBusyMessage },
             h.SystemMessages);
     }
 
@@ -1932,7 +1932,7 @@ public sealed class ItemInteractionControllerTests
         Assert.Empty(h.Uses);
         Assert.True(h.Controller.TryGetPendingBackpackPlacement(pickup, out _));
         Assert.Equal(
-            new[] { ItemInteractionController.InventoryRequestBusyMessage },
+            new[] { RuntimeItemInteraction.InventoryRequestBusyMessage },
             h.SystemMessages);
     }
 
@@ -1950,7 +1950,7 @@ public sealed class ItemInteractionControllerTests
         Assert.Empty(h.Wields);
         Assert.Equal(EquipMask.None, h.Objects.Get(helm)!.CurrentlyEquippedLocation);
         Assert.Equal(
-            new[] { ItemInteractionController.InventoryRequestBusyMessage },
+            new[] { RuntimeItemInteraction.InventoryRequestBusyMessage },
             h.SystemMessages);
     }
 
@@ -1968,7 +1968,7 @@ public sealed class ItemInteractionControllerTests
         Assert.Empty(h.Uses);
         Assert.Equal(0, h.Controller.BusyCount);
         Assert.Equal(
-            new[] { ItemInteractionController.InventoryRequestBusyMessage },
+            new[] { RuntimeItemInteraction.InventoryRequestBusyMessage },
             h.SystemMessages);
     }
 
@@ -1992,7 +1992,7 @@ public sealed class ItemInteractionControllerTests
         Assert.True(h.Controller.TryGetPendingInventoryRequest(out var pending));
         Assert.Equal(moving, pending.ItemId);
         Assert.Equal(
-            new[] { ItemInteractionController.InventoryRequestBusyMessage },
+            new[] { RuntimeItemInteraction.InventoryRequestBusyMessage },
             h.SystemMessages);
 
         h.Objects.ApplyConfirmedServerMove(unrelated, Pack, 0u, 0);
@@ -2334,7 +2334,7 @@ public sealed class ItemInteractionControllerTests
         Assert.Equal(first, pending.ItemId);
         Assert.True(pending.Dispatched);
         Assert.Equal(
-            new[] { ItemInteractionController.InventoryRequestBusyMessage },
+            new[] { RuntimeItemInteraction.InventoryRequestBusyMessage },
             h.SystemMessages);
     }
 

@@ -13,7 +13,7 @@ internal sealed class SelectionInteractionController
 {
     private readonly SelectionState _selection;
     private readonly IWorldSelectionQuery _query;
-    private readonly ItemInteractionController _items;
+    private readonly RuntimeItemInteraction _items;
     private readonly RuntimeInteractionTransactionState _transactions;
     private readonly IRuntimeInteractionTransport _transport;
     private readonly IPlayerInteractionMovementSink _movement;
@@ -25,7 +25,7 @@ internal sealed class SelectionInteractionController
     public SelectionInteractionController(
         SelectionState selection,
         IWorldSelectionQuery query,
-        ItemInteractionController items,
+        RuntimeItemInteraction items,
         IRuntimeInteractionTransport transport,
         IPlayerInteractionMovementSink movement,
         Action<string>? toast = null,

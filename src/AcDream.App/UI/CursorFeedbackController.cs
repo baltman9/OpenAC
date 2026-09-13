@@ -76,12 +76,12 @@ public readonly record struct CursorFeedbackSnapshot(
 
 public sealed class CursorFeedbackController
 {
-    private readonly ItemInteractionController? _itemInteraction;
+    private readonly RuntimeItemInteraction? _itemInteraction;
     private readonly Func<uint>? _worldTargetProvider;
     private readonly Func<CombatMode> _combatModeProvider;
 
     public CursorFeedbackController(
-        ItemInteractionController? itemInteraction = null,
+        RuntimeItemInteraction? itemInteraction = null,
         Func<uint>? worldTargetProvider = null,
         Func<CombatMode>? combatModeProvider = null)
     {
@@ -251,7 +251,7 @@ public sealed class CursorFeedbackController
             : snapshot.TargetMode;
 
     private static RetailCursorTargetMode ModeFromInteraction(
-        ItemInteractionController? interaction)
+        RuntimeItemInteraction? interaction)
         => interaction?.InteractionState.Current.Kind switch
         {
             InteractionModeKind.Use => RetailCursorTargetMode.Use,

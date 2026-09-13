@@ -40,7 +40,7 @@ public sealed class VendorUiControllerTests
             });
 
         var objects = new ClientObjectTable();
-        using var itemInteraction = new ItemInteractionController(
+        using var itemInteraction = new RuntimeItemInteraction(
             objects,
             new RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -83,7 +83,7 @@ public sealed class VendorUiControllerTests
             });
 
         var objects = new ClientObjectTable();
-        using var itemInteraction = new ItemInteractionController(
+        using var itemInteraction = new RuntimeItemInteraction(
             objects,
             new RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -178,7 +178,7 @@ public sealed class VendorUiControllerTests
         public readonly List<(uint VendorGuid, IReadOnlyList<(int Amount, uint ItemGuid)> Items)> Sells = new();
         public readonly List<(uint Item, uint Container, uint Placement, uint Amount)> SplitPuts = new();
         public readonly List<string> SystemMessages = new();
-        public readonly ItemInteractionController ItemInteraction;
+        public readonly RuntimeItemInteraction ItemInteraction;
         public readonly RetailDialogFactory Dialogs;
         public ImportedLayout? ShownDialog;
 
@@ -307,7 +307,7 @@ public sealed class VendorUiControllerTests
                     Resizable = false,
                 });
 
-            ItemInteraction = new ItemInteractionController(
+            ItemInteraction = new RuntimeItemInteraction(
                 Objects,
                 new RuntimeInteractionTransactionState(new InventoryTransactionState(Objects)),
                 new InteractionState(),
@@ -1096,7 +1096,7 @@ public sealed class VendorUiControllerTests
 
         // TryBuy's reservation increments BusyCount synchronously, before
         // any wire response — the button must reflect that immediately,
-        // with no per-frame polling (ItemInteractionController.StateChanged
+        // with no per-frame polling (RuntimeItemInteraction.StateChanged
         // drives RecomputeBuyButtonEnabled).
         Assert.False(h.BuyButton.Enabled);
 

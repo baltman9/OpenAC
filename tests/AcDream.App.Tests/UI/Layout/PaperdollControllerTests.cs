@@ -48,9 +48,9 @@ public class PaperdollControllerTests
         List<(uint item, uint container, int placement)>? puts = null,
         List<string>? systemMessages = null,
         List<uint>? examines = null,
-        Action<ItemInteractionController>? configureInteraction = null)
+        Action<RuntimeItemInteraction>? configureInteraction = null)
     {
-        var itemInteraction = new ItemInteractionController(
+        var itemInteraction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -279,7 +279,7 @@ public class PaperdollControllerTests
         SeedPackItem(objects, helm, EquipMask.HeadWear);
         var wields = new List<(uint item, uint mask)>();
         var messages = new List<string>();
-        ItemInteractionController? interaction = null;
+        RuntimeItemInteraction? interaction = null;
         var ctrl = Bind(
             layout,
             objects,
@@ -298,7 +298,7 @@ public class PaperdollControllerTests
 
         Assert.Empty(wields);
         Assert.Equal(EquipMask.None, objects.Get(helm)!.CurrentlyEquippedLocation);
-        Assert.Equal(new[] { ItemInteractionController.InventoryRequestBusyMessage }, messages);
+        Assert.Equal(new[] { RuntimeItemInteraction.InventoryRequestBusyMessage }, messages);
     }
 
     [Fact]

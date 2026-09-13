@@ -45,7 +45,7 @@ public sealed class AppraisalUiController : IRetainedPanelController
 
     private readonly ImportedLayout _layout;
     private readonly ClientObjectTable _objects;
-    private readonly ItemInteractionController _interaction;
+    private readonly RuntimeItemInteraction _interaction;
     private readonly SelectionState _selection;
     private readonly CombatState _combat;
     private readonly Spellbook _spellbook;
@@ -109,7 +109,7 @@ public sealed class AppraisalUiController : IRetainedPanelController
     private AppraisalUiController(
         ImportedLayout layout,
         ClientObjectTable objects,
-        ItemInteractionController interaction,
+        RuntimeItemInteraction interaction,
         SelectionState selection,
         CombatState combat,
         Spellbook spellbook,
@@ -269,7 +269,7 @@ public sealed class AppraisalUiController : IRetainedPanelController
     public static AppraisalUiController? Bind(
         ImportedLayout layout,
         ClientObjectTable objects,
-        ItemInteractionController interaction,
+        RuntimeItemInteraction interaction,
         SelectionState selection,
         CombatState combat,
         Spellbook spellbook,
@@ -402,7 +402,7 @@ public sealed class AppraisalUiController : IRetainedPanelController
 
     public bool Apply(AppraiseInfoParser.Parsed appraisal)
     {
-        ItemInteractionController.AppraisalResponseAcceptance acceptance =
+        RuntimeItemInteraction.AppraisalResponseAcceptance acceptance =
             _interaction.AcceptAppraisalResponse(appraisal.Guid);
         if (!acceptance.Accepted)
             return false;

@@ -61,7 +61,7 @@ internal sealed record LiveSessionInteractionRuntime(
     GameplayInputFrameController GameplayInput,
     PlayerModeController PlayerMode,
     PlayerModeAutoEntry PlayerModeAutoEntry,
-    ItemInteractionController ItemInteraction,
+    RuntimeItemInteraction ItemInteraction,
     RuntimeCombatAttackState CombatAttack,
     SelectionInteractionController SelectionInteractions);
 

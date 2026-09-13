@@ -29,7 +29,7 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
     private readonly Func<uint> _playerGuid;
     private readonly Func<ItemType, uint, uint, uint, uint, uint> _iconIds;
     private readonly Func<ItemType, uint, uint, uint, uint, uint>? _dragIconIds;
-    private readonly ItemInteractionController _itemInteraction;
+    private readonly RuntimeItemInteraction _itemInteraction;
     private readonly bool _ownsItemInteraction;
     private readonly SelectionState _selection;
     private readonly PaperdollClickMap? _clickMap;
@@ -46,7 +46,7 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
     private PaperdollController(
         ImportedLayout layout, ClientObjectTable objects, Func<uint> playerGuid,
         Func<ItemType, uint, uint, uint, uint, uint> iconIds, SelectionState selection,
-        ItemInteractionController itemInteraction,
+        RuntimeItemInteraction itemInteraction,
         uint emptySlotSprite, UiDatFont? datFont,
         PaperdollClickMap? clickMap,
         Func<ItemType, uint, uint, uint, uint, uint>? dragIconIds,
@@ -135,7 +135,7 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
     public static PaperdollController Bind(
         ImportedLayout layout, ClientObjectTable objects, Func<uint> playerGuid,
         Func<ItemType, uint, uint, uint, uint, uint> iconIds, SelectionState selection,
-        ItemInteractionController itemInteraction,
+        RuntimeItemInteraction itemInteraction,
         uint emptySlotSprite = 0u, UiDatFont? datFont = null,
         PaperdollClickMap? clickMap = null,
         Func<ItemType, uint, uint, uint, uint, uint>? dragIconIds = null,

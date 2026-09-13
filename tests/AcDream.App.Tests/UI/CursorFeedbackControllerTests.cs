@@ -227,7 +227,7 @@ public sealed class CursorFeedbackControllerTests
     public void TargetMode_reportsValidInvalidAndPendingTargets()
     {
         var objects = SeedTargetObjects();
-        var interaction = new ItemInteractionController(
+        var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -262,7 +262,7 @@ public sealed class CursorFeedbackControllerTests
     {
         var objects = SeedTargetObjects();
         objects.Get(Source)!.TargetType = (uint)ItemType.Misc;   // a tool that targets items
-        var interaction = new ItemInteractionController(
+        var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -306,7 +306,7 @@ public sealed class CursorFeedbackControllerTests
         slot.SetItem(Target, iconTexture: 1u);
         root.AddChild(slot);
         root.OnMouseMove(20, 20);
-        var c = new CursorFeedbackController();   // no ItemInteractionController — TargetMode.None throughout
+        var c = new CursorFeedbackController();   // no RuntimeItemInteraction — TargetMode.None throughout
 
         var feedback = c.Update(root);
 
@@ -332,7 +332,7 @@ public sealed class CursorFeedbackControllerTests
     public void UpdateFromRoot_worldProviderContinuesBehindNonItemUi()
     {
         var objects = SeedTargetObjects();
-        var interaction = new ItemInteractionController(
+        var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -385,7 +385,7 @@ public sealed class CursorFeedbackControllerTests
     public void GenericUseAndExamineModes_driveRetailGlobalCursors()
     {
         var objects = SeedTargetObjects();
-        var interaction = new ItemInteractionController(
+        var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),

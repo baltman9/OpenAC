@@ -1,6 +1,6 @@
 using AcDream.Core.Items;
 
-namespace AcDream.App.UI;
+namespace AcDream.Runtime.Gameplay;
 
 /// <summary>
 /// One successfully dispatched inventory-to-world request together with the

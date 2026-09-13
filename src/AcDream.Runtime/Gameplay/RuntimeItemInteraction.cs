@@ -2,9 +2,9 @@ using System;
 using AcDream.Core.Chat;
 using AcDream.Core.Combat;
 using AcDream.Core.Items;
-using AcDream.Runtime.Gameplay;
 
-namespace AcDream.App.UI;
+
+namespace AcDream.Runtime.Gameplay;
 
 public enum ItemPrimaryClickResult
 {
@@ -20,7 +20,7 @@ public readonly record struct PendingBackpackPlacement(
     int Placement,
     ClientObject? ItemIdentity);
 
-public sealed class ItemInteractionController : IDisposable
+public sealed class RuntimeItemInteraction : IDisposable
 {
     internal const string InventoryRequestBusyMessage =
         "You can only move or use one item at a time";
@@ -39,25 +39,25 @@ public sealed class ItemInteractionController : IDisposable
     private readonly Action<uint, uint, uint, uint>? _sendSplitToContainer;
     private readonly Action<uint, uint, uint>? _sendStackableMerge;
     private readonly Action<uint, uint, uint>? _sendGive;
-    private readonly Action<string>? _toast;
+    private Action<string>? _toast;
     private readonly Func<bool> _readyForInventoryRequest;
     private readonly Func<uint> _activeVendorId;
     private readonly Func<uint> _groundObjectId;
-    private readonly Func<bool> _playerOnGround;
+    private Func<bool> _playerOnGround;
     private readonly Func<bool> _inNonCombatMode;
-    private readonly Func<uint, bool> _isComponentPack;
-    private readonly Action<uint, uint, int>? _placeInBackpack;
-    private readonly Func<uint> _backpackContainerId;
+    private Func<uint, bool> _isComponentPack;
+    private Action<uint, uint, int>? _placeInBackpack;
+    private Func<uint> _backpackContainerId;
     private readonly Action<uint>? _requestExternalContainer;
     private readonly Action<ItemPolicyAction>? _auxiliaryAction;
     private readonly InteractionState _interactionState;
     private readonly Func<uint> _selectedObjectId;
-    private readonly StackSplitQuantityState? _stackSplitQuantity;
+    private StackSplitQuantityState? _stackSplitQuantity;
     private readonly Func<bool> _dragOnPlayerOpensSecureTrade;
     private readonly Action<string>? _systemMessage;
     private readonly Action<string, RetailLogTextType>? _interfaceText;
     private readonly AutoWieldController _autoWield;
-    private readonly Action<uint, ItemUseRequestReservation>? _requestUse;
+    private Action<uint, ItemUseRequestReservation>? _requestUse;
     private readonly Func<uint, uint, int, uint, bool>? _sendBuy;
     private readonly Func<uint, IReadOnlyList<(int Amount, uint ItemGuid)>, uint, bool>? _sendBuyAll;
     private readonly Func<uint, IReadOnlyList<(int Amount, uint ItemGuid)>, bool>? _sendSell;
@@ -70,7 +70,7 @@ public sealed class ItemInteractionController : IDisposable
     private PendingBackpackPlacement? _pendingBackpackPlacement;
     private bool _disposed;
 
-    public ItemInteractionController(
+    public RuntimeItemInteraction(
         ClientObjectTable objects,
         RuntimeInteractionTransactionState runtimeTransactions,
         InteractionState interactionState,
@@ -172,6 +172,56 @@ public sealed class ItemInteractionController : IDisposable
         _objects.MoveRequestFailed += OnMoveRequestFailedNotice;
     }
 
+    /// <summary>
+    /// Installs the walk-to-then-act route. A host with a window knows how
+    /// far away an object is and can close the distance first; without one
+    /// the request goes out immediately and the server judges the range.
+    /// </summary>
+    public void BindApproachRoute(
+        Action<uint, ItemUseRequestReservation>? requestUse,
+        Action<uint, uint, int>? placeInBackpack)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (requestUse is not null)
+            _requestUse = requestUse;
+        if (placeInBackpack is not null)
+            _placeInBackpack = placeInBackpack;
+    }
+
+    /// <summary>
+    /// Installs the answers only a presented client has: which pack the
+    /// player currently has open, how much of a stack the split control is
+    /// asking for, whether the player is standing on the ground, and where
+    /// a transient notice goes.
+    /// </summary>
+    public void BindPresentation(
+        Func<uint>? backpackContainerId = null,
+        StackSplitQuantityState? stackSplitQuantity = null,
+        Func<bool>? playerOnGround = null,
+        Action<string>? toast = null)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (backpackContainerId is not null)
+            _backpackContainerId = backpackContainerId;
+        if (stackSplitQuantity is not null)
+            _stackSplitQuantity = stackSplitQuantity;
+        if (playerOnGround is not null)
+            _playerOnGround = playerOnGround;
+        if (toast is not null)
+            _toast = toast;
+    }
+
+    /// <summary>
+    /// Component packs are named by the magic catalogue, which is read from
+    /// the installed data files rather than from the wire.
+    /// </summary>
+    public void BindComponentPackResolver(Func<uint, bool> isComponentPack)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(isComponentPack);
+        _isComponentPack = isComponentPack;
+    }
+
     public event Action? StateChanged;
 
     public event Action<uint, uint>? MergeAttempted;
@@ -196,6 +246,13 @@ public sealed class ItemInteractionController : IDisposable
     public InteractionState InteractionState => _interactionState;
     public RuntimeInteractionTransactionState RuntimeTransactions =>
         _runtimeTransactions;
+
+    /// <summary>
+    /// True once the owner has detached from the state it borrows. A host
+    /// composition that fails and rolls back must leave this false: the
+    /// owner outlives any one host composition.
+    /// </summary>
+    public bool IsDisposed => _disposed;
 
     public int BusyCount => _transactions.BusyCount;
     public uint CurrentAppraisalId =>
@@ -1250,25 +1307,20 @@ public sealed class ItemInteractionController : IDisposable
         return true;
     }
 
-    public bool DropToWorld(ItemDragPayload payload)
-        => PlaceIn3D(payload, targetGuid: 0u);
-
     public bool PlaceSelectedIn3D(uint itemGuid, uint targetGuid)
-        => PlaceIn3D(itemGuid, ItemDragSource.Inventory, targetGuid);
+        => PlaceIn3D(itemGuid, fromShortcutBar: false, targetGuid);
 
-    public bool PlaceIn3D(ItemDragPayload payload, uint targetGuid)
-    {
-        ArgumentNullException.ThrowIfNull(payload);
-
-        return PlaceIn3D(payload.ObjId, payload.SourceKind, targetGuid);
-    }
-
-    private bool PlaceIn3D(
+    /// <summary>
+    /// Places an item into the world, either on the ground or onto another
+    /// object. A shortcut-bar slot holds an alias, not the item, so nothing
+    /// can be placed out of one.
+    /// </summary>
+    public bool PlaceIn3D(
         uint itemGuid,
-        ItemDragSource sourceKind,
+        bool fromShortcutBar,
         uint targetGuid)
     {
-        if (sourceKind == ItemDragSource.ShortcutBar)
+        if (fromShortcutBar)
             return false;
         if (itemGuid == 0 || _objects.Get(itemGuid) is not { } item)
             return false;

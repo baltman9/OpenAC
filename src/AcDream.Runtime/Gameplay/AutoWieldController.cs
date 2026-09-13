@@ -2,9 +2,9 @@ using System;
 using AcDream.Core.Combat;
 using AcDream.Core.Items;
 
-namespace AcDream.App.UI;
+namespace AcDream.Runtime.Gameplay;
 
-internal sealed class AutoWieldController : IDisposable
+public sealed class AutoWieldController : IDisposable
 {
     internal const EquipMask WeaponReadyMask =
         EquipMask.MeleeWeapon

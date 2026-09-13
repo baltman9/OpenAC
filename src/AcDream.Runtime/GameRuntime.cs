@@ -106,6 +106,7 @@ internal enum GameRuntimeConstructionPoint
     HouseCreated,
     MovementCreated,
     ActionsCreated,
+    ItemInteractionCreated,
     EnvironmentCreated,
     TransitCreated,
     EventsCreated,
@@ -127,6 +128,7 @@ internal sealed class GameRuntimeConstructionContext
     public RuntimeHouseState? House { get; set; }
     public RuntimeLocalPlayerMovementState? Movement { get; set; }
     public RuntimeActionState? Actions { get; set; }
+    public RuntimeItemInteraction? ItemInteraction { get; set; }
     public GameRuntimeEventHub? Events { get; set; }
 }
 
@@ -302,6 +304,19 @@ public sealed class GameRuntime
                 context,
                 faultInjection);
 
+            context.ItemInteraction = RuntimeItemInteractionComposition.Create(
+                context.Session,
+                context.PlayerIdentity,
+                context.Inventory,
+                context.Actions,
+                context.Character,
+                context.Communication);
+            construction.Own(context.ItemInteraction);
+            Fault(
+                GameRuntimeConstructionPoint.ItemInteractionCreated,
+                context,
+                faultInjection);
+
             var environment = new RuntimeWorldEnvironmentState(
                 dependencies.TimeProvider,
                 dependencies.Log,
@@ -374,6 +389,7 @@ public sealed class GameRuntime
             HouseOwner = context.House;
             MovementOwner = context.Movement;
             ActionOwner = context.Actions;
+            ItemInteractionOwner = context.ItemInteraction;
             EnvironmentOwner = environment;
             TransitOwner = transit;
             GenerationReset = generationReset;
@@ -443,6 +459,12 @@ public sealed class GameRuntime
 
     public RuntimeHouseState HouseOwner { get; }
     public RuntimeActionState ActionOwner { get; }
+
+    /// <summary>
+    /// The one owner of item and equipment requests. Both hosts borrow it,
+    /// so a plugin gets the same answers with or without a window.
+    /// </summary>
+    public RuntimeItemInteraction ItemInteractionOwner { get; }
     public RuntimeLocalPlayerMovementState MovementOwner { get; }
     internal RuntimeLocalPlayerPhysicsPublicationState
         LocalPlayerPhysicsPublication => MovementOwner.PhysicsPublication;
@@ -771,6 +793,9 @@ public sealed class GameRuntime
                 TransitOwner.ResetSession();
                 return TransitOwner.CaptureOwnership().IsSessionIdle;
             case 4:
+                // The item owner only borrows the action and inventory
+                // state it subscribes to, so it detaches first.
+                ItemInteractionOwner.Dispose();
                 ActionOwner.Dispose();
                 return ActionOwner.CaptureOwnership().IsConverged;
             case 5:

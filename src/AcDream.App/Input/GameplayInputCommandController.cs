@@ -68,10 +68,10 @@ internal interface IItemTargetModeCommands
     void CancelTargetMode();
 }
 
-internal sealed class ItemTargetModeCommands(ItemInteractionController items)
+internal sealed class ItemTargetModeCommands(RuntimeItemInteraction items)
     : IItemTargetModeCommands
 {
-    private readonly ItemInteractionController _items = items
+    private readonly RuntimeItemInteraction _items = items
         ?? throw new ArgumentNullException(nameof(items));
 
     public bool IsAnyTargetModeActive => _items.IsAnyTargetModeActive;

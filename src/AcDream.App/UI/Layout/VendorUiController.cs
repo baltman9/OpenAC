@@ -98,7 +98,7 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
     private readonly Func<ItemType, uint, uint, uint, uint, uint> _resolveIcon;
     private readonly ClientObjectTable _objects;
     private readonly Func<uint> _playerGuid;
-    private readonly ItemInteractionController _itemInteraction;
+    private readonly RuntimeItemInteraction _itemInteraction;
     private readonly SelectionState _selection;
     private readonly StackSplitQuantityState _splitQuantity;
     private readonly UiElement _itemsPage;
@@ -154,7 +154,7 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
         Func<ItemType, uint, uint, uint, uint, uint> resolveIcon,
         ClientObjectTable objects,
         Func<uint> playerGuid,
-        ItemInteractionController itemInteraction,
+        RuntimeItemInteraction itemInteraction,
         SelectionState selection,
         StackSplitQuantityState splitQuantity,
         UiElement itemsPage,
@@ -371,7 +371,7 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
         Func<ItemType, uint, uint, uint, uint, uint> resolveIcon,
         ClientObjectTable objects,
         Func<uint> playerGuid,
-        ItemInteractionController itemInteraction,
+        RuntimeItemInteraction itemInteraction,
         SelectionState selection,
         StackSplitQuantityState splitQuantity,
         UiDatFont? datFont,

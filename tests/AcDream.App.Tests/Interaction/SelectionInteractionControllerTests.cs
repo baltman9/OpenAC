@@ -150,7 +150,7 @@ public sealed class SelectionInteractionControllerTests
         public readonly List<uint> Examines = new();
         public readonly List<PendingBackpackPlacement> PendingPlacements = new();
         public readonly List<PendingBackpackPlacement> CancelledPlacements = new();
-        public readonly ItemInteractionController Items;
+        public readonly RuntimeItemInteraction Items;
         public readonly SelectionInteractionController Controller;
         public uint GroundObjectId { get; set; }
 
@@ -172,7 +172,7 @@ public sealed class SelectionInteractionControllerTests
                 Useability = ItemUseability.Remote,
                 PublicWeenieBitfield = (uint)PublicWeenieFlags.Stuck,
             });
-            Items = new ItemInteractionController(
+            Items = new RuntimeItemInteraction(
                 Objects,
                 new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(Objects)),
                 new InteractionState(),

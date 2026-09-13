@@ -1,10 +1,10 @@
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
-using AcDream.Runtime.Gameplay;
 
-namespace AcDream.App.Interaction;
 
-internal sealed class WorldSessionSelectionInteractionTransport(
+namespace AcDream.Runtime.Gameplay;
+
+public sealed class RuntimeSessionInteractionTransport(
     Func<WorldSession?> session)
     : IRuntimeInteractionTransport
 {

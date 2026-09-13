@@ -160,7 +160,7 @@ public sealed class UiWindowDrawCaptureSweepTests
             });
 
         var objects = new ClientObjectTable();
-        var itemInteraction = new ItemInteractionController(
+        var itemInteraction = new RuntimeItemInteraction(
             objects,
             new RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),

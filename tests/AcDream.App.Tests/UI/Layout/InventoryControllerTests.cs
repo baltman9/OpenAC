@@ -63,7 +63,7 @@ public class InventoryControllerTests
         Action? onClose = null,
         SelectionState? selection = null,
         StackSplitQuantityState? stackSplitQuantity = null,
-        ItemInteractionController? itemInteraction = null,
+        RuntimeItemInteraction? itemInteraction = null,
         Func<int?>? strengthProvider = null,
         Spellbook? burdenSpellbook = null)
         => InventoryController.Bind(layout, objects, () => Player,
@@ -543,7 +543,7 @@ public class InventoryControllerTests
         SeedContained(objects, 0xAu, Player, slot: 0);
         var selection = new SelectionState();
         var appraisals = new List<uint>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -574,7 +574,7 @@ public class InventoryControllerTests
         var (layout, grid, containers, top, _, _, _, _) = BuildLayout();
         var objects = new ClientObjectTable();
         SeedContained(objects, 0xAu, Player, slot: 0);
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(
                 new InventoryTransactionState(objects)),
@@ -605,7 +605,7 @@ public class InventoryControllerTests
         SeedContained(objects, 0xAu, Player, slot: 0);
         var selection = new SelectionState();
         var appraisals = new List<uint>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(
                 new InventoryTransactionState(objects)),
@@ -710,7 +710,7 @@ public class InventoryControllerTests
         });
         SeedContained(objects, 0xA, Player, slot: 0);
         objects.Get(0xA)!.Useability = 0x000A0008u;
-        var interaction = new ItemInteractionController(
+        var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -899,7 +899,7 @@ public class InventoryControllerTests
         SeedContained(objects, 0xBu, Player, slot: 1);
         SeedContained(objects, loot, chest, slot: 0, type: ItemType.Misc);
         var pickups = new List<(uint item, uint container, int placement)>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -945,7 +945,7 @@ public class InventoryControllerTests
         SeedContained(objects, secondLoot, chest, slot: 1, type: ItemType.Misc);
         long now = 1_000;
         var eventOrder = new List<(string Kind, uint Item, ulong Token)>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -998,7 +998,7 @@ public class InventoryControllerTests
         SeedContained(objects, directLoot, chest, slot: 1, type: ItemType.Misc);
         var puts = new List<(uint Item, uint Container, int Placement)>();
         var eventOrder = new List<(string Kind, uint Item)>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -1057,7 +1057,7 @@ public class InventoryControllerTests
         var eventOrder = new List<(string Kind, uint Item)>();
         var puts = new List<(uint Item, uint Container, int Placement)>();
         var messages = new List<string>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -1127,7 +1127,7 @@ public class InventoryControllerTests
         SeedBag(objects, bag, 1);
         var puts = new List<(uint Item, uint Container, int Placement)>();
         var messages = new List<string>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -1160,7 +1160,7 @@ public class InventoryControllerTests
 
         Assert.Empty(puts);
         Assert.Equal(
-            new[] { ItemInteractionController.InventoryRequestBusyMessage },
+            new[] { RuntimeItemInteraction.InventoryRequestBusyMessage },
             messages);
     }
 
@@ -1191,7 +1191,7 @@ public class InventoryControllerTests
         });
         objects.MoveItem(targetStack, Player, 0);
         var merges = new List<(uint Source, uint Target, uint Amount)>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -1252,7 +1252,7 @@ public class InventoryControllerTests
         splitQuantity.Reset(10u);
         splitQuantity.SetValue(1u);
         var splits = new List<(uint Item, uint Container, uint Placement, uint Amount)>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -1300,7 +1300,7 @@ public class InventoryControllerTests
         SeedContained(objects, pendingLoot, chest, slot: 0, type: ItemType.Misc);
         SeedContained(objects, ownedItem, Player, slot: 0, type: ItemType.Misc);
         var puts = new List<(uint Item, uint Container, int Placement)>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -1341,7 +1341,7 @@ public class InventoryControllerTests
         var (layout, grid, _, _, _, _, _, _) = BuildLayout();
         var objects = new ClientObjectTable();
         SeedContained(objects, loot, chest, slot: 0, type: ItemType.Misc);
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -1381,7 +1381,7 @@ public class InventoryControllerTests
         var (layout, grid, _, _, _, _, _, _) = BuildLayout();
         var objects = new ClientObjectTable();
         SeedContained(objects, loot, chest, slot: 0, type: ItemType.Misc);
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -1689,7 +1689,7 @@ public class InventoryControllerTests
             ItemsCapacity = 24,
         });
         var puts = new List<(uint Item, uint Container, int Placement)>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(
                 new InventoryTransactionState(objects)),
@@ -1757,7 +1757,7 @@ public class InventoryControllerTests
             ItemsCapacity = 24,
         });
         var puts = new List<(uint Item, uint Container, int Placement)>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(
                 new InventoryTransactionState(objects)),
@@ -1896,7 +1896,7 @@ public class InventoryControllerTests
         public readonly ClientObjectTable Objects = new();
         public readonly SelectionState Selection = new();
         public readonly List<uint> Appraisals = [];
-        public readonly ItemInteractionController Interaction;
+        public readonly RuntimeItemInteraction Interaction;
         public readonly InventoryController Inventory;
         public readonly AppraisalUiController Appraisal;
 
@@ -1915,7 +1915,7 @@ public class InventoryControllerTests
                 ItemsCapacity = 102,
             });
             SeedContained(Objects, 0xAu, Player, slot: 0);
-            Interaction = new ItemInteractionController(
+            Interaction = new RuntimeItemInteraction(
                 Objects,
                 new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(Objects)),
                 new InteractionState(),
@@ -2049,7 +2049,7 @@ public class InventoryControllerTests
         SeedContained(objects, 0xB, 0xD, slot: 0, type: ItemType.Misc);        // the dragged item
         var puts = new List<(uint item, uint container, int placement)>();
         var messages = new List<string>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -2086,7 +2086,7 @@ public class InventoryControllerTests
         SeedContained(objects, 0xB, chest, slot: 0, type: ItemType.Misc);      // dragged from a chest
         var puts = new List<(uint item, uint container, int placement)>();
         var messages = new List<string>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -2123,7 +2123,7 @@ public class InventoryControllerTests
         objects.AddOrUpdate(new ClientObject { ObjectId = chest, Type = ItemType.Container, ItemsCapacity = 10 });
         SeedContained(objects, loot, chest, slot: 0, type: ItemType.Misc);
         var pickups = new List<(uint item, uint container, int placement)>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -2167,7 +2167,7 @@ public class InventoryControllerTests
         SeedContained(objects, loot, chest, slot: 0, type: ItemType.Misc);
         var pickups = new List<(uint item, uint container, int placement)>();
         var messages = new List<string>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),

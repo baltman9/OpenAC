@@ -117,6 +117,7 @@ public sealed class GameRuntimeTests
     [InlineData((int)GameRuntimeConstructionPoint.AllegianceCreated)]
     [InlineData((int)GameRuntimeConstructionPoint.MovementCreated)]
     [InlineData((int)GameRuntimeConstructionPoint.ActionsCreated)]
+    [InlineData((int)GameRuntimeConstructionPoint.ItemInteractionCreated)]
     [InlineData((int)GameRuntimeConstructionPoint.EnvironmentCreated)]
     [InlineData((int)GameRuntimeConstructionPoint.TransitCreated)]
     [InlineData((int)GameRuntimeConstructionPoint.EventsCreated)]

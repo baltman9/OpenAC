@@ -788,7 +788,7 @@ public sealed class CurrentGameRuntimeAdapterTests
         public const uint PlayerGuid = 0x50000002u;
         public const uint TargetGuid = 0x70000001u;
 
-        private readonly ItemInteractionController _items;
+        private readonly RuntimeItemInteraction _items;
         private readonly LiveSessionController _session;
         private readonly IDisposable _combatModeBinding;
         private readonly GameRuntime _gameRuntime;
@@ -837,7 +837,7 @@ public sealed class CurrentGameRuntimeAdapterTests
                 static () => { },
                 static _ => false);
 
-            _items = new ItemInteractionController(
+            _items = new RuntimeItemInteraction(
                 Objects,
                 Actions.Transactions,
                 Actions.Interaction,

@@ -1683,7 +1683,7 @@ public sealed class AppraisalUiControllerTests
     private static AppraisalUiController? Bind(
         ImportedLayout layout,
         ClientObjectTable objects,
-        ItemInteractionController interaction,
+        RuntimeItemInteraction interaction,
         CombatState combat,
         List<(uint ObjectId, string Text)> inscriptions,
         List<string> messages,
@@ -1724,7 +1724,7 @@ public sealed class AppraisalUiControllerTests
             resolveCharacterTitle,
             localFactionBits);
 
-    private static ItemInteractionController NewInteraction(
+    private static RuntimeItemInteraction NewInteraction(
         ClientObjectTable objects,
         List<uint> sent)
         => new(

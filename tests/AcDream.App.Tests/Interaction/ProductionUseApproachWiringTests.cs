@@ -82,7 +82,7 @@ public sealed class ProductionUseApproachWiringTests
         public readonly ClientObjectTable Objects = new();
         public readonly InventoryTransactionState Inventory;
         public readonly RuntimeInteractionTransactionState Transactions;
-        public readonly ItemInteractionController Items;
+        public readonly RuntimeItemInteraction Items;
         public readonly SelectionInteractionController Controller;
         public readonly PlayerMovementController MovementController;
         public readonly MoveToManager MoveTo;
@@ -180,7 +180,7 @@ public sealed class ProductionUseApproachWiringTests
             Inventory = new InventoryTransactionState(Objects);
             Transactions = new RuntimeInteractionTransactionState(Inventory);
             SelectionInteractionController? selectionController = null;
-            Items = new ItemInteractionController(
+            Items = new RuntimeItemInteraction(
                 Objects,
                 Transactions,
                 new InteractionState(),
