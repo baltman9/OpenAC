@@ -1085,7 +1085,8 @@ internal class RuntimeAutomationSurface
                 entry.Kind,
                 entry.Sender,
                 entry.Text,
-                entry.ChannelName));
+                entry.ChannelName,
+                entry.LogTextType));
             if (_chatMessages.Count > MaximumPluginChatMessages)
             {
                 _chatMessages.RemoveRange(

@@ -77,7 +77,14 @@ public readonly record struct RuntimeChatEntry(
     int Kind,
     string Sender,
     string Text,
-    string ChannelName);
+    string ChannelName,
+    /// <summary>
+    /// The line's log-text type — the same value the client colours the line
+    /// by. It is the only field that distinguishes, for example, an NPC's tell
+    /// from any other tell-shaped line, so anything reading chat as data needs
+    /// it alongside the text.
+    /// </summary>
+    uint LogTextType = 0u);
 
 public readonly record struct RuntimeChatDelta(
     RuntimeEventStamp Stamp,

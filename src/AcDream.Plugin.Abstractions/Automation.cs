@@ -209,7 +209,14 @@ public readonly record struct PluginChatMessage(
     int Kind,
     string Sender,
     string Text,
-    string ChannelName);
+    string ChannelName,
+    /// <summary>
+    /// The line's log-text type — the value the client colours the line by,
+    /// and the only thing that separates lines that read alike. A plugin that
+    /// has to tell an NPC's answer from an ordinary tell reads this, not
+    /// <paramref name="Kind"/>, which groups lines by where they came from.
+    /// </summary>
+    uint LogTextType = 0u);
 
 public interface IPluginChat
 {
