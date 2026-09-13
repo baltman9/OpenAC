@@ -262,7 +262,7 @@ internal sealed class DirectionalShadowPreparedDraws
             return false;
         }
 
-        EnsureCapacity(ref _source, estimatedInstances);
+        ScratchArrays.EnsureRefillCapacity(ref _source, estimatedInstances);
         _sourceCount = 0;
         _commandCount = 0;
         _runCount = 0;
@@ -402,14 +402,14 @@ internal sealed class DirectionalShadowPreparedDraws
 
         int groupCount = 0;
         _groupByKey.Clear();
-        EnsureCapacity(ref _drawNextInGroup, _sourceCount);
-        EnsureCapacity(ref _groupHead, _sourceCount);
-        EnsureCapacity(ref _groupTail, _sourceCount);
-        EnsureCapacity(ref _groupCountByGroup, _sourceCount);
-        EnsureCapacity(ref _groupKeyHi, _sourceCount);
-        EnsureCapacity(ref _groupKeyLo, _sourceCount);
-        EnsureCapacity(ref _groupFirstDraw, _sourceCount);
-        EnsureCapacity(ref _groupOrder, _sourceCount);
+        ScratchArrays.EnsureRefillCapacity(ref _drawNextInGroup, _sourceCount);
+        ScratchArrays.EnsureRefillCapacity(ref _groupHead, _sourceCount);
+        ScratchArrays.EnsureRefillCapacity(ref _groupTail, _sourceCount);
+        ScratchArrays.EnsureRefillCapacity(ref _groupCountByGroup, _sourceCount);
+        ScratchArrays.EnsureRefillCapacity(ref _groupKeyHi, _sourceCount);
+        ScratchArrays.EnsureRefillCapacity(ref _groupKeyLo, _sourceCount);
+        ScratchArrays.EnsureRefillCapacity(ref _groupFirstDraw, _sourceCount);
+        ScratchArrays.EnsureRefillCapacity(ref _groupOrder, _sourceCount);
         for (int i = 0; i < _sourceCount; i++)
         {
             DirectionalShadowDrawKey key = _source[i].Key;
@@ -444,17 +444,17 @@ internal sealed class DirectionalShadowPreparedDraws
             _groupOrder[g] = g;
         _groupOrder.AsSpan(0, groupCount).Sort(
             new GroupOrderComparer(_groupKeyHi, _groupKeyLo, _groupFirstDraw));
-        EnsureCapacity(ref _transforms, _sourceCount);
-        EnsureCapacity(ref _transformSources, _sourceCount);
-        EnsureCapacity(ref _dynamicTransformSlots, _sourceCount);
-        EnsureCapacity(ref _allDynamicTransformSlots, _sourceCount);
-        EnsureCapacity(ref _nextDynamicTransform, _sourceCount);
-        EnsureCapacity(ref _commands, _sourceCount);
-        EnsureCapacity(ref _batches, _sourceCount);
-        EnsureCapacity(ref _runs, _sourceCount);
-        EnsureCapacity(ref _activeCommands, _sourceCount);
-        EnsureCapacity(ref _activeBatches, _sourceCount);
-        EnsureCapacity(ref _activeRuns, _sourceCount);
+        ScratchArrays.EnsureRefillCapacity(ref _transforms, _sourceCount);
+        ScratchArrays.EnsureRefillCapacity(ref _transformSources, _sourceCount);
+        ScratchArrays.EnsureRefillCapacity(ref _dynamicTransformSlots, _sourceCount);
+        ScratchArrays.EnsureRefillCapacity(ref _allDynamicTransformSlots, _sourceCount);
+        ScratchArrays.EnsureRefillCapacity(ref _nextDynamicTransform, _sourceCount);
+        ScratchArrays.EnsureRefillCapacity(ref _commands, _sourceCount);
+        ScratchArrays.EnsureRefillCapacity(ref _batches, _sourceCount);
+        ScratchArrays.EnsureRefillCapacity(ref _runs, _sourceCount);
+        ScratchArrays.EnsureRefillCapacity(ref _activeCommands, _sourceCount);
+        ScratchArrays.EnsureRefillCapacity(ref _activeBatches, _sourceCount);
+        ScratchArrays.EnsureRefillCapacity(ref _activeRuns, _sourceCount);
 
         int maxCasterIndex = -1;
         for (int index = 0; index < _sourceCount; index++)
@@ -1073,15 +1073,10 @@ internal sealed class DirectionalShadowPreparedDraws
     internal static bool FadeExcludesCaster(float translucency) =>
         !float.IsFinite(translucency) || translucency > 0f;
 
-    private static void EnsureCapacity<T>(ref T[] values, int required)
-    {
-        if (values.Length >= required)
-            return;
-        int capacity = values.Length == 0 ? 16 : values.Length;
-        while (capacity < required)
-            capacity = checked(capacity * 2);
-        Array.Resize(ref values, capacity);
-    }
+    // Growth-only sizing for arrays whose contents must survive (appends,
+    // caster-indexed slots that only ever grow).
+    private static void EnsureCapacity<T>(ref T[] values, int required) =>
+        ScratchArrays.EnsureAppendCapacity(ref values, required);
 
     private readonly struct GroupOrderComparer(
         ulong[] keyHi,

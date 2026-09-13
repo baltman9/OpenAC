@@ -3,6 +3,15 @@ namespace AcDream.App.Rendering.Scene;
 internal sealed class RenderProjectionJournal
 {
     private readonly List<RenderProjectionDelta> _deltas = [];
+
+    // A portal arrival can queue tens of thousands of deltas at once; the
+    // list would then keep that capacity for the rest of the session. Every
+    // few hundred drains the capacity is brought back down to the largest
+    // batch seen since the last trim.
+    private const int TrimEveryDrains = 512;
+    private const int TrimFloor = 1024;
+    private int _drainsSinceTrim;
+    private int _peakCountSinceTrim;
     private ulong _nextSequence = 1;
 
     public RenderProjectionJournal(RenderSceneGeneration generation)
@@ -89,7 +98,16 @@ internal sealed class RenderProjectionJournal
 
         RenderDeltaApplyResult result =
             scene.Apply(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_deltas));
+        _peakCountSinceTrim = Math.Max(_peakCountSinceTrim, _deltas.Count);
         _deltas.Clear();
+        if (++_drainsSinceTrim >= TrimEveryDrains)
+        {
+            int target = Math.Max(_peakCountSinceTrim, TrimFloor);
+            if (_deltas.Capacity > target * 2)
+                _deltas.Capacity = target;
+            _drainsSinceTrim = 0;
+            _peakCountSinceTrim = 0;
+        }
         return result;
     }
 

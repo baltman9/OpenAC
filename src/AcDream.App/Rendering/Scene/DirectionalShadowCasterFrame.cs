@@ -685,17 +685,10 @@ internal sealed class DirectionalShadowCasterFrame
         };
     }
 
-    private static void EnsureCapacity<T>(ref T[] values, int required)
-    {
-        if (required < 0)
-            throw new ArgumentOutOfRangeException(nameof(required));
-        if (values.Length >= required)
-            return;
-        int capacity = values.Length == 0 ? 4 : values.Length;
-        while (capacity < required)
-            capacity = checked(capacity * 2);
-        Array.Resize(ref values, capacity);
-    }
+    // Every array sized here is rewritten from index zero right after, so
+    // the refill policy may shrink it when the window got much smaller.
+    private static void EnsureCapacity<T>(ref T[] values, int required) =>
+        ScratchArrays.EnsureRefillCapacity(ref values, required, minimum: 4);
 
     private void SortCasters()
     {

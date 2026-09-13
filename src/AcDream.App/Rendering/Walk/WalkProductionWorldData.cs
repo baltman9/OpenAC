@@ -105,11 +105,7 @@ internal sealed class WalkProductionWorldData : IWalkFrameWorldData
         BuildingShellRebuildCount++;
 
         int required = _scene.IndexCounts.For(RenderSceneIndex.OutdoorStatic);
-        if (required > _sweepScratch.Length)
-        {
-            _sweepScratch = new RenderProjectionRecord[
-                Math.Max(required, _sweepScratch.Length * 2)];
-        }
+        ScratchArrays.EnsureRefillCapacity(ref _sweepScratch, required, minimum: 1024);
         int count = _scene.CopyIndexTo(RenderSceneIndex.OutdoorStatic, _sweepScratch);
         for (int i = 0; i < count; i++)
         {
@@ -219,12 +215,7 @@ internal sealed class WalkProductionWorldData : IWalkFrameWorldData
                 && IsDynamicProjectionClass(record.ProjectionClass) != dynamic.Value)
                 continue;
 
-            if (written == _cellViewScratch.Length)
-            {
-                var grown = new RenderProjectionRecord[_cellViewScratch.Length * 2];
-                Array.Copy(_cellViewScratch, grown, written);
-                _cellViewScratch = grown;
-            }
+            ScratchArrays.EnsureAppendCapacity(ref _cellViewScratch, written + 1, minimum: 64);
             _cellViewScratch[written++] = record;
         }
 
@@ -262,12 +253,7 @@ internal sealed class WalkProductionWorldData : IWalkFrameWorldData
             return ArraySegment<RenderProjectionRecord>.Empty;
 
         int required = _arenaLength + source.Length;
-        if (required > _arena.Length)
-        {
-            var grown = new RenderProjectionRecord[Math.Max(required, _arena.Length * 2)];
-            Array.Copy(_arena, grown, _arenaLength);
-            _arena = grown;
-        }
+        ScratchArrays.EnsureAppendCapacity(ref _arena, required, minimum: 4096);
 
         source.CopyTo(_arena.AsSpan(_arenaLength, source.Length));
         var segment = new ArraySegment<RenderProjectionRecord>(_arena, _arenaLength, source.Length);
