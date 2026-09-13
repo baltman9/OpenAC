@@ -1,3 +1,4 @@
+using AcDream.Content;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
 using AcDream.Runtime.Plugins;
@@ -47,7 +48,8 @@ internal sealed class HeadlessPluginHost
         IPluginStorage? vtankProfiles = null,
         IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
         Func<string, bool>? submitChatText = null,
-        HeadlessItemAutomation? items = null)
+        HeadlessItemAutomation? items = null,
+        MagicCatalog? magicCatalog = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         Log = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -57,6 +59,8 @@ internal sealed class HeadlessPluginHost
         _automation = new RuntimeAutomationSurface();
         _automation.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         _automation.BindSubmit(submitChatText);
+        if (magicCatalog is not null)
+            _automation.BindMagicCatalog(magicCatalog);
         if (items is not null)
         {
             _automation.BindItems(

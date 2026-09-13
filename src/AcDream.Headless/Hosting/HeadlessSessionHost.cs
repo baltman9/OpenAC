@@ -293,7 +293,8 @@ internal sealed class HeadlessSessionHost : IDisposable
                 vtankProfiles,
                 descriptor.PluginSettings,
                 SubmitChatText,
-                items);
+                items,
+                contentLease?.MagicCatalog);
             var liveSession = new LiveSessionHost(
                 runtime.Session,
                 new LiveSessionHostBindings(

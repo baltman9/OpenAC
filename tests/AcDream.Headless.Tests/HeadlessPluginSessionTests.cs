@@ -1,5 +1,8 @@
+using System.Collections.Immutable;
+using System.Reflection;
 using System.Text.Json;
 using System.Net;
+using AcDream.Content;
 using AcDream.Core.Chat;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
@@ -12,6 +15,8 @@ using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
 using AcDream.Runtime.Session;
 using AcDream.Tests.Fixtures.LauncherSession;
+using DatReaderWriter;
+using DatReaderWriter.Options;
 
 namespace AcDream.Headless.Tests;
 
@@ -556,6 +561,82 @@ public sealed class HeadlessPluginSessionTests
         _ = session.Start();
 
         Assert.True(session.Plugins.Host.Automation.Items.IsAvailable);
+    }
+
+    [Trait("Lane", "InstalledDat")]
+    [Fact]
+    public void SpellComponentsResolveThroughTheSessionsContentLeaseMagicCatalog()
+    {
+        string? datDir = InstalledDatTestPath.Resolve();
+        if (datDir is null)
+        {
+            Assert.Fail(
+                "Lane=InstalledDat requires an installed retail DAT directory; see docs/release-gate.md.");
+            return;
+        }
+
+        using var dats = new DatCollection(datDir, DatAccessType.Read);
+        using var adapter = new DatCollectionAdapter(dats);
+        MagicCatalog catalog = MagicCatalog.Load(adapter);
+        SpellComponentDescriptor known = catalog.Components.Values
+            .First(static component => component.SpellComponentId != 0u);
+
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var contentOwner = new HeadlessProcessContentOwner(
+            ContentDescriptor(),
+            _ => { },
+            new InstalledMagicContentFactory(catalog));
+        using HeadlessProcessContentOwner.HeadlessProcessContentLease lease =
+            contentOwner.AcquireLease("headless-session");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            contentLease: lease,
+            pluginRoots: [temporary.Path]);
+
+        Assert.True(session.Plugins.Host.Automation.Spells.TryGetComponent(
+            known.SpellComponentId,
+            out PluginSpellComponentInfo info));
+        Assert.Equal(known.Name, info.Name);
+    }
+
+    [Fact]
+    public void SpellComponentsAreUnavailableWithoutAContentLease()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+
+        Assert.False(session.Plugins.Host.Automation.Spells.TryGetComponent(
+            4200u,
+            out _));
+    }
+
+    private static HeadlessContentDescriptor ContentDescriptor() => new()
+    {
+        DatDirectory = "fixture-dats",
+        PreparedAssetPath = "fixture.pak",
+    };
+
+    private sealed class InstalledMagicContentFactory(MagicCatalog magic)
+        : IHeadlessProcessContentFactory
+    {
+        public HeadlessOpenedProcessContent Open(
+            HeadlessContentDescriptor descriptor,
+            Action<string> diagnostic) =>
+            new(
+                DispatchProxy.Create<IDatReaderWriter, TestResourceProxy>(),
+                DispatchProxy.Create<ITestPreparedSource, TestResourceProxy>(),
+                magic,
+                ImmutableArray.CreateRange(new float[256]));
     }
 
     private static HeadlessSessionDescriptor Descriptor(
