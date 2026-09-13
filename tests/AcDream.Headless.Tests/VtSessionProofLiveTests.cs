@@ -225,6 +225,25 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 Pump(TimeSpan.FromSeconds(1.5d));
             }
 
+            /// <summary>
+            /// What one of the plugin's own settings currently reads, asked
+            /// and answered the way a player would: through its option verb.
+            /// Null when the answer never came back.
+            /// </summary>
+            string? ReadOption(string name)
+            {
+                string marker = $"Option {name} = ";
+                int before = observed.ChatCount;
+                Stage("/vt opt get " + name);
+                foreach (string line in observed.SnapshotChat().Skip(before))
+                {
+                    int at = line.IndexOf(marker, StringComparison.Ordinal);
+                    if (at >= 0)
+                        return line[(at + marker.Length)..].Trim();
+                }
+                return null;
+            }
+
             string Evidence()
             {
                 string[] pluginMessages = PluginMessages(diagnosticsOutput.ToString());
@@ -539,59 +558,191 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 }
             }
 
-            // ---- P8: death, then recovery --------------------------------------
-            Stage("@setvital health 1");
-            Stage("@smite " + character);
+            // ---- P8: death, then the recovery the reference macro performs -----
+            // Dying disables four settings and nothing else. The macro keeps
+            // running through the whole disabled window, which is what the
+            // first four checks are about; the fifth is that the restore picks
+            // the route up where the death left it rather than at the start.
             {
+                // The terminal idle rule is what puts a character in peace
+                // once everything else declines, and it only does that when
+                // its own setting is on. The shipped profile leaves it off —
+                // the reference's default — so the run turns it on the way a
+                // player would, immediately before the death it judges.
+                Stage("/vt opt set IdlePeaceMode true");
+                int? waypointBefore = LastRouteWaypointIndex(
+                    observed.SnapshotChat(), 0, route);
+
+                Stage("@setvital health 1");
+                int chatBeforeDeath = observed.ChatCount;
+                Stage("@smite " + character);
+
                 bool died = WaitUntil(
                     TimeSpan.FromSeconds(45d),
                     () => IsDead(session)
                         || MentionsAny(observed.SnapshotChat(), "You were killed by"));
-                // The plugin has to notice the death itself, not merely keep
-                // talking: its own death handling stops the macro, so the proof
-                // of a real recovery is that acknowledgement followed by the
-                // scheduler picking rules again.
-                bool acknowledged = died
+
+                // (d) the restore offer. The plugin has to notice the death
+                // itself, and what it says is the only way a player learns
+                // what was turned off and how to turn it back on.
+                bool restoreOffered = died
                     && WaitUntil(
                         TimeSpan.FromSeconds(30d),
                         () => observed.SnapshotChat().Any(static line =>
-                            line.Contains("[MossTank]", StringComparison.Ordinal)
-                            && line.Contains("died", StringComparison.Ordinal)));
-                bool recovered = acknowledged
+                            line.Contains("You died!", StringComparison.Ordinal)
+                            && line.Contains("deathrestore", StringComparison.Ordinal)));
+
+                bool recovered = restoreOffered
                     && WaitUntil(
                         TimeSpan.FromSeconds(60d),
                         () => !IsDead(session) && session.Runtime.Lifecycle.State
                             == RuntimeLifecycleState.InWorld);
-                int chatBeforeResume = observed.ChatCount;
-                bool macroResumed = recovered
+
+                // (a) the pass keeps coming round. Not "the plugin is still
+                // loaded" — the scheduler's own per-pass line, printed after
+                // the death, is the difference between a disabled macro and a
+                // stopped one.
+                int chatBeforePasses = observed.ChatCount;
+                bool passStillTicking = recovered
                     && WaitUntil(
-                        TimeSpan.FromSeconds(45d),
+                        TimeSpan.FromSeconds(30d),
                         () => observed.SnapshotChat()
-                            .Skip(chatBeforeResume)
+                            .Skip(chatBeforePasses)
                             .Any(static line => line.Contains(
-                                "Picked ", StringComparison.Ordinal)));
-                if (died && acknowledged && recovered && macroResumed)
+                                "Primary logic loop started", StringComparison.Ordinal)));
+
+                // (b) the four settings the death turns off, read back through
+                // the plugin's own option command.
+                string[] deathSettings =
+                    ["EnableBuffing", "EnableCombat", "EnableNav", "EnableLooting"];
+                var disabled = new Dictionary<string, string?>(StringComparer.Ordinal);
+                if (recovered)
+                {
+                    foreach (string name in deathSettings)
+                        disabled[name] = ReadOption(name);
+                }
+                string[] stillOn = deathSettings
+                    .Where(name => !string.Equals(
+                        disabled.GetValueOrDefault(name), "False", StringComparison.Ordinal))
+                    .ToArray();
+                bool settingsDisabled = recovered && stillOn.Length == 0;
+
+                // (c) peace, and the idle rule is what did it.
+                bool inPeace = settingsDisabled
+                    && WaitUntil(
+                        TimeSpan.FromSeconds(30d),
+                        () => session.Plugins.Host.Automation.Combat.Snapshot.Mode
+                            == PluginCombatMode.Peace);
+                bool idleRuleRan = observed.SnapshotChat()
+                    .Skip(chatBeforeDeath)
+                    .Any(static line => line.Contains("IdlePeace", StringComparison.Ordinal));
+
+                // (e) the restore. The character is at its lifestone, so the
+                // route is out of range from there; putting it back in the
+                // arena is what a player walking or recalling back would do,
+                // and it is also how the run leaves the character somewhere
+                // sane for the next one.
+                Stage(ArenaTeleport);
+                _ = WaitUntil(
+                    TimeSpan.FromSeconds(20d),
+                    () => DistanceMetersFromArena(session) < 40d);
+                int chatBeforeRestore = observed.ChatCount;
+                Stage("/vt deathrestore");
+                bool restored = inPeace
+                    && WaitUntil(
+                        TimeSpan.FromSeconds(20d),
+                        () => observed.SnapshotChat()
+                            .Skip(chatBeforeRestore)
+                            .Any(static line => line.Contains(
+                                "have been restored to previous values",
+                                StringComparison.Ordinal)));
+                var restoredValues = new Dictionary<string, string?>(StringComparer.Ordinal);
+                if (restored)
+                {
+                    foreach (string name in deathSettings)
+                        restoredValues[name] = ReadOption(name);
+                }
+                string[] stillOff = deathSettings
+                    .Where(name => !string.Equals(
+                        restoredValues.GetValueOrDefault(name),
+                        "True",
+                        StringComparison.Ordinal))
+                    .ToArray();
+                bool settingsBack = restored && stillOff.Length == 0;
+
+                int? waypointAfter = null;
+                bool sameWaypoint = false;
+                if (settingsBack)
+                {
+                    int chatBeforeRoute = observed.ChatCount;
+                    _ = WaitUntil(
+                        TimeSpan.FromSeconds(45d),
+                        () => FirstRouteWaypointIndex(
+                            observed.SnapshotChat(), chatBeforeRoute, route) is not null);
+                    waypointAfter = FirstRouteWaypointIndex(
+                        observed.SnapshotChat(), chatBeforeRoute, route);
+                    sameWaypoint = waypointBefore is not null
+                        && waypointAfter == waypointBefore;
+                }
+
+                string verdict = string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"pass-still-ticking={Yes(passStillTicking)}, "
+                        + $"four-settings-off={Yes(settingsDisabled)}, "
+                        + $"peace={Yes(inPeace)} (idle rule named: {Yes(idleRuleRan)}), "
+                        + $"restore-offered={Yes(restoreOffered)}, "
+                        + $"resumed-on-waypoint={Yes(sameWaypoint)} "
+                        + $"(before={Waypoint(waypointBefore)} "
+                        + $"after={Waypoint(waypointAfter)})");
+
+                if (died && restoreOffered && recovered && passStillTicking
+                    && settingsDisabled && inPeace && settingsBack && sameWaypoint)
                 {
                     ledger.Pass(
                         "P8",
-                        "the character dies, recovers and the macro resumes",
-                        "death observed and acknowledged, vitals restored, "
-                            + "the scheduler picked a rule again");
+                        "death disables four settings, the macro keeps running, "
+                            + "and the restore resumes the same waypoint",
+                        verdict);
                 }
                 else
                 {
+                    string reason =
+                        !died ? "no death was observable"
+                        : !restoreOffered
+                            ? "the plugin never offered the restore after the death"
+                        : !recovered ? "the character never recovered after dying"
+                        : !passStillTicking
+                            ? "the scheduler stopped instead of running on disabled"
+                        : !settingsDisabled
+                            ? "still enabled after the death: "
+                                + string.Join(
+                                    ", ",
+                                    stillOff.Length == 0
+                                        ? stillOn.Select(name =>
+                                            $"{name}={disabled.GetValueOrDefault(name) ?? "unread"}")
+                                        : stillOn)
+                        : !inPeace
+                            ? "the character never dropped to peace while disabled "
+                                + $"(mode {session.Plugins.Host.Automation.Combat.Snapshot.Mode})"
+                        : !restored ? "the restore command reported nothing"
+                        : !settingsBack
+                            ? "not restored: " + string.Join(
+                                ", ",
+                                stillOff.Select(name =>
+                                    $"{name}={restoredValues.GetValueOrDefault(name) ?? "unread"}"))
+                        : "the route did not resume on the waypoint it had";
                     ledger.Fail(
                         "P8",
-                        "the character dies, recovers and the macro resumes",
-                        !died
-                            ? "no death was observable"
-                            : !acknowledged
-                                ? "the plugin never noticed the death"
-                                : !recovered
-                                    ? "the character never recovered after dying"
-                                    : "the scheduler picked no rule after the recovery",
+                        "death disables four settings, the macro keeps running, "
+                            + "and the restore resumes the same waypoint",
+                        reason + "; " + verdict,
                         Evidence());
                 }
+
+                // Leave the character alive and unencumbered by this run's
+                // scenery: the next run starts from whatever this one left.
+                Stage("@smite all");
+                Stage("@heal");
             }
 
             FinishAndReport(session, statusPath, ledger, Evidence, output);
@@ -655,7 +806,8 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
         ("P5", "a corpse is opened and at least one loot decision is made"),
         ("P6", "the route advances by at least two waypoints"),
         ("P7", "a vitals recharge fires at least once"),
-        ("P8", "the character dies, recovers and the macro resumes"),
+        ("P8", "death disables four settings, the macro keeps running, "
+            + "and the restore resumes the same waypoint"),
         ("P9", "the session exits gracefully with code 0"),
     ];
 
@@ -884,8 +1036,27 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
         return best;
     }
 
+    private static string Yes(bool value) => value ? "yes" : "no";
+
+    private static string Waypoint(int? index) =>
+        index is { } value
+            ? value.ToString(CultureInfo.InvariantCulture)
+            : "unread";
+
+    private static int? LastRouteWaypointIndex(
+        IReadOnlyList<string> lines,
+        int from,
+        IReadOnlyList<VtProofRoutePoint> route) =>
+        VtProofRouteProgress.Last(lines, from, route);
+
+    private static int? FirstRouteWaypointIndex(
+        IReadOnlyList<string> lines,
+        int from,
+        IReadOnlyList<VtProofRoutePoint> route) =>
+        VtProofRouteProgress.First(lines, from, route);
+
     /// <summary>One map coordinate unit is 240 metres of world distance.</summary>
-    private static double CoordinateDistanceMeters(
+    internal static double CoordinateDistanceMeters(
         double eastWest,
         double northSouth,
         double otherEastWest,
@@ -1376,6 +1547,116 @@ internal readonly record struct VtProofRoutePoint(
     double Elevation);
 
 /// <summary>
+/// Which waypoint of the route the plugin says it is working on, read out of
+/// the lines its navigation rule prints. The rule names the waypoint two ways
+/// depending on whether it won the pass — the goal it is steering at while it
+/// runs, the numbered waypoint while it declines — and both name the same
+/// position in the route file. That is what "the macro came back on the
+/// waypoint it had" is measured against: a death must not send the route back
+/// to its first point.
+/// </summary>
+internal static class VtProofRouteProgress
+{
+    /// <summary>
+    /// A waypoint's coordinates are printed to six decimals of a unit worth
+    /// 240 metres, so a few centimetres is all the tolerance matching one
+    /// needs — far below the spacing of any real route.
+    /// </summary>
+    private const double MatchMeters = 0.05d;
+
+    internal static int? IndexFromLine(
+        string line,
+        IReadOnlyList<VtProofRoutePoint> route)
+    {
+        ArgumentNullException.ThrowIfNull(line);
+        ArgumentNullException.ThrowIfNull(route);
+
+        const string numbered = "Waypoint ";
+        int at = line.IndexOf(numbered, StringComparison.Ordinal);
+        if (at >= 0)
+        {
+            int slash = line.IndexOf('/', at);
+            if (slash > 0
+                && int.TryParse(
+                    line.AsSpan(at + numbered.Length, slash - at - numbered.Length),
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out int ordinal)
+                && ordinal >= 1
+                && ordinal <= route.Count)
+            {
+                return ordinal - 1;
+            }
+        }
+
+        const string goal = "targ loc ";
+        at = line.IndexOf(goal, StringComparison.Ordinal);
+        if (at < 0)
+            return null;
+        int end = line.IndexOf(']', at);
+        string[] parts =
+            (end < 0 ? line[(at + goal.Length)..] : line[(at + goal.Length)..end])
+            .Split(',');
+        if (parts.Length < 2
+            || !double.TryParse(
+                parts[0].Trim(),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out double eastWest)
+            || !double.TryParse(
+                parts[1].Trim(),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out double northSouth))
+        {
+            return null;
+        }
+        for (int index = 0; index < route.Count; index++)
+        {
+            if (VtSessionProofLiveTests.CoordinateDistanceMeters(
+                    eastWest,
+                    northSouth,
+                    route[index].EastWest,
+                    route[index].NorthSouth)
+                < MatchMeters)
+            {
+                return index;
+            }
+        }
+        return null;
+    }
+
+    internal static int? Last(
+        IReadOnlyList<string> lines,
+        int from,
+        IReadOnlyList<VtProofRoutePoint> route)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+        int? found = null;
+        for (int index = Math.Max(0, from); index < lines.Count; index++)
+        {
+            if (IndexFromLine(lines[index], route) is { } waypoint)
+                found = waypoint;
+        }
+        return found;
+    }
+
+    internal static int? First(
+        IReadOnlyList<string> lines,
+        int from,
+        IReadOnlyList<VtProofRoutePoint> route)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+        for (int index = Math.Max(0, from); index < lines.Count; index++)
+        {
+            if (IndexFromLine(lines[index], route) is { } waypoint)
+                return waypoint;
+        }
+        return null;
+    }
+}
+
+/// <summary>
 /// Reads the point nodes out of the proof route file. Only plain points are
 /// read: the proof route is deliberately a bare loop so that "did the
 /// character walk it?" has one unambiguous answer.
@@ -1717,5 +1998,60 @@ public sealed class VtSessionProofHarnessTests
             static () => VtProofRouteFixture.ReadPoints("\tpnt 1.0 2.0\n"));
 
         Assert.Contains("three coordinates", error.Message, StringComparison.Ordinal);
+    }
+
+    private static readonly VtProofRoutePoint[] ProgressRoute =
+    [
+        new(33.7900150d, 42.1057993d, 0.4013750d),
+        new(33.8233483d, 42.1057993d, 0.4013750d),
+        new(33.8233483d, 42.1391327d, 0.4013750d),
+        new(33.7900150d, 42.1391327d, 0.4013750d),
+    ];
+
+    [Fact]
+    public void TheWinningNavigationLineNamesItsWaypointByPosition()
+    {
+        const string line =
+            "[MossTank] (NavigateRouteIdle) Running [targ range 6.087, "
+            + "targ loc 33.823348, 42.139133, 0.401375 ]";
+
+        Assert.Equal(2, VtProofRouteProgress.IndexFromLine(line, ProgressRoute));
+    }
+
+    [Fact]
+    public void TheDecliningNavigationLineNamesItsWaypointByNumber()
+    {
+        const string line =
+            "[MossTank] (NavigateRouteIdle) declined: Waypoint 3/4: 5.9m";
+
+        Assert.Equal(2, VtProofRouteProgress.IndexFromLine(line, ProgressRoute));
+    }
+
+    [Fact]
+    public void APositionOffTheRouteIsNotAWaypoint()
+    {
+        const string line =
+            "[MossTank] (NavigateRouteIdle) Running [targ range 6.087, "
+            + "targ loc 33.900000, 42.139133, 0.401375 ]";
+
+        Assert.Null(VtProofRouteProgress.IndexFromLine(line, ProgressRoute));
+        Assert.Null(VtProofRouteProgress.IndexFromLine("Picked Attack P: 34", ProgressRoute));
+    }
+
+    [Fact]
+    public void RouteProgressReadsTheLastAndFirstWaypointFromAnOffset()
+    {
+        string[] lines =
+        [
+            "[MossTank] (NavigateRouteIdle) declined: Waypoint 1/4: 9.0m",
+            "[MossTank] Picked Attack P: 34",
+            "[MossTank] (NavigateRouteIdle) declined: Waypoint 2/4: 5.0m",
+            "[MossTank] (NavigateRouteIdle) declined: Waypoint 4/4: 2.0m",
+        ];
+
+        Assert.Equal(3, VtProofRouteProgress.Last(lines, 0, ProgressRoute));
+        Assert.Equal(0, VtProofRouteProgress.First(lines, 0, ProgressRoute));
+        Assert.Equal(1, VtProofRouteProgress.First(lines, 1, ProgressRoute));
+        Assert.Null(VtProofRouteProgress.First(["nothing here"], 0, ProgressRoute));
     }
 }
