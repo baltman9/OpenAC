@@ -77,7 +77,14 @@ public readonly record struct RuntimeChatEntry(
     int Kind,
     string Sender,
     string Text,
-    string ChannelName);
+    string ChannelName)
+{
+    /// <summary>
+    /// The log-text type the line was logged under — the number that decides
+    /// its colour and which channel filter it obeys.
+    /// </summary>
+    public uint LogTextType { get; init; }
+}
 
 public readonly record struct RuntimeChatDelta(
     RuntimeEventStamp Stamp,

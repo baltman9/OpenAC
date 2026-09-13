@@ -128,7 +128,11 @@ internal sealed class HeadlessGameplayOperations
     public uint? SelectClosestTarget()
     {
         GameRuntime runtime = RequireRuntime();
-        uint? closest = RuntimeHostileTargetQuery.FindClosest(runtime);
+        // Auto-target means the same thing here as it does under a window: a
+        // monster that cannot be seen, or one already dead, is not picked.
+        uint? closest = RuntimeHostileTargetQuery.FindClosest(
+            runtime,
+            HostileTargetScope.Selectable);
         if (closest is { } target)
         {
             runtime.ActionOwner.Selection.Select(
@@ -235,7 +239,10 @@ internal sealed class HeadlessGameplayOperations
         uint? selected =
             runtime.ActionOwner.Selection.SelectedObjectId;
         if (selected is { } target
-            && RuntimeHostileTargetQuery.IsHostile(runtime, target))
+            && RuntimeHostileTargetQuery.IsHostile(
+                runtime,
+                target,
+                HostileTargetScope.Selectable))
         {
             return target;
         }

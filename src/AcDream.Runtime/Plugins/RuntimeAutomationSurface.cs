@@ -1072,7 +1072,10 @@ internal class RuntimeAutomationSurface
                 entry.Kind,
                 entry.Sender,
                 entry.Text,
-                entry.ChannelName));
+                entry.ChannelName)
+            {
+                LogTextType = entry.LogTextType,
+            });
             if (_chatMessages.Count > MaximumPluginChatMessages)
             {
                 _chatMessages.RemoveRange(
@@ -2086,6 +2089,23 @@ internal class RuntimeAutomationSurface
         }
     }
 
+    /// <summary>
+    /// The order the equipment projection is handed out in, which clients
+    /// read it by: what is equipped first, then by name, then by object id.
+    /// </summary>
+    internal static int CompareEquipmentOrder(
+        PluginEquipmentItem left,
+        PluginEquipmentItem right)
+    {
+        int equipped = right.IsEquipped.CompareTo(left.IsEquipped);
+        if (equipped != 0)
+            return equipped;
+        int name = string.CompareOrdinal(left.Name, right.Name);
+        return name != 0
+            ? name
+            : left.ObjectId.CompareTo(right.ObjectId);
+    }
+
     public IReadOnlyList<PluginEquipmentItem> CaptureOwnedEquipment()
     {
         GameRuntime? runtime;
@@ -2097,7 +2117,19 @@ internal class RuntimeAutomationSurface
         uint playerId = runtime.PlayerIdentity.ServerGuid;
         if (playerId == 0u)
             return Array.Empty<PluginEquipmentItem>();
-        ClientObjectTable objects = runtime.InventoryOwner.Objects;
+        return BuildOwnedEquipment(runtime.InventoryOwner.Objects, playerId);
+    }
+
+    /// <summary>
+    /// The equipment projection, ordering included: what is held first, then
+    /// by name, then by object id. The order is part of what a client reads
+    /// off this list, so it belongs to the projection rather than to a sort
+    /// the caller has to remember.
+    /// </summary>
+    internal static List<PluginEquipmentItem> BuildOwnedEquipment(
+        ClientObjectTable objects,
+        uint playerId)
+    {
         var built = new List<PluginEquipmentItem>();
         foreach (ClientObject item in objects.Objects)
         {
@@ -2126,18 +2158,23 @@ internal class RuntimeAutomationSurface
                 StackSize = Math.Max(1, item.StackSize),
                 WeaponType = item.Properties.GetInt(
                     (uint)PropertyInt.WeaponType),
+                Cleaving = item.Properties.GetInt(
+                    (uint)PropertyInt.Cleaving),
+                ImbuedEffect = item.Properties.GetInt(
+                    (uint)PropertyInt.ImbuedEffect),
+                ResistanceCleaving = item.Properties.GetInt(
+                    (uint)PropertyInt.ResistanceModifierType),
+                SlayerCreatureType = item.Properties.GetInt(
+                    (uint)PropertyInt.SlayerCreatureType),
+                CrushingBlow = item.Properties.GetFloat(
+                    (uint)PropertyFloat.CriticalMultiplier) > 0d,
+                BitingStrike = item.Properties.GetFloat(
+                    (uint)PropertyFloat.CriticalFrequency) > 0d,
+                ArmorCleaving = item.Properties.GetFloat(
+                    (uint)PropertyFloat.IgnoreArmor) > 0d,
             });
         }
-        built.Sort(static (left, right) =>
-        {
-            int equipped = right.IsEquipped.CompareTo(left.IsEquipped);
-            if (equipped != 0)
-                return equipped;
-            int name = string.CompareOrdinal(left.Name, right.Name);
-            return name != 0
-                ? name
-                : left.ObjectId.CompareTo(right.ObjectId);
-        });
+        built.Sort(CompareEquipmentOrder);
         return built;
     }
 
@@ -3388,7 +3425,10 @@ internal class RuntimeAutomationSurface
             return Array.Empty<PluginCombatTarget>();
 
         IReadOnlyList<RuntimeHostileTargetSnapshot> captured =
-            RuntimeHostileTargetQuery.Capture(runtime, maximumDistance);
+            RuntimeHostileTargetQuery.Capture(
+                runtime,
+                maximumDistance,
+                HostileTargetScope.Classified);
         if (captured.Count == 0)
             return Array.Empty<PluginCombatTarget>();
 
@@ -3410,7 +3450,6 @@ internal class RuntimeAutomationSurface
             {
                 SpeciesId = target.SpeciesId,
                 SpeciesName = speciesName(target.SpeciesId),
-                MaximumHealth = target.MaximumHealth,
                 HasShield = target.HasShield,
                 Incarnation = target.Incarnation,
                 HealthRevision = target.HealthRevision,
@@ -3495,8 +3534,16 @@ internal class RuntimeAutomationSurface
             runtime = _runtime;
         if (runtime is null || !IsAvailable)
             return new(PluginCombatCommandStatus.Unavailable);
-        if (!RuntimeHostileTargetQuery.IsHostile(runtime, targetObjectId))
+        // A plugin sees every classified monster, including one the client
+        // can no longer draw or whose health has reached zero: deciding what
+        // to do about those is the plugin's own job.
+        if (!RuntimeHostileTargetQuery.IsHostile(
+                runtime,
+                targetObjectId,
+                HostileTargetScope.Classified))
+        {
             return new(PluginCombatCommandStatus.InvalidTarget);
+        }
         if (!CombatInputPlanner.SupportsTargetedAttack(
                 runtime.ActionOwner.Combat.CurrentMode))
         {

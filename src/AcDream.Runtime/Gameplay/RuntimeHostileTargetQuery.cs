@@ -19,7 +19,7 @@ public readonly record struct RuntimeHostileTargetSnapshot(
     float HealthFraction)
 {
     public int SpeciesId { get; init; }
-    public int MaximumHealth { get; init; }
+
     public bool HasShield { get; init; }
     public ushort Incarnation { get; init; }
     public long HealthRevision { get; init; }
@@ -27,11 +27,65 @@ public readonly record struct RuntimeHostileTargetSnapshot(
         double.PositiveInfinity;
 }
 
+/// <summary>
+/// How much of a monster a caller wants to hear about.
+/// </summary>
+public enum HostileTargetScope
+{
+    /// <summary>
+    /// The classification alone — attackable, not the player, not another
+    /// player, not a pet. A creature that cannot be seen, or whose health has
+    /// reached zero, is still in the answer: an automation client decides for
+    /// itself when such a monster stops being worth attacking, and it needs
+    /// the object in the list to make that call.
+    /// </summary>
+    Classified,
+
+    /// <summary>
+    /// The classification plus the two terms a person picking a target
+    /// expects: the creature can be seen, and it is not already dead. This is
+    /// what a select-nearest key or an auto-target means by "a monster".
+    /// </summary>
+    Selectable,
+}
+
+/// <summary>
+/// The hostile-monster view a client scans. Every entry point answers the
+/// same predicate for a given <see cref="HostileTargetScope"/>, so a caller
+/// can never pick a target that <see cref="IsHostile"/> would then refuse at
+/// the same scope.
+/// </summary>
 public static class RuntimeHostileTargetQuery
 {
+    private static bool IsEligible(
+        uint playerGuid,
+        ClientObject? player,
+        RuntimeEntityRecord record,
+        ClientObject? candidate,
+        GameRuntime runtime,
+        HostileTargetScope scope)
+    {
+        if (record.ServerGuid == playerGuid
+            || record.Snapshot.Position is null
+            || !CombatTargetPolicy.IsHostileMonster(playerGuid, player, candidate))
+        {
+            return false;
+        }
+        if (scope == HostileTargetScope.Classified)
+            return true;
+        if ((record.FinalPhysicsState
+            & (PhysicsStateFlags.Hidden | PhysicsStateFlags.NoDraw)) != 0)
+        {
+            return false;
+        }
+        return !runtime.ActionOwner.Combat.HasHealth(record.ServerGuid)
+            || runtime.ActionOwner.Combat.GetHealthPercent(record.ServerGuid) > 0f;
+    }
+
     public static IReadOnlyList<RuntimeHostileTargetSnapshot> Capture(
         GameRuntime runtime,
-        float maximumDistance)
+        float maximumDistance,
+        HostileTargetScope scope)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         if (float.IsNaN(maximumDistance) || maximumDistance <= 0f)
@@ -61,20 +115,15 @@ public static class RuntimeHostileTargetQuery
         foreach (RuntimeEntityRecord record
             in runtime.EntityObjects.Entities.ActiveRecords)
         {
-            if (record.ServerGuid == playerGuid
-                || record.Snapshot.Position is not { } position
-                || (record.FinalPhysicsState
-                    & (PhysicsStateFlags.Hidden
-                        | PhysicsStateFlags.NoDraw)) != 0)
-            {
-                continue;
-            }
-
             ClientObject? candidate = objects.Get(record.ServerGuid);
-            if (!CombatTargetPolicy.IsHostileMonster(
+            if (record.Snapshot.Position is not { } position
+                || !IsEligible(
                     playerGuid,
                     player,
-                    candidate))
+                    record,
+                    candidate,
+                    runtime,
+                    scope))
             {
                 continue;
             }
@@ -84,14 +133,13 @@ public static class RuntimeHostileTargetQuery
             float health = hasHealth
                 ? runtime.ActionOwner.Combat.GetHealthPercent(record.ServerGuid)
                 : 1f;
-            if (hasHealth && health <= 0f)
-                continue;
 
+            // The separation is measured in three dimensions: a monster on the
+            // gallery above must not read as though it were at your feet.
             Vector3 targetWorld = AbsolutePosition(position);
-            Vector2 delta = new(
-                targetWorld.X - playerWorld.X,
-                targetWorld.Y - playerWorld.Y);
-            float distanceSquared = delta.LengthSquared();
+            float distanceSquared = Vector3.DistanceSquared(
+                playerWorld,
+                targetWorld);
             if (distanceSquared > maximumDistanceSquared)
                 continue;
 
@@ -119,7 +167,6 @@ public static class RuntimeHostileTargetQuery
                 health)
             {
                 SpeciesId = speciesId,
-                MaximumHealth = 0,
                 HasShield = hasShield,
                 Incarnation = record.Incarnation,
                 HealthRevision = healthRevision,
@@ -132,7 +179,9 @@ public static class RuntimeHostileTargetQuery
             : targets.ToArray();
     }
 
-    public static uint? FindClosest(GameRuntime runtime)
+    public static uint? FindClosest(
+        GameRuntime runtime,
+        HostileTargetScope scope)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         uint playerGuid = runtime.PlayerIdentity.ServerGuid;
@@ -153,25 +202,14 @@ public static class RuntimeHostileTargetQuery
         foreach (RuntimeEntityRecord record
             in runtime.EntityObjects.Entities.ActiveRecords)
         {
-            if (record.ServerGuid == playerGuid
-                || record.Snapshot.Position is not { } position
-                || (record.FinalPhysicsState
-                    & (PhysicsStateFlags.Hidden
-                        | PhysicsStateFlags.NoDraw)) != 0)
-            {
-                continue;
-            }
-            ClientObject? candidate = objects.Get(record.ServerGuid);
-            if (!CombatTargetPolicy.IsHostileMonster(
+            if (record.Snapshot.Position is not { } position
+                || !IsEligible(
                     playerGuid,
                     player,
-                    candidate))
-            {
-                continue;
-            }
-            if (runtime.ActionOwner.Combat.HasHealth(record.ServerGuid)
-                && runtime.ActionOwner.Combat.GetHealthPercent(
-                    record.ServerGuid) <= 0f)
+                    record,
+                    objects.Get(record.ServerGuid),
+                    runtime,
+                    scope))
             {
                 continue;
             }
@@ -189,7 +227,8 @@ public static class RuntimeHostileTargetQuery
 
     public static bool IsHostile(
         GameRuntime runtime,
-        uint objectId)
+        uint objectId,
+        HostileTargetScope scope)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         uint playerGuid = runtime.PlayerIdentity.ServerGuid;
@@ -197,24 +236,19 @@ public static class RuntimeHostileTargetQuery
             || playerGuid == 0u
             || !runtime.EntityObjects.Entities.TryGetActive(
                 objectId,
-                out RuntimeEntityRecord record)
-            || (record.FinalPhysicsState
-                & (PhysicsStateFlags.Hidden
-                    | PhysicsStateFlags.NoDraw)) != 0)
-        {
-            return false;
-        }
-        if (runtime.ActionOwner.Combat.HasHealth(objectId)
-            && runtime.ActionOwner.Combat.GetHealthPercent(objectId) <= 0f)
+                out RuntimeEntityRecord record))
         {
             return false;
         }
 
         ClientObjectTable objects = runtime.InventoryOwner.Objects;
-        return CombatTargetPolicy.IsHostileMonster(
+        return IsEligible(
             playerGuid,
             objects.Get(playerGuid),
-            objects.Get(objectId));
+            record,
+            objects.Get(objectId),
+            runtime,
+            scope);
     }
 
     private static Vector3 AbsolutePosition(
