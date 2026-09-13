@@ -1401,7 +1401,6 @@ public sealed class RetailUiRuntime : IDisposable
                 Resizable = false,
                 ResizeX = false,
                 ResizeY = false,
-                ConstrainDragToParent = true,
                 ContentClickThrough = false,
                 Controller = controller,
             });
@@ -1744,7 +1743,6 @@ public sealed class RetailUiRuntime : IDisposable
                 OuterAnchors = AnchorEdges.Left | AnchorEdges.Bottom,
                 Visible = false,
                 Draggable = false,
-                ConstrainDragToParent = true,
                 ContentClickThrough = false,
                 Controller = controllerOwner,
             }));
@@ -1831,7 +1829,6 @@ public sealed class RetailUiRuntime : IDisposable
                 ResizeX = false,
                 ResizeY = true,
                 ResizableEdges = ResizeEdges.Bottom,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
                 ContentAnchors = AnchorEdges.Left | AnchorEdges.Top | AnchorEdges.Bottom,
                 ContentClickThrough = false,
@@ -1936,7 +1933,6 @@ public sealed class RetailUiRuntime : IDisposable
                 ResizeY = true,
                 MinWidth = 310f,
                 MinHeight = 400f,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
                 ContentClickThrough = false,
                 Controller = controller,
@@ -2027,7 +2023,6 @@ public sealed class RetailUiRuntime : IDisposable
                 ResizeX = false,
                 ResizeY = true,
                 ResizableEdges = ResizeEdges.Bottom,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
                 ContentAnchors = AnchorEdges.Left | AnchorEdges.Top
                     | AnchorEdges.Right | AnchorEdges.Bottom,
@@ -2250,7 +2245,6 @@ public sealed class RetailUiRuntime : IDisposable
                 ResizeX = false,
                 ResizeY = true,
                 ResizableEdges = ResizeEdges.Bottom,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
                 ContentAnchors = AnchorEdges.Left | AnchorEdges.Top
                     | AnchorEdges.Right | AnchorEdges.Bottom,
@@ -2335,7 +2329,6 @@ public sealed class RetailUiRuntime : IDisposable
                 Resizable = false,
                 ResizeX = false,
                 ResizeY = false,
-                ConstrainDragToParent = true,
                 ContentClickThrough = false,
                 Controller = controller,
             });
@@ -2619,7 +2612,6 @@ public sealed class RetailUiRuntime : IDisposable
                 ResizeX = false,
                 ResizeY = true,
                 ResizableEdges = ResizeEdges.Bottom,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
                 ContentAnchors = AnchorEdges.Left | AnchorEdges.Top
                     | AnchorEdges.Right | AnchorEdges.Bottom,
@@ -3041,7 +3033,6 @@ public sealed class RetailUiRuntime : IDisposable
                 Resizable = true,
                 ResizeX = true,
                 ResizeY = true,
-                ConstrainDragToParent = true,
                 ContentClickThrough = false,
                 Controller = controller,
             });
@@ -3228,7 +3219,6 @@ public sealed class RetailUiRuntime : IDisposable
                 ResizeX = false,
                 ResizeY = true,
                 ResizableEdges = ResizeEdges.Bottom,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
                 ContentAnchors = AnchorEdges.Left | AnchorEdges.Top
                     | AnchorEdges.Right | AnchorEdges.Bottom,
@@ -3343,7 +3333,6 @@ public sealed class RetailUiRuntime : IDisposable
                 ResizeX = false,
                 ResizeY = true,
                 ResizableEdges = ResizeEdges.Bottom,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
                 ContentAnchors = AnchorEdges.Left | AnchorEdges.Top
                     | AnchorEdges.Right | AnchorEdges.Bottom,
@@ -3459,7 +3448,6 @@ public sealed class RetailUiRuntime : IDisposable
                 Visible = false,
                 ResizeX = false,
                 ResizeY = false,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
                 ContentAnchors = AnchorEdges.Left | AnchorEdges.Top
                     | AnchorEdges.Right | AnchorEdges.Bottom,
@@ -4074,7 +4062,6 @@ public sealed class RetailUiRuntime : IDisposable
                 Visible = false,
                 ResizeX = false,
                 ResizeY = false,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
                 DrawChromeCenter = false,
             });
@@ -4167,7 +4154,6 @@ public sealed class RetailUiRuntime : IDisposable
                 ResizeX = true,
                 ResizeY = false,
                 ResizableEdges = ResizeEdges.Left | ResizeEdges.Right,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
                 Controller = controller,
             });
@@ -4277,7 +4263,6 @@ public sealed class RetailUiRuntime : IDisposable
                 Visible = false,
                 ResizeX = false,
                 ResizeY = false,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
             });
 

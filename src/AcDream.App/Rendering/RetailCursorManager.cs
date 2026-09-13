@@ -156,9 +156,32 @@ public sealed class RetailCursorManager
             return false;
         }
 
+        KnockOutKeyColor(decoded.Rgba8);
         image = new RawImage(decoded.Width, decoded.Height, decoded.Rgba8);
         _imagesBySurface[renderSurfaceId] = image;
         return true;
+    }
+
+    /// <summary>
+    /// Retail cursor art is keyed, not alpha-masked: the surface is fully opaque and
+    /// pure white is the "nothing here" colour, the same convention the inventory
+    /// icons use (see IconComposer.ReplaceWhiteFromSurface). Drawn as decoded, the
+    /// arrow sat on a white rectangle. A surface that already carries transparency is
+    /// left alone - its white is real.
+    /// </summary>
+    internal static void KnockOutKeyColor(byte[] rgba)
+    {
+        for (int i = 3; i < rgba.Length; i += 4)
+        {
+            if (rgba[i] != 255)
+                return;
+        }
+
+        for (int i = 0; i + 3 < rgba.Length; i += 4)
+        {
+            if (rgba[i] == 255 && rgba[i + 1] == 255 && rgba[i + 2] == 255)
+                rgba[i + 3] = 0;
+        }
     }
 
     private DecodedTexture? DecodeCursorSurface(uint renderSurfaceId)

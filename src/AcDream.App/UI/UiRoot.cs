@@ -98,6 +98,7 @@ public sealed class UiRoot : UiElement
     public UiElement? KeyboardFocus { get; private set; }
 
     private int? _suppressedPhysicalKey;
+    private bool _suppressedCharTailPending;
 
     public UiElement? DefaultTextInput { get; set; }
 
@@ -469,8 +470,9 @@ public sealed class UiRoot : UiElement
         {
             float left = x - _windowDragOffX;
             float top = y - _windowDragOffY;
-            if (_windowDragTarget.ConstrainDragToParent
-                && _windowDragTarget.Parent is { } parent)
+            // Every window stays inside its parent, as retail's do - a panel dragged
+            // past the edge of the screen is a panel the player cannot get back.
+            if (_windowDragTarget.Parent is { } parent)
             {
                 left = Math.Clamp(left, 0f, Math.Max(0f, parent.Width - _windowDragTarget.Width));
                 top = Math.Clamp(top, 0f, Math.Max(0f, parent.Height - _windowDragTarget.Height));
@@ -773,6 +775,9 @@ public sealed class UiRoot : UiElement
     {
         if (_suppressedPhysicalKey == vk)
             return;
+        // Another key went down while the activating key is still held: its
+        // char tail, if it had one, has been and gone. Whatever follows is typed.
+        _suppressedCharTailPending = false;
 
         if (KeyboardFocus is null && DefaultTextInput is not null
             && (vk == (int)Silk.NET.Input.Key.Tab
@@ -806,6 +811,7 @@ public sealed class UiRoot : UiElement
         if (_suppressedPhysicalKey == vk)
         {
             _suppressedPhysicalKey = null;
+            _suppressedCharTailPending = false;
             return;
         }
         if (KeyboardFocus is not null)
@@ -819,18 +825,32 @@ public sealed class UiRoot : UiElement
 
     public void OnChar(int codepoint)
     {
-        if (_suppressedPhysicalKey is not null)
+        // The key that activated chat produces its own char right after its key
+        // down (Enter's CR, or the letter itself when the action is bound to a
+        // printable key); that one char must not land in the field it just
+        // focused. It is the first char after the activation and nothing else:
+        // a quick "/" after Enter, or any char after another key went down, is
+        // typed input.
+        if (_suppressedCharTailPending)
+        {
+            _suppressedCharTailPending = false;
             return;
+        }
         if (KeyboardFocus is null || !KeyboardFocus.IsEditControl) return;
         var e = new UiEvent(KeyboardFocus.EventId, KeyboardFocus, UiEventType.Char,
                             Data0: codepoint);
         BubbleEvent(KeyboardFocus, in e);
     }
 
-    /// <summary>Suppress the raw retained-UI tail of a semantic key action.</summary>
+    /// <summary>
+    /// Suppress the raw retained-UI tail of a semantic key action: the key's
+    /// repeats until it is released, and the one char it produces on the way.
+    /// </summary>
     public void SuppressPhysicalKeyUntilRelease(Silk.NET.Input.Key key)
-        => _suppressedPhysicalKey = (int)key;
-
+    {
+        _suppressedPhysicalKey = (int)key;
+        _suppressedCharTailPending = true;
+    }
 
     public void SetKeyboardFocus(UiElement? e)
     {

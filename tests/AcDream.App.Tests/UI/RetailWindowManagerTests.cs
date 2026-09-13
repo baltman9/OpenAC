@@ -118,6 +118,37 @@ public sealed class RetailWindowManagerTests
         Assert.Equal(1, resized);
     }
 
+    [Theory]
+    [InlineData(-50f, -50f, 0f, 0f)]
+    [InlineData(5000f, 5000f, 500f, 450f)]   // 800 - 300, 600 - 150
+    [InlineData(30f, 45f, 30f, 45f)]
+    public void ProgrammaticMove_KeepsTheWindowInsideItsParent(float left, float top, float expectedLeft, float expectedTop)
+    {
+        // A layout restored from a larger screen must still land where it can be
+        // reached, the same rule a drag applies.
+        var root = new UiRoot { Width = 800, Height = 600 };
+        var frame = new UiPanel { Width = 300, Height = 150 };
+        root.AddChild(frame);
+        RetailWindowHandle handle = root.RegisterWindow("inventory", frame);
+
+        Assert.True(handle.MoveTo(left, top));
+
+        Assert.Equal((expectedLeft, expectedTop), (frame.Left, frame.Top));
+    }
+
+    [Fact]
+    public void ProgrammaticMove_OfAWindowLargerThanItsParent_PinsItToTheOrigin()
+    {
+        var root = new UiRoot { Width = 800, Height = 600 };
+        var frame = new UiPanel { Width = 1000, Height = 700 };
+        root.AddChild(frame);
+        RetailWindowHandle handle = root.RegisterWindow("map", frame);
+
+        Assert.True(handle.MoveTo(250f, 120f));
+
+        Assert.Equal((0f, 0f), (frame.Left, frame.Top));
+    }
+
     [Fact]
     public void ProgrammaticResize_ConstrainedToParent_UsesCurrentWindowPosition()
     {

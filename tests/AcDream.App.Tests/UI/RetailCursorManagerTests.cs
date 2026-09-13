@@ -60,3 +60,39 @@ public sealed class RetailCursorManagerTests
         Assert.Equal(new[] { RetailCursorLayer.Global }, plan);
     }
 }
+
+public sealed class RetailCursorKeyColorTests
+{
+    [Fact]
+    public void OpaqueSurface_PureWhiteBecomesTransparent_OtherPixelsUntouched()
+    {
+        byte[] rgba =
+        [
+            255, 255, 255, 255,   // key
+            200, 160,  40, 255,   // gold
+              0,   0,   0, 255,   // black
+            255, 255, 254, 255,   // nearly white - not the key
+        ];
+
+        AcDream.App.Rendering.RetailCursorManager.KnockOutKeyColor(rgba);
+
+        Assert.Equal(0, rgba[3]);
+        Assert.Equal(255, rgba[7]);
+        Assert.Equal(255, rgba[11]);
+        Assert.Equal(255, rgba[15]);
+    }
+
+    [Fact]
+    public void SurfaceWithRealAlpha_IsLeftAlone()
+    {
+        byte[] rgba =
+        [
+            255, 255, 255, 255,   // a real white pixel
+            255, 255, 255,   0,   // already transparent
+        ];
+
+        AcDream.App.Rendering.RetailCursorManager.KnockOutKeyColor(rgba);
+
+        Assert.Equal(255, rgba[3]);
+    }
+}

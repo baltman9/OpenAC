@@ -42,7 +42,6 @@ public static class RetailWindowFrame
         public bool ResizeY { get; init; } = true;
         public ResizeEdges ResizableEdges { get; init; } =
             ResizeEdges.Left | ResizeEdges.Right | ResizeEdges.Top | ResizeEdges.Bottom;
-        public bool ConstrainDragToParent { get; init; }
         public bool ConstrainResizeToParent { get; init; }
 
         public float Opacity { get; init; } = 1f;
@@ -128,7 +127,6 @@ public static class RetailWindowFrame
         outerFrame.ResizeX = options.ResizeX;
         outerFrame.ResizeY = options.ResizeY;
         outerFrame.ResizableEdges = options.ResizableEdges;
-        outerFrame.ConstrainDragToParent = options.ConstrainDragToParent;
         outerFrame.ConstrainResizeToParent = options.ConstrainResizeToParent;
         outerFrame.Opacity = Math.Clamp(options.Opacity, 0f, 1f);
         outerFrame.Visible = options.Visible;

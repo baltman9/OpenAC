@@ -159,7 +159,6 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
             ResizeX = true,
             ResizeY = false,
             ResizableEdges = ResizeEdges.Left | ResizeEdges.Right,
-            ConstrainDragToParent = true,
             ConstrainResizeToParent = true,
             DrawChromeCenter = false,
         };
