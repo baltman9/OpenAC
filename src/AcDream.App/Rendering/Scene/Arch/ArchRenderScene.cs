@@ -606,43 +606,44 @@ internal sealed class ArchRenderScene : IRenderScene, IRenderSceneQuerySource
         if (!TryGetCurrent(in record, ref result, out SceneEntry entry))
             return;
 
-        RenderProjectionRecord prior = ReadRecord(in entry);
+        var c = Access(entry.Entity);
+        RenderProjectionRecord prior = Read(entry.ProjectionClass, in c);
         switch (kind)
         {
             case RenderProjectionDeltaKind.UpdateTransform:
-                _world.Set(entry.Entity, record.PreviousTransform);
-                _world.Set(entry.Entity, record.Transform);
-                _world.Set(entry.Entity, record.Bounds);
-                _world.Set(entry.Entity, record.SortKey);
-                _world.Set(entry.Entity, record.Source);
+                c.t3 = record.PreviousTransform;
+                c.t2 = record.Transform;
+                c.t7 = record.Bounds;
+                c.t10 = record.SortKey;
+                c.t12 = record.Source;
                 OrDirty(
-                    entry.Entity,
+                    ref c.t11,
                     record.Id,
                     RenderDirtyMask.Transform
                     | RenderDirtyMask.WorldBounds
                     | RenderDirtyMask.SortKey);
                 break;
             case RenderProjectionDeltaKind.UpdateAppearance:
-                _world.Set(entry.Entity, record.MeshSet);
-                _world.Set(entry.Entity, record.Material);
-                _world.Set(entry.Entity, record.DegradeState);
-                _world.Set(entry.Entity, record.Source);
-                _world.Set(entry.Entity, record.EntityPayload);
+                c.t4 = record.MeshSet;
+                c.t5 = record.Material;
+                c.t9 = record.DegradeState;
+                c.t12 = record.Source;
+                c.t13 = record.EntityPayload;
                 OrDirty(
-                    entry.Entity,
+                    ref c.t11,
                     record.Id,
                     RenderDirtyMask.Appearance);
                 break;
             case RenderProjectionDeltaKind.UpdateFlags:
-                _world.Set(entry.Entity, record.Flags);
-                _world.Set(entry.Entity, record.Source);
-                OrDirty(entry.Entity, record.Id, RenderDirtyMask.Flags);
+                c.t8 = record.Flags;
+                c.t12 = record.Source;
+                OrDirty(ref c.t11, record.Id, RenderDirtyMask.Flags);
                 break;
             case RenderProjectionDeltaKind.Rebucket:
-                _world.Set(entry.Entity, record.Residency);
-                _world.Set(entry.Entity, record.Source);
+                c.t6 = record.Residency;
+                c.t12 = record.Source;
                 OrDirty(
-                    entry.Entity,
+                    ref c.t11,
                     record.Id,
                     RenderDirtyMask.SpatialResidency);
                 break;
@@ -650,7 +651,7 @@ internal sealed class ArchRenderScene : IRenderScene, IRenderSceneQuerySource
                 throw new ArgumentOutOfRangeException(nameof(kind), kind, null);
         }
 
-        RenderProjectionRecord current = ReadRecord(in entry);
+        RenderProjectionRecord current = Read(entry.ProjectionClass, in c);
         _entries[record.Id] = entry with { Revision = NextRecordRevision() };
         UpdateIndices(in prior, in current);
         NoteBuildingShellChange(in prior, in current);
@@ -745,42 +746,96 @@ internal sealed class ArchRenderScene : IRenderScene, IRenderSceneQuerySource
             record.EntityPayload,
             tag);
 
+    // One entity lookup yields references to every projection component;
+    // reads and writes then touch chunk memory directly. The references are
+    // valid only until the next structural change (create or destroy).
+    private Components<
+        ProjectionIdentity,
+        RenderOwnerIncarnation,
+        RenderTransform,
+        PreviousRenderTransform,
+        RenderMeshSet,
+        RenderMaterialVariant,
+        RenderSpatialResidency,
+        RenderWorldBounds,
+        RenderProjectionFlags,
+        RenderDegradeState,
+        RenderSortKey,
+        RenderDirtyMask,
+        RenderSourceMetadata,
+        RenderEntityPayload> Access(Entity entity) =>
+        _world.Get<
+            ProjectionIdentity,
+            RenderOwnerIncarnation,
+            RenderTransform,
+            PreviousRenderTransform,
+            RenderMeshSet,
+            RenderMaterialVariant,
+            RenderSpatialResidency,
+            RenderWorldBounds,
+            RenderProjectionFlags,
+            RenderDegradeState,
+            RenderSortKey,
+            RenderDirtyMask,
+            RenderSourceMetadata,
+            RenderEntityPayload>(entity);
+
+    private static RenderProjectionRecord Read(
+        RenderProjectionClass projectionClass,
+        in Components<
+            ProjectionIdentity,
+            RenderOwnerIncarnation,
+            RenderTransform,
+            PreviousRenderTransform,
+            RenderMeshSet,
+            RenderMaterialVariant,
+            RenderSpatialResidency,
+            RenderWorldBounds,
+            RenderProjectionFlags,
+            RenderDegradeState,
+            RenderSortKey,
+            RenderDirtyMask,
+            RenderSourceMetadata,
+            RenderEntityPayload> c) =>
+        new(
+            c.t0.Id,
+            projectionClass,
+            c.t1,
+            c.t2,
+            c.t3,
+            c.t4,
+            c.t5,
+            c.t6,
+            c.t7,
+            c.t8,
+            c.t9,
+            c.t10,
+            c.t11,
+            c.t12,
+            c.t13);
+
     private void WriteRecord(
         Entity entity,
         in RenderProjectionRecord record)
     {
-        _world.Set(entity, record.Transform);
-        _world.Set(entity, record.PreviousTransform);
-        _world.Set(entity, record.MeshSet);
-        _world.Set(entity, record.Material);
-        _world.Set(entity, record.Residency);
-        _world.Set(entity, record.Bounds);
-        _world.Set(entity, record.Flags);
-        _world.Set(entity, record.DegradeState);
-        _world.Set(entity, record.SortKey);
-        _world.Set(entity, record.OwnerIncarnation);
-        _world.Set(entity, record.DirtyMask);
-        _world.Set(entity, record.Source);
-        _world.Set(entity, record.EntityPayload);
+        var c = Access(entity);
+        c.t1 = record.OwnerIncarnation;
+        c.t2 = record.Transform;
+        c.t3 = record.PreviousTransform;
+        c.t4 = record.MeshSet;
+        c.t5 = record.Material;
+        c.t6 = record.Residency;
+        c.t7 = record.Bounds;
+        c.t8 = record.Flags;
+        c.t9 = record.DegradeState;
+        c.t10 = record.SortKey;
+        c.t11 = record.DirtyMask;
+        c.t12 = record.Source;
+        c.t13 = record.EntityPayload;
     }
 
     private RenderProjectionRecord ReadRecord(in SceneEntry entry) =>
-        new(
-            _world.Get<ProjectionIdentity>(entry.Entity).Id,
-            entry.ProjectionClass,
-            _world.Get<RenderOwnerIncarnation>(entry.Entity),
-            _world.Get<RenderTransform>(entry.Entity),
-            _world.Get<PreviousRenderTransform>(entry.Entity),
-            _world.Get<RenderMeshSet>(entry.Entity),
-            _world.Get<RenderMaterialVariant>(entry.Entity),
-            _world.Get<RenderSpatialResidency>(entry.Entity),
-            _world.Get<RenderWorldBounds>(entry.Entity),
-            _world.Get<RenderProjectionFlags>(entry.Entity),
-            _world.Get<RenderDegradeState>(entry.Entity),
-            _world.Get<RenderSortKey>(entry.Entity),
-            _world.Get<RenderDirtyMask>(entry.Entity),
-            _world.Get<RenderSourceMetadata>(entry.Entity),
-            _world.Get<RenderEntityPayload>(entry.Entity));
+        Read(entry.ProjectionClass, Access(entry.Entity));
 
     private void Destroy(in SceneEntry entry)
     {
@@ -794,11 +849,10 @@ internal sealed class ArchRenderScene : IRenderScene, IRenderSceneQuerySource
     }
 
     private void OrDirty(
-        Entity entity,
+        ref RenderDirtyMask dirty,
         RenderProjectionId id,
         RenderDirtyMask value)
     {
-        ref RenderDirtyMask dirty = ref _world.Get<RenderDirtyMask>(entity);
         dirty |= value;
         _dirty.Add(id);
     }
