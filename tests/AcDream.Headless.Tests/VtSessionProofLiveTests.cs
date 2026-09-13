@@ -725,7 +725,7 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                         CultureInfo.InvariantCulture,
                         $"stepped {Math.Sqrt((awayX * awayX) + (awayY * awayY)):0.00} m away from the nearest corpse; "
                             + $"landed -> {stepLanded}; nearest corpse now "
-                            + $"{lootSurface.CaptureCorpses(float.MaxValue).Where(static c => c.HasPosition).Select(static c => c.Distance).DefaultIfEmpty(-1d).Min():0.00} m"));
+                            + $"{lootSurface.CaptureCorpses(float.MaxValue).Where(static c => c.HasPosition).Select(static c => (double)c.Distance).DefaultIfEmpty(-1d).Min():0.00} m"));
                 }
                 else
                 {
