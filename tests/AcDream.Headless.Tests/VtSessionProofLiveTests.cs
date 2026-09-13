@@ -239,6 +239,25 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 Pump(TimeSpan.FromSeconds(1.5d));
             }
 
+            /// <summary>
+            /// What one of the plugin's own settings currently reads, asked
+            /// and answered the way a player would: through its option verb.
+            /// Null when the answer never came back.
+            /// </summary>
+            string? ReadOption(string name)
+            {
+                string marker = $"Option {name} = ";
+                int before = observed.ChatCount;
+                Stage("/vt opt get " + name);
+                foreach (string line in observed.SnapshotChat().Skip(before))
+                {
+                    int at = line.IndexOf(marker, StringComparison.Ordinal);
+                    if (at >= 0)
+                        return line[(at + marker.Length)..].Trim();
+                }
+                return null;
+            }
+
             string Evidence()
             {
                 string[] pluginMessages = PluginMessages(diagnosticsOutput.ToString());
@@ -692,64 +711,219 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 }
             }
 
-            // ---- P8: death, then recovery --------------------------------------
+            // ---- P8: death, the stop, and the round picked up again ------------
+            // Dying stops the macro and changes nothing else. The five checks
+            // are: the death was noticed and said so, nothing was silently
+            // reconfigured, the pass really did stop, starting again is all it
+            // takes to get the rules running, and the route carries on from
+            // the waypoint the death interrupted instead of the first one.
             // The death is real; the corpse it would leave is not wanted. The
             // server's own switch for that also stops the death from dropping
-            // what the character is carrying, which is what used to take the
-            // staged caster away with it.
+            // what the character is carrying, so the staged caster stays put.
             Stage("@sticky on");
-            Stage("@setvital health 1");
-            Stage("@smite " + plainCharacter);
             {
+                // What the four settings read BEFORE the death, so "untouched"
+                // can mean untouched rather than "all four happen to be on".
+                string[] deathSettings =
+                    ["EnableBuffing", "EnableCombat", "EnableNav", "EnableLooting"];
+                var beforeDeath = new Dictionary<string, string?>(StringComparer.Ordinal);
+                foreach (string name in deathSettings)
+                    beforeDeath[name] = ReadOption(name);
+
+                Stage("@setvital health 1");
+                // Everything below reads the chat from here on. The run has
+                // already fought a monster by this point, and a kill line from
+                // that fight would otherwise satisfy the death wait before the
+                // smite has even landed.
+                int chatBeforeDeath = observed.ChatCount;
+                Stage("@smite " + plainCharacter);
+
                 bool died = WaitUntil(
                     TimeSpan.FromSeconds(45d),
                     () => IsDead(session)
-                        || MentionsAny(observed.SnapshotChat(), "You were killed by"));
-                // The plugin has to notice the death itself, not merely keep
-                // talking: its own death handling stops the macro, so the proof
-                // of a real recovery is that acknowledgement followed by the
-                // scheduler picking rules again.
-                bool acknowledged = died
+                        || MentionsAny(
+                            [.. observed.SnapshotChat().Skip(chatBeforeDeath)],
+                            "You were killed by"));
+
+                // Read last, not first: the route can still advance a waypoint
+                // in the seconds before the death, and nothing advances it
+                // after — so the last one the rule named is the one the start
+                // has to come back to.
+                int? waypointBefore = LastRouteWaypointIndex(
+                    observed.SnapshotChat(), 0, route);
+
+                // (a) the plugin noticed the death itself and said so. That
+                // line is the only thing that tells a player why the macro
+                // went quiet.
+                bool stopAnnounced = died
                     && WaitUntil(
                         TimeSpan.FromSeconds(30d),
-                        () => observed.SnapshotChat().Any(static line =>
-                            line.Contains("[MossTank]", StringComparison.Ordinal)
-                            && line.Contains("died", StringComparison.Ordinal)));
-                bool recovered = acknowledged
+                        () => observed.SnapshotChat()
+                            .Skip(chatBeforeDeath)
+                            .Any(static line => line.Contains(
+                                "Macro stopped because the character died.",
+                                StringComparison.Ordinal)));
+
+                bool recovered = stopAnnounced
                     && WaitUntil(
                         TimeSpan.FromSeconds(60d),
                         () => !IsDead(session) && session.Runtime.Lifecycle.State
                             == RuntimeLifecycleState.InWorld);
-                int chatBeforeResume = observed.ChatCount;
-                bool macroResumed = recovered
+
+                // (b) the pass really stopped. A macro that says it stopped
+                // and keeps picking rules is worse than one that never said
+                // anything, so this looks for the absence deliberately rather
+                // than assuming it.
+                int chatAfterDeath = observed.ChatCount;
+                Pump(TimeSpan.FromSeconds(6d));
+                string[] passesAfterDeath = observed.SnapshotChat()
+                    .Skip(chatAfterDeath)
+                    .Where(static line => line.Contains(
+                        "Picked ", StringComparison.Ordinal))
+                    .ToArray();
+                bool passStopped = recovered && passesAfterDeath.Length == 0;
+
+                // (c) nothing was reconfigured behind the player's back — the
+                // same four settings read the same either side of the death,
+                // through the plugin's own option command. Compared, not
+                // assumed: an earlier milestone leaving one of them off must
+                // not read as the death having turned it off.
+                var afterDeath = new Dictionary<string, string?>(StringComparer.Ordinal);
+                if (recovered)
+                {
+                    foreach (string name in deathSettings)
+                        afterDeath[name] = ReadOption(name);
+                }
+                string[] changed = deathSettings
+                    .Where(name => !string.Equals(
+                        afterDeath.GetValueOrDefault(name),
+                        beforeDeath.GetValueOrDefault(name),
+                        StringComparison.Ordinal))
+                    .ToArray();
+                bool settingsUntouched = recovered && changed.Length == 0
+                    && deathSettings.All(name => beforeDeath.GetValueOrDefault(name) is not null);
+
+                // (d) starting again. The character respawned at its lifestone,
+                // where the route is out of range, so it is put back first —
+                // which is also how the run leaves the character somewhere sane
+                // for the next one. The caster is still carried: the death ran
+                // under the server's no-drop switch.
+                staged.Add($"caster '{CasterItemName}' still owned after death -> "
+                    + OwnedEquipmentNames(session).Contains(CasterItemName));
+                // A character revives with its vitals near the floor, and the
+                // recharge rule then wins every single pass trying to fix
+                // that — it sits far above navigation, so nothing below it is
+                // ever asked. Getting back on your feet is what a player does
+                // too.
+                Stage("@heal");
+                Stage(ArenaTeleport);
+                _ = WaitUntil(
+                    TimeSpan.FromSeconds(20d),
+                    () => DistanceMetersFromArena(session) < 40d);
+
+                int chatBeforeStart = observed.ChatCount;
+                Stage("/vt start");
+                bool restarted = settingsUntouched
                     && WaitUntil(
                         TimeSpan.FromSeconds(45d),
                         () => observed.SnapshotChat()
-                            .Skip(chatBeforeResume)
+                            .Skip(chatBeforeStart)
                             .Any(static line => line.Contains(
                                 "Picked ", StringComparison.Ordinal)));
-                if (died && acknowledged && recovered && macroResumed)
+
+                // (e) the round carries on where it was. Dying strips the
+                // character's enchantments, so the first thing a restarted
+                // macro does is re-buff all of them, and a burst holds every
+                // other rule's gate shut while it casts — on this character
+                // for longer than the whole rest of the run takes. The route's
+                // position has nothing to do with buffing, so the run puts
+                // buffing down for as long as it takes the navigation rule to
+                // say which waypoint it is on, then hands it straight back.
+                int? waypointAfter = null;
+                bool sameWaypoint = false;
+                string routeSilence = string.Empty;
+                if (restarted)
                 {
-                    ledger.Pass(
-                        "P8",
-                        "the character dies, recovers and the macro resumes",
-                        "death observed and acknowledged, vitals restored, "
-                            + "the scheduler picked a rule again");
+                    Stage("/vt opt set EnableBuffing false");
+                    int chatBeforeRoute = observed.ChatCount;
+                    _ = WaitUntil(
+                        TimeSpan.FromSeconds(60d),
+                        () => FirstRouteWaypointIndex(
+                            observed.SnapshotChat(), chatBeforeRoute, route) is not null);
+                    waypointAfter = FirstRouteWaypointIndex(
+                        observed.SnapshotChat(), chatBeforeRoute, route);
+                    // A round that had not left its first point proves nothing:
+                    // a stop that rewound it to zero would read the same. The
+                    // route milestone has moved the character by now, so the
+                    // waypoint the death interrupted must be a later one.
+                    sameWaypoint = waypointBefore is not null
+                        && waypointBefore != 0
+                        && waypointAfter == waypointBefore;
+                    if (waypointAfter is null)
+                    {
+                        // The navigation rule can only name its waypoint on a
+                        // pass it is asked about, and it is sixty-first in the
+                        // list. Whoever won those passes instead is the whole
+                        // explanation, so say who rather than leaving the
+                        // reader with a silence.
+                        routeSilence = "; the route rule was never asked — "
+                            + (Tail(
+                                    [.. observed.SnapshotChat()
+                                        .Skip(chatBeforeRoute)
+                                        .Where(static line => line.Contains(
+                                            "Picked ", StringComparison.Ordinal))],
+                                    1)
+                                .FirstOrDefault()
+                                ?? "no rule won a pass at all");
+                    }
+                    Stage("/vt opt set EnableBuffing true");
+                }
+
+                string verdict = string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"stop-announced={Yes(stopAnnounced)}, "
+                        + $"pass-stopped={Yes(passStopped)}, "
+                        + $"settings-untouched={Yes(settingsUntouched)}, "
+                        + $"restarted={Yes(restarted)}, "
+                        + $"resumed-on-waypoint={Yes(sameWaypoint)} "
+                        + $"(before={Waypoint(waypointBefore)} "
+                        + $"after={Waypoint(waypointAfter)}){routeSilence}");
+
+                const string title =
+                    "death stops the macro, changes no setting, and starting "
+                    + "again resumes the same waypoint";
+                if (died && stopAnnounced && recovered && passStopped
+                    && settingsUntouched && restarted && sameWaypoint)
+                {
+                    ledger.Pass("P8", title, verdict);
                 }
                 else
                 {
-                    ledger.Fail(
-                        "P8",
-                        "the character dies, recovers and the macro resumes",
-                        !died
-                            ? "no death was observable"
-                            : !acknowledged
-                                ? "the plugin never noticed the death"
-                                : !recovered
-                                    ? "the character never recovered after dying"
-                                    : "the scheduler picked no rule after the recovery",
-                        Evidence());
+                    string reason =
+                        !died ? "no death was observable"
+                        : !stopAnnounced
+                            ? "the plugin never said the death stopped the macro"
+                        : !recovered ? "the character never recovered after dying"
+                        : !passStopped
+                            ? "the scheduler kept picking rules after the stop: "
+                                + string.Join(" | ", Tail(passesAfterDeath, 2))
+                        : !settingsUntouched
+                            ? "the death changed settings it must not: "
+                                + string.Join(
+                                    ", ",
+                                    changed.Select(name =>
+                                        $"{name} {beforeDeath.GetValueOrDefault(name) ?? "unread"}"
+                                            + $" -> {afterDeath.GetValueOrDefault(name) ?? "unread"}"))
+                        : !restarted
+                            ? "no rule was picked after the macro was started again"
+                        : "the route did not resume on the waypoint it had";
+                    ledger.Fail("P8", title, reason + "; " + verdict, Evidence());
                 }
+
+                // Leave the character alive and unencumbered by this run's
+                // scenery: the next run starts from whatever this one left.
+                Stage("@smite all");
+                Stage("@heal");
             }
 
             _ = SweepArena("after the run");
@@ -815,7 +989,8 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
         ("P5", "a corpse is opened and at least one loot decision is made"),
         ("P6", "the route advances by at least two waypoints"),
         ("P7", "a vitals recharge fires at least once"),
-        ("P8", "the character dies, recovers and the macro resumes"),
+        ("P8", "death stops the macro, changes no setting, and starting "
+            + "again resumes the same waypoint"),
         ("P9", "the session exits gracefully with code 0"),
     ];
 
@@ -1074,8 +1249,27 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
         return best;
     }
 
+    private static string Yes(bool value) => value ? "yes" : "no";
+
+    private static string Waypoint(int? index) =>
+        index is { } value
+            ? value.ToString(CultureInfo.InvariantCulture)
+            : "unread";
+
+    private static int? LastRouteWaypointIndex(
+        IReadOnlyList<string> lines,
+        int from,
+        IReadOnlyList<VtProofRoutePoint> route) =>
+        VtProofRouteProgress.Last(lines, from, route);
+
+    private static int? FirstRouteWaypointIndex(
+        IReadOnlyList<string> lines,
+        int from,
+        IReadOnlyList<VtProofRoutePoint> route) =>
+        VtProofRouteProgress.First(lines, from, route);
+
     /// <summary>One map coordinate unit is 240 metres of world distance.</summary>
-    private static double CoordinateDistanceMeters(
+    internal static double CoordinateDistanceMeters(
         double eastWest,
         double northSouth,
         double otherEastWest,
@@ -1673,6 +1867,116 @@ internal readonly record struct VtProofRoutePoint(
     double Elevation);
 
 /// <summary>
+/// Which waypoint of the route the plugin says it is working on, read out of
+/// the lines its navigation rule prints. The rule names the waypoint two ways
+/// depending on whether it won the pass — the goal it is steering at while it
+/// runs, the numbered waypoint while it declines — and both name the same
+/// position in the route file. That is what "the macro came back on the
+/// waypoint it had" is measured against: a death must not send the route back
+/// to its first point.
+/// </summary>
+internal static class VtProofRouteProgress
+{
+    /// <summary>
+    /// A waypoint's coordinates are printed to six decimals of a unit worth
+    /// 240 metres, so a few centimetres is all the tolerance matching one
+    /// needs — far below the spacing of any real route.
+    /// </summary>
+    private const double MatchMeters = 0.05d;
+
+    internal static int? IndexFromLine(
+        string line,
+        IReadOnlyList<VtProofRoutePoint> route)
+    {
+        ArgumentNullException.ThrowIfNull(line);
+        ArgumentNullException.ThrowIfNull(route);
+
+        const string numbered = "Waypoint ";
+        int at = line.IndexOf(numbered, StringComparison.Ordinal);
+        if (at >= 0)
+        {
+            int slash = line.IndexOf('/', at);
+            if (slash > 0
+                && int.TryParse(
+                    line.AsSpan(at + numbered.Length, slash - at - numbered.Length),
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out int ordinal)
+                && ordinal >= 1
+                && ordinal <= route.Count)
+            {
+                return ordinal - 1;
+            }
+        }
+
+        const string goal = "targ loc ";
+        at = line.IndexOf(goal, StringComparison.Ordinal);
+        if (at < 0)
+            return null;
+        int end = line.IndexOf(']', at);
+        string[] parts =
+            (end < 0 ? line[(at + goal.Length)..] : line[(at + goal.Length)..end])
+            .Split(',');
+        if (parts.Length < 2
+            || !double.TryParse(
+                parts[0].Trim(),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out double eastWest)
+            || !double.TryParse(
+                parts[1].Trim(),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out double northSouth))
+        {
+            return null;
+        }
+        for (int index = 0; index < route.Count; index++)
+        {
+            if (VtSessionProofLiveTests.CoordinateDistanceMeters(
+                    eastWest,
+                    northSouth,
+                    route[index].EastWest,
+                    route[index].NorthSouth)
+                < MatchMeters)
+            {
+                return index;
+            }
+        }
+        return null;
+    }
+
+    internal static int? Last(
+        IReadOnlyList<string> lines,
+        int from,
+        IReadOnlyList<VtProofRoutePoint> route)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+        int? found = null;
+        for (int index = Math.Max(0, from); index < lines.Count; index++)
+        {
+            if (IndexFromLine(lines[index], route) is { } waypoint)
+                found = waypoint;
+        }
+        return found;
+    }
+
+    internal static int? First(
+        IReadOnlyList<string> lines,
+        int from,
+        IReadOnlyList<VtProofRoutePoint> route)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+        for (int index = Math.Max(0, from); index < lines.Count; index++)
+        {
+            if (IndexFromLine(lines[index], route) is { } waypoint)
+                return waypoint;
+        }
+        return null;
+    }
+}
+
+/// <summary>
 /// Reads the point nodes out of the proof route file. Only plain points are
 /// read: the proof route is deliberately a bare loop so that "did the
 /// character walk it?" has one unambiguous answer.
@@ -2014,5 +2318,60 @@ public sealed class VtSessionProofHarnessTests
             static () => VtProofRouteFixture.ReadPoints("\tpnt 1.0 2.0\n"));
 
         Assert.Contains("three coordinates", error.Message, StringComparison.Ordinal);
+    }
+
+    private static readonly VtProofRoutePoint[] ProgressRoute =
+    [
+        new(33.7900150d, 42.1057993d, 0.4013750d),
+        new(33.8233483d, 42.1057993d, 0.4013750d),
+        new(33.8233483d, 42.1391327d, 0.4013750d),
+        new(33.7900150d, 42.1391327d, 0.4013750d),
+    ];
+
+    [Fact]
+    public void TheWinningNavigationLineNamesItsWaypointByPosition()
+    {
+        const string line =
+            "[MossTank] (NavigateRouteIdle) Running [targ range 6.087, "
+            + "targ loc 33.823348, 42.139133, 0.401375 ]";
+
+        Assert.Equal(2, VtProofRouteProgress.IndexFromLine(line, ProgressRoute));
+    }
+
+    [Fact]
+    public void TheDecliningNavigationLineNamesItsWaypointByNumber()
+    {
+        const string line =
+            "[MossTank] (NavigateRouteIdle) declined: Waypoint 3/4: 5.9m";
+
+        Assert.Equal(2, VtProofRouteProgress.IndexFromLine(line, ProgressRoute));
+    }
+
+    [Fact]
+    public void APositionOffTheRouteIsNotAWaypoint()
+    {
+        const string line =
+            "[MossTank] (NavigateRouteIdle) Running [targ range 6.087, "
+            + "targ loc 33.900000, 42.139133, 0.401375 ]";
+
+        Assert.Null(VtProofRouteProgress.IndexFromLine(line, ProgressRoute));
+        Assert.Null(VtProofRouteProgress.IndexFromLine("Picked Attack P: 34", ProgressRoute));
+    }
+
+    [Fact]
+    public void RouteProgressReadsTheLastAndFirstWaypointFromAnOffset()
+    {
+        string[] lines =
+        [
+            "[MossTank] (NavigateRouteIdle) declined: Waypoint 1/4: 9.0m",
+            "[MossTank] Picked Attack P: 34",
+            "[MossTank] (NavigateRouteIdle) declined: Waypoint 2/4: 5.0m",
+            "[MossTank] (NavigateRouteIdle) declined: Waypoint 4/4: 2.0m",
+        ];
+
+        Assert.Equal(3, VtProofRouteProgress.Last(lines, 0, ProgressRoute));
+        Assert.Equal(0, VtProofRouteProgress.First(lines, 0, ProgressRoute));
+        Assert.Equal(1, VtProofRouteProgress.First(lines, 1, ProgressRoute));
+        Assert.Null(VtProofRouteProgress.First(["nothing here"], 0, ProgressRoute));
     }
 }
