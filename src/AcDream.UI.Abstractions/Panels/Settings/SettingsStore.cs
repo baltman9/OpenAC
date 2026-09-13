@@ -13,7 +13,13 @@ public readonly record struct UiWindowPosition(float X, float Y);
 
 public sealed class SettingsStore
 {
-    private const int CurrentSchemaVersion = 3;
+    private const int CurrentSchemaVersion = 4;
+
+    // Before v4 the two texture-detail rows had no effect and their labels ran
+    // the other way round (0 was "Very Low"). Whatever a pre-v4 file holds for
+    // them was never seen on screen, so both reset to their defaults when the
+    // file is first read or re-saved at v4; a v4 value is a real choice.
+    private const int TextureDetailRowsLiveSchemaVersion = 4;
     private readonly string _path;
 
     public SettingsStore(string path)
@@ -37,6 +43,13 @@ public sealed class SettingsStore
             float fieldOfView = ReadFloat(disp, "fieldOfView", d.FieldOfView);
             if (ReadSchemaVersion(root) < 3 && disp.TryGetProperty("fieldOfView", out _))
                 fieldOfView = MigrateLegacyVerticalFovDegrees(fieldOfView);
+            bool textureDetailRowsWereDead = ReadSchemaVersion(root) < TextureDetailRowsLiveSchemaVersion;
+            int landscapeTextureDetail = textureDetailRowsWereDead
+                ? d.LandscapeTextureDetail
+                : ReadInt(disp, "landscapeTextureDetail", d.LandscapeTextureDetail);
+            int environmentTextureDetail = textureDetailRowsWereDead
+                ? d.EnvironmentTextureDetail
+                : ReadInt(disp, "environmentTextureDetail", d.EnvironmentTextureDetail);
             return new DisplaySettings(
                 Resolution:  ReadString      (disp, "resolution",  d.Resolution),
                 Fullscreen:  ReadBool        (disp, "fullscreen",  d.Fullscreen),
@@ -51,13 +64,16 @@ public sealed class SettingsStore
                 AutomaticDegrades:       ReadBool (disp, "automaticDegrades",       d.AutomaticDegrades),
                 GraphicsPerformance:     ReadFloat(disp, "graphicsPerformance",     d.GraphicsPerformance),
                 DegradeDistance:         ReadFloat(disp, "degradeDistance",         d.DegradeDistance),
-                LandscapeTextureDetail:  ReadInt  (disp, "landscapeTextureDetail",  d.LandscapeTextureDetail),
-                EnvironmentTextureDetail:ReadInt  (disp, "environmentTextureDetail",d.EnvironmentTextureDetail),
+                LandscapeTextureDetail:  landscapeTextureDetail,
+                EnvironmentTextureDetail:environmentTextureDetail,
                 TextureFiltering:        ReadInt  (disp, "textureFiltering",        d.TextureFiltering),
                 LandscapeDrawDistance:   ReadInt  (disp, "landscapeDrawDistance",   d.LandscapeDrawDistance),
                 BuildingDetailTextures:  ReadBool (disp, "buildingDetailTextures",  d.BuildingDetailTextures),
                 MultiPassAlpha:          ReadBool (disp, "multiPassAlpha",          d.MultiPassAlpha),
-                KeepDistantBuildings:    ReadBool (disp, "keepDistantBuildings",    d.KeepDistantBuildings))
+                KeepDistantBuildings:    ReadBool (disp, "keepDistantBuildings",    d.KeepDistantBuildings),
+                PotatoMode:              ReadBool (disp, "potatoMode",              d.PotatoMode),
+                UiOnly:                  ReadBool (disp, "uiOnly",                  d.UiOnly),
+                UiOnlyWhenUnfocused:     ReadBool (disp, "uiOnlyWhenUnfocused",     d.UiOnlyWhenUnfocused))
             {
                 RenderPack = ReadRenderPackSelection(disp, d.RenderPack),
             };
@@ -581,8 +597,27 @@ public sealed class SettingsStore
         var dir = Path.GetDirectoryName(_path);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
         if (!File.Exists(_path)) return new JsonObject();
-        try { return JsonNode.Parse(File.ReadAllText(_path)) as JsonObject ?? new JsonObject(); }
+        JsonObject root;
+        try { root = JsonNode.Parse(File.ReadAllText(_path)) as JsonObject ?? new JsonObject(); }
         catch { return new JsonObject(); }
+        MigrateSectionsInPlace(root);
+        return root;
+    }
+
+    /// <summary>
+    /// The one schema version is stamped by every section's save, so a save of
+    /// audio or chat would otherwise carry an un-migrated display section past
+    /// the version that promises it was migrated. Every save therefore migrates
+    /// the sections it does not own first, with the same rules LoadDisplay
+    /// applies.
+    /// </summary>
+    private static void MigrateSectionsInPlace(JsonObject root)
+    {
+        int version = root["version"] is JsonValue value && value.TryGetValue(out int stored) ? stored : 1;
+        if (version >= TextureDetailRowsLiveSchemaVersion)
+            return;
+        if (root["display"] is JsonObject display)
+            ResetDeadTextureDetailRows(display);
     }
 
     private void WriteMutableRoot(JsonObject root)
@@ -673,6 +708,9 @@ public sealed class SettingsStore
             ["landscapeTextureDetail"]   = d.LandscapeTextureDetail,
             ["multiPassAlpha"]           = d.MultiPassAlpha,
             ["particleRange"] = d.ParticleRange.ToString(),
+            ["potatoMode"]  = d.PotatoMode,
+            ["uiOnly"]      = d.UiOnly,
+            ["uiOnlyWhenUnfocused"] = d.UiOnlyWhenUnfocused,
             ["quality"]     = d.Quality.ToString(),
             ["renderPack"]  = BuildRenderPackObject(d.RenderPack),
             ["resolution"]  = d.Resolution,
@@ -758,10 +796,13 @@ public sealed class SettingsStore
             {
                 using var stream = File.OpenRead(_path);
                 var doc  = JsonDocument.Parse(stream);
+                int storedVersion = ReadSchemaVersion(doc.RootElement);
                 foreach (var prop in doc.RootElement.EnumerateObject())
                 {
                     if (prop.Name == sectionName || prop.Name == "version") continue;
-                    preservedKeys[prop.Name] = prop.Value.GetRawText();
+                    preservedKeys[prop.Name] = prop.Name == "display" && storedVersion < 4
+                        ? MigrateDisplaySectionText(prop.Value)
+                        : prop.Value.GetRawText();
                 }
             }
             catch
@@ -785,6 +826,27 @@ public sealed class SettingsStore
         sb.Append('}').AppendLine();
 
         File.WriteAllText(_path, sb.ToString());
+    }
+
+    /// <summary>
+    /// A pre-v4 display section carried through another section's save gets
+    /// the same migration LoadDisplay applies, since that save stamps the
+    /// version that promises it happened.
+    /// </summary>
+    private static string MigrateDisplaySectionText(JsonElement display)
+    {
+        if (JsonNode.Parse(display.GetRawText()) is not JsonObject node)
+            return display.GetRawText();
+        ResetDeadTextureDetailRows(node);
+        return node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }).Replace("\n", "\n  ");
+    }
+
+    private static void ResetDeadTextureDetailRows(JsonObject display)
+    {
+        if (display.ContainsKey("landscapeTextureDetail"))
+            display["landscapeTextureDetail"] = DisplaySettings.Default.LandscapeTextureDetail;
+        if (display.ContainsKey("environmentTextureDetail"))
+            display["environmentTextureDetail"] = DisplaySettings.Default.EnvironmentTextureDetail;
     }
 
     private static RenderPackSelectionSettings ReadRenderPackSelection(

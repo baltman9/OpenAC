@@ -97,6 +97,10 @@ internal readonly record struct WorldRenderFrame(
 
 internal interface IDirectionalShadowCellMembership
 {
+    /// <summary>Advances whenever any retail cell array changes; a reader
+    /// that saw the same value may keep the arrays it already fetched.</summary>
+    ulong Revision { get; }
+
     bool TryGetRetailCellArray(uint entityId, out IReadOnlyList<uint> cells);
 }
 
@@ -104,6 +108,8 @@ internal sealed class EmptyDirectionalShadowCellMembership
     : IDirectionalShadowCellMembership
 {
     internal static EmptyDirectionalShadowCellMembership Instance { get; } = new();
+
+    public ulong Revision => 1UL;
 
     public bool TryGetRetailCellArray(
         uint entityId,
@@ -120,6 +126,8 @@ internal sealed class RuntimeDirectionalShadowCellMembership(
 {
     private readonly ShadowObjectRegistry _source = source
         ?? throw new ArgumentNullException(nameof(source));
+
+    public ulong Revision => _source.RetailCellArrayRevision;
 
     public bool TryGetRetailCellArray(
         uint entityId,

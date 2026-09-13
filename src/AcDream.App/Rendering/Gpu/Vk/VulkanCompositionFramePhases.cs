@@ -108,6 +108,10 @@ internal sealed class VulkanWorldScenePhase : IWorldSceneFramePhase
             ?? throw new InvalidOperationException(
                 "The Vulkan world phase requires an open IGpuFrame (see GpuDeviceFrameLifetime).");
 
+        // Before any pass of this frame opens: the pass records pending
+        // uploads on entry, so what is staged here is on the GPU for its draws.
+        _world.PrepareResources(input);
+
         int samples = _sampleCount();
         if (_renderPacks is not null)
         {
@@ -128,6 +132,15 @@ internal sealed class VulkanWorldScenePhase : IWorldSceneFramePhase
             {
                 _renderPacks.OnRuntimeFailure(
                     "The selected pack has no compatible production world graph.");
+                return RenderRetail(frame, input);
+            }
+
+            if (!_world.WorldPassEnabled)
+            {
+                // UI Only: no world pass, so the pack's world targets are not
+                // needed until the world comes back; the plain clear presents
+                // the frame the retained UI draws over.
+                graph.ReleaseWorldTargets();
                 return RenderRetail(frame, input);
             }
 

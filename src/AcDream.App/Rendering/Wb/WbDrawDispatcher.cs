@@ -1691,6 +1691,30 @@ public sealed partial class WbDrawDispatcher : IDisposable, Walk.IWalkShellResid
         }
     }
 
+    /// <summary>Retail's routing of one walk alpha instance: deferred to the
+    /// alpha queue, or drawn immediately (detail-textured shells, and any
+    /// subset the delay mask does not hold).</summary>
+    private RetailAlphaMeshDecision RouteWalkAlpha(TranslucencyKind kind, bool isBuildingShell)
+    {
+        byte mask = RetailAlphaMeshRouter.MaskFromTranslucencyKind(kind);
+        bool detailSurfaceActive = isBuildingShell
+            && RetailDetailTextureContract.ShouldRender(_buildingDetailEnabled(), _buildingDetail)
+            && _buildingDetail.Tiling != 0f;
+        return RetailAlphaMeshRouter.Route(
+            currentlyDrawingSky: false,
+            delayMask: RetailAlphaMeshRouter.DefaultDelayMask,
+            detailSurfaceActive: detailSurfaceActive,
+            multiPassAlpha: false,
+            subsetMask: mask,
+            materialHasAlpha: false);
+    }
+
+    /// <summary>Whether <see cref="SubmitWalkAlphaInstance"/> would record a
+    /// draw right away for this batch instead of only queueing it.</summary>
+    internal bool WalkAlphaInstanceDrawsImmediately(in WalkClassifiedBatch batch) =>
+        RouteWalkAlpha(batch.Key.Translucency, batch.DetailCategory == 1u).Action
+            != RetailAlphaMeshAction.Append;
+
     private void SubmitToAlphaQueue(
         RetailAlphaQueue queue,
         TranslucencyKind kind,
@@ -1698,17 +1722,7 @@ public sealed partial class WbDrawDispatcher : IDisposable, Walk.IWalkShellResid
         bool isBuildingShell,
         Matrix4x4 viewProjection)
     {
-        byte mask = RetailAlphaMeshRouter.MaskFromTranslucencyKind(kind);
-        bool detailSurfaceActive = isBuildingShell
-            && RetailDetailTextureContract.ShouldRender(_buildingDetailEnabled(), _buildingDetail)
-            && _buildingDetail.Tiling != 0f;
-        RetailAlphaMeshDecision decision = RetailAlphaMeshRouter.Route(
-            currentlyDrawingSky: false,
-            delayMask: RetailAlphaMeshRouter.DefaultDelayMask,
-            detailSurfaceActive: detailSurfaceActive,
-            multiPassAlpha: false,
-            subsetMask: mask,
-            materialHasAlpha: false);
+        RetailAlphaMeshDecision decision = RouteWalkAlpha(kind, isBuildingShell);
 
         if (decision.Action == RetailAlphaMeshAction.Immediate)
         {

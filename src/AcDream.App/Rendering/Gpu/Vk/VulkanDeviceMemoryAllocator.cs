@@ -89,6 +89,12 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
 
     private readonly HashSet<uint> _exhaustedTypes = [];
 
+    // Per-owner accounting for the diagnostics report: bytes allocated by
+    // owner name, and the owner of each live range so a free can be charged
+    // back. Allocation is rare (streaming), so a dictionary write is fine.
+    private readonly Dictionary<string, ulong> _allocatedByOwner = [];
+    private readonly Dictionary<(uint TypeIndex, int BlockIndex, ulong OffsetBytes), string> _ownerByRange = [];
+
     private bool _disposed;
 
     private readonly record struct BlockMemory(DeviceMemory Memory, nint Mapped, ulong CapacityBytes);
@@ -242,6 +248,8 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
 
                 BlockMemory block = _blockMemory[(typeIndex, range.BlockIndex)];
                 AllocatedBytes += range.SizeBytes;
+                _allocatedByOwner[ownerName] = _allocatedByOwner.GetValueOrDefault(ownerName) + range.SizeBytes;
+                _ownerByRange[(typeIndex, range.BlockIndex, range.OffsetBytes)] = ownerName;
                 void* mapped = block.Mapped == 0
                     ? null
                     : (void*)(block.Mapped + (nint)range.OffsetBytes);
@@ -274,6 +282,17 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
                 return;
 
             AllocatedBytes -= Math.Min(AllocatedBytes, allocation.Range.SizeBytes);
+            if (_ownerByRange.Remove(
+                    (allocation.MemoryTypeIndex, allocation.Range.BlockIndex, allocation.Range.OffsetBytes),
+                    out string? owner)
+                && _allocatedByOwner.TryGetValue(owner, out ulong ownerBytes))
+            {
+                ulong remaining = ownerBytes - Math.Min(ownerBytes, allocation.Range.SizeBytes);
+                if (remaining == 0)
+                    _allocatedByOwner.Remove(owner);
+                else
+                    _allocatedByOwner[owner] = remaining;
+            }
             if (!pool.Free(allocation.Range))
                 return;
 
@@ -331,6 +350,22 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
             if (_exhaustedTypes.Count > 0)
                 description += $"; exhausted memory types: {string.Join(", ", _exhaustedTypes.Order())}";
             return description;
+        }
+    }
+
+    /// <summary>Live allocation bytes by owner name, largest first, plus each
+    /// pool's committed block capacities; what the [gpu-mem] line prints.</summary>
+    internal string DescribeOwners(int maximumOwners = 12)
+    {
+        lock (_sync)
+        {
+            var parts = new List<string>();
+            foreach ((string owner, ulong bytes) in _allocatedByOwner.OrderByDescending(pair => pair.Value).Take(maximumOwners))
+                parts.Add($"{owner}={bytes / (1024 * 1024)}");
+            var blocks = new List<string>();
+            foreach (((uint typeIndex, int blockIndex), BlockMemory block) in _blockMemory.OrderBy(pair => pair.Key))
+                blocks.Add($"t{typeIndex}b{blockIndex}:{block.CapacityBytes / (1024 * 1024)}");
+            return $"owners(MiB) {string.Join(' ', parts)} | blocks(MiB) {string.Join(' ', blocks)}";
         }
     }
 

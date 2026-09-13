@@ -6,6 +6,7 @@ namespace AcDream.UI.Abstractions.Tests.Panels.Settings;
 public class QualityPresetTests
 {
     [Theory]
+    [InlineData(QualityPreset.Potato, 1, 3,  0)]
     [InlineData(QualityPreset.Low,    2, 5,  0)]
     [InlineData(QualityPreset.Medium, 3, 8,  2)]
     [InlineData(QualityPreset.High,   4, 12, 4)]
@@ -20,6 +21,7 @@ public class QualityPresetTests
     }
 
     [Theory]
+    [InlineData(QualityPreset.Potato, 1,  false)]
     [InlineData(QualityPreset.Low,    4,  false)]
     [InlineData(QualityPreset.Medium, 8,  false)]
     [InlineData(QualityPreset.High,   16, true)]
@@ -33,6 +35,7 @@ public class QualityPresetTests
     }
 
     [Theory]
+    [InlineData(QualityPreset.Potato, 2)]
     [InlineData(QualityPreset.Low,    2)]
     [InlineData(QualityPreset.Medium, 3)]
     [InlineData(QualityPreset.High,   4)]

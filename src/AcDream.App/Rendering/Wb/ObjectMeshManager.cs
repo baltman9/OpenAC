@@ -105,6 +105,35 @@ namespace AcDream.App.Rendering.Wb
         private readonly AcDream.App.Rendering.Gpu.IGpuDevice _gpuDevice;
 
         private readonly IWorldTextureArrayFactory _atlasArrays;
+        // The texture-detail choice the world started with; mesh textures are
+        // reduced to it once per texture key here, before they enter an array.
+        private readonly WorldTextureDetail _textureDetail;
+        private readonly Dictionary<(TextureKey Key, (int Width, int Height, TextureFormat Format) Format), WorldTextureDetail.ReducedTexture> _reducedTextures = new();
+        private const int ReducedTextureCacheEntries = 8192;
+
+        internal WorldTextureDetail TextureDetail => _textureDetail;
+
+        private WorldTextureDetail.ReducedTexture ReduceForUpload(
+            (int Width, int Height, TextureFormat Format) format,
+            TextureBatchData batch)
+        {
+            var unchanged = new WorldTextureDetail.ReducedTexture(
+                format, batch.TextureData, batch.UploadPixelFormat, batch.UploadPixelType);
+            if (_textureDetail.Environment == AcDream.Core.Textures.ImageScale.Full)
+                return unchanged;
+            if (_reducedTextures.TryGetValue((batch.Key, format), out WorldTextureDetail.ReducedTexture cached))
+                return cached;
+            WorldTextureDetail.ReducedTexture reduced = _textureDetail.ReduceEnvironment(
+                format, batch.TextureData, batch.UploadPixelFormat, batch.UploadPixelType);
+            // Only a real reduction is worth remembering; an unchanged layer
+            // would pin the full-size bytes the mesh cache is free to drop.
+            if (ReferenceEquals(reduced.Data, batch.TextureData))
+                return unchanged;
+            if (_reducedTextures.Count >= ReducedTextureCacheEntries)
+                _reducedTextures.Clear();
+            _reducedTextures[(batch.Key, format)] = reduced;
+            return reduced;
+        }
 
 
         public bool IsDisposed { get; private set; }
@@ -125,6 +154,18 @@ namespace AcDream.App.Rendering.Wb
         private readonly LinkedList<ulong> _lruList = new();
         private readonly long _maxGpuMemory;
         private readonly int _maxCachedObjects;
+        private bool _retainUnowned = true;
+
+        /// <summary>
+        /// While the world is not drawn nothing unowned is kept for a revisit:
+        /// released render data and emptied atlases go back to the device at
+        /// the per-frame reclamation pace instead of waiting for a budget.
+        /// </summary>
+        internal void SetUnownedContentRetained(bool retained)
+        {
+            _retainUnowned = retained;
+            _safeEmptyAtlases.RetainUnowned = retained;
+        }
         private long _currentNonArenaGpuMemory;
 
         // Shared atlases grouped by (Width, Height, Format)
@@ -356,9 +397,11 @@ namespace AcDream.App.Rendering.Wb
             AcDream.App.Rendering.Gpu.IGpuDevice gpuDevice,
             IPreparedAssetSource preparedAssets,
             ILogger<ObjectMeshManager> logger,
-            ResidencyBudgetOptions? budgets = null)
+            ResidencyBudgetOptions? budgets = null,
+            WorldTextureDetail? textureDetail = null)
         {
             budgets ??= ResidencyBudgetOptions.Default;
+            _textureDetail = textureDetail ?? WorldTextureDetail.Full;
             _graphicsDevice = graphicsDevice
                 ?? throw new ArgumentNullException(nameof(graphicsDevice));
             ArgumentNullException.ThrowIfNull(gpuDevice);
@@ -383,7 +426,9 @@ namespace AcDream.App.Rendering.Wb
             {
                 GlobalBuffer = new GlobalMeshBuffer(
                     gpuDevice,
-                    _graphicsDevice.ResourceRetirement);
+                    _graphicsDevice.ResourceRetirement,
+                    gpuDevice.MemoryProfile.MeshArenaInitialVertices,
+                    gpuDevice.MemoryProfile.MeshArenaInitialIndices);
             }
         }
 
@@ -611,6 +656,7 @@ namespace AcDream.App.Rendering.Wb
                         _currentNonArenaGpuMemory
                         + trackedAtlasBytes);
                     if (!forceArenaReclamation
+                        && _retainUnowned
                         && IsWithinGpuCacheBudget(
                             nonArenaAndAtlasBytes,
                             physicalArenaBytes,
@@ -1769,11 +1815,13 @@ namespace AcDream.App.Rendering.Wb
                         indexSegments);
                 }
 
-                foreach (var (format, batch) in uploadOrder)
+                foreach (var (sourceFormat, batch) in uploadOrder)
                 {
                     {
                         if (batch.Indices.Count == 0) continue;
 
+                        WorldTextureDetail.ReducedTexture upload = ReduceForUpload(sourceFormat, batch);
+                        (int Width, int Height, TextureFormat Format) format = upload.Format;
                         TextureAtlasManager? atlasManager = null;
                         int textureIndex = 0;
                         uint firstIndex = 0;
@@ -1819,8 +1867,8 @@ namespace AcDream.App.Rendering.Wb
                         bool uploadsNewLayer = !atlasManager.HasTexture(batch.Key);
                         try
                         {
-                            textureIndex = atlasManager.AddTexture(batch.Key, batch.TextureData,
-                                batch.UploadPixelFormat, batch.UploadPixelType);
+                            textureIndex = atlasManager.AddTexture(batch.Key, upload.Data,
+                                upload.PixelFormat, upload.PixelType);
                         }
                         catch
                         {

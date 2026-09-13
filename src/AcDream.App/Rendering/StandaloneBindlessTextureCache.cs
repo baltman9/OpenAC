@@ -136,6 +136,9 @@ internal sealed class StandaloneBindlessTextureCache : IDisposable
             visitor(resource);
     }
 
+    /// <summary>While false, unowned textures are evicted at the per-frame pace regardless of the budget.</summary>
+    internal void SetUnownedContentRetained(bool retained) => _unowned.RetainUnowned = retained;
+
     public void Tick(int maximumEvictions = DefaultMaximumEvictionsPerFrame)
     {
         ObjectDisposedException.ThrowIf(_disposeRequested, this);

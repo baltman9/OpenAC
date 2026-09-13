@@ -244,7 +244,6 @@ internal sealed class DirectionalSunShadowRenderer : IDirectionalShadowReceiverS
             terrain?.Dispose();
             if (textureSlot.IsAssigned)
                 device.ReleaseTextureSlot(textureSlot);
-            sampler?.Dispose();
             target?.Dispose();
             throw;
         }
@@ -1062,7 +1061,6 @@ internal sealed class DirectionalSunShadowRenderer : IDirectionalShadowReceiverS
         _worldBatchBuffer?.Dispose();
         _transformBuffers.Dispose();
         _device.ReleaseTextureSlot(_textureSlot);
-        _sampler.Dispose();
         _target.Dispose();
     }
 

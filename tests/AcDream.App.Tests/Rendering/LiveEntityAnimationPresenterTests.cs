@@ -189,6 +189,26 @@ public sealed class LiveEntityAnimationPresenterTests
     }
 
     [Fact]
+    public void PrepareAnimation_OnAnAlreadyPreparedSequencer_AllocatesNothing()
+    {
+        var fixture = Build(partCount: 1, withSequencer: true);
+        var context = new Context();
+        var presenter = Presenter(fixture.Live, new EntityEffectPoseRegistry(), context);
+        presenter.PrepareAnimation(fixture.Record, fixture.State);
+        Action<uint, bool> assigned = fixture.State.Sequencer!.MotionDoneTarget!;
+        for (int warmup = 0; warmup < 64; warmup++)
+            presenter.PrepareAnimation(fixture.Record, fixture.State);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 1024; i++)
+            presenter.PrepareAnimation(fixture.Record, fixture.State);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0, allocated);
+        Assert.Same(assigned, fixture.State.Sequencer!.MotionDoneTarget);
+    }
+
+    [Fact]
     public void MotionDone_OldComponentCannotResolveReplacementByGuid()
     {
         var fixture = Build(partCount: 1, withSequencer: true);

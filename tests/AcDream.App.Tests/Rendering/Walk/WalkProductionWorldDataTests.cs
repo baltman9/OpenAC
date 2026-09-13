@@ -412,6 +412,98 @@ public sealed class WalkProductionWorldDataTests
         Assert.Equal(first.Records.Count, second.Records.Count);
     }
 
+    [Fact]
+    public void BeginFrame_KeepsBuildingShellBucketsUntilAShellRecordChanges()
+    {
+        const uint cellId = 0x8A020010u;
+        var shadows = new ShadowObjectRegistry();
+        RenderSceneGeneration generation = RenderSceneGeneration.FromRaw(1);
+        using var scene = new ArchRenderScene(generation);
+        RenderProjectionRecord ordinary = OutdoorRecord(0x48A02030u, cellId, shell: false);
+        RenderProjectionRecord shell = OutdoorRecord(0x48A02031u, cellId, shell: true);
+        scene.Apply(
+        [
+            RenderProjectionDelta.Register(generation, 1, ordinary),
+            RenderProjectionDelta.Register(generation, 2, shell),
+        ]);
+        var building = new WalkBuilding { PositionCellId = cellId, Portals = [] };
+        var worldData = new WalkProductionWorldData(new WalkBuildingRegistry(), shadows);
+
+        worldData.BeginFrame(scene.OpenQuery(), 0x8A020000u, renderCenterLbX: 0x8A, renderCenterLbY: 0x02);
+        Assert.Equal(1, worldData.BuildingShellRebuildCount);
+        Assert.Contains(worldData.GetBuildingShellStatics(building).Records, record => record.Id == shell.Id);
+
+        worldData.BeginFrame(scene.OpenQuery(), 0x8A020000u, renderCenterLbX: 0x8A, renderCenterLbY: 0x02);
+        Assert.Equal(1, worldData.BuildingShellRebuildCount);
+        Assert.Contains(worldData.GetBuildingShellStatics(building).Records, record => record.Id == shell.Id);
+
+        scene.Apply(
+        [
+            RenderProjectionDelta.Update(
+                RenderProjectionDeltaKind.UpdateTransform,
+                generation,
+                3,
+                ordinary with { Transform = new RenderTransform(Matrix4x4.CreateTranslation(5, 5, 5)) }),
+        ]);
+        worldData.BeginFrame(scene.OpenQuery(), 0x8A020000u, renderCenterLbX: 0x8A, renderCenterLbY: 0x02);
+        Assert.Equal(1, worldData.BuildingShellRebuildCount);
+
+        RenderProjectionRecord movedShell = shell with
+        {
+            Transform = new RenderTransform(Matrix4x4.CreateTranslation(7, 7, 7)),
+        };
+        scene.Apply(
+        [
+            RenderProjectionDelta.Update(
+                RenderProjectionDeltaKind.UpdateTransform, generation, 4, movedShell),
+        ]);
+        worldData.BeginFrame(scene.OpenQuery(), 0x8A020000u, renderCenterLbX: 0x8A, renderCenterLbY: 0x02);
+        Assert.Equal(2, worldData.BuildingShellRebuildCount);
+        Assert.Contains(
+            worldData.GetBuildingShellStatics(building).Records,
+            record => record.Id == shell.Id && record.Transform.LocalToWorld.M41 == 7f);
+
+        scene.Apply([RenderProjectionDelta.Unregister(generation, 5, shell.Id, shell.OwnerIncarnation)]);
+        worldData.BeginFrame(scene.OpenQuery(), 0x8A020000u, renderCenterLbX: 0x8A, renderCenterLbY: 0x02);
+        Assert.Equal(3, worldData.BuildingShellRebuildCount);
+        Assert.Equal(0, worldData.GetBuildingShellStatics(building).Records.Count);
+    }
+
+    [Fact]
+    public void RetailCellArrayRevision_AdvancesOnRegistrationAndDeregistration()
+    {
+        var shadows = new ShadowObjectRegistry();
+        ulong initial = shadows.RetailCellArrayRevision;
+
+        Register(shadows, 0x48A02040u, 0x8A02015Fu, landblockId: 0x8A020000u);
+        ulong afterRegister = shadows.RetailCellArrayRevision;
+        Assert.True(afterRegister > initial);
+
+        Assert.Equal(afterRegister, shadows.RetailCellArrayRevision);
+
+        shadows.Deregister(0x48A02040u);
+        Assert.True(shadows.RetailCellArrayRevision > afterRegister);
+        Assert.False(shadows.TryGetRetailCellArray(0x48A02040u, out _));
+    }
+
+    private static RenderProjectionRecord OutdoorRecord(uint id, uint cellId, bool shell) =>
+        new RenderProjectionRecord() with
+        {
+            Id = RenderProjectionId.FromRaw(id),
+            ProjectionClass = RenderProjectionClass.OutdoorStatic,
+            OwnerIncarnation = RenderOwnerIncarnation.FromRaw(1),
+            Transform = new RenderTransform(Matrix4x4.CreateTranslation(1, 2, 3)),
+            Flags = RenderProjectionFlags.Draw,
+            Source = new RenderSourceMetadata() with
+            {
+                LocalEntityId = id,
+                SourceId = 0x02000030u,
+                ParentCellId = cellId,
+                EffectCellId = cellId,
+            },
+            EntityPayload = new RenderEntityPayload() with { IsBuildingShell = shell },
+        };
+
     private static RenderProjectionRecord Record(uint id, Vector3 position) =>
         new RenderProjectionRecord() with
         {

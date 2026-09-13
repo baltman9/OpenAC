@@ -179,6 +179,25 @@ internal sealed unsafe class VulkanTextureTable : IDisposable
         }
     }
 
+    /// <summary>Points a live slot at another (view, sampler) pair; the index every consumer holds stays valid.</summary>
+    internal void Rewrite(
+        GpuTextureSlot slot,
+        ImageView view,
+        Sampler sampler,
+        ImageLayout layout = ImageLayout.ShaderReadOnlyOptimal)
+    {
+        lock (_sync)
+        {
+            // Deferred through the flight ledger, so teardown may already have
+            // dropped the table; then there is nothing left to point anywhere.
+            if (_disposed)
+                return;
+            if (!slot.IsAssigned || !_slots.IsLive(slot.Index))
+                throw new InvalidOperationException($"Texture table slot {slot.Index} is not live; it cannot be rewritten.");
+            Write(slot.Index, view, sampler, layout);
+        }
+    }
+
     internal void ReleaseNow(GpuTextureSlot slot)
     {
         lock (_sync)
@@ -194,7 +213,7 @@ internal sealed unsafe class VulkanTextureTable : IDisposable
     internal bool IsLive(GpuTextureSlot slot)
     {
         lock (_sync)
-            return slot.IsAssigned && _slots.IsLive(slot.Index);
+            return !_disposed && slot.IsAssigned && _slots.IsLive(slot.Index);
     }
 
     private void Write(

@@ -229,7 +229,8 @@ public sealed class WorldRenderCompositionTests
         public TerrainAtlas AcquireBackendNeutralTerrainAtlas(
             IGameRenderResourceLifetime lifetime,
             IGpuDevice device,
-            IDatReaderWriter dats) =>
+            IDatReaderWriter dats,
+            WorldTextureDetail textureDetail) =>
             lifetime.AcquireTerrainAtlas(() => Atlas);
 
         public void ExerciseBackendNeutralWorldTextures(
@@ -285,7 +286,8 @@ public sealed class WorldRenderCompositionTests
             IDatReaderWriter dats,
             IPreparedAssetSource preparedAssets,
             IGpuResourceRetirementQueue retirement,
-            ResidencyBudgetOptions budgets)
+            ResidencyBudgetOptions budgets,
+            WorldTextureDetail textureDetail)
         {
             MeshBudgets = budgets;
             return Resource<WbMeshAdapter>("WB mesh adapter");
@@ -296,7 +298,8 @@ public sealed class WorldRenderCompositionTests
             IDatReaderWriter dats,
             IGpuResourceRetirementQueue retirement,
             string diagnosticsDirectory,
-            ResidencyBudgetOptions budgets)
+            ResidencyBudgetOptions budgets,
+            WorldTextureDetail textureDetail)
         {
             TextureBudgets = budgets;
             return Resource<TextureCache>("texture cache");

@@ -61,6 +61,10 @@ public sealed class WbMeshAdapter
     internal int LastMipmapArrayCount { get; private set; }
     internal long LastMipmapBytes { get; private set; }
     internal int StagedUploadBacklog => _meshManager?.StagedMeshCount ?? 0;
+
+    /// <summary>See <see cref="ObjectMeshManager.SetUnownedContentRetained"/>.</summary>
+    internal void SetUnownedContentRetained(bool retained) =>
+        _meshManager?.SetUnownedContentRetained(retained);
     internal long StagedUploadBytes => _meshManager?.StagedMeshBytes ?? 0;
     internal bool StagingAtHighWater => _meshManager?.StagingAtHighWater ?? false;
     internal (int Count, long Bytes) CpuMeshCacheDiagnostics =>
@@ -101,7 +105,8 @@ public sealed class WbMeshAdapter
             logger,
             AcDream.App.Rendering.ImmediateGpuResourceRetirementQueue.Instance,
             ownsPreparedAssets: true,
-            ResidencyBudgetOptions.Default)
+            ResidencyBudgetOptions.Default,
+            WorldTextureDetail.Full)
     {
     }
 
@@ -117,7 +122,8 @@ public sealed class WbMeshAdapter
             logger,
             resourceRetirement,
             ownsPreparedAssets: true,
-            ResidencyBudgetOptions.Default);
+            ResidencyBudgetOptions.Default,
+            WorldTextureDetail.Full);
 
     internal WbMeshAdapter(
         AcDream.App.Rendering.Gpu.IGpuDevice gpuDevice,
@@ -125,7 +131,8 @@ public sealed class WbMeshAdapter
         IPreparedAssetSource preparedAssets,
         ILogger<WbMeshAdapter> logger,
         AcDream.App.Rendering.IGpuResourceRetirementQueue resourceRetirement,
-        ResidencyBudgetOptions? budgets = null)
+        ResidencyBudgetOptions? budgets = null,
+        WorldTextureDetail? textureDetail = null)
         : this(
             gpuDevice,
             dats,
@@ -133,7 +140,8 @@ public sealed class WbMeshAdapter
             logger,
             resourceRetirement,
             ownsPreparedAssets: false,
-            budgets ?? ResidencyBudgetOptions.Default)
+            budgets ?? ResidencyBudgetOptions.Default,
+            textureDetail ?? WorldTextureDetail.Full)
     {
     }
 
@@ -144,7 +152,8 @@ public sealed class WbMeshAdapter
         ILogger<WbMeshAdapter> logger,
         AcDream.App.Rendering.IGpuResourceRetirementQueue resourceRetirement,
         bool ownsPreparedAssets,
-        ResidencyBudgetOptions budgets)
+        ResidencyBudgetOptions budgets,
+        WorldTextureDetail textureDetail)
     {
         ArgumentNullException.ThrowIfNull(gpuDevice);
         ArgumentNullException.ThrowIfNull(dats);
@@ -185,7 +194,8 @@ public sealed class WbMeshAdapter
                 gpuDevice,
                 resolvedPreparedAssets,
                 new ConsoleErrorLogger<ObjectMeshManager>(),
-                budgets);
+                budgets,
+                textureDetail);
             resources.Add("WB object mesh manager", meshManager.Dispose);
             resources.TransferAll();
         }

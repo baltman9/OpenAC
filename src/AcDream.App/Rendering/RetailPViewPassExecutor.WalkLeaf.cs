@@ -161,4 +161,6 @@ internal sealed class WalkProductionLeafRenderer : IWalkFrameLeafRenderer
     public void AlphaBarrier() => _passes.FlushBuildingAlpha();
 
     public void FlushSortCellExit() => _passes.FlushSortCellExitAlpha();
+
+    public bool SortCellExitWouldFlush() => _passes.SortCellExitAlphaWouldFlush();
 }

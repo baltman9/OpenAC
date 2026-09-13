@@ -152,6 +152,16 @@ public sealed class ShadowObjectRegistry
 
     internal ulong MutationRevision => _mutationRevision;
 
+    /// <summary>Advances whenever any entity's retail cell array is assigned,
+    /// edited in place, or removed, so readers that hold those arrays across
+    /// frames know when to fetch them again.</summary>
+    public ulong RetailCellArrayRevision => _retailCellArrayRevision;
+
+    private ulong _retailCellArrayRevision = 1UL;
+
+    private void AdvanceRetailCellArrayRevision() =>
+        _retailCellArrayRevision = checked(_retailCellArrayRevision + 1UL);
+
     private void AdvanceMutationRevision() =>
         _mutationRevision = checked(_mutationRevision + 1UL);
 
@@ -425,6 +435,7 @@ public sealed class ShadowObjectRegistry
         {
             RemoveRetailPartEntriesFromCells(entityId, previousCells);
             _retailCellArrays.Remove(entityId);
+            AdvanceRetailCellArrayRevision();
         }
         _retailCellArrayRoutes[entityId] = route;
         if (cellArray.Count == 0)
@@ -437,6 +448,7 @@ public sealed class ShadowObjectRegistry
         for (int i = 0; i < cellArray.Count; i++)
             orderedCells.Add(cellArray[i]);
         _retailCellArrays[entityId] = orderedCells;
+        AdvanceRetailCellArrayRevision();
         PublishRetailPartEntries(entityId, orderedCells, partArray);
         RepublishAttachedChildren(entityId);
     }
@@ -466,6 +478,7 @@ public sealed class ShadowObjectRegistry
         {
             RemoveRetailPartEntriesFromCells(entityId, cells);
             _retailCellArrays.Remove(entityId);
+            AdvanceRetailCellArrayRevision();
         }
         _retailCellArrayRoutes.Remove(entityId);
         _entityRetailPartArrays.Remove(entityId);
@@ -647,6 +660,7 @@ public sealed class ShadowObjectRegistry
         {
             RemoveRetailPartEntriesFromCells(childEntityId, cells);
             _retailCellArrays.Remove(childEntityId);
+            AdvanceRetailCellArrayRevision();
         }
         _childPartArrays.Remove(childEntityId);
         _childParent.Remove(childEntityId);
@@ -697,6 +711,7 @@ public sealed class ShadowObjectRegistry
         {
             RemoveRetailPartEntriesFromCells(childEntityId, previousCells);
             _retailCellArrays.Remove(childEntityId);
+            AdvanceRetailCellArrayRevision();
         }
         if (!_childPartArrays.TryGetValue(childEntityId, out IReadOnlyList<ShadowShape>? partArray))
             return;
@@ -710,6 +725,7 @@ public sealed class ShadowObjectRegistry
         }
 
         _retailCellArrays[childEntityId] = rootCells;
+        AdvanceRetailCellArrayRevision();
         PublishRetailPartEntries(childEntityId, rootCells, partArray);
     }
 
@@ -2052,6 +2068,7 @@ public sealed class ShadowObjectRegistry
         {
             RemoveRetailPartEntriesFromCells(entityId, retailCells);
             _retailCellArrays.Remove(entityId);
+            AdvanceRetailCellArrayRevision();
             RepublishAttachedChildren(entityId);
         }
 
@@ -2430,6 +2447,7 @@ public sealed class ShadowObjectRegistry
             _retailPartEntriesByCell.Remove(_prefixRemovalScratch[i]);
 
         _prefixRemovalScratch.Clear();
+        bool cellArraysTouched = false;
         foreach (var (ownerId, cells) in _retailCellArrays)
         {
             for (int i = cells.Count - 1; i >= 0; i--)
@@ -2437,12 +2455,15 @@ public sealed class ShadowObjectRegistry
                 if ((cells[i] & 0xFFFF0000u) == lbPrefix)
                 {
                     cells.RemoveAt(i);
+                    cellArraysTouched = true;
                     touchedOwners.Add(ownerId);
                 }
             }
             if (cells.Count == 0)
                 _prefixRemovalScratch.Add(ownerId);
         }
+        if (cellArraysTouched || _prefixRemovalScratch.Count != 0)
+            AdvanceRetailCellArrayRevision();
         for (int i = 0; i < _prefixRemovalScratch.Count; i++)
         {
             uint ownerId = _prefixRemovalScratch[i];
@@ -2487,6 +2508,7 @@ public sealed class ShadowObjectRegistry
                     continue;
                 touched = true;
                 retailCells.RemoveAt(index);
+                AdvanceRetailCellArrayRevision();
                 if (_retailPartEntriesByCell.TryGetValue(
                         cellId,
                         out List<RetailPartEntry>? partRows))
@@ -2497,7 +2519,10 @@ public sealed class ShadowObjectRegistry
                 }
             }
             if (retailCells.Count == 0)
+            {
                 _retailCellArrays.Remove(entityId);
+                AdvanceRetailCellArrayRevision();
+            }
         }
         if (!_entityToCells.TryGetValue(entityId, out List<uint>? cells))
         {
@@ -2919,7 +2944,10 @@ public sealed class ShadowObjectRegistry
             _retailCellArrayRoutes[state.EntityId] = state.RetailRoute;
         }
         if (state.RetailCellIds is not null)
+        {
             _retailCellArrays[state.EntityId] = state.RetailCellIds;
+            AdvanceRetailCellArrayRevision();
+        }
         for (int rowIndex = 0; rowIndex < state.RetailRows.Count; rowIndex++)
         {
             PreparedShadowRetailPartRows row = state.RetailRows[rowIndex];
@@ -3170,6 +3198,7 @@ public sealed class ShadowObjectRegistry
         _pendingSetPositionDispatches.Clear();
         _entityRetailPartArrays.Clear();
         _retailCellArrays.Clear();
+        AdvanceRetailCellArrayRevision();
         _retailCellArrayRoutes.Clear();
         _retailPartEntriesByCell.Clear();
         _cellRenderStamps.Clear();

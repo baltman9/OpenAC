@@ -7,6 +7,13 @@ internal interface IGpuDevice : IDisposable
     GpuCapabilityRecord Capabilities { get; }
 
     /// <summary>
+    /// The device-memory sizing the backend was built with (pool blocks, the
+    /// staging and per-frame rings, the mesh arena's starting size). Fixed for
+    /// the device's lifetime; a stand-in device reports the default.
+    /// </summary>
+    GpuMemoryProfile MemoryProfile => GpuMemoryProfile.Default;
+
+    /// <summary>
     /// Frame-flight-gated resource release. Resource disposal routes through here
     /// so nothing is freed while a submitted frame may still reference it.
     /// </summary>
@@ -38,6 +45,20 @@ internal interface IGpuDevice : IDisposable
     GpuTextureSlot RegisterTexture(IGpuTexture texture, IGpuSampler sampler);
 
     void ReleaseTextureSlot(GpuTextureSlot slot);
+
+    /// <summary>
+    /// Points an already-published slot at a new (texture, sampler) pair and
+    /// returns the slot to keep using. Draw data that baked the slot's index
+    /// (terrain tiles, cached draws) stays valid, which a release followed by a
+    /// fresh registration would not give: the freed index is scrubbed and can
+    /// be handed to the next texture. A stand-in may fall back to that shape.
+    /// </summary>
+    GpuTextureSlot ReplaceTextureSlot(GpuTextureSlot slot, IGpuTexture texture, IGpuSampler sampler)
+    {
+        if (slot.IsAssigned)
+            ReleaseTextureSlot(slot);
+        return RegisterTexture(texture, sampler);
+    }
 
     /// <summary>Opens the next frame, waiting for its flight slot to retire first.</summary>
     IGpuFrame BeginFrame();

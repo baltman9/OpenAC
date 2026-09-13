@@ -99,7 +99,8 @@ internal sealed unsafe partial class VulkanGpuDevice
                 "vk-binding-dummy",
                 65536,
                 GpuBufferUsage.Storage | GpuBufferUsage.Uniform,
-                GpuMemoryResidency.HostWritable));
+                GpuMemoryResidency.HostWritable),
+            NoteBufferDestroyed);
 
         _frameBindings = new VulkanFrameBindings[_flights.SlotCount];
         for (int slot = 0; slot < _flights.SlotCount; slot++)
@@ -197,7 +198,7 @@ internal sealed unsafe partial class VulkanGpuDevice
         _pipelineFormatLeaseCounts.Clear();
 
         foreach (VulkanGpuSampler sampler in _samplers.Values)
-            sampler.Dispose();
+            sampler.Destroy();
         _samplers.Clear();
 
         _bindingDummy?.Dispose();
@@ -283,8 +284,7 @@ internal sealed unsafe partial class VulkanGpuDevice
     private IGpuSampler CreateSamplerLocked(in GpuSamplerDescription description)
     {
         ThrowIfDisposed();
-        if (_samplers.TryGetValue(description, out VulkanGpuSampler? existing)
-            && !existing.IsDisposed)
+        if (_samplers.TryGetValue(description, out VulkanGpuSampler? existing))
             return existing;
 
         var created = new VulkanGpuSampler(
@@ -391,6 +391,44 @@ internal sealed unsafe partial class VulkanGpuDevice
             vulkanTexture.SampledView,
             vulkanSampler.Handle,
             vulkanTexture.SampledLayout);
+    }
+
+    public GpuTextureSlot ReplaceTextureSlot(GpuTextureSlot slot, IGpuTexture texture, IGpuSampler sampler)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(texture);
+        ArgumentNullException.ThrowIfNull(sampler);
+        if (!slot.IsAssigned)
+            return RegisterTexture(texture, sampler);
+        if (texture is not VulkanGpuTexture vulkanTexture)
+            throw new ArgumentException("The Vulkan backend can only register a Vulkan texture.", nameof(texture));
+        if (sampler is not VulkanGpuSampler vulkanSampler)
+            throw new ArgumentException("The Vulkan backend can only register a Vulkan sampler.", nameof(sampler));
+        if (!vulkanTexture.IsSampleable || vulkanTexture.SampledView.Handle == 0)
+        {
+            throw new ArgumentException(
+                $"Texture '{vulkanTexture.Name}' is an attachment-only image and has no sampled view.",
+                nameof(texture));
+        }
+
+        // Update-after-bind allows the write between record and submit, not
+        // while a submitted frame may still sample the slot, so the rewrite
+        // waits for the frames in flight like a release does; the tiles sample
+        // the old pair for those frames, and the caller keeps both pairs alive.
+        VulkanTextureTable table = TextureTable;
+        if (!table.IsLive(slot))
+            throw new InvalidOperationException($"Texture table slot {slot.Index} is not live; it cannot be replaced.");
+        ImageView view = vulkanTexture.SampledView;
+        Sampler samplerHandle = vulkanSampler.Handle;
+        ImageLayout layout = vulkanTexture.SampledLayout;
+        _flights.Retire(() =>
+        {
+            // Released after the replace in the same frame: the release ran
+            // first at this key and wins; nothing points at the index now.
+            if (table.IsLive(slot))
+                table.Rewrite(slot, view, samplerHandle, layout);
+        });
+        return slot;
     }
 
     public void ReleaseTextureSlot(GpuTextureSlot slot)
@@ -617,28 +655,6 @@ internal sealed unsafe partial class VulkanGpuDevice
                 $"vkCreateShaderModule ('{name}.{stage}')");
             return module;
         }
-    }
-
-    internal void CmdBindPipelineDefaults(CommandBuffer commands, GpuPipelineDescription description)
-    {
-        _vk.CmdSetCullMode(commands, VulkanViewportMapping.ToVulkan(description.Cull));
-        _vk.CmdSetFrontFace(commands, VulkanViewportMapping.ToVulkan(description.FrontFace));
-        _vk.CmdSetDepthWriteEnable(commands, description.Depth.Write);
-        if (!description.StencilTest)
-            return;
-
-        GpuStencilState stencil = description.Stencil;
-        const StencilFaceFlags BothFaces = StencilFaceFlags.FaceFrontAndBack;
-        _vk.CmdSetStencilOp(
-            commands,
-            BothFaces,
-            VulkanViewportMapping.ToVulkan(stencil.Fail),
-            VulkanViewportMapping.ToVulkan(stencil.Pass),
-            VulkanViewportMapping.ToVulkan(stencil.DepthFail),
-            VulkanViewportMapping.ToVulkan(stencil.Compare));
-        _vk.CmdSetStencilCompareMask(commands, BothFaces, stencil.CompareMask);
-        _vk.CmdSetStencilWriteMask(commands, BothFaces, stencil.WriteMask);
-        _vk.CmdSetStencilReference(commands, BothFaces, stencil.Reference);
     }
 
     internal IGpuPassEncoder BeginPass(VulkanGpuFrame frame, GpuPassDescription description)
@@ -1415,7 +1431,8 @@ internal sealed unsafe partial class VulkanGpuDevice
                 "vk-backbuffer-capture",
                 width * height * 4,
                 GpuBufferUsage.TransferDestination,
-                GpuMemoryResidency.HostReadable));
+                GpuMemoryResidency.HostReadable),
+            NoteBufferDestroyed);
     }
 
     private readonly bool _retainBackbufferCapture;

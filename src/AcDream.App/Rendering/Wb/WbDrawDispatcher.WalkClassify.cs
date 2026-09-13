@@ -75,11 +75,36 @@ public sealed partial class WbDrawDispatcher
         uint GfxObjId,
         Matrix4x4 LocalToWorld);
 
+    /// <summary>A classified part kept across frames by the far-landscape
+    /// cache. The drawing sphere is transformed once here because a retained
+    /// part's placement does not change until it is reclassified.</summary>
     internal readonly record struct WalkCachedPart(
         ObjectRenderData RenderData,
         WalkClassifiedSelectionPart Selection,
         int BatchStart,
-        int BatchCount);
+        int BatchCount,
+        Vector3 SphereCenter,
+        float SphereRadius,
+        bool HasSphere)
+    {
+        internal static WalkCachedPart Create(
+            ObjectRenderData renderData,
+            WalkClassifiedSelectionPart selection,
+            int batchStart,
+            int batchCount)
+        {
+            Vector3 center = Vector3.Zero;
+            float radius = 0f;
+            bool hasSphere = false;
+            if (renderData.SelectionSphere is { Radius: > 0f } sphere)
+            {
+                hasSphere = true;
+                TransformDrawingSphere(sphere, selection.LocalToWorld, out center, out radius);
+            }
+            return new WalkCachedPart(
+                renderData, selection, batchStart, batchCount, center, radius, hasSphere);
+        }
+    }
 
     internal long WalkMeshAvailabilityVersion =>
         _meshAdapter.MeshManager?.RenderDataAvailabilityVersion ?? 0;
@@ -115,10 +140,19 @@ public sealed partial class WbDrawDispatcher
         in RenderProjectionRecord record,
         in WalkCachedPart part,
         IWalkLookInViewSource views,
-        int routeIndex) =>
-        ResolvePartVisible(views, routeIndex, part.RenderData,
-            part.Selection.LocalToWorld, out _, out _, out _)
-        && TryStampWalkPart(in record, part.Selection.PartIndex);
+        int routeIndex)
+    {
+        if (views is not null)
+        {
+            Vector3 center = part.SphereCenter;
+            if (!views.SphereVisibleInLookInTurn(
+                    routeIndex, in center, part.SphereRadius, testSphere: part.HasSphere))
+            {
+                return false;
+            }
+        }
+        return TryStampWalkPart(in record, part.Selection.PartIndex);
+    }
 
     internal void ResolveCachedWalkLighting(
         in RenderProjectionRecord record,
@@ -127,12 +161,26 @@ public sealed partial class WbDrawDispatcher
         out uint indoorFlag,
         out Vector2 selection)
     {
-        RenderInstanceCandidate entity = RenderInstanceCandidate.FromProjection(
-            in record, tupleLandblockId, animated: false);
-        ResolveWalkLightSet(in entity, out lights, out bool indoor);
+        // Point lights only reach indoor objects, so an outdoor record needs
+        // neither the candidate projection nor the light selection.
+        uint parentCellId = record.Source.ParentCellId;
+        bool indoor = IndoorObjectReceivesTorches(
+            parentCellId == 0 ? null : parentCellId);
+        if (indoor)
+        {
+            RenderInstanceCandidate entity = RenderInstanceCandidate.FromProjection(
+                in record, tupleLandblockId, animated: false);
+            ResolveWalkLightSet(in entity, out lights, out _);
+        }
+        else
+        {
+            lights = InstanceLightSet.Disabled;
+        }
         indoorFlag = indoor ? 1u : 0u;
         selection = _selectionLighting?.TryGetLighting(
-            entity.ServerGuid, entity.LocalEntityId, out RetailSelectionLighting lighting) == true
+            record.Source.ServerGuid,
+            record.Source.LocalEntityId,
+            out RetailSelectionLighting lighting) == true
             ? new Vector2(lighting.Luminosity, lighting.Diffuse)
             : new Vector2(0f, 1f);
     }
@@ -312,7 +360,7 @@ public sealed partial class WbDrawDispatcher
                     selectionParts.Add(new WalkClassifiedSelectionPart(
                         entity.ServerGuid, entity.LocalEntityId, selectionPartIndex,
                         (uint)gfxObjId, model));
-                    retainedParts?.Add(new WalkCachedPart(
+                    retainedParts?.Add(WalkCachedPart.Create(
                         partData, selectionParts[^1], batchStart, batches.Count - batchStart));
                 }
             }
@@ -351,7 +399,7 @@ public sealed partial class WbDrawDispatcher
                 selectionParts.Add(new WalkClassifiedSelectionPart(
                     entity.ServerGuid, entity.LocalEntityId, partIndex,
                     (uint)meshRef.GfxObjId, model));
-                retainedParts?.Add(new WalkCachedPart(
+                retainedParts?.Add(WalkCachedPart.Create(
                     renderData, selectionParts[^1], batchStart, batches.Count - batchStart));
             }
         }

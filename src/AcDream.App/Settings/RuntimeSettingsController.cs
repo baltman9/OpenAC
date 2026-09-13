@@ -97,6 +97,16 @@ internal interface IRuntimeSettingsTargets
 
     void ApplyQuality(QualitySettings quality);
 
+    /// <summary>
+    /// Whether unowned world content (released meshes, emptied atlases,
+    /// composite and particle textures) is kept for a revisit. Off while the
+    /// world is not drawn, so the memory the UI-only switch promises actually
+    /// goes back.
+    /// </summary>
+    void SetUnownedContentRetained(bool retained)
+    {
+    }
+
     void ApplyUiLock(bool locked);
 
     void SetSingleCharacterOption(uint optionId, bool value);
@@ -157,7 +167,8 @@ internal sealed class RuntimeSettingsController :
         _resolveQuality = resolveQuality
             ?? (preset => ResolveQuality(
                 preset,
-                Display.LandscapeDrawDistance));
+                EffectiveDisplay.LandscapeDrawDistance,
+                EffectiveDisplay.UiOnly));
         _log = log ?? Console.WriteLine;
         _characterOptionValue = characterOptionValue;
 
@@ -166,9 +177,9 @@ internal sealed class RuntimeSettingsController :
         Chat = _storage.LoadChat();
         _defaultCharacter = _storage.LoadCharacter(DefaultToonKey);
         Character = _defaultCharacter;
-        ResolvedQuality = _resolveQuality(Display.Quality);
+        ResolvedQuality = _resolveQuality(EffectiveDisplay.Quality);
         Startup = new RuntimeSettingsSnapshot(
-            Display,
+            EffectiveDisplay,
             Audio,
             Chat,
             Character,
@@ -181,7 +192,58 @@ internal sealed class RuntimeSettingsController :
 
     public string ActiveToonKey { get; private set; } = DefaultToonKey;
 
-    public DisplaySettings Display { get; private set; }
+    private DisplaySettings _display = null!;
+    private DisplaySettings _effectiveDisplay = null!;
+    private bool _windowFocused = true;
+
+    public DisplaySettings Display
+    {
+        get => _display;
+        private set
+        {
+            _display = value;
+            RecomputeEffectiveDisplay();
+        }
+    }
+
+    /// <summary>True while the window has keyboard focus; a background client with the option on runs UI-only.</summary>
+    public bool WindowFocused => _windowFocused;
+
+    private void RecomputeEffectiveDisplay()
+    {
+        DisplaySettings effective = _display.Effective;
+        if (!_windowFocused && _display.UiOnlyWhenUnfocused && !effective.UiOnly)
+            effective = effective with { UiOnly = true };
+        _effectiveDisplay = effective;
+    }
+
+    /// <summary>
+    /// The window gained or lost focus. With "UI Only in Background" on, losing
+    /// focus switches the effective display to UI-only (world pass skipped,
+    /// window shrunk, nothing unowned kept) and gaining it switches back; the
+    /// stored settings are untouched.
+    /// </summary>
+    public void SetWindowFocused(bool focused)
+    {
+        if (_windowFocused == focused)
+            return;
+        _windowFocused = focused;
+        bool wasUiOnly = _effectiveDisplay.UiOnly;
+        RecomputeEffectiveDisplay();
+        if (wasUiOnly == _effectiveDisplay.UiOnly)
+            return;
+        _log($"[QUALITY] Window {(focused ? "focused" : "in background")}: UI-only {(_effectiveDisplay.UiOnly ? "on" : "off")}");
+        ReapplyQualityPreset(_effectiveDisplay.Quality);
+        _runtimeTargets?.SetUnownedContentRetained(!_effectiveDisplay.UiOnly);
+    }
+
+    /// <summary>
+    /// What the runtime runs with: <see cref="Display"/> with Potato Mode
+    /// applied while it is on. The stored settings stay the user's own, so
+    /// the Options panel binds to <see cref="Display"/> and the renderer,
+    /// streaming, particles and render pack read this.
+    /// </summary>
+    public DisplaySettings EffectiveDisplay => _effectiveDisplay;
 
     public AudioSettings Audio { get; private set; }
 
@@ -201,7 +263,7 @@ internal sealed class RuntimeSettingsController :
 
     public bool HasDraftPreview => false;
 
-    public DisplaySettings DisplayPreview => Display;
+    public DisplaySettings DisplayPreview => EffectiveDisplay;
 
     public AudioSettings AudioPreview => Audio;
 
@@ -214,8 +276,11 @@ internal sealed class RuntimeSettingsController :
         if (!_startupDisplayApplied)
         {
             RuntimeDisplayApplyResult result = target.ApplyDisplay(Startup.Display);
-            DisplaySettings applied = ReconcileDisplayResult(Startup.Display, result);
-            if (!ReferenceEquals(applied, Startup.Display))
+            // Reconcile the STORED record: the startup snapshot is the Potato
+            // overlay when the switch is on, and the reconciled fullscreen flag
+            // must never carry the overlay's values into the file.
+            DisplaySettings applied = ReconcileDisplayResult(Display, result);
+            if (!ReferenceEquals(applied, Display))
             {
                 _storage.SaveDisplay(applied);
                 Display = applied;
@@ -244,6 +309,7 @@ internal sealed class RuntimeSettingsController :
         if (_runtimeTargets is not null)
             throw new InvalidOperationException("Runtime settings targets are already bound.");
         _runtimeTargets = targets;
+        targets.SetUnownedContentRetained(!EffectiveDisplay.UiOnly);
     }
 
     public IDisposable BindRuntimeTargetsOwned(IRuntimeSettingsTargets targets)
@@ -391,7 +457,8 @@ internal sealed class RuntimeSettingsController :
                     + $"{applied.Fullscreen}");
             }
             Display = applied;
-            ReapplyQualityPreset(applied.Quality);
+            ReapplyQualityPreset(applied.Effective.Quality);
+            _runtimeTargets?.SetUnownedContentRetained(!EffectiveDisplay.UiOnly);
         }
         catch (Exception ex)
         {
@@ -401,7 +468,7 @@ internal sealed class RuntimeSettingsController :
 
         try
         {
-            DisplayChanged?.Invoke(Display);
+            DisplayChanged?.Invoke(EffectiveDisplay);
         }
         catch (Exception ex)
         {
@@ -536,13 +603,32 @@ internal sealed class RuntimeSettingsController :
 
     private static QualitySettings ResolveQuality(
         QualityPreset preset,
-        int landscapeDrawDistance)
+        int landscapeDrawDistance,
+        bool uiOnly = false)
     {
         QualitySettings quality = ApplyLandscapeDrawDistance(
             QualitySettings.From(preset),
             landscapeDrawDistance);
-        return QualitySettings.WithEnvOverrides(quality);
+        return ApplyUiOnly(QualitySettings.WithEnvOverrides(quality), uiOnly);
     }
+
+    /// <summary>The smallest window that still keeps the player's own landblock and its neighbours resident for collision and movement.</summary>
+    internal const int UiOnlyStreamingRadius = 1;
+
+    /// <summary>
+    /// With the world not drawn, the streaming window shrinks to the 3x3 around
+    /// the player: enough for collision, movement and the objects the server
+    /// keeps talking about, and nothing rendered is kept for the eye. Turning
+    /// the switch off restores the preset's window and the world streams back.
+    /// </summary>
+    internal static QualitySettings ApplyUiOnly(QualitySettings quality, bool uiOnly) =>
+        uiOnly
+            ? quality with
+            {
+                NearRadius = Math.Min(quality.NearRadius, UiOnlyStreamingRadius),
+                FarRadius = UiOnlyStreamingRadius,
+            }
+            : quality;
 
     internal static QualitySettings ApplyLandscapeDrawDistance(
         QualitySettings quality,

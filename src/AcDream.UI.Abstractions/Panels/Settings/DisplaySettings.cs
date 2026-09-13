@@ -121,16 +121,41 @@ public sealed record DisplaySettings(
     bool AutomaticDegrades = false,
     float GraphicsPerformance = 0f,
     float DegradeDistance = 50f,
-    int LandscapeTextureDetail = 2,
+    int LandscapeTextureDetail = 0,
     int EnvironmentTextureDetail = 1,
     int TextureFiltering = 1,
     int LandscapeDrawDistance = 8,
     bool BuildingDetailTextures = true,
     bool MultiPassAlpha = false,
-    bool KeepDistantBuildings = true)
+    bool KeepDistantBuildings = true,
+    bool PotatoMode = false,
+    bool UiOnly = false,
+    bool UiOnlyWhenUnfocused = false)
 {
     public RenderPackSelectionSettings RenderPack { get; init; } =
         RenderPackSelectionSettings.Retail;
+
+    /// <summary>
+    /// The settings the runtime runs with. Potato Mode is an overlay for
+    /// running many clients on one machine: while it is on, every quality
+    /// choice is forced to its cheapest value and the stored choices are left
+    /// alone, so turning it off brings them back. Off returns this instance.
+    /// </summary>
+    public DisplaySettings Effective => PotatoMode
+        ? this with
+        {
+            Quality = QualityPreset.Potato,
+            ParticleRange = ParticleRange.Retail,
+            AutomaticDegrades = false,
+            LandscapeTextureDetail = 4,
+            EnvironmentTextureDetail = 4,
+            TextureFiltering = 0,
+            LandscapeDrawDistance = 3,
+            BuildingDetailTextures = false,
+            MultiPassAlpha = false,
+            RenderPack = RenderPackSelectionSettings.Retail,
+        }
+        : this;
 
     public static DisplaySettings Default { get; } = new(
         Resolution:   "1280x720",

@@ -36,8 +36,12 @@ internal interface IGpuTexture : IDisposable
     void GenerateMipChain();
 }
 
-/// <summary>Immutable sampler state. Owned and de-duplicated by the device.</summary>
-internal interface IGpuSampler : IDisposable
+/// <summary>
+/// Immutable sampler state, de-duplicated by description and owned by the
+/// device for its whole lifetime: the same instance is handed to every
+/// consumer that asks for the description, so no consumer may destroy it.
+/// </summary>
+internal interface IGpuSampler
 {
     GpuSamplerDescription Description { get; }
 }

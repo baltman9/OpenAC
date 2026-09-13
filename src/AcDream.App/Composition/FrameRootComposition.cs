@@ -450,6 +450,7 @@ internal sealed class FrameRootCompositionPhase
             // old dispatcher/selection observer remains detached.
             live.DrawDispatcher!.SetCurrentRenderSceneObserver(null);
             live.SelectionScene.SetCurrentRenderSceneObserver(null);
+            var displayPolicy = new DisplayBuildingDetailPolicy(d.Settings);
             worldSceneRenderer = new WorldSceneRenderer(
                 renderFrameResources,
                 renderLoginState,
@@ -478,9 +479,10 @@ internal sealed class FrameRootCompositionPhase
                 worldScenePasses,
                 d.RenderRange,
                 worldSceneDiagnostics,
+                displayPolicy,
+                displayPolicy,
                 live.WorldAvailability,
-                atmosphericInputs,
-                new DisplayBuildingDetailPolicy(d.Settings));
+                atmosphericInputs);
             worldSceneRenderer =
                 new AcDream.App.Rendering.Gpu.Vk.VulkanWorldScenePhase(
                     host.GpuFrameLifetime,
@@ -664,7 +666,44 @@ internal sealed class FrameRootCompositionPhase
                             ? (true, string.Empty)
                             : (false, $"framebuffer resize '{resolution}' was not persisted");
                     },
-                    requestClientClose: d.Window.Close);
+                    requestClientClose: d.Window.Close,
+                    setPotatoMode: enabled =>
+                    {
+                        d.Settings.SaveDisplay(d.Settings.Display with
+                        {
+                            PotatoMode = enabled,
+                        });
+                        return d.Settings.Display.PotatoMode == enabled
+                            ? (true, string.Empty)
+                            : (false, $"potato mode '{enabled}' was not persisted");
+                    },
+                    setUiOnly: enabled =>
+                    {
+                        d.Settings.SaveDisplay(d.Settings.Display with
+                        {
+                            UiOnly = enabled,
+                        });
+                        return d.Settings.Display.UiOnly == enabled
+                            ? (true, string.Empty)
+                            : (false, $"ui-only '{enabled}' was not persisted");
+                    },
+                    setWindowFocused: focused =>
+                    {
+                        d.Settings.SetWindowFocused(focused);
+                        return d.Settings.WindowFocused == focused
+                            ? (true, string.Empty)
+                            : (false, $"window focus '{focused}' was not applied");
+                    },
+                    setUiOnlyWhenUnfocused: enabled =>
+                    {
+                        d.Settings.SaveDisplay(d.Settings.Display with
+                        {
+                            UiOnlyWhenUnfocused = enabled,
+                        });
+                        return d.Settings.Display.UiOnlyWhenUnfocused == enabled
+                            ? (true, string.Empty)
+                            : (false, $"ui-only background '{enabled}' was not persisted");
+                    });
             bindings.Adopt(
                 "world lifecycle automation owner",
                 lifecycleAutomation);

@@ -448,8 +448,13 @@ internal sealed partial class RetailPViewPassExecutor : IEnvCellImmediateDrawSin
     internal void FlushBuildingAlpha() =>
         _alpha.Flush(RetailAlphaFlushSite.DrawBuilding, 0f);
 
+    private const float SortCellExitAlphaThreshold = 0.75f;
+
     internal void FlushSortCellExitAlpha() =>
-        _alpha.Flush(RetailAlphaFlushSite.SortCellExit, 0.75f);
+        _alpha.Flush(RetailAlphaFlushSite.SortCellExit, SortCellExitAlphaThreshold);
+
+    internal bool SortCellExitAlphaWouldFlush() =>
+        _alpha.WouldFlush(SortCellExitAlphaThreshold);
 
     public void DrawCellParticles(
         RetailPViewFrameInput frame,

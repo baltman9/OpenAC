@@ -45,14 +45,24 @@ internal interface IWorldSceneBuildingDetailPolicy
     bool KeepDistantBuildings { get; }
 }
 
-internal sealed class DefaultBuildingDetailPolicy : IWorldSceneBuildingDetailPolicy
+/// <summary>Whether the world is drawn at all this frame. The UI-only switch says no: the panels, chat, radar and plugins stay, the world pass is skipped and the streaming window shrinks.</summary>
+internal interface IWorldScenePresentationPolicy
+{
+    bool DrawWorld { get; }
+}
+
+internal sealed class DefaultBuildingDetailPolicy
+    : IWorldSceneBuildingDetailPolicy, IWorldScenePresentationPolicy
 {
     public static DefaultBuildingDetailPolicy Instance { get; } = new();
 
     public bool KeepDistantBuildings => DisplaySettings.Default.KeepDistantBuildings;
+
+    public bool DrawWorld => !DisplaySettings.Default.UiOnly;
 }
 
-internal sealed class DisplayBuildingDetailPolicy : IWorldSceneBuildingDetailPolicy
+internal sealed class DisplayBuildingDetailPolicy
+    : IWorldSceneBuildingDetailPolicy, IWorldScenePresentationPolicy
 {
     private readonly IRuntimeSettingsPreviewSource _settings;
 
@@ -60,6 +70,8 @@ internal sealed class DisplayBuildingDetailPolicy : IWorldSceneBuildingDetailPol
         => _settings = settings ?? throw new ArgumentNullException(nameof(settings));
 
     public bool KeepDistantBuildings => _settings.DisplayPreview.KeepDistantBuildings;
+
+    public bool DrawWorld => !_settings.DisplayPreview.UiOnly;
 }
 
 internal sealed class WorldScenePViewRenderer : IWorldScenePViewRenderer
@@ -100,6 +112,7 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
     private readonly IWorldGenerationAvailability _availability;
     private readonly IAtmosphericWorldFrameSink? _atmosphere;
     private readonly IWorldSceneBuildingDetailPolicy _buildingDetail;
+    private readonly IWorldScenePresentationPolicy _presentation;
     private readonly RetailPViewFrameInput _pviewFrameInput = new();
     private WorldRenderFrame _preparedEnhancedWorld;
     private bool _hasPreparedEnhancedWorld;
@@ -118,9 +131,10 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
         IWorldScenePassExecutor passes,
         IWorldRenderRangeSource renderRange,
         IWorldSceneDiagnostics diagnostics,
+        IWorldSceneBuildingDetailPolicy buildingDetail,
+        IWorldScenePresentationPolicy presentation,
         IWorldGenerationAvailability? availability = null,
-        IAtmosphericWorldFrameSink? atmosphere = null,
-        IWorldSceneBuildingDetailPolicy? buildingDetail = null)
+        IAtmosphericWorldFrameSink? atmosphere = null)
     {
         _foundation = foundation ?? throw new ArgumentNullException(nameof(foundation));
         _login = login ?? throw new ArgumentNullException(nameof(login));
@@ -138,7 +152,20 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
         _diagnostics = diagnostics ?? throw new ArgumentNullException(nameof(diagnostics));
         _availability = availability ?? AlwaysAvailableWorldGeneration.Instance;
         _atmosphere = atmosphere;
-        _buildingDetail = buildingDetail ?? DefaultBuildingDetailPolicy.Instance;
+        _buildingDetail = buildingDetail ?? throw new ArgumentNullException(nameof(buildingDetail));
+        _presentation = presentation ?? throw new ArgumentNullException(nameof(presentation));
+    }
+
+    public bool WorldPassEnabled => _presentation.DrawWorld;
+
+    public void PrepareResources(RenderFrameInput input)
+    {
+        _ = input;
+        if (!_availability.IsWorldAvailable
+            || _foundation.Foundation.PortalViewportVisible
+            || !_presentation.DrawWorld)
+            return;
+        _passes.PrepareSky(_sky.ActiveDayGroup);
     }
 
     public WorldRenderFrameOutcome Render(RenderFrameInput input)
@@ -161,7 +188,7 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
             }
 
             RenderFrameFoundation foundation = _foundation.Foundation;
-            if (foundation.PortalViewportVisible)
+            if (foundation.PortalViewportVisible || !_presentation.DrawWorld)
             {
                 _selection?.CompleteFrame();
                 selectionFrameStarted = false;
@@ -315,7 +342,9 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
         }
 
         RenderFrameFoundation foundation = _foundation.Foundation;
-        if (!_availability.IsWorldAvailable || foundation.PortalViewportVisible)
+        if (!_availability.IsWorldAvailable
+            || foundation.PortalViewportVisible
+            || !_presentation.DrawWorld)
             return new PreparedWorldSceneFrame(false, foundation, default, -1);
 
         WorldRenderFrame world = _frames.Build(

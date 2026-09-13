@@ -91,6 +91,8 @@ public sealed class GameWindow :
     private AcDream.UI.Abstractions.Settings.QualitySettings _startupQuality =
         AcDream.UI.Abstractions.Settings.QualitySettings.From(
             AcDream.UI.Abstractions.Settings.QualityPreset.High);
+    private AcDream.App.Rendering.Gpu.GpuMemoryProfile _startupMemoryProfile =
+        AcDream.App.Rendering.Gpu.GpuMemoryProfile.Default;
     private IInputContext? _input;
     private TerrainModernRenderer? _terrain;
     private CameraController? _cameraController;
@@ -145,6 +147,7 @@ public sealed class GameWindow :
     private Exception? _runFailure;
     private readonly DisplayFramePacingController _displayFramePacing;
     private readonly RuntimeSettingsController _runtimeSettings;
+    private readonly AcDream.App.Input.WindowFocusRouter _windowFocus;
 
     /// <summary>
     /// The one owner that writes a mixer setting down and then changes the
@@ -519,6 +522,9 @@ public sealed class GameWindow :
                 _applicationPaths.SettingsFile),
             log: Console.WriteLine,
             characterOptionValue: _runtime.CharacterOwner.Options.GetOptionBit);
+        _windowFocus = new AcDream.App.Input.WindowFocusRouter(
+            () => _cameraPointerInput,
+            _runtimeSettings.SetWindowFocused);
         _audioMixerSettings = new AcDream.App.Audio.AudioMixerSettings(
             () => _runtimeSettings.AudioMixer,
             _runtimeSettings.SaveAudioMixer,
@@ -588,6 +594,8 @@ public sealed class GameWindow :
             directCharacterLaunch: _options.LiveCharacterSelector is not null);
         _startupPacing = startupPacing;
         _startupQuality = startup.Quality;
+        _startupMemoryProfile =
+            AcDream.App.Rendering.Gpu.GpuMemoryProfile.For(startup.Display.Quality);
 
         _window = Window.Create(options);
         IWindow window = _window;
@@ -1153,6 +1161,7 @@ public sealed class GameWindow :
                 _platformServices,
                 _startupPacing,
                 _startupQuality.MsaaSamples,
+                _startupMemoryProfile,
                 Console.WriteLine);
         _vulkanGraphics = vulkan;
         return new VulkanGameWindowGraphics(vulkan);
@@ -1246,7 +1255,11 @@ public sealed class GameWindow :
                         _applicationPaths.DiagnosticsDirectory,
                         Console.WriteLine,
                         _gpuDevice!,
-                        _gpuFrameLifetime!),
+                        _gpuFrameLifetime!)
+                    {
+                        TextureDetail = AcDream.App.Rendering.Wb.WorldTextureDetail.FromDisplay(
+                            _runtimeSettings.Startup.Display),
+                    },
                     this).Compose(platformResult, contentEffectsAudio, settingsDevTools);
                 Console.WriteLine(
                     $"loading world view centered on " +
@@ -1714,7 +1727,7 @@ public sealed class GameWindow :
             _input,
             _graphics));
     private void OnFocusChanged(bool focused)
-        => _cameraPointerInput?.HandleFocusChanged(focused);
+        => _windowFocus.HandleFocusChanged(focused);
 
     public void Dispose()
     {

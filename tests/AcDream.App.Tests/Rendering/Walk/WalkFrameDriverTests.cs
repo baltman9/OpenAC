@@ -120,6 +120,68 @@ public sealed partial class WalkFrameDriverTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Replay_RecordsConsecutiveLandscapeCellsAsOneRangeUnlessSomethingDrawsBetween(
+        bool firstCellHasEmitters)
+    {
+        using var fx = new DispatcherFixture();
+        var log = new List<string>();
+        const ulong gfxObj = 0x0200_0031UL;
+        const uint firstCellId = 0xF4180009u;
+        const uint secondCellId = 0xF418000Au;
+        InjectRenderData(fx.Manager, gfxObj, MakeFlatMesh(
+            MakeBatch(0x08100031u, TranslucencyKind.Opaque, 0, 0, 3, 1)));
+
+        var worldData = new FakeWorldData();
+        worldData.OutdoorStaticsByCell[firstCellId] = new WalkFrameStaticRecords(
+            new[] { MakeRecord(0x4F418071u, 0, new Vector3(1, 0, 0), [new MeshRef((uint)gfxObj, Matrix4x4.Identity)]) },
+            0xF418u);
+        worldData.OutdoorStaticsByCell[secondCellId] = new WalkFrameStaticRecords(
+            new[] { MakeRecord(0x4F418072u, 0, new Vector3(2, 0, 0), [new MeshRef((uint)gfxObj, Matrix4x4.Identity)]) },
+            0xF418u);
+
+        var ctx = new TestContext();
+        var leaf = new RecordingLeafRenderer(log);
+        leaf.CellsWithoutEmitters.Add(secondCellId);
+        if (!firstCellHasEmitters)
+            leaf.CellsWithoutEmitters.Add(firstCellId);
+        var driver = new WalkFrameDriver(fx.Dispatcher, leaf, worldData, new RecordingTrace(log));
+        IWalkEventSink sink = driver;
+
+        using DrawScope draw = fx.BeginDraw();
+        driver.BeginFrame(ctx, Matrix4x4.Identity, Vector3.Zero);
+        sink.Emit(WalkEvent.Landscape(activeViewCount: 1));
+        var landscapeViews = new WalkPortalView();
+        WalkCopyView.AppendFullViewportQuad(
+            landscapeViews, ctx.Rays, ctx.WorldViewpoint, ctx.ViewportWidth, ctx.ViewportHeight);
+        sink.OnLandscapeViews(landscapeViews);
+        sink.OnLandscapeCellTurn(firstCellId);
+        sink.OnLandscapeCellTurn(secondCellId);
+        driver.EndFrame();
+        driver.Replay(draw.Frame, draw.Pass);
+
+        // Every retail flush point is still reported, in order.
+        Assert.Equal(2, log.Count(entry => entry == "FLUSH:1:OutdoorStatic"));
+
+        List<GpuRecordedMultiDrawIndirect> mdiCalls =
+            [.. fx.Device.Calls.OfType<GpuRecordedMultiDrawIndirect>()];
+        if (firstCellHasEmitters)
+        {
+            // The first cell's particle turn prepares an immediate mesh, so
+            // the first cell's range must be recorded before it.
+            Assert.Equal(2, mdiCalls.Count);
+            Assert.All(mdiCalls, call => Assert.Equal(1u, call.DrawCount));
+        }
+        else
+        {
+            // Nothing records between the two marks: one range, both draws.
+            Assert.Single(mdiCalls);
+            Assert.Equal(2u, mdiCalls[0].DrawCount);
+        }
+    }
+
     private sealed class RecordingTrace(List<string> log) : IWalkFrameDriverTrace
     {
         public void OnFlush(int commandCount, IReadOnlyList<WalkDrawStage> stages) =>

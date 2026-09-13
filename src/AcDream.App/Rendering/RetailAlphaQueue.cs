@@ -130,12 +130,17 @@ internal sealed class RetailAlphaQueue : IWorldSceneAlphaFrame
         _sources.Add(source);
     }
 
+    /// <summary>Whether <see cref="Flush"/> at this threshold would drain
+    /// (and so record draws) given the entries queued right now.</summary>
+    public bool WouldFlush(float threshold) =>
+        _clip.Count >= threshold * ListCapacity || _alpha.Count >= threshold * ListCapacity;
+
     public void Flush(RetailAlphaFlushSite site, float threshold)
     {
         if (!IsCollecting)
             throw new InvalidOperationException("Retail alpha flush requires an active frame.");
 
-        if (_clip.Count < threshold * ListCapacity && _alpha.Count < threshold * ListCapacity)
+        if (!WouldFlush(threshold))
             return;
 
         _drainObserver?.Invoke(site);

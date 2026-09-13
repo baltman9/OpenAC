@@ -7,6 +7,7 @@ using AcDream.App.UI;
 using AcDream.Core.Audio;
 using AcDream.Plugin.Abstractions.Rendering;
 using AcDream.UI.Abstractions.Panels.Settings;
+using AcDream.UI.Abstractions.Settings;
 
 namespace AcDream.App.UI.Layout;
 
@@ -1031,15 +1032,131 @@ public static class ConfigOptionsPageController
                 + "without this a distant building can vanish while the fences "
                 + "and stairs around it stay.");
 
+        // The graphics profile: acdream's one-choice quality setting (the
+        // streaming window, anti-aliasing, texture filtering). Not a retail
+        // option, so it is built with explicit text like the row above. The
+        // window and filtering apply live; anti-aliasing is sized at startup.
+        BuildExplicitStringMenuRow(
+            listBox,
+            "Graphics Profile",
+            GraphicsProfileChoices,
+            page,
+            read: () => bindings.LoadDisplay().Quality.ToString(),
+            apply: value =>
+            {
+                if (!Enum.TryParse(value, ignoreCase: true, out QualityPreset preset))
+                    return;
+                bindings.SaveDisplay(bindings.LoadDisplay() with { Quality = preset });
+            },
+            defaultValue: DisplaySettings.Default.Quality.ToString(),
+            resolveSprite,
+            datFont,
+            debugFont);
+
+        // Potato Mode: one switch that turns every quality choice down to its
+        // cheapest value for running many clients on one machine. It is an
+        // overlay (DisplaySettings.Effective) over the choices above and below,
+        // which stay stored as they are and come back when it is turned off.
+        BuildExplicitToggleRow(
+            listBox,
+            "Potato Mode",
+            DisplaySettings.Default.PotatoMode,
+            page,
+            read: () => bindings.LoadDisplay().PotatoMode,
+            apply: value =>
+            {
+                bindings.SaveDisplay(bindings.LoadDisplay() with { PotatoMode = value });
+                return true;
+            },
+            isCurrent: static () => true,
+            tooltip:
+                "Everything at its cheapest, for running many clients on one "
+                + "machine: full detail only in the nearest landblocks, landscape "
+                + "draw distance 3, no anti-aliasing, plain texture filtering, no "
+                + "building detail textures, the plain render pack, retail "
+                + "particle range, and compact video-memory pools. Your other "
+                + "settings are kept and come back when this is off. "
+                + "Texture detail, anti-aliasing and the memory pools change at "
+                + "the next start.");
+
+        // UI Only: the world is not drawn and the streaming window shrinks to
+        // the landblocks the simulation needs; panels, chat, radar and plugins
+        // keep working. For the clients of an army that nobody is looking at.
+        BuildExplicitToggleRow(
+            listBox,
+            "UI Only",
+            DisplaySettings.Default.UiOnly,
+            page,
+            read: () => bindings.LoadDisplay().UiOnly,
+            apply: value =>
+            {
+                bindings.SaveDisplay(bindings.LoadDisplay() with { UiOnly = value });
+                return true;
+            },
+            isCurrent: static () => true,
+            tooltip:
+                "Stop drawing the world and keep only the landblocks around you "
+                + "loaded; the panels, chat, radar and plugins keep working. For "
+                + "a client nobody is watching. Off again brings the world back "
+                + "as it streams in.");
+
+        BuildExplicitToggleRow(
+            listBox,
+            "UI Only in Background",
+            DisplaySettings.Default.UiOnlyWhenUnfocused,
+            page,
+            read: () => bindings.LoadDisplay().UiOnlyWhenUnfocused,
+            apply: value =>
+            {
+                bindings.SaveDisplay(bindings.LoadDisplay() with { UiOnlyWhenUnfocused = value });
+                return true;
+            },
+            isCurrent: static () => true,
+            tooltip:
+                "Switch to UI Only whenever this window is not the active one, "
+                + "and back when it is: the client you are looking at draws the "
+                + "world, the others do not.");
+
         display = bindings.LoadDisplay();
     }
 
+    private static readonly ExplicitMenuChoice[] GraphicsProfileChoices =
+    [
+        new(
+            nameof(QualityPreset.Low),
+            "Low",
+            true,
+            "Full detail within 2 landblocks, no anti-aliasing, 4x texture "
+            + "filtering. Landscape range is the draw distance below."),
+        new(
+            nameof(QualityPreset.Medium),
+            "Medium",
+            true,
+            "Full detail within 3 landblocks, 2x anti-aliasing, 8x texture "
+            + "filtering. Landscape range is the draw distance below."),
+        new(
+            nameof(QualityPreset.High),
+            "High",
+            true,
+            "Full detail within 4 landblocks, 4x anti-aliasing, 16x texture "
+            + "filtering. Landscape range is the draw distance below."),
+        new(
+            nameof(QualityPreset.Ultra),
+            "Ultra",
+            true,
+            "Full detail within 5 landblocks, 4x anti-aliasing, 16x texture "
+            + "filtering. Landscape range is the draw distance below."),
+    ];
+
     // ── Section 4: Rendering Quality Options ────────────────────────────
 
+    // Stored value 0 is the highest detail (source size) and 4 the lowest (an
+    // eighth), so the labels run from Very High down to Very Low. The choice
+    // applies when the world is next started.
     private static readonly string[] TextureDetailChoices =
     {
-        "ID_Graphics_Value_VeryLow", "ID_Graphics_Value_Low", "ID_Graphics_Value_Medium",
-        "ID_Graphics_Value_High", "ID_Graphics_Value_VeryHigh",
+        "ID_Graphics_Value_VeryHigh", "ID_Graphics_Value_High", "ID_Graphics_Value_Medium",
+        "ID_Graphics_Value_Low", "ID_Graphics_Value_VeryLow",
     };
 
     private static readonly string[] TextureFilteringChoices =
@@ -1075,16 +1192,16 @@ public static class ConfigOptionsPageController
             listBox, "ID_Graphics_LandscapeTextureDetail", TextureDetailChoices, page, resolveString,
             read: () => bindings.LoadDisplay().LandscapeTextureDetail,
             apply: value => bindings.SaveDisplay(bindings.LoadDisplay() with { LandscapeTextureDetail = value }),
-            defaultValue: 2,
-            storeOnly: true,
+            defaultValue: DisplaySettings.Default.LandscapeTextureDetail,
+            storeOnly: false,
             resolveSprite, datFont, debugFont);
 
         BuildMenuRow(
             listBox, "ID_Graphics_EnvironmentTextureDetail", TextureDetailChoices, page, resolveString,
             read: () => bindings.LoadDisplay().EnvironmentTextureDetail,
             apply: value => bindings.SaveDisplay(bindings.LoadDisplay() with { EnvironmentTextureDetail = value }),
-            defaultValue: 1,
-            storeOnly: true,
+            defaultValue: DisplaySettings.Default.EnvironmentTextureDetail,
+            storeOnly: false,
             resolveSprite, datFont, debugFont);
 
         BuildMenuRow(

@@ -242,10 +242,14 @@ public sealed class TerrainAtlas : IDisposable
             decodedMaxH);
     }
 
-    internal static TerrainAtlas BuildBackendNeutral(IGpuDevice device, IDatReaderWriter dats)
+    internal static TerrainAtlas BuildBackendNeutral(
+        IGpuDevice device,
+        IDatReaderWriter dats,
+        Wb.WorldTextureDetail? textureDetail = null)
     {
         ArgumentNullException.ThrowIfNull(device);
         ArgumentNullException.ThrowIfNull(dats);
+        textureDetail ??= Wb.WorldTextureDetail.Full;
 
         var region = dats.Get<Region>(0x13000000u)
             ?? throw new InvalidOperationException("Region dat id 0x13000000 missing");
@@ -268,8 +272,11 @@ public sealed class TerrainAtlas : IDisposable
             TerrainLayerDecode decode = DecodeTerrainLayers(dats, terrainDesc);
             decodedByType = decode.DecodedByType;
             tilingByType = decode.TilingByType;
-            maxW = decode.MaxWidth;
-            maxH = decode.MaxHeight;
+            // The landscape texture-detail choice: every layer is resampled to
+            // the reduced size of the largest source, so one array still fits
+            // them all.
+            maxW = textureDetail.LandscapeSize(decode.MaxWidth);
+            maxH = textureDetail.LandscapeSize(decode.MaxHeight);
         }
 
         AlphaLayerDecode alpha = texMerge is null
@@ -302,7 +309,7 @@ public sealed class TerrainAtlas : IDisposable
             int layerIdx = 0;
             foreach (var kvp in decodedByType)
             {
-                byte[] buffer = ResizeRgba8Nearest(kvp.Value, maxW, maxH);
+                byte[] buffer = ResampleRgba8(kvp.Value, maxW, maxH);
                 terrainTexture.Upload(0, layerIdx, buffer);
                 map[kvp.Key] = (uint)layerIdx;
                 layerIdx++;
@@ -361,7 +368,8 @@ public sealed class TerrainAtlas : IDisposable
             }
 
             Console.WriteLine(
-                $"TerrainAtlas: {layerCount} terrain layers at {maxW}x{maxH} ({mipLevels} mip levels)");
+                $"TerrainAtlas: {layerCount} terrain layers at {maxW}x{maxH} ({mipLevels} mip levels, "
+                + $"landscape detail {textureDetail.Landscape})");
             Console.WriteLine(
                 $"AlphaAtlas: {alphaLayerCount} layers at {alphaW}x{alphaH}  "
                 + $"(corners={alpha.CornerLayers.Count}, sides={alpha.SideLayers.Count}, "
@@ -505,10 +513,12 @@ public sealed class TerrainAtlas : IDisposable
         if (ReferenceEquals(rhi.TerrainSampler, sampler) && rhi.TerrainSlot.IsAssigned)
             return;
 
-        if (rhi.TerrainSlot.IsAssigned)
-            rhi.Device.ReleaseTextureSlot(rhi.TerrainSlot);
+        // Every built terrain tile carries this slot's index in its instance
+        // data, so the slot is rewritten in place rather than released: a
+        // released index is scrubbed and reused, and the tiles would sample
+        // whatever texture took it next.
         rhi.TerrainSampler = sampler;
-        rhi.TerrainSlot = rhi.Device.RegisterTexture(rhi.Terrain, sampler);
+        rhi.TerrainSlot = rhi.Device.ReplaceTextureSlot(rhi.TerrainSlot, rhi.Terrain, sampler);
     }
 
     private static bool TryDecodeAlphaMap(IDatReaderWriter dats, uint surfaceTextureId, out DecodedTexture decoded)
@@ -533,6 +543,16 @@ public sealed class TerrainAtlas : IDisposable
 
         decoded = d;
         return true;
+    }
+
+    /// <summary>Box-averages a layer that shrinks; nearest-neighbour for one that grows or matches.</summary>
+    private static byte[] ResampleRgba8(DecodedTexture src, int dstW, int dstH)
+    {
+        bool growsOnASide = dstW > src.Width || dstH > src.Height;
+        bool shrinksOnASide = dstW < src.Width || dstH < src.Height;
+        if (!growsOnASide && shrinksOnASide)
+            return TexturePixels.DownsampleBox(src.Rgba8, src.Width, src.Height, 4, dstW, dstH);
+        return ResizeRgba8Nearest(src, dstW, dstH);
     }
 
     private static byte[] ResizeRgba8Nearest(DecodedTexture src, int dstW, int dstH)

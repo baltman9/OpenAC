@@ -324,6 +324,9 @@ internal sealed class CompositeTextureArrayCache : IDisposable
     internal int OwnerCount => _owners.OwnerCount;
     internal int CachedEntryCount => _entries.Count;
     internal int UnownedEntryCount => _unowned.Count;
+
+    /// <summary>While false, unowned composites are evicted at the per-frame pace regardless of the budget.</summary>
+    internal void SetUnownedContentRetained(bool retained) => _unowned.RetainUnowned = retained;
     internal long UnownedBytes => _unowned.ResidentBytes;
     internal int AtlasCount => _atlases.Count;
     internal long AllocatedBytes => _allocatedBytes;

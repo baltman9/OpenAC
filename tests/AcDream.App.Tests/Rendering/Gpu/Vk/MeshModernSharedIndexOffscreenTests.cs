@@ -474,7 +474,10 @@ public sealed unsafe partial class MeshModernSharedIndexOffscreenTests
                     backbuffer: null,
                     shaderSpirvDirectory: shaderDirectory,
                     pipelineCacheDirectory: null,
-                    ringCapacityBytesPerSlot: 2 * 1024 * 1024,
+                    memoryProfile: GpuMemoryProfile.Default with
+                    {
+                        RingCapacityBytesPerSlot = 2 * 1024 * 1024,
+                    },
                     framesInFlight: 1);
                 return new HeadlessVulkanHost(
                     vk,

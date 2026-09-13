@@ -47,6 +47,154 @@ public sealed partial class RuntimeSettingsControllerTests
     }
 
     [Fact]
+    public void UiOnly_ShrinksTheStreamingWindowToTheNeighboursOnly_AndOffRestoresIt()
+    {
+        QualitySettings ultra = QualitySettings.From(QualityPreset.Ultra);
+
+        QualitySettings uiOnly = RuntimeSettingsController.ApplyUiOnly(ultra, uiOnly: true);
+        Assert.Equal(1, uiOnly.NearRadius);
+        Assert.Equal(1, uiOnly.FarRadius);
+        Assert.Equal(ultra.MsaaSamples, uiOnly.MsaaSamples);
+        Assert.Equal(ultra, RuntimeSettingsController.ApplyUiOnly(ultra, uiOnly: false));
+
+        // Potato's near 1 is already the floor; far still drops from 3 to 1.
+        QualitySettings potato = RuntimeSettingsController.ApplyUiOnly(
+            QualitySettings.From(QualityPreset.Potato), uiOnly: true);
+        Assert.Equal(1, potato.NearRadius);
+        Assert.Equal(1, potato.FarRadius);
+    }
+
+    [Fact]
+    public void UiOnlySwitch_ReappliesTheWindowLive_ThroughTheRuntimeTargets()
+    {
+        var storage = new FakeStorage();
+        var events = new List<string>();
+        var controller = new RuntimeSettingsController(storage, log: _ => { });
+        controller.BindRuntimeTargets(new FakeRuntimeTargets(events) { RecordRetention = true });
+
+        Assert.Equal("target-retain", events[^1]); // binding applies the current state
+
+        controller.SaveDisplay(controller.Display with { UiOnly = true });
+        Assert.Equal(1, controller.ResolvedQuality.FarRadius);
+        Assert.Contains("target-quality", events);
+        Assert.Equal("target-release", events[^1]);
+
+        controller.SaveDisplay(controller.Display with { UiOnly = false });
+        Assert.Equal("target-retain", events[^1]);
+        Assert.Equal(
+            RuntimeSettingsController.ApplyLandscapeDrawDistance(
+                QualitySettings.From(DisplaySettings.Default.Quality),
+                DisplaySettings.Default.LandscapeDrawDistance).FarRadius,
+            controller.ResolvedQuality.FarRadius);
+    }
+
+    [Fact]
+    public void BackgroundUiOnly_FollowsWindowFocus_OnlyWhileTheOptionIsOn()
+    {
+        var storage = new FakeStorage();
+        var events = new List<string>();
+        var controller = new RuntimeSettingsController(storage, log: _ => { });
+        controller.BindRuntimeTargets(new FakeRuntimeTargets(events) { RecordRetention = true });
+
+        // Option off: focus changes nothing.
+        controller.SetWindowFocused(false);
+        Assert.False(controller.EffectiveDisplay.UiOnly);
+        Assert.DoesNotContain("target-release", events);
+        controller.SetWindowFocused(true);
+
+        controller.SaveDisplay(controller.Display with { UiOnlyWhenUnfocused = true });
+        Assert.False(controller.EffectiveDisplay.UiOnly);
+
+        controller.SetWindowFocused(false);
+        Assert.True(controller.EffectiveDisplay.UiOnly);
+        Assert.False(controller.Display.UiOnly); // stored switch untouched
+        Assert.Equal(1, controller.ResolvedQuality.FarRadius);
+        Assert.Equal("target-release", events[^1]);
+
+        controller.SetWindowFocused(true);
+        Assert.False(controller.EffectiveDisplay.UiOnly);
+        Assert.Equal("target-retain", events[^1]);
+
+        // A stored UI Only stays on regardless of focus.
+        controller.SaveDisplay(controller.Display with { UiOnly = true });
+        controller.SetWindowFocused(false);
+        controller.SetWindowFocused(true);
+        Assert.True(controller.EffectiveDisplay.UiOnly);
+    }
+
+    [Fact]
+    public void PotatoMode_RunsTheCheapestSettings_WhileTheStoredChoicesStayTheUsers()
+    {
+        var pack = new RenderPackSelectionSettings("pack.alpha", "1.0.0", "high");
+        var storage = new FakeStorage
+        {
+            DisplayValue = DisplaySettings.Default with
+            {
+                PotatoMode = true,
+                Quality = QualityPreset.Ultra,
+                LandscapeDrawDistance = 25,
+                ParticleRange = ParticleRange.Extended,
+                RenderPack = pack,
+            },
+        };
+        var resolvedFor = new List<QualityPreset>();
+
+        var controller = new RuntimeSettingsController(
+            storage,
+            preset =>
+            {
+                resolvedFor.Add(preset);
+                return RuntimeSettingsController.ApplyLandscapeDrawDistance(
+                    QualitySettings.From(preset),
+                    storage.DisplayValue.Effective.LandscapeDrawDistance);
+            },
+            log: _ => { });
+
+        Assert.Equal([QualityPreset.Potato], resolvedFor);
+        Assert.Equal(1, controller.ResolvedQuality.NearRadius);
+        Assert.Equal(3, controller.ResolvedQuality.FarRadius);
+        Assert.Equal(0, controller.ResolvedQuality.MsaaSamples);
+        Assert.Equal(QualityPreset.Potato, controller.Startup.Display.Quality);
+        Assert.True(controller.DisplayPreview.RenderPack.IsRetail);
+        Assert.Equal(ParticleRange.Retail, controller.DisplayPreview.ParticleRange);
+        Assert.False(controller.DisplayPreview.BuildingDetailTextures);
+        // The stored settings are untouched: the panel shows and edits these.
+        Assert.Same(storage.DisplayValue, controller.Display);
+        Assert.Equal(QualityPreset.Ultra, controller.Display.Quality);
+        Assert.Same(pack, controller.Display.RenderPack);
+    }
+
+    [Fact]
+    public void TurningPotatoModeOff_PublishesTheStoredChoicesAgain()
+    {
+        var pack = new RenderPackSelectionSettings("pack.alpha", "1.0.0", "high");
+        var storage = new FakeStorage
+        {
+            DisplayValue = DisplaySettings.Default with
+            {
+                PotatoMode = true,
+                Quality = QualityPreset.Ultra,
+                RenderPack = pack,
+            },
+        };
+        var events = new List<string>();
+        var controller = new RuntimeSettingsController(
+            storage,
+            static preset => QualitySettings.From(preset),
+            static _ => { });
+        controller.BindRuntimeTargets(new FakeRuntimeTargets(events));
+        var published = new List<DisplaySettings>();
+        controller.DisplayChanged += published.Add;
+
+        controller.SaveDisplay(controller.Display with { PotatoMode = false });
+
+        Assert.Equal(QualitySettings.From(QualityPreset.Ultra), controller.ResolvedQuality);
+        Assert.Same(pack, Assert.Single(published).RenderPack);
+        Assert.Same(controller.Display, controller.EffectiveDisplay);
+        Assert.Contains("target-quality", events);
+    }
+
+    [Fact]
     public void ConstructionLoadsEachBagOnceAndPublishesOneStartupSnapshot()
     {
         var storage = new FakeStorage
@@ -1237,6 +1385,15 @@ public sealed partial class RuntimeSettingsControllerTests
             if (ThrowOnDisplay)
                 throw new InvalidOperationException("display target failed");
             return DisplayResult ?? new RuntimeDisplayApplyResult(display.Fullscreen);
+        }
+
+        /// <summary>Only the retention tests care about this event; the exact-sequence tests keep their lists.</summary>
+        public bool RecordRetention { get; init; }
+
+        public void SetUnownedContentRetained(bool retained)
+        {
+            if (RecordRetention)
+                events.Add(retained ? "target-retain" : "target-release");
         }
 
         public void ApplyQuality(QualitySettings quality)
