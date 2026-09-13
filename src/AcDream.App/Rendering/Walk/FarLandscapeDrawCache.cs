@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using AcDream.App.Rendering.Scene;
 using AcDream.App.Rendering.Wb;
 
@@ -18,6 +19,9 @@ internal sealed class FarLandscapeDrawCache(
         /// <summary>The scene's write revision of <see cref="Record"/> when it
         /// was classified; 0 when the world does not report revisions.</summary>
         public ulong Revision;
+        /// <summary>Index of <see cref="CellId"/> within the owning entry's cells.</summary>
+        public int CellIndex;
+        public WalkDrawStage Stage;
         public readonly List<WbDrawDispatcher.WalkClassifiedBatch> Batches = new();
         public readonly List<WbDrawDispatcher.WalkCachedPart> Parts = new();
         public bool[] Visible = [];
@@ -33,8 +37,13 @@ internal sealed class FarLandscapeDrawCache(
         public readonly List<Entity> Entities = new();
         public readonly List<BatchRef> Opaque = new();
         public readonly List<BatchRef> Alpha = new();
+        /// <summary><see cref="Alpha"/> partitioned by cell, in the same
+        /// relative order; cell c owns [AlphaCellEnds[c], AlphaCellEnds[c + 1]).</summary>
+        public readonly List<BatchRef> AlphaByCell = new();
+        public readonly int[] AlphaCellEnds = new int[cells.Length + 1];
         public readonly Dictionary<GroupKey, List<BatchRef>> Groups = new();
         public readonly List<List<BatchRef>> GroupLists = new();
+        public readonly List<int> GroupOrder = new();
         public long MeshVersion = -1;
         public bool Retry;
     }
@@ -144,11 +153,10 @@ internal sealed class FarLandscapeDrawCache(
             Entity entity = item.Entity;
             if (!entity.Visible[item.PartIndex])
                 continue;
-            WbDrawDispatcher.WalkClassifiedBatch batch = entity.Batches[item.BatchIndex];
-            WalkDrawStage stage = IsDynamic(entity.Record)
-                ? WalkDrawStage.Dynamic : WalkDrawStage.OutdoorStatic;
+            ref readonly WbDrawDispatcher.WalkClassifiedBatch batch =
+                ref CollectionsMarshal.AsSpan(entity.Batches)[item.BatchIndex];
             stream.Append(new OrderedDrawCommand(
-                batch.Key, batch.Transform, stage, firstCell, batch.ClipSlot,
+                batch.Key, batch.Transform, entity.Stage, firstCell, batch.ClipSlot,
                 entity.Lights, entity.Indoor, batch.Alpha,
                 entity.Selection, batch.DetailCategory, AllowInstanceMerge: true));
         }
@@ -156,10 +164,12 @@ internal sealed class FarLandscapeDrawCache(
         for (int cellIndex = 0; cellIndex < entry.Cells.Length; cellIndex++)
         {
             _alphaScratch.Clear();
-            foreach (BatchRef item in entry.Alpha)
+            int cellEnd = entry.AlphaCellEnds[cellIndex + 1];
+            for (int k = entry.AlphaCellEnds[cellIndex]; k < cellEnd; k++)
             {
+                BatchRef item = entry.AlphaByCell[k];
                 Entity entity = item.Entity;
-                if (entity.CellId != entry.Cells[cellIndex] || !entity.Visible[item.PartIndex])
+                if (!entity.Visible[item.PartIndex])
                     continue;
                 WbDrawDispatcher.WalkClassifiedBatch batch = entity.Batches[item.BatchIndex];
                 _alphaScratch.Add(batch with
@@ -212,6 +222,8 @@ internal sealed class FarLandscapeDrawCache(
                 var entity = new Entity(record, cellId)
                 {
                     Revision = ReadRevision(record.Source.LocalEntityId),
+                    CellIndex = i,
+                    Stage = StageFor(in record),
                 };
                 retry |= ClassifyEntity(entity, records.TupleLandblockId);
                 entry.Entities.Add(entity);
@@ -266,6 +278,7 @@ internal sealed class FarLandscapeDrawCache(
             entry.Retry = true;
             changed = true;
             entity.Record = current;
+            entity.Stage = StageFor(in current);
             retry |= ClassifyEntity(entity, _context.TupleLandblockId);
         }
         if (changed)
@@ -323,9 +336,80 @@ internal sealed class FarLandscapeDrawCache(
                 }
             }
         }
+        // Emit the groups so consecutive draws share a cull mode, detail
+        // category, and translucency. The ordered stream starts a new merge
+        // run whenever one of those changes, and every run costs a pipeline
+        // bind plus an indirect submission. The groups are opaque and
+        // depth-tested, so their relative order does not change the image.
+        entry.GroupOrder.Clear();
         for (int i = 0; i < groupCount; i++)
-            entry.Opaque.AddRange(entry.GroupLists[i]);
+            entry.GroupOrder.Add(i);
+        SortGroupOrder(entry);
+        foreach (int groupIndex in entry.GroupOrder)
+            entry.Opaque.AddRange(entry.GroupLists[groupIndex]);
+
+        // Partition the alpha batches by cell once, keeping their relative
+        // order, so each cell's per-frame sort reads only its own slice.
+        entry.AlphaByCell.Clear();
+        entry.AlphaCellEnds[0] = 0;
+        for (int cellIndex = 0; cellIndex < entry.Cells.Length; cellIndex++)
+        {
+            foreach (BatchRef item in entry.Alpha)
+            {
+                if (item.Entity.CellIndex == cellIndex)
+                    entry.AlphaByCell.Add(item);
+            }
+            entry.AlphaCellEnds[cellIndex + 1] = entry.AlphaByCell.Count;
+        }
     }
+
+    // Insertion sort over the group indices: the counts are small, the
+    // order is a total order (index breaks ties), and unlike the span sort
+    // it never boxes the comparer, which keeps regroup frames allocation-free.
+    private static void SortGroupOrder(Entry entry)
+    {
+        var comparer = new GroupOrderComparer(entry);
+        Span<int> order = CollectionsMarshal.AsSpan(entry.GroupOrder);
+        for (int i = 1; i < order.Length; i++)
+        {
+            int value = order[i];
+            int j = i - 1;
+            while (j >= 0 && comparer.Compare(order[j], value) > 0)
+            {
+                order[j + 1] = order[j];
+                j--;
+            }
+            order[j + 1] = value;
+        }
+    }
+
+    private readonly struct GroupOrderComparer(Entry entry)
+    {
+        public int Compare(int left, int right)
+        {
+            if (left == right)
+                return 0;
+            ref readonly WbDrawDispatcher.WalkClassifiedBatch a = ref First(left);
+            ref readonly WbDrawDispatcher.WalkClassifiedBatch b = ref First(right);
+            int order = ((int)a.Key.CullMode).CompareTo((int)b.Key.CullMode);
+            if (order != 0)
+                return order;
+            order = a.DetailCategory.CompareTo(b.DetailCategory);
+            if (order != 0)
+                return order;
+            order = ((int)a.Key.Translucency).CompareTo((int)b.Key.Translucency);
+            return order != 0 ? order : left.CompareTo(right);
+        }
+
+        private ref readonly WbDrawDispatcher.WalkClassifiedBatch First(int groupIndex)
+        {
+            BatchRef item = entry.GroupLists[groupIndex][0];
+            return ref CollectionsMarshal.AsSpan(item.Entity.Batches)[item.BatchIndex];
+        }
+    }
+
+    private static WalkDrawStage StageFor(in RenderProjectionRecord record) =>
+        IsDynamic(in record) ? WalkDrawStage.Dynamic : WalkDrawStage.OutdoorStatic;
 
     private static bool IsDynamic(in RenderProjectionRecord record) =>
         record.ProjectionClass is RenderProjectionClass.LiveDynamicRoot

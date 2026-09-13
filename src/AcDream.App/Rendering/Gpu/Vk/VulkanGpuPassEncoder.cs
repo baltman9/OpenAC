@@ -22,6 +22,23 @@ internal sealed unsafe class VulkanGpuPassEncoder : IGpuPassEncoder
     internal bool HasDepthAttachment => _hasDepthAttachment;
 
     private VulkanGpuPipeline? _pipeline;
+
+    // Vulkan keeps dynamic state and buffer bindings in the command buffer
+    // across pipeline binds, so the encoder tracks what it has recorded and
+    // skips a command that would leave that state unchanged. Every field
+    // starts unknown; the first bind of each kind always records.
+    private GpuCullMode? _cullMode;
+    private GpuFrontFace? _frontFace;
+    private bool? _depthWrite;
+    private GpuStencilState? _stencil;
+    private Silk.NET.Vulkan.Buffer _vertexBuffer;
+    private uint _vertexBinding;
+    private ulong _vertexOffset;
+    private bool _vertexBound;
+    private Silk.NET.Vulkan.Buffer _indexBuffer;
+    private uint _indexOffset;
+    private GpuIndexType _indexType;
+    private bool _indexBound;
     private VulkanDrawBindingState _drawBindingState;
     private bool _closed;
 
@@ -77,13 +94,23 @@ internal sealed unsafe class VulkanGpuPassEncoder : IGpuPassEncoder
                 $"Pipeline '{vulkanPipeline.Description.Name}' view mask does not match pass '{Pass.Name}'.");
         }
 
-        _pipeline = vulkanPipeline;
-        _device.Api.CmdBindPipeline(
-            _commands,
-            PipelineBindPoint.Graphics,
-            vulkanPipeline.HandleFor(_hasDepthAttachment, _colorFormat));
+        if (!ReferenceEquals(_pipeline, vulkanPipeline))
+        {
+            _pipeline = vulkanPipeline;
+            _device.Api.CmdBindPipeline(
+                _commands,
+                PipelineBindPoint.Graphics,
+                vulkanPipeline.HandleFor(_hasDepthAttachment, _colorFormat));
+        }
 
-        _device.CmdBindPipelineDefaults(_commands, vulkanPipeline.Description);
+        // A bind always re-establishes the pipeline's dynamic-state defaults;
+        // only the values that differ from the recorded state are re-recorded.
+        GpuPipelineDescription description = vulkanPipeline.Description;
+        ApplyCullMode(description.Cull);
+        ApplyFrontFace(description.FrontFace);
+        ApplyDepthWrite(description.Depth.Write);
+        if (description.StencilTest)
+            ApplyStencil(description.Stencil);
     }
 
     public void BindStorageBuffer(uint binding, IGpuBuffer buffer, uint offsetBytes, uint sizeBytes)
@@ -130,15 +157,40 @@ internal sealed unsafe class VulkanGpuPassEncoder : IGpuPassEncoder
         ThrowIfClosed();
         Silk.NET.Vulkan.Buffer handle = RequireBuffer(buffer).Handle;
         ulong offset = offsetBytes;
+        if (_vertexBound
+            && _vertexBinding == binding
+            && _vertexBuffer.Handle == handle.Handle
+            && _vertexOffset == offset)
+        {
+            return;
+        }
+
+        _vertexBound = true;
+        _vertexBinding = binding;
+        _vertexBuffer = handle;
+        _vertexOffset = offset;
         _device.Api.CmdBindVertexBuffers(_commands, binding, 1, &handle, &offset);
     }
 
     public void BindIndexBuffer(IGpuBuffer buffer, uint offsetBytes, GpuIndexType indexType)
     {
         ThrowIfClosed();
+        Silk.NET.Vulkan.Buffer handle = RequireBuffer(buffer).Handle;
+        if (_indexBound
+            && _indexBuffer.Handle == handle.Handle
+            && _indexOffset == offsetBytes
+            && _indexType == indexType)
+        {
+            return;
+        }
+
+        _indexBound = true;
+        _indexBuffer = handle;
+        _indexOffset = offsetBytes;
+        _indexType = indexType;
         _device.Api.CmdBindIndexBuffer(
             _commands,
-            RequireBuffer(buffer).Handle,
+            handle,
             offsetBytes,
             VulkanViewportMapping.ToVulkan(indexType));
     }
@@ -175,24 +227,56 @@ internal sealed unsafe class VulkanGpuPassEncoder : IGpuPassEncoder
     public void SetCullMode(GpuCullMode cullMode)
     {
         ThrowIfClosed();
-        _device.Api.CmdSetCullMode(_commands, VulkanViewportMapping.ToVulkan(cullMode));
+        ApplyCullMode(cullMode);
     }
 
     public void SetFrontFace(GpuFrontFace frontFace)
     {
         ThrowIfClosed();
-        _device.Api.CmdSetFrontFace(_commands, VulkanViewportMapping.ToVulkan(frontFace));
+        ApplyFrontFace(frontFace);
     }
 
     public void SetDepthWrite(bool enabled)
     {
         ThrowIfClosed();
-        _device.Api.CmdSetDepthWriteEnable(_commands, enabled);
+        ApplyDepthWrite(enabled);
     }
 
     public void SetStencil(in GpuStencilState stencil)
     {
         ThrowIfClosed();
+        ApplyStencil(stencil);
+    }
+
+    private void ApplyCullMode(GpuCullMode cullMode)
+    {
+        if (_cullMode == cullMode)
+            return;
+        _cullMode = cullMode;
+        _device.Api.CmdSetCullMode(_commands, VulkanViewportMapping.ToVulkan(cullMode));
+    }
+
+    private void ApplyFrontFace(GpuFrontFace frontFace)
+    {
+        if (_frontFace == frontFace)
+            return;
+        _frontFace = frontFace;
+        _device.Api.CmdSetFrontFace(_commands, VulkanViewportMapping.ToVulkan(frontFace));
+    }
+
+    private void ApplyDepthWrite(bool enabled)
+    {
+        if (_depthWrite == enabled)
+            return;
+        _depthWrite = enabled;
+        _device.Api.CmdSetDepthWriteEnable(_commands, enabled);
+    }
+
+    private void ApplyStencil(in GpuStencilState stencil)
+    {
+        if (_stencil == stencil)
+            return;
+        _stencil = stencil;
         const StencilFaceFlags BothFaces = StencilFaceFlags.FaceFrontAndBack;
         _device.Api.CmdSetStencilOp(
             _commands,

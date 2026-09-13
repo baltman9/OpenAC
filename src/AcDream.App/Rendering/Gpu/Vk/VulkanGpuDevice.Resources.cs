@@ -619,28 +619,6 @@ internal sealed unsafe partial class VulkanGpuDevice
         }
     }
 
-    internal void CmdBindPipelineDefaults(CommandBuffer commands, GpuPipelineDescription description)
-    {
-        _vk.CmdSetCullMode(commands, VulkanViewportMapping.ToVulkan(description.Cull));
-        _vk.CmdSetFrontFace(commands, VulkanViewportMapping.ToVulkan(description.FrontFace));
-        _vk.CmdSetDepthWriteEnable(commands, description.Depth.Write);
-        if (!description.StencilTest)
-            return;
-
-        GpuStencilState stencil = description.Stencil;
-        const StencilFaceFlags BothFaces = StencilFaceFlags.FaceFrontAndBack;
-        _vk.CmdSetStencilOp(
-            commands,
-            BothFaces,
-            VulkanViewportMapping.ToVulkan(stencil.Fail),
-            VulkanViewportMapping.ToVulkan(stencil.Pass),
-            VulkanViewportMapping.ToVulkan(stencil.DepthFail),
-            VulkanViewportMapping.ToVulkan(stencil.Compare));
-        _vk.CmdSetStencilCompareMask(commands, BothFaces, stencil.CompareMask);
-        _vk.CmdSetStencilWriteMask(commands, BothFaces, stencil.WriteMask);
-        _vk.CmdSetStencilReference(commands, BothFaces, stencil.Reference);
-    }
-
     internal IGpuPassEncoder BeginPass(VulkanGpuFrame frame, GpuPassDescription description)
     {
         ThrowIfDisposed();

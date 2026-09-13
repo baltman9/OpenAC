@@ -117,6 +117,26 @@ public sealed partial class WalkStaticStreamPopulatorTests
     }
 
     [Fact]
+    public void RetainedCells_EmitGroupsSoConsecutiveDrawsShareACullMode()
+    {
+        using var fx = new DispatcherFixture();
+        InstallRetainedMesh(fx);
+        InjectRenderData(fx.Manager, RetainedMesh + 1, MakeFlatMesh(
+            MakeBatch(RetainedMesh + 1, TranslucencyKind.Opaque, 12, 0, 3, 1, cullMode: DatReaderWriter.Enums.CullMode.None)));
+        var world = new RetainedWorld();
+        world.Set(RetainedRecord(1), RetainedRecord(2, RetainedMesh + 1), RetainedRecord(3));
+        var cache = new FarLandscapeDrawCache(fx.Dispatcher, world);
+
+        var stream = AppendRetainedFrame(fx, cache);
+
+        // CullMode.None sorts before CounterClockwise, so the lone None group
+        // leads instead of splitting the two CounterClockwise entities' run.
+        Assert.Equal(new[] { 12u, 3u, 3u }, stream.Keys.Select(key => key.FirstIndex));
+        Assert.Equal(new[] { 2f, 1f, 3f }, stream.Transforms.Select(transform => transform.M41));
+        Assert.Equal(1, WbDrawDispatcher.BuildOrderedMergeRuns(stream).Count(run => run.CommandCount == 2));
+    }
+
+    [Fact]
     public void RetainedCells_UnchangedRecordRevisionsSkipRecordReadsAndReclassification()
     {
         using var fx = new DispatcherFixture();
