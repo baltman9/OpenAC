@@ -46,7 +46,8 @@ internal sealed class HeadlessPluginHost
         IPluginCommandRegistry? commands = null,
         IPluginStorage? vtankProfiles = null,
         IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
-        Func<string, bool>? submitChatText = null)
+        Func<string, bool>? submitChatText = null,
+        HeadlessItemAutomation? items = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         Log = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -56,6 +57,18 @@ internal sealed class HeadlessPluginHost
         _automation = new RuntimeAutomationSurface();
         _automation.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         _automation.BindSubmit(submitChatText);
+        if (items is not null)
+        {
+            _automation.BindItems(
+                items.TryUse,
+                HeadlessItemAutomation.RefuseApply,
+                items.TryMove,
+                items.TryMerge,
+                HeadlessItemAutomation.RefuseDrop,
+                HeadlessItemAutomation.RefuseGive,
+                HeadlessItemAutomation.RefusePickup,
+                HeadlessItemAutomation.RefuseIdentify);
+        }
         _eventSubscription = runtime.Subscribe(this);
     }
 

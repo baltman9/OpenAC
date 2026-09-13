@@ -539,6 +539,25 @@ public sealed class HeadlessPluginSessionTests
         Assert.True(session.Plugins.Host.Automation.Spells.IsKnown(1u));
     }
 
+    [Fact]
+    public void ItemsAreAvailableOnceTheSessionEntersTheWorld()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+
+        Assert.False(session.Plugins.Host.Automation.Items.IsAvailable);
+
+        _ = session.Start();
+
+        Assert.True(session.Plugins.Host.Automation.Items.IsAvailable);
+    }
+
     private static HeadlessSessionDescriptor Descriptor(
         List<string> plugins,
         string statusPath,

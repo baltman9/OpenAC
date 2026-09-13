@@ -245,6 +245,13 @@ internal sealed class HeadlessSessionHost : IDisposable
             var commands = new DirectGameRuntimeCommandAdapter(
                 runtime,
                 bridge);
+            var items = new HeadlessItemAutomation(
+                runtime,
+                commands,
+                commands.TrySendPutItemInContainer,
+                commands.TrySendStackableSplitToContainer,
+                commands.TrySendStackableMerge,
+                contentLease is { } lease ? lease.MagicCatalog.IsComponentPack : null);
             var statusWriter = new SessionStatusWriter(descriptor.StatusFile);
             var pluginCommands = new AcDream.Core.Plugins.PluginCommandRegistry(
                 (verb, error) => diagnostics.Failure(
@@ -285,7 +292,8 @@ internal sealed class HeadlessSessionHost : IDisposable
                 pluginCommands,
                 vtankProfiles,
                 descriptor.PluginSettings,
-                SubmitChatText);
+                SubmitChatText,
+                items);
             var liveSession = new LiveSessionHost(
                 runtime.Session,
                 new LiveSessionHostBindings(
