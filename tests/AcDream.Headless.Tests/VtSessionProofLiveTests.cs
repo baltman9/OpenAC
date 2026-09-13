@@ -37,6 +37,13 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
     private const string ArenaTeleport =
         "@teleloc A9B40029 133.603592 17.391838 96.330009 1 0 0 0";
 
+    /// <summary>
+    /// How many of the character's own corpses one sweep will remove. High
+    /// enough to clear a backlog in one run, bounded so a corpse that refuses
+    /// to go cannot spin the run.
+    /// </summary>
+    private const int MaximumSweptCorpses = 30;
+
     private const double ArenaEastWest = 33.8066816d;
     private const double ArenaNorthSouth = 42.1224660d;
 
@@ -106,6 +113,12 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
         Assert.NotEmpty(pass!);
 
         const string character = "+Acdream";
+        // The server spells a privileged character's name with a marker
+        // and looks one up with or without it, but once the character is
+        // made to appear as an ordinary player the marked spelling stops
+        // resolving. The plain spelling resolves either way, so that is
+        // the one the run names in a command.
+        const string plainCharacter = "Acdream";
         var ledger = new VtProofLedger();
 
         using var temporary = new TemporaryDirectory();
@@ -259,6 +272,14 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                     Indent(Tail([.. chat.Where(IsPassSpam)], 6)),
                     "last 30 other chat lines:",
                     Indent(Tail([.. chat.Where(line => !IsPassSpam(line))], 30)),
+                    "last 40 loot and corpse lines:",
+                    Indent(Tail(
+                        [.. chat.Where(line =>
+                            !IsPassSpam(line)
+                            && (line.Contains("Loot", StringComparison.Ordinal)
+                                || line.Contains("Corpse", StringComparison.Ordinal)
+                                || line.Contains("full", StringComparison.Ordinal)))],
+                        40)),
                     "last 30 other plugin messages:",
                     Indent(Tail(
                         [.. pluginMessages.Where(line => !IsPassSpam(line))],
@@ -357,12 +378,74 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
             }
 
             // ---- stage the arena ----------------------------------------------
+            // The proof character is a privileged one, and the server spells
+            // a privileged name with a marker in front of it -- except in the
+            // "killed by" line it writes into a corpse, which it deliberately
+            // strips. The two never match, so such a character can never be
+            // recorded as the killer of its own kill and can never loot it.
+            // The server's own answer to that is to make the character appear
+            // as an ordinary player, which drops the marker from the name
+            // everywhere; it is remembered across logins, so the run asks for
+            // it every time and it costs nothing once it is set.
+            Stage("@cloak player");
+
+            // The proof runs against a live server and has to leave it the way
+            // it found it. Every death used to leave a corpse standing in the
+            // arena for as long as the server keeps one, and the server stops
+            // accepting new ones past its per-player ceiling -- so the run
+            // sweeps its own leavings at both ends and, from here on, dies
+            // without leaving a corpse at all.
+            int SweepArena(string when)
+            {
+                // Monsters first: a live one would fight the sweep, and their
+                // own corpses rot on their own.
+                Stage("@smite all");
+                var removed = new List<string>();
+                ILootAutomation corpses = session.Plugins.Host.Automation.Loot;
+                for (int round = 0; round < MaximumSweptCorpses; round++)
+                {
+                    if (VtProofArena.NextOwnCorpse(
+                            corpses.CaptureCorpses(float.MaxValue),
+                            character) is not { } own)
+                    {
+                        break;
+                    }
+                    uint corpseId = own.ObjectId;
+                    // The server deletes what the character last assessed, so
+                    // the assessment IS the selection, and the run will not
+                    // ask for a deletion it has not aimed.
+                    _ = corpses.Identify(corpseId);
+                    if (!WaitUntil(
+                            TimeSpan.FromSeconds(5d),
+                            () => corpses.Appraisal.CurrentObjectId == corpseId))
+                    {
+                        removed.Add($"0x{corpseId:X8} could not be selected");
+                        break;
+                    }
+                    Stage("@delete");
+                    bool gone = WaitUntil(
+                        TimeSpan.FromSeconds(5d),
+                        () => corpses.CaptureCorpses(float.MaxValue)
+                            .All(corpse => corpse.ObjectId != corpseId));
+                    removed.Add($"0x{corpseId:X8} {(gone ? "deleted" : "stayed")}");
+                    if (!gone)
+                        break;
+                }
+                staged.Add(
+                    $"arena swept ({when}) -> "
+                        + (removed.Count == 0
+                            ? "nothing of the character's to remove"
+                            : string.Join(", ", removed)));
+                return removed.Count;
+            }
+
             Stage(ArenaTeleport);
             bool inArena = WaitUntil(
                 TimeSpan.FromSeconds(20d),
                 () => DistanceMetersFromArena(session) < 40d);
             Pump(TimeSpan.FromSeconds(2d));
             staged.Add($"arena reached -> {inArena} ({PositionText(session)})");
+            _ = SweepArena("before the run");
 
             // ---- stage the caster, then start the macro ------------------------
             // In that order: the gate every casting rule shares stops the
@@ -483,27 +566,63 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
 
             // ---- P5: loot -- a corpse is opened and a decision is made ---------
             {
-                bool decision = WaitUntil(
-                    TimeSpan.FromSeconds(45d),
+                // The corpse the fight left is the character's own kill, so
+                // the profile's plain rule covers it: no switch is opened and
+                // nothing is waited out. That only holds because the run
+                // makes the character an ordinary one first -- see the
+                // plain-player staging above; with the privileged marker on
+                // the name the server's own corpse description can never
+                // match it and this milestone is unreachable.
+                int additionsBefore = observed.InventoryAdditions;
+                bool opened = WaitUntil(
+                    TimeSpan.FromSeconds(120d),
                     () => MentionsAny(
                         observed.SnapshotChat(),
-                        "Opening ", "Looting ", "Looted "));
-                bool picked = observed.InventoryAdditions > 0;
-                if (decision && picked)
+                        "LootCorpse: opening "));
+                bool decided = opened
+                    && WaitUntil(
+                        TimeSpan.FromSeconds(45d),
+                        () => MentionsAny(
+                            observed.SnapshotChat(),
+                            "LootDecision: "));
+                bool taken = decided
+                    && WaitUntil(
+                        TimeSpan.FromSeconds(45d),
+                        () => MentionsAny(
+                            observed.SnapshotChat(),
+                            "LootPickup: took "));
+                // The looter is put down for the rest of the run, the same
+                // reason the arena is cleared of monsters below: nothing after
+                // this milestone loots, and a looter still working a corpse
+                // would spend the route's window on it.
+                Stage("/vt opt set EnableLooting False");
+                if (opened && decided && taken)
                 {
+                    string[] lootChat = observed.SnapshotChat();
                     ledger.Pass(
                         "P5",
                         "a corpse is opened and at least one loot decision is made",
-                        $"{observed.InventoryAdditions} item(s) reached the inventory");
+                        $"{CountMentioning(lootChat, "LootCorpse: opening ")} "
+                            + "corpse open(s); first opened: "
+                            + FirstMentioning(lootChat, "LootCorpse: opening ")
+                            + "; first judged: "
+                            + FirstMentioning(lootChat, "LootDecision: ")
+                            + "; first taken: "
+                            + FirstMentioning(lootChat, "LootPickup: took ")
+                            + $"; {observed.InventoryAdditions - additionsBefore} "
+                            + "inventory addition(s) during the milestone");
                 }
                 else
                 {
                     ledger.Fail(
                         "P5",
                         "a corpse is opened and at least one loot decision is made",
-                        decision
-                            ? "a loot decision was reported but nothing entered the inventory"
-                            : "no corpse was opened and no loot decision was reported",
+                        !opened
+                            ? "no corpse was opened"
+                            : !decided
+                                ? "the corpse was opened but no item was judged"
+                                : "the corpse was opened and judged but nothing "
+                                    + "was taken out of it",
                         Evidence());
                 }
             }
@@ -574,8 +693,13 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
             }
 
             // ---- P8: death, then recovery --------------------------------------
+            // The death is real; the corpse it would leave is not wanted. The
+            // server's own switch for that also stops the death from dropping
+            // what the character is carrying, which is what used to take the
+            // staged caster away with it.
+            Stage("@sticky on");
             Stage("@setvital health 1");
-            Stage("@smite " + character);
+            Stage("@smite " + plainCharacter);
             {
                 bool died = WaitUntil(
                     TimeSpan.FromSeconds(45d),
@@ -628,6 +752,8 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 }
             }
 
+            _ = SweepArena("after the run");
+            Stage("@sticky off");
             FinishAndReport(session, statusPath, ledger, Evidence, output);
         }
         catch (Exception error) when (error is not Xunit.Sdk.XunitException)
@@ -769,6 +895,29 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 .Select(static item => item.Name)
                 .Order(StringComparer.Ordinal)]
             : [];
+    }
+
+    /// <summary>How many lines carry the needle, for the record.</summary>
+    private static int CountMentioning(IReadOnlyList<string> lines, string needle)
+    {
+        int count = 0;
+        for (int index = 0; index < lines.Count; index++)
+        {
+            if (lines[index].Contains(needle, StringComparison.Ordinal))
+                count++;
+        }
+        return count;
+    }
+
+    /// <summary>The first line carrying the needle, for the record.</summary>
+    private static string FirstMentioning(IReadOnlyList<string> lines, string needle)
+    {
+        for (int index = 0; index < lines.Count; index++)
+        {
+            if (lines[index].Contains(needle, StringComparison.Ordinal))
+                return lines[index];
+        }
+        return "(none)";
     }
 
     private static bool MentionsAny(IReadOnlyList<string> lines, params string[] needles)
@@ -1424,6 +1573,53 @@ internal readonly record struct VtProofCastEvidence(
 /// the macro.
 /// </para>
 /// </summary>
+/// <summary>
+/// The proof's arena housekeeping. The run stages deaths and monsters in one
+/// landblock over and over, so it has to recognise its own leavings and
+/// nothing else: the server refuses to delete a player, but it will happily
+/// delete somebody else's corpse, so the name test is the safety rail.
+/// </summary>
+internal static class VtProofArena
+{
+    /// <summary>
+    /// The name the server gives a corpse of the named character. The server
+    /// spells a privileged name with a marker in front of it and drops the
+    /// marker once the character is made to appear as an ordinary player, so
+    /// a run can meet both spellings of the same character's corpse -- and
+    /// the server itself treats the two as one name when it looks one up.
+    /// </summary>
+    internal static string OwnCorpseName(string characterName) =>
+        "Corpse of " + characterName;
+
+    /// <summary>
+    /// The next corpse of the named character in the reported set, or none
+    /// when the set holds nothing of theirs. Monster corpses, and the corpses
+    /// of other characters, are never returned: the whole name has to match,
+    /// marker aside, so a longer name that merely starts the same is not the
+    /// character's.
+    /// </summary>
+    internal static PluginLootContainer? NextOwnCorpse(
+        IReadOnlyList<PluginLootContainer> reported,
+        string characterName)
+    {
+        ArgumentNullException.ThrowIfNull(reported);
+        if (string.IsNullOrWhiteSpace(characterName))
+            return null;
+        string marked = OwnCorpseName(characterName.TrimStart('+'));
+        string plain = OwnCorpseName("+" + characterName.TrimStart('+'));
+        for (int index = 0; index < reported.Count; index++)
+        {
+            string name = reported[index].Name;
+            if (string.Equals(name, marked, StringComparison.Ordinal)
+                || string.Equals(name, plain, StringComparison.Ordinal))
+            {
+                return reported[index];
+            }
+        }
+        return null;
+    }
+}
+
 internal static class VtProofVestments
 {
     /// <summary>
