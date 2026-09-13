@@ -38,13 +38,13 @@ public sealed class HeadlessNavigationSteeringLiveTests(ITestOutputHelper output
     /// The first waypoint of `Fixtures/vt-proof/navs/vt-proof-route.af`, in the
     /// same game coordinates the route file carries.
     /// </summary>
-    private const double FirstWaypointEastWest = 33.7900150d;
-    private const double FirstWaypointNorthSouth = 42.1057993d;
-    private const double FirstWaypointElevation = 0.4013750d;
+    private const double FirstWaypointEastWest = 33.8066816d;
+    private const double FirstWaypointNorthSouth = 42.1557993d;
+    private const double FirstWaypointElevation = 0.3916875d;
 
     /// <summary>The route's second waypoint: the first leg ends here.</summary>
-    private const double SecondWaypointEastWest = 33.8233483d;
-    private const double SecondWaypointNorthSouth = 42.1057993d;
+    private const double SecondWaypointEastWest = 33.8066816d;
+    private const double SecondWaypointNorthSouth = 42.1891327d;
 
     /// <summary>The route mover's arrival radius, `NavigationSettings.MinimumDistanceMeters`.</summary>
     private const double ArrivalMeters = 2d;
