@@ -246,6 +246,15 @@ internal sealed class VolumetricShaftRenderer : IDisposable
         return new VolumetricShaftOutput(target.TextureSlot, LastDiagnostics);
     }
 
+    /// <summary>Drops the shaft target while no world pass runs; the next prepare rebuilds it.</summary>
+    internal void ReleaseTarget()
+    {
+        if (_disposed)
+            return;
+        _target?.Dispose();
+        _target = null;
+    }
+
     public void Dispose()
     {
         if (_disposed)

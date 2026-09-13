@@ -487,6 +487,18 @@ internal class DeclaredFullscreenRenderPackGraph :
             + $"the active pack budget is {_residentGpuBudgetBytes} bytes.");
     }
 
+    public void ReleaseWorldTargets()
+    {
+        if (_disposed)
+            return;
+        TargetSet? targets = _targets;
+        if (targets is null)
+            return;
+        _targets = null;
+        _resourceGeneration = checked(_resourceGeneration + 1);
+        targets.Dispose();
+    }
+
     public void Dispose()
     {
         if (_disposed)

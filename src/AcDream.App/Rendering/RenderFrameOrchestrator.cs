@@ -58,6 +58,13 @@ internal interface IWorldSceneFramePhase
     {
     }
 
+    /// <summary>
+    /// False while the world pass is switched off (UI Only): the frame still
+    /// clears and presents, but nothing that exists only for the world pass
+    /// needs to stay resident.
+    /// </summary>
+    bool WorldPassEnabled => true;
+
     WorldRenderFrameOutcome Render(RenderFrameInput input);
 }
 

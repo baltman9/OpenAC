@@ -362,6 +362,15 @@ public sealed class WorldSceneRendererTests
     }
 
     [Fact]
+    public void WorldPassEnabled_FollowsThePresentationPolicy()
+    {
+        var rig = new Rig(portalVisible: false, waitingForLogin: false, clipRoot: null);
+        Assert.True(rig.Renderer.WorldPassEnabled);
+        rig.BuildingDetail.DrawWorld = false;
+        Assert.False(rig.Renderer.WorldPassEnabled);
+    }
+
+    [Fact]
     public void UiOnly_PublishesEmptySelectionFrameAndSkipsWorldOwners()
     {
         var rig = new Rig(portalVisible: false, waitingForLogin: false, clipRoot: null);

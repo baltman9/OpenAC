@@ -135,6 +135,15 @@ internal sealed class VulkanWorldScenePhase : IWorldSceneFramePhase
                 return RenderRetail(frame, input);
             }
 
+            if (!_world.WorldPassEnabled)
+            {
+                // UI Only: no world pass, so the pack's world targets are not
+                // needed until the world comes back; the plain clear presents
+                // the frame the retained UI draws over.
+                graph.ReleaseWorldTargets();
+                return RenderRetail(frame, input);
+            }
+
             IAtmosphericCpuStageProfileRuntime? cpuStageProfile =
                 graph as IAtmosphericCpuStageProfileRuntime;
             bool profileCpuStages = cpuStageProfile?.ShouldProfileCpuFrame(frame.Serial) == true;

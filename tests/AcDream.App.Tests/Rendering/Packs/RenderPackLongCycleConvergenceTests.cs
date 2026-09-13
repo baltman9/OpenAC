@@ -98,6 +98,35 @@ public sealed class RenderPackLongCycleConvergenceTests
     }
 
     [Fact]
+    public void ReleasingWorldTargets_FreesThemAndTheNextPrepareBuildsThemAgain()
+    {
+        using var device = new RecordingGpuDevice();
+        PrimeDeviceOwnedSamplerCache(device);
+        var lifetime = new RecordingRendererLifetime(device);
+        try
+        {
+            AtmosphericPostProcessGraph low = lifetime.Activate("low", 640, 360);
+            RenderOnePostFrame(device, low, 640, 360);
+            int withTargets = device.CreatedRenderTargets.Count(static value => !value.IsDisposed);
+            long generation = low.ResourceGeneration;
+
+            low.ReleaseWorldTargets();
+            int released = device.CreatedRenderTargets.Count(static value => !value.IsDisposed);
+            Assert.True(released < withTargets, $"{released} live targets after release, {withTargets} before");
+            Assert.Equal(generation + 1, low.ResourceGeneration);
+            low.ReleaseWorldTargets(); // idempotent
+            Assert.Equal(generation + 1, low.ResourceGeneration);
+
+            RenderOnePostFrame(device, low, 640, 360);
+            Assert.Equal(withTargets, device.CreatedRenderTargets.Count(static value => !value.IsDisposed));
+        }
+        finally
+        {
+            lifetime.Dispose();
+        }
+    }
+
+    [Fact]
     public void DeviceRecreationIsFullRendererTeardownThenANewContextAndDevice()
     {
         RecordingGpuDevice firstDevice = new();

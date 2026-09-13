@@ -156,6 +156,8 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
         _presentation = presentation ?? throw new ArgumentNullException(nameof(presentation));
     }
 
+    public bool WorldPassEnabled => _presentation.DrawWorld;
+
     public void PrepareResources(RenderFrameInput input)
     {
         _ = input;
