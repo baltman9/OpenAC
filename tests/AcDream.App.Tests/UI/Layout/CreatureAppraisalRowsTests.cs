@@ -1,3 +1,4 @@
+using System.Numerics;
 using AcDream.App.UI;
 using AcDream.App.UI.Layout;
 using AcDream.Core.Items;
@@ -635,6 +636,36 @@ public sealed class CreatureAppraisalRowsTests
             Assert.Single(((UiText)foreground.Content.FindElement(
                 CreatureAppraisalRowTemplateFactory.ValueId)!)
                 .LinesProvider()).Text);
+    }
+
+    [Theory]
+    [InlineData(CreatureAppraisalValueStyle.Normal, 1f, 1f, 1f, 1f)]
+    [InlineData(CreatureAppraisalValueStyle.Positive, 0f, 1f, 0f, 1f)]
+    [InlineData(CreatureAppraisalValueStyle.Negative, 1f, 0f, 0f, 1f)]
+    [InlineData(CreatureAppraisalValueStyle.Incomplete, 1f, 1f, 0f, 1f)]
+    public void ValueLineColorFollowsRowStyleFromTheAuthoredPalette(
+        CreatureAppraisalValueStyle style, float r, float g, float b, float a)
+    {
+        var templates = new CreatureAppraisalRowTemplateFactory(
+            FixtureLoader.LoadExaminationRowTemplateInfos(),
+            _ => (0u, 0, 0),
+            defaultFont: null);
+        var row = new CreatureAppraisalRow("Strength", "120", style);
+
+        UiTemplateListSlot foreground = templates.Create(
+            row,
+            CreatureAppraisalRowLayer.Foreground);
+
+        Assert.Equal(
+            new Vector4(r, g, b, a),
+            Assert.Single(((UiText)foreground.Content.FindElement(
+                CreatureAppraisalRowTemplateFactory.ValueId)!)
+                .LinesProvider()).Color);
+        Assert.Equal(
+            Vector4.One,
+            Assert.Single(((UiText)foreground.Content.FindElement(
+                CreatureAppraisalRowTemplateFactory.LabelId)!)
+                .LinesProvider()).Color);
     }
 
     private static AppraiseInfoParser.CreatureProfile Profile(
