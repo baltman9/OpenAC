@@ -188,6 +188,63 @@ public sealed class HeadlessPluginSessionTests
         Assert.False(context.IsAlive);
     }
 
+    /// <summary>
+    /// A plugin driven by a bot has to be able to remember things, exactly
+    /// as one driven by a window does. Without its own storage the host
+    /// hands every plugin the no-op store: reads answer "nothing is there"
+    /// and writes vanish, so a plugin that keeps state beside the shared
+    /// profile files silently runs on defaults with nothing in the record
+    /// to say so.
+    /// </summary>
+    [Fact]
+    public void APluginsOwnStorageIsReadableAndWritableInAHeadlessSession()
+    {
+        using var temporary = new TemporaryDirectory();
+        string storageRoot = Path.Combine(temporary.Path, "plugin-storage");
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path],
+            pluginStorage: new FilePluginStorage(storageRoot));
+
+        IPluginStorage storage = session.Plugins.Host.Storage;
+
+        Assert.True(storage.IsAvailable);
+        storage.WriteText("acdream.mosstank/profiles/macro/thing.json", "{}");
+        Assert.Equal(
+            "{}",
+            storage.ReadText("acdream.mosstank/profiles/macro/thing.json"));
+        Assert.Contains(
+            "acdream.mosstank/profiles/macro/thing.json",
+            storage.List("acdream.mosstank"));
+        Assert.True(File.Exists(Path.Combine(
+            storageRoot, "acdream.mosstank", "profiles", "macro", "thing.json")));
+        Assert.True(storage.Delete("acdream.mosstank/profiles/macro/thing.json"));
+    }
+
+    /// <summary>
+    /// And a session given no storage still writes nothing anywhere: the
+    /// no-op store stays the default, so a host that never configured one
+    /// cannot start leaving files behind.
+    /// </summary>
+    [Fact]
+    public void ASessionWithNoConfiguredPluginStorageKeepsTheNoOpStore()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+
+        Assert.Same(NoOpPluginStorage.Instance, session.Plugins.Host.Storage);
+    }
+
     [Fact]
     public void LauncherProbeRoundTripKeepsPluginsDisabledInTheRealHost()
     {

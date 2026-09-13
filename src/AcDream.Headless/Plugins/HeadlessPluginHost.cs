@@ -48,12 +48,14 @@ internal sealed class HeadlessPluginHost
         Func<string, bool>? submitChatText = null,
         IGameRuntimeCommands? sessionCommands = null,
         AcDream.Content.IDatReaderWriter? content = null,
-        AcDream.Content.MagicCatalog? magicCatalog = null)
+        AcDream.Content.MagicCatalog? magicCatalog = null,
+        IPluginStorage? pluginStorage = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         Log = logger ?? throw new ArgumentNullException(nameof(logger));
         Commands = commands ?? NoOpPluginCommandRegistry.Instance;
         VtankProfiles = vtankProfiles ?? NoOpPluginStorage.Instance;
+        Storage = pluginStorage ?? NoOpPluginStorage.Instance;
         _sessionSettingsByPlugin = CopySessionSettings(sessionSettings);
         _automation = new HeadlessAutomationSurface(
             runtime,
@@ -88,6 +90,15 @@ internal sealed class HeadlessPluginHost
     public IPluginLogger Log { get; }
     public IPluginCommandRegistry Commands { get; }
     public IPluginStorage VtankProfiles { get; }
+
+    /// <summary>
+    /// A plugin's own persisted state. Without one a plugin runs headless
+    /// with no memory at all: everything it keeps beside the shared profile
+    /// files — MossTank's per-profile companion document among them — is
+    /// silently replaced by defaults on every load.
+    /// </summary>
+    public IPluginStorage Storage { get; }
+
     public IGameState State => this;
     public IEvents Events => this;
     public ISelectionService Selection => _runtime.ActionOwner.Selection;

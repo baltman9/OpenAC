@@ -187,7 +187,8 @@ internal sealed class HeadlessSessionHost : IDisposable
         IRuntimePlacementProjectionSink? placementSinkOverride = null,
         FellowshipAllegianceGateCoordinator? gateCoordinator = null,
         IEnumerable<string>? pluginRoots = null,
-        IPluginStorage? vtankProfiles = null)
+        IPluginStorage? vtankProfiles = null,
+        IPluginStorage? pluginStorage = null)
     {
         _descriptor = descriptor
             ?? throw new ArgumentNullException(nameof(descriptor));
@@ -288,7 +289,8 @@ internal sealed class HeadlessSessionHost : IDisposable
                 SubmitChatText,
                 commands,
                 contentLease?.Dats,
-                contentLease?.MagicCatalog);
+                contentLease?.MagicCatalog,
+                pluginStorage);
             var liveSession = new LiveSessionHost(
                 runtime.Session,
                 new LiveSessionHostBindings(

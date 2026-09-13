@@ -94,6 +94,30 @@ public sealed class HeadlessPathSetTests
             paths.CacheDirectory);
     }
 
+    /// <summary>
+    /// The three per-plugin folders a bot process uses, spelled the same way
+    /// the graphical host spells them: plugin code and shared VTank profiles
+    /// under data, a plugin's own persisted state under config.
+    /// </summary>
+    [Fact]
+    public void PluginCodeAndProfilesLiveUnderDataAndPluginStateUnderConfig()
+    {
+        var paths = new HeadlessPathSet(
+            Path.Combine("root", "cfg"),
+            Path.Combine("root", "data"),
+            Path.Combine("root", "cache"));
+
+        Assert.Equal(
+            Path.Combine("root", "data", "plugins"),
+            paths.PluginsDirectory);
+        Assert.Equal(
+            Path.Combine("root", "data", "vtank"),
+            paths.VtankProfilesDirectory);
+        Assert.Equal(
+            Path.Combine("root", "cfg", "plugins"),
+            paths.PluginStorageDirectory);
+    }
+
     private sealed class FixturePlatform(bool isWindows)
         : IHeadlessPlatformEnvironment
     {
