@@ -9,6 +9,7 @@ using AcDream.Headless.Credentials;
 using AcDream.Headless.Diagnostics;
 using AcDream.Headless.Hosting;
 using AcDream.Headless.Plugins;
+using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
 using AcDream.Runtime.Chat;
 using Xunit.Abstractions;
@@ -195,6 +196,8 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                     .ToArray();
                 return string.Join(
                     Environment.NewLine,
+                    "the character the plugin can see:",
+                    Indent([CharacterText(session)]),
                     "staged server commands:",
                     Indent(staged),
                     "plugin warnings and errors:",
@@ -727,6 +730,44 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 + $"{movement.Position.Frame.Origin.Y:0.0},"
                 + $"{movement.Position.Frame.Origin.Z:0.0}) "
                 + $"{DistanceMetersFromArena(session):0.0} m from the arena centre");
+    }
+
+    /// <summary>
+    /// What the plugin's own surface says the character is and carries.
+    /// A profile that names no weapon, or an inventory the surface cannot
+    /// see, stops the whole macro on its first pass — and the run's evidence
+    /// used to show neither.
+    /// </summary>
+    private static string CharacterText(HeadlessSessionHost session)
+    {
+        IAutomationSurface automation = session.Plugins.Host.Automation;
+        if (!automation.IsAvailable)
+            return "the automation surface is not available";
+        string carried = automation.Items.IsAvailable
+            ? string.Join(
+                ", ",
+                automation.Items.CaptureOwnedItems()
+                    .Select(static item => item.Name)
+                    .Order(StringComparer.Ordinal))
+            : "(the item surface is unavailable)";
+        string equipped = automation.Equipment.IsAvailable
+            ? string.Join(
+                ", ",
+                automation.Equipment.CaptureOwnedEquipment()
+                    .Select(static item => item.Name)
+                    .Order(StringComparer.Ordinal))
+            : "(the equipment surface is unavailable)";
+        string counts = string.Create(
+            CultureInfo.InvariantCulture,
+            $"name='{automation.Character.Name}' "
+                + $"skills={automation.Character.Skills.Count} "
+                + $"selfBuffs={automation.Spells.KnownSelfBuffs.Count} "
+                + $"combatMode={automation.Combat.Snapshot.Mode}");
+        return counts
+            + Environment.NewLine
+            + "carried: " + carried
+            + Environment.NewLine
+            + "equipment: " + equipped;
     }
 
     private static double DistanceMetersFromArena(HeadlessSessionHost session)
