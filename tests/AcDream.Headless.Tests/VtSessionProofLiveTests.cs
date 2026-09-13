@@ -570,8 +570,6 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 // the reference's default — so the run turns it on the way a
                 // player would, immediately before the death it judges.
                 Stage("/vt opt set IdlePeaceMode true");
-                int? waypointBefore = LastRouteWaypointIndex(
-                    observed.SnapshotChat(), 0, route);
 
                 Stage("@setvital health 1");
                 int chatBeforeDeath = observed.ChatCount;
@@ -581,6 +579,13 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                     TimeSpan.FromSeconds(45d),
                     () => IsDead(session)
                         || MentionsAny(observed.SnapshotChat(), "You were killed by"));
+
+                // Read last, not first: the route can still advance a waypoint
+                // in the seconds before the death, and nothing can advance it
+                // after — so the last one the rule named is the one the
+                // restore has to come back to.
+                int? waypointBefore = LastRouteWaypointIndex(
+                    observed.SnapshotChat(), 0, route);
 
                 // (d) the restore offer. The plugin has to notice the death
                 // itself, and what it says is the only way a player learns
@@ -633,15 +638,28 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                         TimeSpan.FromSeconds(30d),
                         () => session.Plugins.Host.Automation.Combat.Snapshot.Mode
                             == PluginCombatMode.Peace);
+                // The idle rule only has work to do when the character is in a
+                // combat stance when it dies; a character that was already at
+                // peace gives it nothing to do and it correctly declines. So
+                // the check is the state, and the evidence records both
+                // whether the rule was armed and whether it was named.
                 bool idleRuleRan = observed.SnapshotChat()
                     .Skip(chatBeforeDeath)
                     .Any(static line => line.Contains("IdlePeace", StringComparison.Ordinal));
+                string idlePeaceArmed = ReadOption("IdlePeaceMode") ?? "unread";
 
-                // (e) the restore. The character is at its lifestone, so the
-                // route is out of range from there; putting it back in the
-                // arena is what a player walking or recalling back would do,
-                // and it is also how the run leaves the character somewhere
-                // sane for the next one.
+                // (e) the restore. Two things a player would do first. The
+                // death left the caster on the corpse, and every rule that
+                // casts stops the macro outright when the profile's wand is
+                // nowhere to be found, so the run stages another one. And the
+                // character respawned at its lifestone, where the route is out
+                // of range, so it goes back to the arena — which is also what
+                // leaves the character somewhere sane for the next run.
+                Stage("@ci " + CasterWeenie);
+                bool casterRestaged = WaitUntil(
+                    TimeSpan.FromSeconds(20d),
+                    () => OwnedEquipmentNames(session).Contains(CasterItemName));
+                staged.Add($"caster '{CasterItemName}' owned again -> {casterRestaged}");
                 Stage(ArenaTeleport);
                 _ = WaitUntil(
                     TimeSpan.FromSeconds(20d),
@@ -670,13 +688,20 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                     .ToArray();
                 bool settingsBack = restored && stillOff.Length == 0;
 
+                // Dying strips the character's enchantments, so the first
+                // thing the restore turns back on is a full re-buff, and a
+                // burst holds every other rule's gate shut while it casts.
+                // Waiting it out is the point rather than a nuisance: the
+                // route line that comes after it is the macro genuinely
+                // picking its work back up. Same budget the first buff pass
+                // gets, and it returns the moment the line appears.
                 int? waypointAfter = null;
                 bool sameWaypoint = false;
                 if (settingsBack)
                 {
                     int chatBeforeRoute = observed.ChatCount;
                     _ = WaitUntil(
-                        TimeSpan.FromSeconds(45d),
+                        BuffPassBudget,
                         () => FirstRouteWaypointIndex(
                             observed.SnapshotChat(), chatBeforeRoute, route) is not null);
                     waypointAfter = FirstRouteWaypointIndex(
@@ -689,7 +714,8 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                     CultureInfo.InvariantCulture,
                     $"pass-still-ticking={Yes(passStillTicking)}, "
                         + $"four-settings-off={Yes(settingsDisabled)}, "
-                        + $"peace={Yes(inPeace)} (idle rule named: {Yes(idleRuleRan)}), "
+                        + $"peace={Yes(inPeace)} (idle rule armed: {idlePeaceArmed}, "
+                        + $"named: {Yes(idleRuleRan)}), "
                         + $"restore-offered={Yes(restoreOffered)}, "
                         + $"resumed-on-waypoint={Yes(sameWaypoint)} "
                         + $"(before={Waypoint(waypointBefore)} "
