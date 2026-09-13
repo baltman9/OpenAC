@@ -171,10 +171,14 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
         Assert.True(Directory.Exists(pluginRoot));
         (string vtankRoot, string pluginStorageRoot) =
             StageProfileFixtures(temporary.Path, rynthify);
-        IReadOnlyList<VtProofRoutePoint> route = VtProofRouteFixture.ReadPoints(
-            File.ReadAllText(Path.Combine(
-                vtankRoot, "navs", RouteProfileName + ".af")));
+        string routeFixture = File.ReadAllText(Path.Combine(
+            vtankRoot, "navs", RouteProfileName + ".af"));
+        IReadOnlyList<VtProofRoutePoint> route =
+            VtProofRouteFixture.ReadPoints(routeFixture);
         Assert.True(route.Count >= 3, "The proof route fixture must hold at least three points.");
+        Assert.True(
+            VtProofRouteFixture.IsCircular(routeFixture),
+            "The proof's ordered route acceptance requires a circular fixture.");
         string statusPath = Path.Combine(temporary.Path, "status.jsonl");
 
         var descriptor = new HeadlessSessionDescriptor
@@ -1223,7 +1227,9 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
             // ---- P6: the route is walked -- two waypoints reached in order -----
             {
                 var reached = new List<int>();
-                _ = WaitUntil(
+                int chatBeforeRoute = observed.ChatCount;
+                IReadOnlyList<int> targets = [];
+                bool progressed = WaitUntil(
                     TimeSpan.FromSeconds(100d),
                     () =>
                     {
@@ -1231,29 +1237,53 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                             session, route, WaypointArrivalMeters);
                         if (index >= 0 && (reached.Count == 0 || reached[^1] != index))
                             reached.Add(index);
-                        return reached.Count >= 3;
+                        if (!rynthify.Enabled)
+                            return reached.Count >= 3;
+
+                        targets = VtProofRouteProgress.TargetSequence(
+                            observed.SnapshotChat(),
+                            chatBeforeRoute,
+                            route);
+                        return reached.Count >= 3
+                            && VtProofRouteProgress.HasCircularForwardAdvances(
+                                targets,
+                                route.Count,
+                                requiredAdvances: 2);
                     });
-                int advances = Math.Max(0, reached.Count - 1);
+                int advances = rynthify.Enabled
+                    ? Math.Max(0, targets.Count - 1)
+                    : Math.Max(0, reached.Count - 1);
                 if (rynthify.Enabled)
                 {
-                    rynthifyProgress.RouteAdvanced = advances >= 2;
-                    rynthifyProgress.RouteEvidence =
-                        $"route advances={advances}; order="
+                    rynthifyProgress.RouteAdvanced = progressed;
+                    rynthifyProgress.RouteEvidence = $"route target advances={advances}; "
+                        + "target order="
+                        + (targets.Count == 0 ? "none" : string.Join("->", targets))
+                        + "; proximity order="
                         + (reached.Count == 0 ? "none" : string.Join("->", reached));
                 }
-                if (advances >= 2)
+                if (progressed)
                 {
                     ledger.Pass(
                         "P6",
                         "the route advances by at least two waypoints",
-                        $"waypoint order {string.Join("->", reached)}");
+                        rynthify.Enabled
+                            ? $"circular target order {string.Join("->", targets)}; "
+                                + $"proximity order {string.Join("->", reached)}"
+                            : $"waypoint order {string.Join("->", reached)}");
                 }
                 else
                 {
                     ledger.Fail(
                         "P6",
                         "the route advances by at least two waypoints",
-                        $"only {advances} waypoint advance(s); "
+                        rynthify.Enabled
+                            ? $"no two-edge forward circular target sequence; targets "
+                                + (targets.Count == 0 ? "none" : string.Join("->", targets))
+                                + "; proximity "
+                                + (reached.Count == 0 ? "none" : string.Join("->", reached))
+                                + "; " + PositionText(session)
+                            : $"only {advances} waypoint advance(s); "
                             + $"visited {(reached.Count == 0 ? "none" : string.Join("->", reached))}; "
                             + PositionText(session),
                         Evidence());
@@ -3099,6 +3129,52 @@ internal static class VtProofRouteProgress
         }
         return null;
     }
+
+    internal static IReadOnlyList<int> TargetSequence(
+        IReadOnlyList<string> lines,
+        int from,
+        IReadOnlyList<VtProofRoutePoint> route)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+        ArgumentNullException.ThrowIfNull(route);
+        var result = new List<int>();
+        for (int index = Math.Max(0, from); index < lines.Count; index++)
+        {
+            string line = lines[index];
+            if (!line.Contains("(NavigateRouteIdle)", StringComparison.Ordinal)
+                || IndexFromLine(line, route) is not { } target
+                || (result.Count > 0 && result[^1] == target))
+            {
+                continue;
+            }
+            result.Add(target);
+        }
+        return result;
+    }
+
+    internal static bool HasCircularForwardAdvances(
+        IReadOnlyList<int> targets,
+        int waypointCount,
+        int requiredAdvances)
+    {
+        ArgumentNullException.ThrowIfNull(targets);
+        if (waypointCount <= 0 || requiredAdvances <= 0
+            || targets.Count < requiredAdvances + 1)
+        {
+            return false;
+        }
+        for (int index = 1; index < targets.Count; index++)
+        {
+            int previous = targets[index - 1];
+            int current = targets[index];
+            if (previous < 0 || previous >= waypointCount
+                || current != (previous + 1) % waypointCount)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
 }
 
 /// <summary>
@@ -3108,6 +3184,22 @@ internal static class VtProofRouteProgress
 /// </summary>
 internal static class VtProofRouteFixture
 {
+    internal static bool IsCircular(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        foreach (string raw in text
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Split('\n'))
+        {
+            string line = raw.Trim();
+            if (!line.StartsWith("NAV:", StringComparison.Ordinal))
+                continue;
+            return line.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Contains("circular", StringComparer.OrdinalIgnoreCase);
+        }
+        return false;
+    }
+
     internal static IReadOnlyList<VtProofRoutePoint> ReadPoints(string text)
     {
         ArgumentNullException.ThrowIfNull(text);
@@ -3595,9 +3687,11 @@ public sealed class VtSessionProofHarnessTests
             "vt-proof-route.af");
         Assert.True(File.Exists(path), $"missing route fixture: {path}");
 
+        string text = File.ReadAllText(path);
         IReadOnlyList<VtProofRoutePoint> points =
-            VtProofRouteFixture.ReadPoints(File.ReadAllText(path));
+            VtProofRouteFixture.ReadPoints(text);
 
+        Assert.True(VtProofRouteFixture.IsCircular(text));
         Assert.Equal(4, points.Count);
         Assert.All(points, static point =>
         {
@@ -3623,6 +3717,7 @@ public sealed class VtSessionProofHarnessTests
 
         Assert.Single(points);
         Assert.Equal(new VtProofRoutePoint(1.5d, -2.25d, 0.5d), points[0]);
+        Assert.True(VtProofRouteFixture.IsCircular(text));
     }
 
     [Fact]
@@ -3687,6 +3782,42 @@ public sealed class VtSessionProofHarnessTests
         Assert.Equal(0, VtProofRouteProgress.First(lines, 0, ProgressRoute));
         Assert.Equal(1, VtProofRouteProgress.First(lines, 1, ProgressRoute));
         Assert.Null(VtProofRouteProgress.First(["nothing here"], 0, ProgressRoute));
+    }
+
+    [Fact]
+    public void CircularTargetProgressAcceptsForwardWrapping()
+    {
+        string[] lines =
+        [
+            "[MossTank] (OpenDoor) declined: Waypoint 2/4: 3.0m",
+            "[MossTank] (NavigateRouteIdle) declined: Waypoint 3/4: 2.9m",
+            "[MossTank] (NavigateRouteIdle) declined: Waypoint 3/4: 2.8m",
+            "[MossTank] (NavigateRouteIdle) declined: Waypoint 4/4: 2.7m",
+            "[MossTank] (NavigateRouteIdle) Running [targ range 12.000, "
+                + "targ loc 33.790015, 42.105799, 0.401375 ]",
+        ];
+
+        IReadOnlyList<int> targets =
+            VtProofRouteProgress.TargetSequence(lines, 0, ProgressRoute);
+
+        Assert.Equal([2, 3, 0], targets);
+        Assert.True(VtProofRouteProgress.HasCircularForwardAdvances(
+            targets,
+            waypointCount: 4,
+            requiredAdvances: 2));
+    }
+
+    [Fact]
+    public void CircularTargetProgressRejectsTheOldDistinctButBackwardBoundary()
+    {
+        int[] targets = [2, 3, 2];
+
+        // Counting distinct adjacent samples alone called this two advances.
+        Assert.Equal(2, targets.Length - 1);
+        Assert.False(VtProofRouteProgress.HasCircularForwardAdvances(
+            targets,
+            waypointCount: 4,
+            requiredAdvances: 2));
     }
 }
 
