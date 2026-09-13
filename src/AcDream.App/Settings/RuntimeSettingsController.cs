@@ -194,6 +194,7 @@ internal sealed class RuntimeSettingsController :
 
     private DisplaySettings _display = null!;
     private DisplaySettings _effectiveDisplay = null!;
+    private bool _windowFocused = true;
 
     public DisplaySettings Display
     {
@@ -201,8 +202,39 @@ internal sealed class RuntimeSettingsController :
         private set
         {
             _display = value;
-            _effectiveDisplay = value.Effective;
+            RecomputeEffectiveDisplay();
         }
+    }
+
+    /// <summary>True while the window has keyboard focus; a background client with the option on runs UI-only.</summary>
+    public bool WindowFocused => _windowFocused;
+
+    private void RecomputeEffectiveDisplay()
+    {
+        DisplaySettings effective = _display.Effective;
+        if (!_windowFocused && _display.UiOnlyWhenUnfocused && !effective.UiOnly)
+            effective = effective with { UiOnly = true };
+        _effectiveDisplay = effective;
+    }
+
+    /// <summary>
+    /// The window gained or lost focus. With "UI Only in Background" on, losing
+    /// focus switches the effective display to UI-only (world pass skipped,
+    /// window shrunk, nothing unowned kept) and gaining it switches back; the
+    /// stored settings are untouched.
+    /// </summary>
+    public void SetWindowFocused(bool focused)
+    {
+        if (_windowFocused == focused)
+            return;
+        _windowFocused = focused;
+        bool wasUiOnly = _effectiveDisplay.UiOnly;
+        RecomputeEffectiveDisplay();
+        if (wasUiOnly == _effectiveDisplay.UiOnly)
+            return;
+        _log($"[QUALITY] Window {(focused ? "focused" : "in background")}: UI-only {(_effectiveDisplay.UiOnly ? "on" : "off")}");
+        ReapplyQualityPreset(_effectiveDisplay.Quality);
+        _runtimeTargets?.SetUnownedContentRetained(!_effectiveDisplay.UiOnly);
     }
 
     /// <summary>

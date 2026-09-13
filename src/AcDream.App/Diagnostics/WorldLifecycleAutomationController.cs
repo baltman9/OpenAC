@@ -230,6 +230,8 @@ internal sealed class WorldLifecycleAutomationController :
         _getRenderPackStatus;
     private readonly Func<bool, (bool Succeeded, string Error)> _setPotatoMode;
     private readonly Func<bool, (bool Succeeded, string Error)> _setUiOnly;
+    private readonly Func<bool, (bool Succeeded, string Error)> _setWindowFocused;
+    private readonly Func<bool, (bool Succeeded, string Error)> _setUiOnlyWhenUnfocused;
     private readonly Func<string, (bool Succeeded, string Error)>
         _selectRenderPack;
     private readonly Func<(bool Succeeded, string Error)>?
@@ -275,7 +277,9 @@ internal sealed class WorldLifecycleAutomationController :
         Func<int, int, (bool Succeeded, string Error)>? resizeFramebuffer = null,
         Action? requestClientClose = null,
         Func<bool, (bool Succeeded, string Error)>? setPotatoMode = null,
-        Func<bool, (bool Succeeded, string Error)>? setUiOnly = null)
+        Func<bool, (bool Succeeded, string Error)>? setUiOnly = null,
+        Func<bool, (bool Succeeded, string Error)>? setWindowFocused = null,
+        Func<bool, (bool Succeeded, string Error)>? setUiOnlyWhenUnfocused = null)
     {
         _getReveal = getReveal ?? throw new ArgumentNullException(nameof(getReveal));
         _getEnvironmentOwnership = getEnvironmentOwnership
@@ -303,6 +307,10 @@ internal sealed class WorldLifecycleAutomationController :
         _setPotatoMode = setPotatoMode
             ?? (_ => (false, "potato-mode automation is unavailable"));
         _setUiOnly = setUiOnly
+            ?? (_ => (false, "ui-only automation is unavailable"));
+        _setWindowFocused = setWindowFocused
+            ?? (_ => (false, "window-focus automation is unavailable"));
+        _setUiOnlyWhenUnfocused = setUiOnlyWhenUnfocused
             ?? (_ => (false, "ui-only automation is unavailable"));
         _captureResources = captureResources ?? throw new ArgumentNullException(nameof(captureResources));
         _screenshots = screenshots ?? throw new ArgumentNullException(nameof(screenshots));
@@ -333,6 +341,20 @@ internal sealed class WorldLifecycleAutomationController :
     public bool TrySetUiOnly(bool enabled, out string error)
     {
         (bool succeeded, string failure) = _setUiOnly(enabled);
+        error = succeeded ? string.Empty : failure;
+        return succeeded;
+    }
+
+    public bool TrySetWindowFocused(bool focused, out string error)
+    {
+        (bool succeeded, string failure) = _setWindowFocused(focused);
+        error = succeeded ? string.Empty : failure;
+        return succeeded;
+    }
+
+    public bool TrySetUiOnlyWhenUnfocused(bool enabled, out string error)
+    {
+        (bool succeeded, string failure) = _setUiOnlyWhenUnfocused(enabled);
         error = succeeded ? string.Empty : failure;
         return succeeded;
     }

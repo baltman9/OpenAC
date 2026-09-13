@@ -147,6 +147,7 @@ public sealed class GameWindow :
     private Exception? _runFailure;
     private readonly DisplayFramePacingController _displayFramePacing;
     private readonly RuntimeSettingsController _runtimeSettings;
+    private readonly AcDream.App.Input.WindowFocusRouter _windowFocus;
 
     /// <summary>
     /// The one owner that writes a mixer setting down and then changes the
@@ -521,6 +522,9 @@ public sealed class GameWindow :
                 _applicationPaths.SettingsFile),
             log: Console.WriteLine,
             characterOptionValue: _runtime.CharacterOwner.Options.GetOptionBit);
+        _windowFocus = new AcDream.App.Input.WindowFocusRouter(
+            () => _cameraPointerInput,
+            _runtimeSettings.SetWindowFocused);
         _audioMixerSettings = new AcDream.App.Audio.AudioMixerSettings(
             () => _runtimeSettings.AudioMixer,
             _runtimeSettings.SaveAudioMixer,
@@ -1723,7 +1727,7 @@ public sealed class GameWindow :
             _input,
             _graphics));
     private void OnFocusChanged(bool focused)
-        => _cameraPointerInput?.HandleFocusChanged(focused);
+        => _windowFocus.HandleFocusChanged(focused);
 
     public void Dispose()
     {

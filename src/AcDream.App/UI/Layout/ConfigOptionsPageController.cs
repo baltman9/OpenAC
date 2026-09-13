@@ -1100,6 +1100,23 @@ public static class ConfigOptionsPageController
                 + "a client nobody is watching. Off again brings the world back "
                 + "as it streams in.");
 
+        BuildExplicitToggleRow(
+            listBox,
+            "UI Only in Background",
+            DisplaySettings.Default.UiOnlyWhenUnfocused,
+            page,
+            read: () => bindings.LoadDisplay().UiOnlyWhenUnfocused,
+            apply: value =>
+            {
+                bindings.SaveDisplay(bindings.LoadDisplay() with { UiOnlyWhenUnfocused = value });
+                return true;
+            },
+            isCurrent: static () => true,
+            tooltip:
+                "Switch to UI Only whenever this window is not the active one, "
+                + "and back when it is: the client you are looking at draws the "
+                + "world, the others do not.");
+
         display = bindings.LoadDisplay();
     }
 

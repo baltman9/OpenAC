@@ -89,6 +89,40 @@ public sealed partial class RuntimeSettingsControllerTests
     }
 
     [Fact]
+    public void BackgroundUiOnly_FollowsWindowFocus_OnlyWhileTheOptionIsOn()
+    {
+        var storage = new FakeStorage();
+        var events = new List<string>();
+        var controller = new RuntimeSettingsController(storage, log: _ => { });
+        controller.BindRuntimeTargets(new FakeRuntimeTargets(events) { RecordRetention = true });
+
+        // Option off: focus changes nothing.
+        controller.SetWindowFocused(false);
+        Assert.False(controller.EffectiveDisplay.UiOnly);
+        Assert.DoesNotContain("target-release", events);
+        controller.SetWindowFocused(true);
+
+        controller.SaveDisplay(controller.Display with { UiOnlyWhenUnfocused = true });
+        Assert.False(controller.EffectiveDisplay.UiOnly);
+
+        controller.SetWindowFocused(false);
+        Assert.True(controller.EffectiveDisplay.UiOnly);
+        Assert.False(controller.Display.UiOnly); // stored switch untouched
+        Assert.Equal(1, controller.ResolvedQuality.FarRadius);
+        Assert.Equal("target-release", events[^1]);
+
+        controller.SetWindowFocused(true);
+        Assert.False(controller.EffectiveDisplay.UiOnly);
+        Assert.Equal("target-retain", events[^1]);
+
+        // A stored UI Only stays on regardless of focus.
+        controller.SaveDisplay(controller.Display with { UiOnly = true });
+        controller.SetWindowFocused(false);
+        controller.SetWindowFocused(true);
+        Assert.True(controller.EffectiveDisplay.UiOnly);
+    }
+
+    [Fact]
     public void PotatoMode_RunsTheCheapestSettings_WhileTheStoredChoicesStayTheUsers()
     {
         var pack = new RenderPackSelectionSettings("pack.alpha", "1.0.0", "high");

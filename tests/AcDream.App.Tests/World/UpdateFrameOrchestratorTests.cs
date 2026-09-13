@@ -536,6 +536,12 @@ public sealed class UpdateFrameOrchestratorTests
         MethodInfo focus = RequiredMethod(typeof(GameWindow), "OnFocusChanged");
         Assert.Single(
             CompiledCallGraph.Read(focus),
+            call => call.Target.DeclaringType == typeof(WindowFocusRouter)
+                && call.Target.Name == nameof(WindowFocusRouter.HandleFocusChanged));
+        Assert.Single(
+            CompiledCallGraph.Read(RequiredMethod(
+                typeof(WindowFocusRouter),
+                nameof(WindowFocusRouter.HandleFocusChanged))),
             call => call.Target.DeclaringType == typeof(CameraPointerInputController)
                 && call.Target.Name == nameof(CameraPointerInputController.HandleFocusChanged));
     }

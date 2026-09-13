@@ -129,7 +129,8 @@ public sealed record DisplaySettings(
     bool MultiPassAlpha = false,
     bool KeepDistantBuildings = true,
     bool PotatoMode = false,
-    bool UiOnly = false)
+    bool UiOnly = false,
+    bool UiOnlyWhenUnfocused = false)
 {
     public RenderPackSelectionSettings RenderPack { get; init; } =
         RenderPackSelectionSettings.Retail;

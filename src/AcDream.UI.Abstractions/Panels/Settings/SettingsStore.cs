@@ -72,7 +72,8 @@ public sealed class SettingsStore
                 MultiPassAlpha:          ReadBool (disp, "multiPassAlpha",          d.MultiPassAlpha),
                 KeepDistantBuildings:    ReadBool (disp, "keepDistantBuildings",    d.KeepDistantBuildings),
                 PotatoMode:              ReadBool (disp, "potatoMode",              d.PotatoMode),
-                UiOnly:                  ReadBool (disp, "uiOnly",                  d.UiOnly))
+                UiOnly:                  ReadBool (disp, "uiOnly",                  d.UiOnly),
+                UiOnlyWhenUnfocused:     ReadBool (disp, "uiOnlyWhenUnfocused",     d.UiOnlyWhenUnfocused))
             {
                 RenderPack = ReadRenderPackSelection(disp, d.RenderPack),
             };
@@ -709,6 +710,7 @@ public sealed class SettingsStore
             ["particleRange"] = d.ParticleRange.ToString(),
             ["potatoMode"]  = d.PotatoMode,
             ["uiOnly"]      = d.UiOnly,
+            ["uiOnlyWhenUnfocused"] = d.UiOnlyWhenUnfocused,
             ["quality"]     = d.Quality.ToString(),
             ["renderPack"]  = BuildRenderPackObject(d.RenderPack),
             ["resolution"]  = d.Resolution,

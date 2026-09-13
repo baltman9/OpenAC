@@ -92,6 +92,16 @@ public interface IRetailUiAutomationRuntime
         error = "ui-only automation is unavailable";
         return false;
     }
+    bool TrySetWindowFocused(bool focused, out string error)
+    {
+        error = "window-focus automation is unavailable";
+        return false;
+    }
+    bool TrySetUiOnlyWhenUnfocused(bool enabled, out string error)
+    {
+        error = "ui-only automation is unavailable";
+        return false;
+    }
     bool TryRequestClientClose(out string error)
     {
         error = "client-close automation is unavailable";
@@ -281,6 +291,7 @@ public sealed class RetailUiAutomationScriptRunner : IDisposable
             "renderpack" => DoRenderPack(command),
             "potato" => DoPotato(command),
             "uionly" => DoUiOnly(command),
+            "focus" => DoFocus(command),
             "resize" => DoResize(command),
             "screenshot" => DoScreenshot(command),
             "close-client" => DoCloseClient(command),
@@ -588,7 +599,35 @@ public sealed class RetailUiAutomationScriptRunner : IDisposable
             return _runtime.TrySetUiOnly(enabled, out string error)
                 || Stop(command, error);
         }
-        return Stop(command, "usage: uionly on|off");
+        // `uionly background on|off`: the stored "UI Only in Background" option.
+        if (p.Length == 3
+            && string.Equals(p[1], "background", StringComparison.OrdinalIgnoreCase)
+            && (string.Equals(p[2], "on", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(p[2], "off", StringComparison.OrdinalIgnoreCase)))
+        {
+            bool enabled = string.Equals(p[2], "on", StringComparison.OrdinalIgnoreCase);
+            return _runtime.TrySetUiOnlyWhenUnfocused(enabled, out string error)
+                || Stop(command, error);
+        }
+        return Stop(command, "usage: uionly on|off | uionly background on|off");
+    }
+
+    // `focus on|off`: what the window's focus callback would report, so the
+    // background switch can be exercised from a route.
+    private bool DoFocus(ScriptCommand command)
+    {
+        if (_runtime is null)
+            return Stop(command, "window-focus automation is unavailable");
+        var p = command.Parts;
+        if (p.Length == 2
+            && (string.Equals(p[1], "on", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(p[1], "off", StringComparison.OrdinalIgnoreCase)))
+        {
+            bool focused = string.Equals(p[1], "on", StringComparison.OrdinalIgnoreCase);
+            return _runtime.TrySetWindowFocused(focused, out string error)
+                || Stop(command, error);
+        }
+        return Stop(command, "usage: focus on|off");
     }
 
     private bool DoRenderPack(ScriptCommand command)

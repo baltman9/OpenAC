@@ -31,10 +31,13 @@ public sealed class SettingsStoreTests : System.IDisposable
     public void UiOnly_round_trips_as_its_own_flag()
     {
         var store = new SettingsStore(_tempPath);
-        store.SaveDisplay(DisplaySettings.Default with { UiOnly = true });
+        store.SaveDisplay(DisplaySettings.Default with { UiOnly = true, UiOnlyWhenUnfocused = true });
 
-        Assert.True(store.LoadDisplay().UiOnly);
+        DisplaySettings loaded = store.LoadDisplay();
+        Assert.True(loaded.UiOnly);
+        Assert.True(loaded.UiOnlyWhenUnfocused);
         Assert.False(DisplaySettings.Default.UiOnly);
+        Assert.False(DisplaySettings.Default.UiOnlyWhenUnfocused);
     }
 
     [Fact]

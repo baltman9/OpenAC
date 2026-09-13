@@ -684,6 +684,23 @@ internal sealed class FrameRootCompositionPhase
                         return d.Settings.Display.UiOnly == enabled
                             ? (true, string.Empty)
                             : (false, $"ui-only '{enabled}' was not persisted");
+                    },
+                    setWindowFocused: focused =>
+                    {
+                        d.Settings.SetWindowFocused(focused);
+                        return d.Settings.WindowFocused == focused
+                            ? (true, string.Empty)
+                            : (false, $"window focus '{focused}' was not applied");
+                    },
+                    setUiOnlyWhenUnfocused: enabled =>
+                    {
+                        d.Settings.SaveDisplay(d.Settings.Display with
+                        {
+                            UiOnlyWhenUnfocused = enabled,
+                        });
+                        return d.Settings.Display.UiOnlyWhenUnfocused == enabled
+                            ? (true, string.Empty)
+                            : (false, $"ui-only background '{enabled}' was not persisted");
                     });
             bindings.Adopt(
                 "world lifecycle automation owner",

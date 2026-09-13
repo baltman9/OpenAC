@@ -311,8 +311,8 @@ public sealed class GameWindowHostBoundaryTests
 
         AssertOnlyProductionCall(
             RequiredMethod(typeof(GameWindow), "OnFocusChanged"),
-            typeof(CameraPointerInputController),
-            nameof(CameraPointerInputController.HandleFocusChanged));
+            typeof(WindowFocusRouter),
+            nameof(WindowFocusRouter.HandleFocusChanged));
         AssertOnlyProductionCall(
             RequiredMethod(typeof(GameWindow), "OnClosing"),
             typeof(GameWindow),

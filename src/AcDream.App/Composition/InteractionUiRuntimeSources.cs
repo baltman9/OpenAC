@@ -815,6 +815,22 @@ internal sealed class DeferredWorldLifecycleAutomationRuntime
         return false;
     }
 
+    public bool TrySetWindowFocused(bool focused, out string error)
+    {
+        if (!_deactivated && _target is { } target)
+            return target.TrySetWindowFocused(focused, out error);
+        error = "world lifecycle automation is not bound";
+        return false;
+    }
+
+    public bool TrySetUiOnlyWhenUnfocused(bool enabled, out string error)
+    {
+        if (!_deactivated && _target is { } target)
+            return target.TrySetUiOnlyWhenUnfocused(enabled, out error);
+        error = "world lifecycle automation is not bound";
+        return false;
+    }
+
     public bool TryResetRenderPackPerformance(out string error)
     {
         if (!_deactivated && _target is { } target)
