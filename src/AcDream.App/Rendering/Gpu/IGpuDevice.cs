@@ -7,6 +7,13 @@ internal interface IGpuDevice : IDisposable
     GpuCapabilityRecord Capabilities { get; }
 
     /// <summary>
+    /// The device-memory sizing the backend was built with (pool blocks, the
+    /// staging and per-frame rings, the mesh arena's starting size). Fixed for
+    /// the device's lifetime; a stand-in device reports the default.
+    /// </summary>
+    GpuMemoryProfile MemoryProfile => GpuMemoryProfile.Default;
+
+    /// <summary>
     /// Frame-flight-gated resource release. Resource disposal routes through here
     /// so nothing is freed while a submitted frame may still reference it.
     /// </summary>

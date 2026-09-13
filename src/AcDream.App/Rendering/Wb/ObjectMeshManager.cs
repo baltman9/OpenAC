@@ -383,7 +383,9 @@ namespace AcDream.App.Rendering.Wb
             {
                 GlobalBuffer = new GlobalMeshBuffer(
                     gpuDevice,
-                    _graphicsDevice.ResourceRetirement);
+                    _graphicsDevice.ResourceRetirement,
+                    gpuDevice.MemoryProfile.MeshArenaInitialVertices,
+                    gpuDevice.MemoryProfile.MeshArenaInitialIndices);
             }
         }
 

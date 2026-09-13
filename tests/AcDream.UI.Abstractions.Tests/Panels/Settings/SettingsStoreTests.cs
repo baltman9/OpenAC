@@ -28,6 +28,22 @@ public sealed class SettingsStoreTests : System.IDisposable
     }
 
     [Fact]
+    public void PotatoMode_round_trips_as_its_own_flag_beside_the_stored_quality()
+    {
+        var store = new SettingsStore(_tempPath);
+        store.SaveDisplay(DisplaySettings.Default with
+        {
+            PotatoMode = true,
+            Quality = AcDream.UI.Abstractions.Settings.QualityPreset.Ultra,
+        });
+
+        var loaded = store.LoadDisplay();
+        Assert.True(loaded.PotatoMode);
+        Assert.Equal(AcDream.UI.Abstractions.Settings.QualityPreset.Ultra, loaded.Quality);
+        Assert.False(DisplaySettings.Default.PotatoMode);
+    }
+
+    [Fact]
     public void SaveDisplay_then_LoadDisplay_round_trips_all_fields()
     {
         var store = new SettingsStore(_tempPath);

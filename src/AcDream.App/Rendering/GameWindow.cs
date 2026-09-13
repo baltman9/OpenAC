@@ -91,6 +91,8 @@ public sealed class GameWindow :
     private AcDream.UI.Abstractions.Settings.QualitySettings _startupQuality =
         AcDream.UI.Abstractions.Settings.QualitySettings.From(
             AcDream.UI.Abstractions.Settings.QualityPreset.High);
+    private AcDream.App.Rendering.Gpu.GpuMemoryProfile _startupMemoryProfile =
+        AcDream.App.Rendering.Gpu.GpuMemoryProfile.Default;
     private IInputContext? _input;
     private TerrainModernRenderer? _terrain;
     private CameraController? _cameraController;
@@ -588,6 +590,8 @@ public sealed class GameWindow :
             directCharacterLaunch: _options.LiveCharacterSelector is not null);
         _startupPacing = startupPacing;
         _startupQuality = startup.Quality;
+        _startupMemoryProfile =
+            AcDream.App.Rendering.Gpu.GpuMemoryProfile.For(startup.Display.Quality);
 
         _window = Window.Create(options);
         IWindow window = _window;
@@ -1153,6 +1157,7 @@ public sealed class GameWindow :
                 _platformServices,
                 _startupPacing,
                 _startupQuality.MsaaSamples,
+                _startupMemoryProfile,
                 Console.WriteLine);
         _vulkanGraphics = vulkan;
         return new VulkanGameWindowGraphics(vulkan);

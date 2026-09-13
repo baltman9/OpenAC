@@ -181,13 +181,29 @@ public sealed class GlobalMeshBuffer : IDisposable
             newBuffers);
     }
 
-    internal GlobalMeshBuffer(IGpuDevice device, IGpuResourceRetirementQueue retirement)
+    private readonly int _initialVertexCapacity;
+    private readonly int _initialIndexCapacity;
+
+    internal GlobalMeshBuffer(
+        IGpuDevice device,
+        IGpuResourceRetirementQueue retirement,
+        int initialVertexCapacity = InitialVertexCapacity,
+        int initialIndexCapacity = InitialIndexCapacity)
     {
         _device = device ?? throw new ArgumentNullException(nameof(device));
         ArgumentNullException.ThrowIfNull(retirement);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(initialVertexCapacity);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(initialVertexCapacity, MaximumVertexCapacity);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(initialIndexCapacity);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(initialIndexCapacity, MaximumIndexCapacity);
         _retirementLedger = new GpuRetirementLedger(retirement);
-        _vertices = new GpuRetiredRangeAllocator(InitialVertexCapacity, retirement); // ~32 MB
-        _indices = new GpuRetiredRangeAllocator(InitialIndexCapacity, retirement);   // ~6 MB
+        // The starting size is also the floor the tail trim never goes below.
+        // The defaults are ~32 MB of vertices and ~6 MB of indices; the compact
+        // memory profile starts at a quarter of that and grows the same way.
+        _initialVertexCapacity = initialVertexCapacity;
+        _initialIndexCapacity = initialIndexCapacity;
+        _vertices = new GpuRetiredRangeAllocator(initialVertexCapacity, retirement);
+        _indices = new GpuRetiredRangeAllocator(initialIndexCapacity, retirement);
         InitBuffers();
     }
 
@@ -568,11 +584,11 @@ public sealed class GlobalMeshBuffer : IDisposable
             return false;
         bool trimVertices = TryCalculateTrimCapacity(
             _vertices.Capacity, _vertices.HighWaterMark,
-            InitialVertexCapacity, VertexGrowthQuantum,
+            _initialVertexCapacity, VertexGrowthQuantum,
             out int vertexCapacity);
         bool trimIndices = TryCalculateTrimCapacity(
             _indices.Capacity, _indices.HighWaterMark,
-            InitialIndexCapacity, IndexGrowthQuantum,
+            _initialIndexCapacity, IndexGrowthQuantum,
             out int indexCapacity);
 
         long vertexSaving = trimVertices

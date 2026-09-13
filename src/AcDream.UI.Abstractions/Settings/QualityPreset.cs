@@ -1,7 +1,13 @@
 using System.Globalization;
 namespace AcDream.UI.Abstractions.Settings;
 
-public enum QualityPreset { Low, Medium, High, Ultra }
+/// <summary>
+/// The graphics profile: one choice that sets the streaming window, anti-aliasing,
+/// texture filtering and the streaming completion budget. Potato exists for
+/// running many clients on one machine: the smallest window, no anti-aliasing,
+/// plain filtering, and (in the graphical host) compact video-memory pools.
+/// </summary>
+public enum QualityPreset { Low, Medium, High, Ultra, Potato }
 
 public readonly record struct QualitySettings(
     int   NearRadius,
@@ -13,6 +19,7 @@ public readonly record struct QualitySettings(
 {
     public static QualitySettings From(QualityPreset preset) => preset switch
     {
+        QualityPreset.Potato => new(NearRadius: 1, FarRadius: 3,  MsaaSamples: 0, AnisotropicLevel: 1,  AlphaToCoverage: false, MaxCompletionsPerFrame: 2),
         QualityPreset.Low    => new(NearRadius: 2, FarRadius: 5,  MsaaSamples: 0, AnisotropicLevel: 4,  AlphaToCoverage: false, MaxCompletionsPerFrame: 2),
         QualityPreset.Medium => new(NearRadius: 3, FarRadius: 8,  MsaaSamples: 2, AnisotropicLevel: 8,  AlphaToCoverage: false, MaxCompletionsPerFrame: 3),
         QualityPreset.High   => new(NearRadius: 4, FarRadius: 12, MsaaSamples: 4, AnisotropicLevel: 16, AlphaToCoverage: true,  MaxCompletionsPerFrame: 4),

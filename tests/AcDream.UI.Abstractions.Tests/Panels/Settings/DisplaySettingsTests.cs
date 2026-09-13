@@ -1,4 +1,5 @@
 using AcDream.UI.Abstractions.Panels.Settings;
+using AcDream.UI.Abstractions.Settings;
 
 namespace AcDream.UI.Abstractions.Tests.Panels.Settings;
 
@@ -16,6 +17,59 @@ public sealed class DisplaySettingsTests
         Assert.False(d.ShowFps);
         Assert.Equal(RenderPackSelectionSettings.Retail, d.RenderPack);
         Assert.True(d.RenderPack.IsRetail);
+    }
+
+    [Fact]
+    public void Effective_is_this_instance_while_potato_mode_is_off()
+    {
+        var d = DisplaySettings.Default with { Quality = QualityPreset.Ultra };
+
+        Assert.Same(d, d.Effective);
+    }
+
+    [Fact]
+    public void Effective_forces_every_quality_choice_down_and_keeps_the_stored_ones()
+    {
+        var pack = new RenderPackSelectionSettings("pack.alpha", "1.0.0", "high");
+        var stored = DisplaySettings.Default with
+        {
+            PotatoMode = true,
+            Quality = QualityPreset.Ultra,
+            ParticleRange = ParticleRange.Extended,
+            AutomaticDegrades = true,
+            LandscapeTextureDetail = 4,
+            EnvironmentTextureDetail = 4,
+            TextureFiltering = 2,
+            LandscapeDrawDistance = 25,
+            BuildingDetailTextures = true,
+            MultiPassAlpha = true,
+            KeepDistantBuildings = true,
+            Resolution = "1920x1080",
+            RenderPack = pack,
+        };
+
+        DisplaySettings effective = stored.Effective;
+
+        Assert.True(effective.PotatoMode);
+        Assert.Equal(QualityPreset.Potato, effective.Quality);
+        Assert.Equal(ParticleRange.Retail, effective.ParticleRange);
+        Assert.False(effective.AutomaticDegrades);
+        Assert.Equal(0, effective.LandscapeTextureDetail);
+        Assert.Equal(0, effective.EnvironmentTextureDetail);
+        Assert.Equal(0, effective.TextureFiltering);
+        Assert.Equal(3, effective.LandscapeDrawDistance);
+        Assert.False(effective.BuildingDetailTextures);
+        Assert.False(effective.MultiPassAlpha);
+        Assert.True(effective.RenderPack.IsRetail);
+        // Not a quality choice: kept.
+        Assert.True(effective.KeepDistantBuildings);
+        Assert.Equal("1920x1080", effective.Resolution);
+        // Applying the overlay twice changes nothing more.
+        Assert.Equal(effective, effective.Effective);
+        // The stored record is untouched.
+        Assert.Equal(QualityPreset.Ultra, stored.Quality);
+        Assert.Same(pack, stored.RenderPack);
+        Assert.Equal(25, stored.LandscapeDrawDistance);
     }
 
     [Fact]

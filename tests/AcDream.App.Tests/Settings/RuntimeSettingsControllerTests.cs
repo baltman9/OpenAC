@@ -47,6 +47,78 @@ public sealed partial class RuntimeSettingsControllerTests
     }
 
     [Fact]
+    public void PotatoMode_RunsTheCheapestSettings_WhileTheStoredChoicesStayTheUsers()
+    {
+        var pack = new RenderPackSelectionSettings("pack.alpha", "1.0.0", "high");
+        var storage = new FakeStorage
+        {
+            DisplayValue = DisplaySettings.Default with
+            {
+                PotatoMode = true,
+                Quality = QualityPreset.Ultra,
+                LandscapeDrawDistance = 25,
+                ParticleRange = ParticleRange.Extended,
+                RenderPack = pack,
+            },
+        };
+        var resolvedFor = new List<QualityPreset>();
+
+        var controller = new RuntimeSettingsController(
+            storage,
+            preset =>
+            {
+                resolvedFor.Add(preset);
+                return RuntimeSettingsController.ApplyLandscapeDrawDistance(
+                    QualitySettings.From(preset),
+                    storage.DisplayValue.Effective.LandscapeDrawDistance);
+            },
+            log: _ => { });
+
+        Assert.Equal([QualityPreset.Potato], resolvedFor);
+        Assert.Equal(1, controller.ResolvedQuality.NearRadius);
+        Assert.Equal(3, controller.ResolvedQuality.FarRadius);
+        Assert.Equal(0, controller.ResolvedQuality.MsaaSamples);
+        Assert.Equal(QualityPreset.Potato, controller.Startup.Display.Quality);
+        Assert.True(controller.DisplayPreview.RenderPack.IsRetail);
+        Assert.Equal(ParticleRange.Retail, controller.DisplayPreview.ParticleRange);
+        Assert.False(controller.DisplayPreview.BuildingDetailTextures);
+        // The stored settings are untouched: the panel shows and edits these.
+        Assert.Same(storage.DisplayValue, controller.Display);
+        Assert.Equal(QualityPreset.Ultra, controller.Display.Quality);
+        Assert.Same(pack, controller.Display.RenderPack);
+    }
+
+    [Fact]
+    public void TurningPotatoModeOff_PublishesTheStoredChoicesAgain()
+    {
+        var pack = new RenderPackSelectionSettings("pack.alpha", "1.0.0", "high");
+        var storage = new FakeStorage
+        {
+            DisplayValue = DisplaySettings.Default with
+            {
+                PotatoMode = true,
+                Quality = QualityPreset.Ultra,
+                RenderPack = pack,
+            },
+        };
+        var events = new List<string>();
+        var controller = new RuntimeSettingsController(
+            storage,
+            static preset => QualitySettings.From(preset),
+            static _ => { });
+        controller.BindRuntimeTargets(new FakeRuntimeTargets(events));
+        var published = new List<DisplaySettings>();
+        controller.DisplayChanged += published.Add;
+
+        controller.SaveDisplay(controller.Display with { PotatoMode = false });
+
+        Assert.Equal(QualitySettings.From(QualityPreset.Ultra), controller.ResolvedQuality);
+        Assert.Same(pack, Assert.Single(published).RenderPack);
+        Assert.Same(controller.Display, controller.EffectiveDisplay);
+        Assert.Contains("target-quality", events);
+    }
+
+    [Fact]
     public void ConstructionLoadsEachBagOnceAndPublishesOneStartupSnapshot()
     {
         var storage = new FakeStorage

@@ -157,7 +157,7 @@ internal sealed class RuntimeSettingsController :
         _resolveQuality = resolveQuality
             ?? (preset => ResolveQuality(
                 preset,
-                Display.LandscapeDrawDistance));
+                EffectiveDisplay.LandscapeDrawDistance));
         _log = log ?? Console.WriteLine;
         _characterOptionValue = characterOptionValue;
 
@@ -166,9 +166,9 @@ internal sealed class RuntimeSettingsController :
         Chat = _storage.LoadChat();
         _defaultCharacter = _storage.LoadCharacter(DefaultToonKey);
         Character = _defaultCharacter;
-        ResolvedQuality = _resolveQuality(Display.Quality);
+        ResolvedQuality = _resolveQuality(EffectiveDisplay.Quality);
         Startup = new RuntimeSettingsSnapshot(
-            Display,
+            EffectiveDisplay,
             Audio,
             Chat,
             Character,
@@ -182,6 +182,14 @@ internal sealed class RuntimeSettingsController :
     public string ActiveToonKey { get; private set; } = DefaultToonKey;
 
     public DisplaySettings Display { get; private set; }
+
+    /// <summary>
+    /// What the runtime runs with: <see cref="Display"/> with Potato Mode
+    /// applied while it is on. The stored settings stay the user's own, so
+    /// the Options panel binds to <see cref="Display"/> and the renderer,
+    /// streaming, particles and render pack read this.
+    /// </summary>
+    public DisplaySettings EffectiveDisplay => Display.Effective;
 
     public AudioSettings Audio { get; private set; }
 
@@ -201,7 +209,7 @@ internal sealed class RuntimeSettingsController :
 
     public bool HasDraftPreview => false;
 
-    public DisplaySettings DisplayPreview => Display;
+    public DisplaySettings DisplayPreview => EffectiveDisplay;
 
     public AudioSettings AudioPreview => Audio;
 
@@ -391,7 +399,7 @@ internal sealed class RuntimeSettingsController :
                     + $"{applied.Fullscreen}");
             }
             Display = applied;
-            ReapplyQualityPreset(applied.Quality);
+            ReapplyQualityPreset(applied.Effective.Quality);
         }
         catch (Exception ex)
         {
@@ -401,7 +409,7 @@ internal sealed class RuntimeSettingsController :
 
         try
         {
-            DisplayChanged?.Invoke(Display);
+            DisplayChanged?.Invoke(EffectiveDisplay);
         }
         catch (Exception ex)
         {

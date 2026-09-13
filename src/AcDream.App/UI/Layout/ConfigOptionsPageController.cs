@@ -7,6 +7,7 @@ using AcDream.App.UI;
 using AcDream.Core.Audio;
 using AcDream.Plugin.Abstractions.Rendering;
 using AcDream.UI.Abstractions.Panels.Settings;
+using AcDream.UI.Abstractions.Settings;
 
 namespace AcDream.App.UI.Layout;
 
@@ -1031,8 +1032,82 @@ public static class ConfigOptionsPageController
                 + "without this a distant building can vanish while the fences "
                 + "and stairs around it stay.");
 
+        // The graphics profile: acdream's one-choice quality setting (the
+        // streaming window, anti-aliasing, texture filtering). Not a retail
+        // option, so it is built with explicit text like the row above. The
+        // window and filtering apply live; anti-aliasing is sized at startup.
+        BuildExplicitStringMenuRow(
+            listBox,
+            "Graphics Profile",
+            GraphicsProfileChoices,
+            page,
+            read: () => bindings.LoadDisplay().Quality.ToString(),
+            apply: value =>
+            {
+                if (!Enum.TryParse(value, ignoreCase: true, out QualityPreset preset))
+                    return;
+                bindings.SaveDisplay(bindings.LoadDisplay() with { Quality = preset });
+            },
+            defaultValue: DisplaySettings.Default.Quality.ToString(),
+            resolveSprite,
+            datFont,
+            debugFont);
+
+        // Potato Mode: one switch that turns every quality choice down to its
+        // cheapest value for running many clients on one machine. It is an
+        // overlay (DisplaySettings.Effective) over the choices above and below,
+        // which stay stored as they are and come back when it is turned off.
+        BuildExplicitToggleRow(
+            listBox,
+            "Potato Mode",
+            DisplaySettings.Default.PotatoMode,
+            page,
+            read: () => bindings.LoadDisplay().PotatoMode,
+            apply: value =>
+            {
+                bindings.SaveDisplay(bindings.LoadDisplay() with { PotatoMode = value });
+                return true;
+            },
+            isCurrent: static () => true,
+            tooltip:
+                "Everything at its cheapest, for running many clients on one "
+                + "machine: full detail only in the nearest landblocks, landscape "
+                + "draw distance 3, no anti-aliasing, plain texture filtering, no "
+                + "building detail textures, the plain render pack, retail "
+                + "particle range, and compact video-memory pools. Your other "
+                + "settings are kept and come back when this is off. "
+                + "Anti-aliasing and the memory pools change at the next start.");
+
         display = bindings.LoadDisplay();
     }
+
+    private static readonly ExplicitMenuChoice[] GraphicsProfileChoices =
+    [
+        new(
+            nameof(QualityPreset.Low),
+            "Low",
+            true,
+            "Full detail within 2 landblocks, no anti-aliasing, 4x texture "
+            + "filtering. Landscape range is the draw distance below."),
+        new(
+            nameof(QualityPreset.Medium),
+            "Medium",
+            true,
+            "Full detail within 3 landblocks, 2x anti-aliasing, 8x texture "
+            + "filtering. Landscape range is the draw distance below."),
+        new(
+            nameof(QualityPreset.High),
+            "High",
+            true,
+            "Full detail within 4 landblocks, 4x anti-aliasing, 16x texture "
+            + "filtering. Landscape range is the draw distance below."),
+        new(
+            nameof(QualityPreset.Ultra),
+            "Ultra",
+            true,
+            "Full detail within 5 landblocks, 4x anti-aliasing, 16x texture "
+            + "filtering. Landscape range is the draw distance below."),
+    ];
 
     // ── Section 4: Rendering Quality Options ────────────────────────────
 

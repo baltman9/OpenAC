@@ -57,7 +57,8 @@ public sealed class SettingsStore
                 LandscapeDrawDistance:   ReadInt  (disp, "landscapeDrawDistance",   d.LandscapeDrawDistance),
                 BuildingDetailTextures:  ReadBool (disp, "buildingDetailTextures",  d.BuildingDetailTextures),
                 MultiPassAlpha:          ReadBool (disp, "multiPassAlpha",          d.MultiPassAlpha),
-                KeepDistantBuildings:    ReadBool (disp, "keepDistantBuildings",    d.KeepDistantBuildings))
+                KeepDistantBuildings:    ReadBool (disp, "keepDistantBuildings",    d.KeepDistantBuildings),
+                PotatoMode:              ReadBool (disp, "potatoMode",              d.PotatoMode))
             {
                 RenderPack = ReadRenderPackSelection(disp, d.RenderPack),
             };
@@ -673,6 +674,7 @@ public sealed class SettingsStore
             ["landscapeTextureDetail"]   = d.LandscapeTextureDetail,
             ["multiPassAlpha"]           = d.MultiPassAlpha,
             ["particleRange"] = d.ParticleRange.ToString(),
+            ["potatoMode"]  = d.PotatoMode,
             ["quality"]     = d.Quality.ToString(),
             ["renderPack"]  = BuildRenderPackObject(d.RenderPack),
             ["resolution"]  = d.Resolution,

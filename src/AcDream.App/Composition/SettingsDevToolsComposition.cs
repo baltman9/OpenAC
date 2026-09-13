@@ -61,7 +61,7 @@ internal sealed class SettingsDevToolsCompositionPhase :
         return new SettingsDevToolsResult(_dependencies.Settings.ResolvedQuality)
         {
             RenderPacks = renderPacks,
-            RenderPackSelection = _dependencies.Settings.Display.RenderPack,
+            RenderPackSelection = _dependencies.Settings.EffectiveDisplay.RenderPack,
         };
     }
 }
