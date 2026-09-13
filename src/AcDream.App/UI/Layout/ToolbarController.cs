@@ -378,7 +378,7 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
 
     private void WireClick(UiItemList list)
     {
-        list.Cell.Clicked = () =>
+        list.Cell.DoubleClicked = () =>
         {
             if (list.Cell.ItemId != 0)
             {
