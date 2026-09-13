@@ -42,8 +42,7 @@ public sealed class HeadlessNavigationSteeringLiveTests(ITestOutputHelper output
     private const double FirstWaypointNorthSouth = 42.1057993d;
     private const double FirstWaypointElevation = 0.4013750d;
 
-    /// <summary>`NavigationSettings.MinimumDistanceMeters`, VTank's
-    /// `NavCloseStopRange` default.</summary>
+    /// <summary>The route mover's arrival radius, `NavigationSettings.MinimumDistanceMeters`.</summary>
     private const double ArrivalMeters = 2d;
 
     /// <summary>`NavigationController.HeadingToleranceDegrees`.</summary>
