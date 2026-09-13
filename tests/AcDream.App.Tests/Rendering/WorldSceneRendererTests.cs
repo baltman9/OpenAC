@@ -330,6 +330,38 @@ public sealed class WorldSceneRendererTests
     }
 
     [Fact]
+    public void PrepareResources_UploadsTheSkyBeforeThePass_OnlyWhenTheWorldWillDraw()
+    {
+        var drawn = new Rig(portalVisible: false, waitingForLogin: false, clipRoot: null);
+        drawn.Renderer.PrepareResources(default);
+        Assert.Equal(["sky:prepare"], drawn.Calls);
+
+        var portal = new Rig(portalVisible: true, waitingForLogin: false, clipRoot: null);
+        portal.Renderer.PrepareResources(default);
+        Assert.Empty(portal.Calls);
+
+        var uiOnly = new Rig(portalVisible: false, waitingForLogin: false, clipRoot: null);
+        uiOnly.BuildingDetail.DrawWorld = false;
+        uiOnly.Renderer.PrepareResources(default);
+        Assert.Empty(uiOnly.Calls);
+
+        var unavailable = new Rig(
+            portalVisible: false,
+            waitingForLogin: false,
+            clipRoot: null,
+            availability: new UnavailableWorld());
+        unavailable.Renderer.PrepareResources(default);
+        Assert.Empty(unavailable.Calls);
+    }
+
+    private sealed class UnavailableWorld : IWorldGenerationAvailability
+    {
+        public bool IsWorldAvailable => false;
+
+        public long QuiescedGeneration => 0;
+    }
+
+    [Fact]
     public void UiOnly_PublishesEmptySelectionFrameAndSkipsWorldOwners()
     {
         var rig = new Rig(portalVisible: false, waitingForLogin: false, clipRoot: null);
@@ -1114,6 +1146,8 @@ public sealed class WorldSceneRendererTests
 
         public float WeatherDayFraction { get; private set; }
 
+
+        public void PrepareSky(DayGroupData? activeDayGroup) => calls.Add("sky:prepare");
 
         public void BeginFrame() => calls.Add("passes:begin");
 

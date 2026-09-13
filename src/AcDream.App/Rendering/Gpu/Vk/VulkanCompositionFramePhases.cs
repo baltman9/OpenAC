@@ -108,6 +108,10 @@ internal sealed class VulkanWorldScenePhase : IWorldSceneFramePhase
             ?? throw new InvalidOperationException(
                 "The Vulkan world phase requires an open IGpuFrame (see GpuDeviceFrameLifetime).");
 
+        // Before any pass of this frame opens: the pass records pending
+        // uploads on entry, so what is staged here is on the GPU for its draws.
+        _world.PrepareResources(input);
+
         int samples = _sampleCount();
         if (_renderPacks is not null)
         {

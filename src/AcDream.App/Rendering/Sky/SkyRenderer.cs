@@ -142,8 +142,12 @@ public sealed partial class SkyRenderer : IDisposable
             _params.UvScroll = new Vector2(uOffset, vOffset);
             _params.Transparency = transparent;
 
-            EnsureMeshUploaded(gfxObjId);
-            if (!_gpuByGfxObj.TryGetValue(gfxObjId, out var subMeshes)) continue;
+            if (!_gpuByGfxObj.TryGetValue(gfxObjId, out var subMeshes))
+            {
+                throw new InvalidOperationException(
+                    $"Sky object 0x{gfxObjId:X8} was not uploaded before the world pass; "
+                    + "PrepareDayGroup must run for the active day group before the pass opens.");
+            }
 
             foreach (var sub in subMeshes)
             {
@@ -198,6 +202,29 @@ public sealed partial class SkyRenderer : IDisposable
             result[r.ObjectIndex] = r;
 
         return result;
+    }
+
+    /// <summary>
+    /// Uploads every GfxObj the day group can draw: each sky object and each
+    /// per-keyframe replacement. Runs before the world pass opens, because a
+    /// buffer uploaded inside the pass is copied only after the pass and its
+    /// draw in the same pass reads whatever the memory held before. Cheap
+    /// once everything is resident.
+    /// </summary>
+    public void PrepareDayGroup(DayGroupData? group)
+    {
+        if (group is null)
+            return;
+        foreach (SkyObjectData obj in group.SkyObjects)
+            EnsureMeshUploaded(obj.GfxObjId);
+        foreach (DatSkyKeyframeData time in group.SkyTimes)
+        {
+            foreach (SkyObjectReplaceData replace in time.Replaces)
+            {
+                if (replace.GfxObjId != 0)
+                    EnsureMeshUploaded(replace.GfxObjId);
+            }
+        }
     }
 
     private void EnsureMeshUploaded(uint gfxObjId)

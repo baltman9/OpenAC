@@ -48,6 +48,16 @@ internal interface IRenderFrameGpuMeasurement
 
 internal interface IWorldSceneFramePhase
 {
+    /// <summary>
+    /// Uploads everything this frame's world pass will draw, before the pass
+    /// opens. A copy staged while the pass is open is recorded after it, so
+    /// a draw in the same pass would read whatever the memory held before.
+    /// Phases with nothing to upload keep the no-op.
+    /// </summary>
+    void PrepareResources(RenderFrameInput input)
+    {
+    }
+
     WorldRenderFrameOutcome Render(RenderFrameInput input);
 }
 

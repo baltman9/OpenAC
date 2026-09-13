@@ -156,6 +156,16 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
         _presentation = presentation ?? throw new ArgumentNullException(nameof(presentation));
     }
 
+    public void PrepareResources(RenderFrameInput input)
+    {
+        _ = input;
+        if (!_availability.IsWorldAvailable
+            || _foundation.Foundation.PortalViewportVisible
+            || !_presentation.DrawWorld)
+            return;
+        _passes.PrepareSky(_sky.ActiveDayGroup);
+    }
+
     public WorldRenderFrameOutcome Render(RenderFrameInput input)
     {
         _ = input;
