@@ -40,6 +40,20 @@ public sealed class DispatchedMotionDrainTests
     }
 
     [Fact]
+    public void AnObjectThatPlaysItsOwnAnimationsIsLeftToFinishThemItself()
+    {
+        var motion = new MotionInterpreter(new PhysicsBody())
+        {
+            DefaultSink = new NoOpSink(),
+        };
+        motion.AddToQueue(0u, (uint)MotionCommand.Ready, 0u);
+
+        RuntimeLocalPlayerPhysicsPublicationState.CompleteDispatchedMotions(motion);
+
+        Assert.Equal(1, motion.PendingMotionCount);
+    }
+
+    [Fact]
     public void ADrainWithNoBodyTakesNothingOffTheQueue()
     {
         // Without a body the interpreter completes nothing, and the drain must
@@ -51,5 +65,11 @@ public sealed class DispatchedMotionDrainTests
         RuntimeLocalPlayerPhysicsPublicationState.CompleteDispatchedMotions(motion);
 
         Assert.Equal(70, motion.PendingMotionCount);
+    }
+
+    private sealed class NoOpSink : IInterpretedMotionSink
+    {
+        public bool ApplyMotion(uint motion, float speed) => true;
+        public bool StopMotion(uint motion) => true;
     }
 }

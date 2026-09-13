@@ -390,6 +390,14 @@ internal sealed class RuntimeLocalPlayerPhysicsPublicationState : IDisposable
     /// </remarks>
     internal static void CompleteDispatchedMotions(MotionInterpreter motion)
     {
+        // The invariant is about the object, not about who was wired up
+        // first: an object with something to play its animations keeps its
+        // dispatched motions outstanding until that thing finishes them, and
+        // completing them here as well would finish them twice. Whether such
+        // an object also replaced this fallback is not the question — having
+        // somewhere to dispatch to is.
+        if (motion.DefaultSink is not null)
+            return;
         for (int completed = 0;
              completed < MaximumMotionCompletionsPerPass;
              completed++)
