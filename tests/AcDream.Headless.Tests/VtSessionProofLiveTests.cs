@@ -75,7 +75,15 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
     /// close enough to stay inside the looter's five-metre open step, so what
     /// the milestone proves is that the character walks the difference.
     /// </summary>
-    private const float CorpseStepBackMeters = 3.5f;
+    private const double CorpseStepBackMeters = 4.5d;
+
+    /// <summary>
+    /// How far the corpse has to have lain from the character when the loot
+    /// milestone began for the open to have needed a walk at all. The server
+    /// allows an open from a little under three metres between these two
+    /// bodies, so below this the pass would be proving a turn.
+    /// </summary>
+    private const double CorpseMinimumOpenDistanceMeters = 3.0d;
 
     private const double ArenaEastWest = 33.8066816d;
     private const double ArenaNorthSouth = 42.1224660d;
@@ -667,21 +675,56 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 string[] Slice() => observed.SnapshotChat()
                     .Skip(chatBefore)
                     .ToArray();
-                // The point of this milestone is the walk: the character is
-                // stood back off the ground the fight ended on, so the corpse
-                // is certainly outside the server's own reach and inside the
-                // looter's. A corpse that happens to fall underfoot proves
-                // nothing about a corpse that does not.
+                // The point of this milestone is the walk, so the character is
+                // stood away from the corpse the fight left -- along the line
+                // that already separates the two, not along a fixed compass
+                // direction, because a drudge that died on the wrong side of
+                // the caster would otherwise be stepped TOWARDS. A corpse
+                // that happens to lie underfoot proves nothing about a corpse
+                // that does not.
+                ILootAutomation lootSurface =
+                    session.Plugins.Host.Automation.Loot;
                 RuntimeMovementSnapshot stood =
                     session.Runtime.Movement.Snapshot;
-                Stage(string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"@teleloc A9B40029 {stood.Position.Frame.Origin.X:0.000} "
-                        + $"{stood.Position.Frame.Origin.Y - CorpseStepBackMeters:0.000} "
-                        + $"{stood.Position.Frame.Origin.Z:0.000} 1 0 0 0"));
+                PluginNavigationPosition standingAt = session.Plugins.Host
+                    .Automation.Navigation.Snapshot.Position;
+                if (VtProofArena.StepAwayFromCorpse(
+                        standingAt,
+                        lootSurface.CaptureCorpses(float.MaxValue),
+                        CorpseStepBackMeters,
+                        out double awayX,
+                        out double awayY))
+                {
+                    Stage(string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"@teleloc A9B40029 {stood.Position.Frame.Origin.X + awayX:0.000} "
+                            + $"{stood.Position.Frame.Origin.Y + awayY:0.000} "
+                            + $"{stood.Position.Frame.Origin.Z:0.000} 1 0 0 0"));
+                }
+
+                // Where every corpse lay when the milestone opened. The
+                // evidence quotes this for the corpse the looter chose, and
+                // the pass turns on it: a corpse already within the server's
+                // reach is opened where it stands, and an open that needed no
+                // walk is not what this milestone is for.
+                var layAt = new Dictionary<uint, double>();
+                void SampleCorpses()
+                {
+                    foreach (PluginLootContainer corpse in
+                             lootSurface.CaptureCorpses(float.MaxValue))
+                    {
+                        _ = layAt.TryAdd(corpse.ObjectId, corpse.Distance);
+                    }
+                }
+
+                SampleCorpses();
                 bool opened = WaitUntil(
                     TimeSpan.FromSeconds(120d),
-                    () => MentionsAny(Slice(), "LootCorpse: opening "));
+                    () =>
+                    {
+                        SampleCorpses();
+                        return MentionsAny(Slice(), "LootCorpse: opening ");
+                    });
                 bool decided = opened
                     && WaitUntil(
                         TimeSpan.FromSeconds(45d),
@@ -695,7 +738,16 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 // this milestone loots, and a looter still working a corpse
                 // would spend the route's window on it.
                 Stage("/vt opt set EnableLooting False");
-                if (opened && decided && taken)
+                string openedLine =
+                    FirstMentioning(Slice(), "LootCorpse: opening ");
+                double lay = VtProofArena.CorpseDistanceWhenOpened(
+                    openedLine,
+                    layAt);
+                bool walked = lay > CorpseMinimumOpenDistanceMeters;
+                string layText = lay < 0d
+                    ? "unknown"
+                    : string.Create(CultureInfo.InvariantCulture, $"{lay:0.00} m");
+                if (opened && decided && taken && walked)
                 {
                     string[] lootChat = Slice();
                     ledger.Pass(
@@ -703,7 +755,9 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                         "a corpse is opened and at least one loot decision is made",
                         $"{CountMentioning(lootChat, "LootCorpse: opening ")} "
                             + "corpse open(s); first opened: "
-                            + FirstMentioning(lootChat, "LootCorpse: opening ")
+                            + openedLine
+                            + $"; it lay {layText} away when the milestone "
+                            + "opened, so the character walked to it"
                             + "; first judged: "
                             + FirstMentioning(lootChat, "LootDecision: ")
                             + "; first taken: "
@@ -720,8 +774,14 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                             ? "no corpse was opened"
                             : !decided
                                 ? "the corpse was opened but no item was judged"
-                                : "the corpse was opened and judged but nothing "
-                                    + "was taken out of it",
+                                : !taken
+                                    ? "the corpse was opened and judged but "
+                                        + "nothing was taken out of it"
+                                    : "the corpse was looted, but it lay "
+                                        + $"{layText} away when the milestone "
+                                        + "opened -- near enough for the server "
+                                        + "to allow the open where the character "
+                                        + "stood, so nothing here needed a walk",
                         Evidence());
                 }
             }
@@ -1965,6 +2025,89 @@ internal static class VtProofArena
             return reported[index];
         }
         return null;
+    }
+
+    /// <summary>
+    /// How far to step, and in which direction, to stand a given distance away
+    /// from the nearest corpse — along the line that already separates the two,
+    /// so the step is always AWAY from it whichever side of the character it
+    /// fell on. The answer is in metres along the cell's own axes, which is
+    /// the frame a placement command names.
+    /// </summary>
+    /// <returns>
+    /// False when there is nothing to step away from, when the character is
+    /// already at least that far, or when the two are on the same spot and
+    /// there is no line to step along.
+    /// </returns>
+    internal static bool StepAwayFromCorpse(
+        in PluginNavigationPosition stood,
+        IReadOnlyList<PluginLootContainer> reported,
+        double wantedMeters,
+        out double eastWestMeters,
+        out double northSouthMeters)
+    {
+        ArgumentNullException.ThrowIfNull(reported);
+        eastWestMeters = 0d;
+        northSouthMeters = 0d;
+
+        PluginLootContainer? nearest = null;
+        for (int index = 0; index < reported.Count; index++)
+        {
+            if (!reported[index].HasPosition)
+                continue;
+            if (nearest is null || reported[index].Distance < nearest.Value.Distance)
+                nearest = reported[index];
+        }
+        if (nearest is not { } corpse)
+            return false;
+
+        // One unit of the map frame is 240 metres along the same axis the
+        // cell's own coordinates run on, so the two frames differ by a scale
+        // and nothing else.
+        double dx = (stood.EastWest - corpse.Position.EastWest) * 240d;
+        double dy = (stood.NorthSouth - corpse.Position.NorthSouth) * 240d;
+        double apart = Math.Sqrt((dx * dx) + (dy * dy));
+        if (apart >= wantedMeters || apart < 0.05d)
+            return false;
+
+        double step = wantedMeters - apart;
+        eastWestMeters = dx / apart * step;
+        northSouthMeters = dy / apart * step;
+        return true;
+    }
+
+    /// <summary>
+    /// How far away the corpse named in an opening line lay when the milestone
+    /// began, or a negative number when the line names no corpse this run was
+    /// watching. The line's own text is the only record of WHICH corpse the
+    /// looter chose, so the id is read back out of it.
+    /// </summary>
+    internal static double CorpseDistanceWhenOpened(
+        string openedLine,
+        IReadOnlyDictionary<uint, double> layAt)
+    {
+        ArgumentNullException.ThrowIfNull(layAt);
+        if (string.IsNullOrEmpty(openedLine))
+            return -1d;
+        int open = openedLine.LastIndexOf("(0x", StringComparison.Ordinal);
+        if (open < 0)
+            return -1d;
+        int close = openedLine.IndexOf(')', open);
+        if (close < 0)
+            return -1d;
+        ReadOnlySpan<char> digits = openedLine
+            .AsSpan(open + 3, close - open - 3);
+        if (!uint.TryParse(
+                digits,
+                NumberStyles.HexNumber,
+                CultureInfo.InvariantCulture,
+                out uint objectId))
+        {
+            return -1d;
+        }
+        return layAt.TryGetValue(objectId, out double distance)
+            ? distance
+            : -1d;
     }
 
     private static bool BelongsToAnyone(

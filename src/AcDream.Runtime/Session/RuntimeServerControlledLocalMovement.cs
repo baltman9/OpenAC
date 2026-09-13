@@ -97,7 +97,7 @@ internal static class RuntimeServerControlledLocalMovement
     /// <remarks>
     /// The other two pre-switch steps, cancelling whatever movement is running
     /// and unsticking from whatever the character is stuck to, are not repeated
-    /// here: <see cref="MovementManager.PerformMovement"/> already does both as
+    /// here: <see cref="MoveToManager.PerformMovement"/> already does both as
     /// its own first two statements. The only difference left is the reason
     /// code the cancel carries, which nothing reads.
     /// </remarks>

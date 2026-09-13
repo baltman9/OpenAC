@@ -3322,7 +3322,7 @@ public sealed class HeadlessSessionHostTests
         sink.MotionUpdated(new WorldSession.EntityMotionUpdate(
             player,
             new CreateObject.ServerMotionState(
-                Stance: (ushort)0x3Du,
+                Stance: (ushort)0x3Fu,
                 ForwardCommand: null,
                 MovementType: 6,
                 MoveToSpeed: 1f,
@@ -3362,6 +3362,12 @@ public sealed class HeadlessSessionHostTests
         // The movement owner has to know this move was not the character's
         // own, or the next key press cannot take control back from it.
         Assert.False(controller.PhysicsBody.LastMoveWasAutonomous);
+        // And the stance the order was written in is applied before the
+        // movement it asks for, which is the step the original takes ahead of
+        // every kind of movement it unpacks.
+        Assert.Equal(
+            0x8000003Fu,
+            controller.Movement.Minterp.InterpretedState.CurrentStyle);
     }
 
     /// <summary>
