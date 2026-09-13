@@ -10,7 +10,11 @@ public sealed class PakReader : IDisposable {
     private readonly MemoryMappedFile _mmf;
     private readonly MemoryMappedViewAccessor _accessor;
     private readonly long _fileLength;
-    private readonly PakTocEntry[] _toc; // sorted ascending by Key
+    // The TOC stays in the mapped file: 24-byte records sorted ascending by
+    // Key, read on demand. A materialized array costs 54 MB per process for a
+    // full bake, and every client on a machine shares the mapped pages instead.
+    private readonly long _tocOffset;
+    private readonly int _tocCount;
     private readonly PakTexturePayloadCache _texturePayloads = new();
 
     /// <summary>Lazy per-entry verdict: absent = not yet judged, 0 = bad (bounds/crc/structure), 1 = ok.</summary>
@@ -52,15 +56,10 @@ public sealed class PakReader : IDisposable {
                 $"the file's actual length ({_fileLength} bytes) — truncated or corrupt file");
         }
 
-        _toc = new PakTocEntry[Header.TocCount];
-        var tocBytes = new byte[PakTocEntry.Size];
-        long tocPos = (long)Header.TocOffset;
-        for (int i = 0; i < _toc.Length; i++) {
-            _accessor.ReadArray(tocPos, tocBytes, 0, PakTocEntry.Size);
-            _toc[i] = PakTocEntry.ReadFrom((ReadOnlySpan<byte>)tocBytes);
-            tocPos += PakTocEntry.Size;
-
-            ref readonly var entry = ref _toc[i];
+        _tocOffset = (long)Header.TocOffset;
+        _tocCount = checked((int)Header.TocCount);
+        for (int i = 0; i < _tocCount; i++) {
+            PakTocEntry entry = ReadToc(i);
             bool invalid = !IsEntryRangeValid(entry);
             if (invalid) {
                 _entryVerdictByTocIndex[i] = 0;
@@ -68,6 +67,22 @@ public sealed class PakReader : IDisposable {
                     $"file={_fileLength}, toc@{Header.TocOffset})");
             }
         }
+    }
+
+    /// <summary>Reads TOC record <paramref name="index"/> from the mapped file.
+    /// The on-disk record is the little-endian sequential layout of
+    /// <see cref="PakTocEntry"/>, so a little-endian host copies it directly.</summary>
+    private PakTocEntry ReadToc(int index) {
+        long position = _tocOffset + (long)index * PakTocEntry.Size;
+        if (BitConverter.IsLittleEndian) {
+            _accessor.Read(position, out PakTocEntry entry);
+            return entry;
+        }
+
+        Span<byte> bytes = stackalloc byte[PakTocEntry.Size];
+        for (int i = 0; i < bytes.Length; i++)
+            bytes[i] = _accessor.ReadByte(position + i);
+        return PakTocEntry.ReadFrom(bytes);
     }
 
     /// <summary>True if <paramref name="key"/> is present AND its blob verifies (bounds + CRC).</summary>
@@ -137,7 +152,7 @@ public sealed class PakReader : IDisposable {
         bool judged = _entryVerdictByTocIndex.TryGetValue(index, out var verdict);
         if (judged && verdict == 0) return PakObjectReadStatus.Corrupt;
 
-        ref readonly var entry = ref _toc[index];
+        PakTocEntry entry = ReadToc(index);
         uint storedLength = entry.StoredLength;
         bytes = new byte[checked((int)storedLength)];
         _accessor.ReadArray((long)entry.Offset, bytes, 0, checked((int)storedLength));
@@ -200,21 +215,21 @@ public sealed class PakReader : IDisposable {
     public long GetBlobOffsetForTest(ulong key) {
         int index = BinarySearch(key);
         if (index < 0) throw new KeyNotFoundException($"pak key 0x{key:X16} not found");
-        return (long)_toc[index].Offset;
+        return (long)ReadToc(index).Offset;
     }
 
     /// <summary>Returns the immutable TOC receipt for alias/layout assertions in tests.</summary>
     public PakTocEntry GetTocEntryForTest(ulong key) {
         int index = BinarySearch(key);
         if (index < 0) throw new KeyNotFoundException($"pak key 0x{key:X16} not found");
-        return _toc[index];
+        return ReadToc(index);
     }
 
     public int CountEntries(PakAssetType type) {
         byte rawType = (byte)type;
         int count = 0;
-        for (int i = 0; i < _toc.Length; i++) {
-            if ((byte)(_toc[i].Key >> 56) == rawType)
+        for (int i = 0; i < _tocCount; i++) {
+            if ((byte)(ReadToc(i).Key >> 56) == rawType)
                 count++;
         }
         return count;
@@ -223,8 +238,8 @@ public sealed class PakReader : IDisposable {
     public void ValidateTocStructure() {
         ulong previousKey = 0;
 
-        for (int i = 0; i < _toc.Length; i++) {
-            ref readonly var entry = ref _toc[i];
+        for (int i = 0; i < _tocCount; i++) {
+            PakTocEntry entry = ReadToc(i);
             if (i > 0 && entry.Key <= previousKey) {
                 throw new InvalidDataException(
                     $"pak TOC is not strictly sorted at entry {i}: " +
@@ -242,8 +257,8 @@ public sealed class PakReader : IDisposable {
     }
 
     public bool DebugLinearScanContainsKey(ulong key) {
-        for (int i = 0; i < _toc.Length; i++) {
-            if (_toc[i].Key == key) return VerdictFor(i) == 1;
+        for (int i = 0; i < _tocCount; i++) {
+            if (ReadToc(i).Key == key) return VerdictFor(i) == 1;
         }
         return false;
     }
@@ -251,7 +266,7 @@ public sealed class PakReader : IDisposable {
     private int VerdictFor(int tocIndex) {
         if (_entryVerdictByTocIndex.TryGetValue(tocIndex, out var cached)) return cached;
 
-        ref readonly var entry = ref _toc[tocIndex];
+        PakTocEntry entry = ReadToc(tocIndex);
         uint storedLength = entry.StoredLength;
         var bytes = new byte[checked((int)storedLength)];
         _accessor.ReadArray((long)entry.Offset, bytes, 0, checked((int)storedLength));
@@ -267,7 +282,7 @@ public sealed class PakReader : IDisposable {
 
     private void LogCorruptionOnce(int tocIndex, string reason) {
         if (!_loggedCorruption.TryAdd(tocIndex, true)) return;
-        ref readonly var entry = ref _toc[tocIndex];
+        PakTocEntry entry = ReadToc(tocIndex);
         Console.Error.WriteLine(
             $"[pak-corrupt] key 0x{entry.Key:X16} at offset {entry.Offset} " +
             $"(storedLength {entry.StoredLength}, compressed={entry.IsCompressed}): " +
@@ -275,10 +290,10 @@ public sealed class PakReader : IDisposable {
     }
 
     private int BinarySearch(ulong key) {
-        int lo = 0, hi = _toc.Length - 1;
+        int lo = 0, hi = _tocCount - 1;
         while (lo <= hi) {
             int mid = lo + (hi - lo) / 2;
-            ulong midKey = _toc[mid].Key;
+            ulong midKey = ReadToc(mid).Key;
             if (midKey == key) return mid;
             if (midKey < key) lo = mid + 1;
             else hi = mid - 1;
