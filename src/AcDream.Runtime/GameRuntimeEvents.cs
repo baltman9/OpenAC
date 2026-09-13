@@ -80,8 +80,8 @@ public readonly record struct RuntimeChatEntry(
     string ChannelName)
 {
     /// <summary>
-    /// The retail log-text type the line was logged under — what decides its
-    /// colour and which channel filter it obeys.
+    /// The log-text type the line was logged under — the number that decides
+    /// its colour and which channel filter it obeys.
     /// </summary>
     public uint LogTextType { get; init; }
 }
