@@ -62,6 +62,15 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
     /// </summary>
     private const string CasterItemName = "Wand";
 
+    /// <summary>
+    /// How long the first buff pass may take. A character that knows the
+    /// whole self-buff book and has every skill trained casts dozens of
+    /// them one after another, and each one is a real cast on a real
+    /// server; the run waits that out rather than judging combat and
+    /// navigation through a buff pass that is still working.
+    /// </summary>
+    private static readonly TimeSpan BuffPassBudget = TimeSpan.FromMinutes(6d);
+
     private const string SettingsProfileName = "vt-proof-settings";
     private const string LootProfileName = "vt-proof-loot";
     private const string RouteProfileName = "vt-proof-route";
@@ -371,33 +380,35 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 () => MentionsAny(observed.SnapshotChat(), "Macro started."));
             staged.Add($"macro started -> {macroStarted}");
 
-            // ---- P3: a buff spell is really cast, then the pass goes quiet -----
+            // ---- P3: buff spells are cast until nothing is due -----------------
+            // The pass is as long as the character's spellbook makes it — a
+            // fully skilled character really does cast dozens of buffs — and
+            // it ends by saying so, which is a far better signal than a
+            // silence anyone could mistake for a stalled macro. Everything
+            // after this waits for it, because the buff rule outranks combat
+            // and navigation and would otherwise eat their windows.
             {
                 int before = observed.ChatCount;
                 _ = WaitUntil(
-                    TimeSpan.FromSeconds(60d),
-                    () => VtProofCastEvidence.Read(observed.SnapshotChat()).IsCast);
+                    TimeSpan.FromSeconds(BuffPassBudget.TotalSeconds),
+                    () => VtProofCastEvidence.Read(observed.SnapshotChat())
+                        .IsSettledPass);
                 VtProofCastEvidence evidence =
                     VtProofCastEvidence.Read(observed.SnapshotChat());
-                bool settled = evidence.IsCast
-                    && WaitUntil(
-                        TimeSpan.FromSeconds(30d),
-                        () => Quiet(observed, "Casting:", TimeSpan.FromSeconds(6d)));
-                if (evidence.IsCast && settled)
+                if (evidence.IsSettledPass)
                 {
                     ledger.Pass(
                         "P3",
-                        "a buff spell is cast and the pass then goes quiet",
-                        $"{evidence.CastLine} (after chat entry {before})");
+                        "buff spells are cast until nothing is due",
+                        $"{evidence.CastLine}; {evidence.NothingDueLine} "
+                            + $"(after chat entry {before})");
                 }
                 else
                 {
                     ledger.Fail(
                         "P3",
-                        "a buff spell is cast and the pass then goes quiet",
-                        evidence.IsCast
-                            ? $"the buff pass never went quiet after {evidence.CastLine}"
-                            : evidence.Explain(),
+                        "buff spells are cast until nothing is due",
+                        evidence.Explain(),
                         Evidence());
                 }
             }
@@ -636,7 +647,7 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
     [
         ("P1", "connected, plugin loaded, entered world"),
         ("P2", "the fixture settings, loot and route profiles are loaded"),
-        ("P3", "a buff spell is cast and the pass then goes quiet"),
+        ("P3", "buff spells are cast until nothing is due"),
         ("P4", "the attack rule wins the loop and a kill is observed"),
         ("P5", "a corpse is opened and at least one loot decision is made"),
         ("P6", "the route advances by at least two waypoints"),
@@ -734,9 +745,6 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
         }
         return false;
     }
-
-    private static bool Quiet(SessionObservation observed, string needle, TimeSpan window) =>
-        observed.SecondsSinceLastMatch(needle) >= window.TotalSeconds;
 
     private static bool IsDead(HeadlessSessionHost session) =>
         session.Runtime.Character.TryGetVital(
@@ -896,7 +904,6 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
     {
         private readonly object _gate = new();
         private readonly List<string> _chat = [];
-        private readonly Dictionary<string, DateTime> _lastMatch = new(StringComparer.Ordinal);
 
         internal int InventoryAdditions { get; private set; }
 
@@ -915,16 +922,6 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                 return [.. _chat];
         }
 
-        internal double SecondsSinceLastMatch(string needle)
-        {
-            lock (_gate)
-            {
-                return _lastMatch.TryGetValue(needle, out DateTime stamp)
-                    ? (DateTime.UtcNow - stamp).TotalSeconds
-                    : double.MaxValue;
-            }
-        }
-
         public void OnLifecycle(in RuntimeLifecycleDelta delta) { }
         public void OnCommand(in RuntimeCommandDelta delta) { }
         public void OnEntity(in RuntimeEntityDelta delta) { }
@@ -939,11 +936,7 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
         {
             string text = delta.Entry.Text;
             lock (_gate)
-            {
                 _chat.Add(text);
-                if (text.Contains("Casting:", StringComparison.Ordinal))
-                    _lastMatch["Casting:"] = DateTime.UtcNow;
-            }
         }
 
         public void OnMovement(in RuntimeMovementDelta delta) { }
@@ -1285,28 +1278,37 @@ internal sealed class VtProofLedger
 }
 
 /// <summary>
-/// Whether a run's chat really shows a spell leaving the character, read
-/// out of the plugin's own two lines for one cast. The planner is chatty —
-/// it says which buff it would like, on whom, and for how long it is
-/// covered — and none of that means anything left the character: the milestone
-/// used to accept exactly those lines, so it stayed green through a run whose
-/// macro had already stopped.
+/// Whether a run's chat shows a buff pass that really ran and really
+/// finished, read out of three of the plugin's own lines.
 /// <para>
-/// The cast line is written once the caster surface has accepted the
-/// request, and the tracking line once the caster has opened its record of
-/// that same cast, so the pair together cannot be produced by planning alone.
+/// The planner is chatty — it says which buff it would like, on whom, and
+/// how long it is covered for — and none of that means anything left the
+/// character: the milestone used to accept exactly those lines, so it
+/// stayed green through a run whose macro had already stopped. The cast
+/// line is written only after the caster surface accepted the request, and
+/// the tracking line only once the caster opened its record of that same
+/// cast, so the pair cannot be produced by planning alone.
+/// </para>
+/// <para>
+/// The pass ends when the buff rule declines because nothing is due. That
+/// is the milestone's own wording, and it is a much better end signal than
+/// silence: a stalled macro is silent too.
 /// </para>
 /// </summary>
 internal readonly record struct VtProofCastEvidence(
     string? CastLine,
-    bool CasterBeganTracking)
+    bool CasterBeganTracking,
+    string? NothingDueLine)
 {
     internal bool IsCast => CastLine is not null && CasterBeganTracking;
+
+    internal bool IsSettledPass => IsCast && NothingDueLine is not null;
 
     internal static VtProofCastEvidence Read(IReadOnlyList<string> chat)
     {
         ArgumentNullException.ThrowIfNull(chat);
         string? castLine = null;
+        string? nothingDue = null;
         bool tracking = false;
         foreach (string line in chat)
         {
@@ -1314,14 +1316,23 @@ internal readonly record struct VtProofCastEvidence(
                 ? line
                 : null;
             tracking |= line.Contains("SpellCaster: Begin", StringComparison.Ordinal);
+            // Only the buff rule's own decline counts: the same wording from
+            // another rule would say nothing about buffs.
+            nothingDue ??= line.Contains(
+                "(BuffSelf) declined: nothing is due", StringComparison.Ordinal)
+                ? line
+                : null;
         }
-        return new VtProofCastEvidence(castLine, tracking);
+        return new VtProofCastEvidence(castLine, tracking, nothingDue);
     }
 
     internal string Explain() => CastLine is null
         ? "no spell was ever cast (no cast line)"
-        : "a cast line appeared but the caster never began tracking it: "
-            + CastLine;
+        : !CasterBeganTracking
+            ? "a cast line appeared but the caster never began tracking it: "
+                + CastLine
+            : "the buff pass never reported that nothing was due; last it "
+                + "said: " + CastLine;
 }
 
 internal readonly record struct VtProofRoutePoint(
@@ -1492,6 +1503,84 @@ public sealed class VtSessionProofHarnessTests
         Assert.Equal(
             "[MossTank] Casting: Strength Self VII on 1342177290 (+Acdream)",
             evidence.CastLine);
+    }
+
+    /// <summary>
+    /// A pass that is still casting has not finished, however many spells it
+    /// has got through; the buff rule saying nothing is due is what ends it.
+    /// </summary>
+    [Fact]
+    public void ABuffPassStillCastingHasNotSettled()
+    {
+        string[] chat =
+        [
+            "[MossTank] Casting: Strength Self VII on 1342177290 (+Acdream)",
+            "[MossTank] SpellCaster: Begin",
+            "[MossTank] SpellCaster: Spell success reset (You cast Strength Self VII on yourself)",
+        ];
+
+        VtProofCastEvidence evidence = VtProofCastEvidence.Read(chat);
+
+        Assert.True(evidence.IsCast);
+        Assert.False(evidence.IsSettledPass);
+        Assert.Contains(
+            "never reported that nothing was due",
+            evidence.Explain(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ABuffPassThatCastAndThenFoundNothingDueHasSettled()
+    {
+        string[] chat =
+        [
+            "[MossTank] Casting: Strength Self VII on 1342177290 (+Acdream)",
+            "[MossTank] SpellCaster: Begin",
+            "[MossTank] (BuffSelf) declined: nothing is due within 330s that this "
+                + "character can cast (2054 self buffs known, 34 items carried)",
+        ];
+
+        VtProofCastEvidence evidence = VtProofCastEvidence.Read(chat);
+
+        Assert.True(evidence.IsSettledPass);
+        Assert.Contains(
+            "nothing is due within 330s",
+            evidence.NothingDueLine!,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Another rule declining for its own reasons is not the buff pass
+    /// ending, and a pass that never cast anything has not run at all.
+    /// </summary>
+    [Fact]
+    public void AnotherRulesDeclineDoesNotEndTheBuffPass()
+    {
+        string[] chat =
+        [
+            "[MossTank] Casting: Strength Self VII on 1342177290 (+Acdream)",
+            "[MossTank] SpellCaster: Begin",
+            "[MossTank] (RechargeSelfNormal) declined: nothing is due",
+        ];
+
+        VtProofCastEvidence evidence = VtProofCastEvidence.Read(chat);
+
+        Assert.False(evidence.IsSettledPass);
+    }
+
+    [Fact]
+    public void APassThatOnlyDeclinedNeverRan()
+    {
+        string[] chat =
+        [
+            "[MossTank] (BuffSelf) declined: nothing is due within 330s that this "
+                + "character can cast (0 self buffs known, 0 items carried)",
+        ];
+
+        VtProofCastEvidence evidence = VtProofCastEvidence.Read(chat);
+
+        Assert.False(evidence.IsSettledPass);
+        Assert.Equal("no spell was ever cast (no cast line)", evidence.Explain());
     }
 
     [Fact]
