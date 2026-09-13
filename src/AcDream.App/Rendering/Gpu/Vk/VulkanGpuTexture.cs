@@ -292,9 +292,8 @@ internal sealed unsafe class VulkanGpuSampler : IGpuSampler
 
     internal Sampler Handle { get; }
 
-    internal bool IsDisposed => _disposed;
-
-    public void Dispose()
+    /// <summary>Device teardown only: every consumer shares this instance.</summary>
+    internal void Destroy()
     {
         if (_disposed)
             return;

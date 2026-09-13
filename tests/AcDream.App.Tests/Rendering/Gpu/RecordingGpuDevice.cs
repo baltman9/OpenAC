@@ -224,8 +224,7 @@ internal sealed class RecordingGpuDevice : IGpuDevice, IGpuPipelineFormatVariant
 
     public IGpuSampler CreateSampler(in GpuSamplerDescription description)
     {
-        if (_samplers.TryGetValue(description, out RecordingGpuSampler? existing)
-            && !existing.IsDisposed)
+        if (_samplers.TryGetValue(description, out RecordingGpuSampler? existing))
             return existing;
 
         RecordingGpuSampler created = new(description);
@@ -755,10 +754,6 @@ internal sealed class RecordingGpuTexture(
 internal sealed class RecordingGpuSampler(GpuSamplerDescription description) : IGpuSampler
 {
     public GpuSamplerDescription Description { get; } = description;
-
-    public bool IsDisposed { get; private set; }
-
-    public void Dispose() => IsDisposed = true;
 }
 
 internal sealed class RecordingGpuPipeline(GpuPipelineDescription description) : IGpuPipeline

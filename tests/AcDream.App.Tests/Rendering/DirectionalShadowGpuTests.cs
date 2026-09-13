@@ -1051,7 +1051,9 @@ public sealed class DirectionalShadowGpuTests
 
         Assert.Equal(baselineSlots, device.LiveTextureSlotCount);
         Assert.True(target.IsDisposed);
-        Assert.True(sampler.IsDisposed);
+        // The sampler is the device's, shared with every other consumer of
+        // the description; the renderer's teardown must leave it alone.
+        Assert.Same(sampler, device.CreateSampler(GpuSamplerDescription.ShadowNearestClamp));
         Assert.All(pipelines, pipeline => Assert.True(pipeline.IsDisposed));
     }
 
@@ -1071,7 +1073,7 @@ public sealed class DirectionalShadowGpuTests
         Assert.Equal("injected pipeline failure", failure.Message);
         Assert.Equal(baselineSlots, device.LiveTextureSlotCount);
         Assert.True(Assert.Single(device.CreatedDirectionalDepthTargets).IsDisposed);
-        Assert.True(device.CreatedSamplers[^1].IsDisposed);
+        Assert.Same(device.CreatedSamplers[^1], device.CreateSampler(GpuSamplerDescription.ShadowNearestClamp));
         Assert.True(Assert.Single(device.CreatedPipelines).IsDisposed);
     }
 
@@ -1093,26 +1095,29 @@ public sealed class DirectionalShadowGpuTests
 
         Assert.Equal(baselineSlots, device.LiveTextureSlotCount);
         Assert.True(Assert.Single(device.CreatedDirectionalDepthTargets).IsDisposed);
-        Assert.True(device.CreatedSamplers[^1].IsDisposed);
+        Assert.Same(device.CreatedSamplers[^1], device.CreateSampler(GpuSamplerDescription.ShadowNearestClamp));
         Assert.Equal(5, device.CreatedPipelines.Count);
         Assert.All(device.CreatedPipelines, pipeline => Assert.True(pipeline.IsDisposed));
     }
 
     [Fact]
-    public void RebuildAfterDisposal_UsesANewLiveShadowSampler()
+    public void TwoRenderersShareTheDeviceSampler_AndOneTeardownLeavesTheOtherSampling()
     {
+        // Two graphs can be alive at once (a prepared pack graph beside the
+        // active one); tearing one down must not destroy the sampler the
+        // other's texture slot still names.
         using var device = new RecordingGpuDevice();
-        var first = new DirectionalSunShadowRenderer(device, DirectionalShadowPreset.Low);
+        using var first = new DirectionalSunShadowRenderer(device, DirectionalShadowPreset.Low);
         RecordingGpuSampler firstSampler = device.CreatedSamplers[^1];
-        first.Dispose();
-
-        using var second = new DirectionalSunShadowRenderer(device, DirectionalShadowPreset.Low);
+        var second = new DirectionalSunShadowRenderer(device, DirectionalShadowPreset.Low);
         RecordingGpuSampler secondSampler = device.CreatedSamplers[^1];
+        Assert.Same(firstSampler, secondSampler);
 
-        Assert.NotSame(firstSampler, secondSampler);
-        Assert.True(firstSampler.IsDisposed);
-        Assert.False(secondSampler.IsDisposed);
-        Assert.Equal(GpuSamplerDescription.ShadowNearestClamp, secondSampler.Description);
+        second.Dispose();
+
+        Assert.Same(firstSampler, device.CreateSampler(GpuSamplerDescription.ShadowNearestClamp));
+        Assert.Single(device.CreatedSamplers, sampler => sampler.Description == GpuSamplerDescription.ShadowNearestClamp);
+        Assert.Equal(GpuSamplerDescription.ShadowNearestClamp, firstSampler.Description);
     }
 
     [Fact]

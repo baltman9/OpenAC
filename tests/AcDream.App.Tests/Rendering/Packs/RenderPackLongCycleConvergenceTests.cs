@@ -427,9 +427,13 @@ public sealed class RenderPackLongCycleConvergenceTests
         Assert.Null(lifetime.ActiveRuntime);
     }
 
+    // Samplers are device-owned and de-duplicated by description, so the
+    // first graph that asks for a description grows the cache once and never
+    // again; priming keeps the ledger about the graph's own resources.
     private static void PrimeDeviceOwnedSamplerCache(RecordingGpuDevice device)
     {
         _ = device.CreateSampler(GpuSamplerDescription.WorldClamp);
+        _ = device.CreateSampler(GpuSamplerDescription.ShadowNearestClamp);
     }
 
     private static IRenderPackAssets BuiltInAssets() =>
@@ -466,7 +470,7 @@ public sealed class RenderPackLongCycleConvergenceTests
         internal static LiveGpuLedger Capture(RecordingGpuDevice device) => new(
             device.CreatedBuffers.Count(static value => !value.IsDisposed),
             device.CreatedPipelines.Count(static value => !value.IsDisposed),
-            device.CreatedSamplers.Count(static value => !value.IsDisposed),
+            device.CreatedSamplers.Count, // de-duplicated by description, device-owned
             device.CreatedTextures.Count(static value => !value.IsDisposed),
             device.CreatedRenderTargets.Count(static value => !value.IsDisposed),
             device.CreatedDirectionalDepthTargets.Count(static value => !value.IsDisposed),

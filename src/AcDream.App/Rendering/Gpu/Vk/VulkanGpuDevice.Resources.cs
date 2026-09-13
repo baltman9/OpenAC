@@ -198,7 +198,7 @@ internal sealed unsafe partial class VulkanGpuDevice
         _pipelineFormatLeaseCounts.Clear();
 
         foreach (VulkanGpuSampler sampler in _samplers.Values)
-            sampler.Dispose();
+            sampler.Destroy();
         _samplers.Clear();
 
         _bindingDummy?.Dispose();
@@ -284,8 +284,7 @@ internal sealed unsafe partial class VulkanGpuDevice
     private IGpuSampler CreateSamplerLocked(in GpuSamplerDescription description)
     {
         ThrowIfDisposed();
-        if (_samplers.TryGetValue(description, out VulkanGpuSampler? existing)
-            && !existing.IsDisposed)
+        if (_samplers.TryGetValue(description, out VulkanGpuSampler? existing))
             return existing;
 
         var created = new VulkanGpuSampler(
