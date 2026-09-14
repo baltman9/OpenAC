@@ -384,6 +384,7 @@ public sealed class RetailUiRuntime : IDisposable
     private CreditsUiController? _creditsController;
     private CharacterCreationUiMountCoordinator? _characterCreationMount;
     private PluginSidePanel? _pluginSidePanel;
+    private bool _pluginsMounted;
     private IDisposable? _characterSheetSubscription;
     private Layout.CharacterTitlesController? _characterTitlesController;
     private ResourceShutdownTransaction? _shutdown;
@@ -434,6 +435,7 @@ public sealed class RetailUiRuntime : IDisposable
         MountRadar();
         MountChat();
         MountFloatingChatWindows();
+        ApplySavedChatFont();
         MountToolbar();
         MountCombat();
         MountSpellbook();
@@ -452,6 +454,7 @@ public sealed class RetailUiRuntime : IDisposable
         MountBookPanel();
         MountCharacter();
         MountPlugins();
+        _pluginsMounted = true;
         MountInventory();
         MountExternalContainer();
         MountVendor();
@@ -713,6 +716,11 @@ public sealed class RetailUiRuntime : IDisposable
         _characterCreationMount?.Tick();
         CharacterCreationController?.Tick();
         DialogFactory?.Tick();
+        // Windows a plugin registered after the UI came up (a server-fed panel
+        // arrives once the character is in the world). Same path as the first
+        // mount; each registration is drained once.
+        if (_pluginsMounted && _bindings.Plugins is { HasUndrained: true })
+            MountPlugins();
         Host.Tick(deltaSeconds);
         TooltipPresenter?.Tick();
         _automation?.Tick(deltaSeconds);
@@ -1604,6 +1612,30 @@ public sealed class RetailUiRuntime : IDisposable
         }
 
         Console.WriteLine("[UI] retail floating chat windows 1-4 from LayoutDesc importer (0x2100005B).");
+    }
+
+    private void ApplySavedChatFont()
+    {
+        if (_bindings.Chat.Store?.LoadChat() is { } chat)
+            ApplyChatFont(chat.ChatFontFace, chat.ChatFontSizeIndex);
+    }
+
+    private void ApplyChatFont(int faceIndex, int sizeIndex)
+    {
+        UiDatFont? font;
+        lock (_bindings.Assets.DatLock)
+        {
+            if (!ChatFontResolver.TryResolveFontId(
+                    _bindings.Assets.Dats, faceIndex, sizeIndex, out uint fontDid))
+                return;
+            font = _bindings.Assets.ResolveFont(fontDid);
+        }
+        if (font is null)
+            return;
+
+        _chatWindowController?.ApplyChatFont(font);
+        foreach (FloatingChatWindowController? floating in _floatingChatControllers)
+            floating?.ApplyChatFont(font);
     }
 
     private void MountToolbar()
@@ -2617,6 +2649,7 @@ public sealed class RetailUiRuntime : IDisposable
                                 _bindings.Options.LoadRenderPackFailureNotice,
                         }
                         : null,
+                    ApplyChatFont = ApplyChatFont,
                 },
                 resolveSprite: _bindings.Assets.ResolveSprite,
                 datFont: _bindings.Assets.DefaultFont,
