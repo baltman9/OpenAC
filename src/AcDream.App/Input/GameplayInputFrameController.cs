@@ -22,17 +22,30 @@ internal sealed class CombatAttackInputFrameAdapter : ICombatInputFrameControlle
 
     public void Tick() => _owner.Tick();
 
+    /// <summary>
+    /// The movement bindings that end a repeating attack. Issuing any movement
+    /// command takes local control of the character back from the server, and
+    /// taking control back is what ends the repeat: it happens on the way in,
+    /// before anything looks at which command actually arrived. So a turn or a
+    /// sidestep ends the repeat exactly the way a step backward does. Walk mode
+    /// is the one movement binding left out - it only changes the speed a later
+    /// command will carry, and never becomes a command of its own.
+    /// </summary>
+    internal static bool EndsRepeatingAttack(InputAction action) =>
+        action is InputAction.MovementForward
+            or InputAction.MovementBackup
+            or InputAction.MovementStop
+            or InputAction.MovementStrafeLeft
+            or InputAction.MovementStrafeRight
+            or InputAction.MovementTurnLeft
+            or InputAction.MovementTurnRight
+            or InputAction.MovementRunLock
+            or InputAction.MovementJump;
+
     public void HandleMovementInput(InputAction action, ActivationType activation)
     {
-        if (activation != ActivationType.Press
-            || action is not (
-                InputAction.MovementForward
-                or InputAction.MovementBackup
-                or InputAction.MovementRunLock
-                or InputAction.MovementJump))
-        {
+        if (activation != ActivationType.Press || !EndsRepeatingAttack(action))
             return;
-        }
 
         _owner.HandleCommand(new RuntimeCombatAttackInput(
             RuntimeCombatAttackCommand.AbortForMovement,
