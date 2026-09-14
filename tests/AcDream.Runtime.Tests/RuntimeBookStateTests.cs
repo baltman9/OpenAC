@@ -438,4 +438,107 @@ public sealed class RuntimeBookStateTests
         Assert.Equal("one", pages[0].PageText);
         Assert.Equal("two", pages[1].PageText);
     }
+
+    [Fact]
+    public void TurnPage_SavesWhatTheReaderTypedOnThePageBeingLeft()
+    {
+        RuntimeBookState state = NewState();
+        state.ApplyOpenBook(Open(Page(Player, "old"), Page(Player, "two")));
+
+        RuntimeBookPageTurn turn = state.TurnPage(1, "edited");
+
+        Assert.Equal(RuntimeBookFlushAction.ModifyPage, turn.Flush);
+        Assert.Equal(0, turn.FlushPage);
+        Assert.Equal(RuntimeBookPageAction.Display, turn.Action);
+        Assert.Equal(1, turn.Page);
+        Assert.Equal("edited", state.View.GetPage(0)!.Value.PageText);
+    }
+
+    [Fact]
+    public void TurnPage_WithNullTextSavesNothing()
+    {
+        RuntimeBookState state = NewState();
+        state.ApplyOpenBook(Open(Page(Player, "old"), Page(Player, "two")));
+
+        RuntimeBookPageTurn turn = state.TurnPage(1, pageText: null);
+
+        Assert.Equal(RuntimeBookFlushAction.None, turn.Flush);
+        Assert.Equal("old", state.View.GetPage(0)!.Value.PageText);
+    }
+
+    [Fact]
+    public void TurnPage_ForwardOffADeletedPageFollowsThePagesThatShiftedDown()
+    {
+        // Blanking page 2 of three and pressing next has to land on what
+        // used to be page 3 -- which is page 2 once the blank one goes.
+        RuntimeBookState state = NewState();
+        state.ApplyOpenBook(
+            Open(Page(Player, "one"), Page(Player, "two"), Page(Player, "three")));
+        state.SetCurrentPage(1);
+
+        RuntimeBookPageTurn turn = state.TurnPage(2, "   ");
+
+        Assert.Equal(RuntimeBookFlushAction.DeletePage, turn.Flush);
+        Assert.Equal(1, turn.FlushPage);
+        Assert.Equal(1, turn.Page);
+        Assert.Equal(RuntimeBookPageAction.Display, turn.Action);
+        Assert.Equal("three", state.View.GetPage(1)!.Value.PageText);
+        Assert.Equal(2, state.Snapshot.PageCount);
+    }
+
+    [Fact]
+    public void TurnPage_BackwardOffADeletedPageDoesNotShift()
+    {
+        RuntimeBookState state = NewState();
+        state.ApplyOpenBook(
+            Open(Page(Player, "one"), Page(Player, "two"), Page(Player, "three")));
+        state.SetCurrentPage(1);
+
+        RuntimeBookPageTurn turn = state.TurnPage(0, string.Empty);
+
+        Assert.Equal(RuntimeBookFlushAction.DeletePage, turn.Flush);
+        Assert.Equal(0, turn.Page);
+        Assert.Equal("one", state.View.GetPage(0)!.Value.PageText);
+    }
+
+    [Fact]
+    public void TurnPage_ToTheSamePageIsRefusedWithoutSaving()
+    {
+        RuntimeBookState state = NewState();
+        state.ApplyOpenBook(Open(Page(Player, "one")));
+
+        RuntimeBookPageTurn turn = state.TurnPage(0, "edited");
+
+        Assert.Equal(RuntimeBookFlushAction.None, turn.Flush);
+        Assert.Equal(RuntimeBookPageAction.None, turn.Action);
+        Assert.Equal("one", state.View.GetPage(0)!.Value.PageText);
+    }
+
+    [Fact]
+    public void TurnPage_WhileARequestIsInFlightSavesNothingAndGoesNowhere()
+    {
+        RuntimeBookState state = NewState();
+        state.ApplyOpenBook(Open(Page(Player, "one"), Page(Player, "two")));
+        state.MarkRequestPending();
+
+        RuntimeBookPageTurn turn = state.TurnPage(1, "edited");
+
+        Assert.Equal(RuntimeBookFlushAction.None, turn.Flush);
+        Assert.Equal(RuntimeBookPageAction.None, turn.Action);
+        Assert.Equal(0, state.Snapshot.CurrentPage);
+        Assert.Equal("one", state.View.GetPage(0)!.Value.PageText);
+    }
+
+    [Fact]
+    public void TurnPage_OffAPageWrittenBySomeoneElseSavesNothing()
+    {
+        RuntimeBookState state = NewState();
+        state.ApplyOpenBook(Open(Page(Other, "theirs"), Page(Other, "two")));
+
+        RuntimeBookPageTurn turn = state.TurnPage(1, "vandalism");
+
+        Assert.Equal(RuntimeBookFlushAction.None, turn.Flush);
+        Assert.Equal(RuntimeBookPageAction.Display, turn.Action);
+        Assert.Equal("theirs", state.View.GetPage(0)!.Value.PageText);
+    }
 }

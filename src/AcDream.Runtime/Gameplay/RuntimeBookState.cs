@@ -37,6 +37,16 @@ public enum RuntimeBookFlushAction
     DeletePage = 2,
 }
 
+/// <summary>
+/// One page turn: what the page being left has to save, and what the
+/// page being opened has to fetch.
+/// </summary>
+public readonly record struct RuntimeBookPageTurn(
+    RuntimeBookFlushAction Flush,
+    int FlushPage,
+    RuntimeBookPageAction Action,
+    int Page);
+
 public readonly record struct RuntimeBookSnapshot(
     long Revision,
     bool IsOpen,
@@ -225,35 +235,60 @@ public sealed class RuntimeBookState
     /// the in-flight gate is raised here for the two answers that need
     /// one, so a second turn cannot race the first.
     /// </summary>
-    public RuntimeBookPageAction SetCurrentPage(int page)
+    public RuntimeBookPageAction SetCurrentPage(int page) =>
+        TurnPage(page, pageText: null).Action;
+
+    /// <summary>
+    /// Turn a page, saving what the reader typed on the one being left.
+    /// Pass null for the text to turn without saving -- a reader who
+    /// cannot write has nothing to save.
+    ///
+    /// The page being asked for is checked against the page the reader
+    /// is on BEFORE the save, because a save that deletes a blank page
+    /// shifts every later page down one, and the turn has to follow it.
+    /// </summary>
+    public RuntimeBookPageTurn TurnPage(int requested, string? pageText)
     {
         lock (_gate)
         {
             if (_bookGuid == 0u || _requestPending)
-                return RuntimeBookPageAction.None;
-            if (page < 0 || page >= _maxNumPages)
-                return RuntimeBookPageAction.None;
-            if (page == _currentPage)
-                return RuntimeBookPageAction.None;
-            if (page > _pages.Count)
-                return RuntimeBookPageAction.None;
+                return default;
+            if (requested < 0 || requested >= _maxNumPages)
+                return default;
+            if (requested == _currentPage)
+                return default;
+            if (requested > _pages.Count)
+                return default;
+
+            RuntimeBookFlushAction flush = RuntimeBookFlushAction.None;
+            int flushPage = _currentPage;
+            if (pageText is not null)
+                flush = FlushCurrentPageLocked(pageText, out flushPage);
+
+            int page = requested;
+            if (flush == RuntimeBookFlushAction.DeletePage && page > _currentPage)
+                page--;
 
             _currentPage = page;
             Bump();
 
+            RuntimeBookPageAction action;
             if (page >= _pages.Count)
             {
                 _requestPending = true;
-                return RuntimeBookPageAction.AddPage;
+                action = RuntimeBookPageAction.AddPage;
             }
-
-            if (_pages[page].TextIncluded == 0u)
+            else if (_pages[page].TextIncluded == 0u)
             {
                 _requestPending = true;
-                return RuntimeBookPageAction.RequestPageText;
+                action = RuntimeBookPageAction.RequestPageText;
+            }
+            else
+            {
+                action = RuntimeBookPageAction.Display;
             }
 
-            return RuntimeBookPageAction.Display;
+            return new RuntimeBookPageTurn(flush, flushPage, action, page);
         }
     }
 
@@ -265,31 +300,34 @@ public sealed class RuntimeBookState
     public RuntimeBookFlushAction FlushCurrentPage(string text, out int page)
     {
         lock (_gate)
+            return FlushCurrentPageLocked(text, out page);
+    }
+
+    private RuntimeBookFlushAction FlushCurrentPageLocked(string text, out int page)
+    {
+        page = _currentPage;
+        if (_bookGuid == 0u || _requestPending)
+            return RuntimeBookFlushAction.None;
+        if (_currentPage < 0 || _currentPage >= _pages.Count)
+            return RuntimeBookFlushAction.None;
+
+        BookPage current = _pages[_currentPage];
+        if (!IsEditableLocked(current))
+            return RuntimeBookFlushAction.None;
+
+        uint playerGuid = _playerGuid?.Invoke() ?? 0u;
+        if (IsBlank(text) && current.AuthorId == playerGuid)
         {
-            page = _currentPage;
-            if (_bookGuid == 0u || _requestPending)
-                return RuntimeBookFlushAction.None;
-            if (_currentPage < 0 || _currentPage >= _pages.Count)
-                return RuntimeBookFlushAction.None;
-
-            BookPage current = _pages[_currentPage];
-            if (!IsEditableLocked(current))
-                return RuntimeBookFlushAction.None;
-
-            uint playerGuid = _playerGuid?.Invoke() ?? 0u;
-            if (IsBlank(text) && current.AuthorId == playerGuid)
-            {
-                _pages.RemoveAt(_currentPage);
-                if (_currentPage >= _pages.Count)
-                    _currentPage = Math.Max(0, _pages.Count - 1);
-                Bump();
-                return RuntimeBookFlushAction.DeletePage;
-            }
-
-            _pages[_currentPage] = current with { PageText = text, TextIncluded = 1u };
+            // The page the reader is on keeps its index: a turn that
+            // follows adjusts against it, and a close clears it anyway.
+            _pages.RemoveAt(_currentPage);
             Bump();
-            return RuntimeBookFlushAction.ModifyPage;
+            return RuntimeBookFlushAction.DeletePage;
         }
+
+        _pages[_currentPage] = current with { PageText = text, TextIncluded = 1u };
+        Bump();
+        return RuntimeBookFlushAction.ModifyPage;
     }
 
     /// <summary>

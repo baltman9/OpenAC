@@ -29,7 +29,9 @@ public sealed class BookPanelController : IRetainedPanelController
         Func<uint, string> ResolveBookName,
         Action<uint /*bookGuid*/, int /*page*/> RequestPageText,
         Action<uint /*bookGuid*/> RequestAddPage,
-        Action<bool> SetVisible);
+        Action<bool> SetVisible,
+        Action<uint /*bookGuid*/, int /*page*/, string /*text*/>? SavePage = null,
+        Action<uint /*bookGuid*/, int /*page*/>? DeletePage = null);
 
     private readonly Bindings _bindings;
     private readonly UiText? _title;
@@ -118,6 +120,16 @@ public sealed class BookPanelController : IRetainedPanelController
     /// </summary>
     public void OnHidden()
     {
+        // Closing a book saves the open page first, the same as turning
+        // away from it.
+        RuntimeBookSnapshot snapshot = _bindings.Book.Snapshot;
+        if (TypedText() is { } typed)
+        {
+            RuntimeBookFlushAction flush =
+                _bindings.Commands.FlushCurrentPage(typed, out int page);
+            Send(snapshot.BookGuid, flush, page);
+        }
+
         _bindings.Commands.CloseBook();
         _wasOpen = false;
         Refresh();
@@ -147,7 +159,22 @@ public sealed class BookPanelController : IRetainedPanelController
             ? page?.PageText ?? string.Empty
             : string.Empty;
         SetText(_pageTextDisplay, pageText);
-        _pageTextField?.SetText(pageText);
+        if (_pageTextField is not null)
+        {
+            _pageTextField.SetText(pageText);
+
+            // A page is the reader's to write in when they wrote it, or
+            // when the book lets anyone write; everything else is read
+            // only, and so is a page whose text has not arrived yet.
+            _pageTextField.Editable =
+                snapshot.IsOpen
+                && page is not null
+                && page.Value.TextIncluded != 0u
+                && _bindings.Book.IsPageEditable(snapshot.CurrentPage);
+            // The book says how much fits on a page.
+            if (snapshot.MaxNumCharsPerPage > 0)
+                _pageTextField.MaxCharacters = snapshot.MaxNumCharsPerPage;
+        }
 
         SetText(
             _pageNumber,
@@ -190,11 +217,14 @@ public sealed class BookPanelController : IRetainedPanelController
     private void Turn(int page)
     {
         RuntimeBookSnapshot before = _bindings.Book.Snapshot;
-        RuntimeBookPageAction action = _bindings.Commands.SetCurrentPage(page);
-        switch (action)
+        RuntimeBookPageTurn turn = _bindings.Commands.TurnPage(page, TypedText());
+
+        Send(before.BookGuid, turn.Flush, turn.FlushPage);
+
+        switch (turn.Action)
         {
             case RuntimeBookPageAction.RequestPageText:
-                _bindings.RequestPageText(before.BookGuid, page);
+                _bindings.RequestPageText(before.BookGuid, turn.Page);
                 break;
             case RuntimeBookPageAction.AddPage:
                 _bindings.RequestAddPage(before.BookGuid);
@@ -206,6 +236,28 @@ public sealed class BookPanelController : IRetainedPanelController
         }
 
         Refresh();
+    }
+
+    /// <summary>What the reader typed, or null when this book cannot be
+    /// written in at all and so has nothing to save.</summary>
+    private string? TypedText() =>
+        _pageTextField is { Editable: true } field ? field.Text : null;
+
+    private void Send(uint bookGuid, RuntimeBookFlushAction flush, int page)
+    {
+        switch (flush)
+        {
+            case RuntimeBookFlushAction.ModifyPage:
+                _bindings.SavePage?.Invoke(
+                    bookGuid, page, _pageTextField?.Text ?? string.Empty);
+                break;
+            case RuntimeBookFlushAction.DeletePage:
+                _bindings.DeletePage?.Invoke(bookGuid, page);
+                break;
+            case RuntimeBookFlushAction.None:
+            default:
+                break;
+        }
     }
 
     private static void SetText(UiText? text, string value)

@@ -1065,7 +1065,13 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                     SendBookPageData: (bookGuid, page) =>
                         late.Session.CurrentSession?.SendBookPageData(bookGuid, page),
                     SendBookAddPage: bookGuid =>
-                        late.Session.CurrentSession?.SendBookAddPage(bookGuid)),
+                        late.Session.CurrentSession?.SendBookAddPage(bookGuid),
+                    SendBookModifyPage: (bookGuid, page, text) =>
+                        late.Session.CurrentSession?.SendBookModifyPage(
+                            bookGuid, page, text),
+                    SendBookDeletePage: (bookGuid, page) =>
+                        late.Session.CurrentSession?.SendBookDeletePage(
+                            bookGuid, page)),
                 IsGameplayDisplay: () => d.Settings.IsGameplayDisplay,
                 SynchronizeDisplayPhase: () =>
                 {

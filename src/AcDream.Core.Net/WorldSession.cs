@@ -2407,6 +2407,15 @@ public sealed partial class WorldSession : IDisposable
         SendGameAction(
             BookRequests.BuildBookAddPage(NextGameActionSequence(), bookGuid));
 
+    public void SendBookDeletePage(uint bookGuid, int page) =>
+        SendGameAction(
+            BookRequests.BuildBookDeletePage(NextGameActionSequence(), bookGuid, page));
+
+    public void SendBookModifyPage(uint bookGuid, int page, string text) =>
+        SendGameAction(
+            BookRequests.BuildBookModifyPage(
+                NextGameActionSequence(), bookGuid, page, text));
+
     public void SendPutItemInContainer(uint itemGuid, uint containerGuid, int placement)
     {
         uint seq = NextGameActionSequence();

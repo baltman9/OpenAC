@@ -286,7 +286,9 @@ public sealed record BookRuntimeBindings(
     AcDream.Runtime.Gameplay.IRuntimeBookView Book,
     AcDream.Runtime.Gameplay.RuntimeBookState Commands,
     Action<uint /*bookGuid*/, int /*page*/> SendBookPageData,
-    Action<uint /*bookGuid*/> SendBookAddPage);
+    Action<uint /*bookGuid*/> SendBookAddPage,
+    Action<uint /*bookGuid*/, int /*page*/, string /*text*/> SendBookModifyPage,
+    Action<uint /*bookGuid*/, int /*page*/> SendBookDeletePage);
 
 public sealed record RetailUiRuntimeBindings(
     UiHost Host,
@@ -3514,7 +3516,9 @@ public sealed class RetailUiRuntime : IDisposable
             RequestPageText: book.SendBookPageData,
             RequestAddPage: book.SendBookAddPage,
             SetVisible: visible =>
-                _panelUi.SetPanelVisibility(RetailPanelCatalog.Book, visible));
+                _panelUi.SetPanelVisibility(RetailPanelCatalog.Book, visible),
+            SavePage: book.SendBookModifyPage,
+            DeletePage: book.SendBookDeletePage);
 
         Layout.BookPanelController? controller;
         lock (_bindings.Assets.DatLock)

@@ -26,6 +26,8 @@ public sealed class BookPanelControllerTests
         public List<(uint Book, int Page)> PageTextRequests { get; } = [];
         public List<uint> AddPageRequests { get; } = [];
         public List<bool> Visibility { get; } = [];
+        public List<(uint Book, int Page, string Text)> Saved { get; } = [];
+        public List<(uint Book, int Page)> Deleted { get; } = [];
     }
 
     private static UiText Text(uint id) =>
@@ -85,7 +87,9 @@ public sealed class BookPanelControllerTests
                 RequestPageText: (book, page) =>
                     sent.PageTextRequests.Add((book, page)),
                 RequestAddPage: book => sent.AddPageRequests.Add(book),
-                SetVisible: sent.Visibility.Add));
+                SetVisible: sent.Visibility.Add,
+                SavePage: (book, page, text) => sent.Saved.Add((book, page, text)),
+                DeletePage: (book, page) => sent.Deleted.Add((book, page))));
 
         Assert.NotNull(controller);
         return (controller!, state, root, sent);
@@ -341,5 +345,170 @@ public sealed class BookPanelControllerTests
         controller.Tick();
 
         Assert.Equal([true], sent.Visibility);
+    }
+    [Fact]
+    public void APageTheReaderWroteIsTypeable()
+    {
+        (BookPanelController controller, RuntimeBookState state,
+            UiElement root, _) = Bind();
+
+        state.ApplyOpenBook(Open(4, Other, Page(Player, "mine")));
+        controller.Tick();
+
+        Assert.True(PageField(root).Editable);
+        Assert.Equal(500, PageField(root).MaxCharacters);
+    }
+
+    [Fact]
+    public void APageSomeoneElseWroteIsReadOnly()
+    {
+        (BookPanelController controller, RuntimeBookState state,
+            UiElement root, _) = Bind();
+
+        state.ApplyOpenBook(Open(4, Other, Page(Other, "theirs")));
+        controller.Tick();
+
+        Assert.False(PageField(root).Editable);
+    }
+
+    [Fact]
+    public void ACommunalPageIsTypeableWhoeverWroteIt()
+    {
+        (BookPanelController controller, RuntimeBookState state,
+            UiElement root, _) = Bind();
+
+        state.ApplyOpenBook(Open(4, Other, Page(Other, "shared", ignoreAuthor: 1u)));
+        controller.Tick();
+
+        Assert.True(PageField(root).Editable);
+    }
+
+    [Fact]
+    public void APageWhoseTextHasNotArrivedIsNotTypeable()
+    {
+        (BookPanelController controller, RuntimeBookState state,
+            UiElement root, _) = Bind();
+
+        state.ApplyOpenBook(
+            Open(4, Other, Page(Player, string.Empty, textIncluded: 0u)));
+        controller.Tick();
+
+        Assert.False(PageField(root).Editable);
+    }
+
+    [Fact]
+    public void TurningAwayFromAnEditedPageSavesIt()
+    {
+        (BookPanelController controller, RuntimeBookState state,
+            UiElement root, Sent sent) = Bind();
+        state.ApplyOpenBook(
+            Open(4, Other, Page(Player, "old"), Page(Player, "two")));
+        controller.Tick();
+        PageField(root).SetText("rewritten");
+
+        Click(root, BookPanelController.NextButtonId);
+
+        Assert.Equal([(BookGuid, 0, "rewritten")], sent.Saved);
+        Assert.Equal("rewritten", state.View.GetPage(0)!.Value.PageText);
+        Assert.Equal("two", PageField(root).Text);
+    }
+
+    [Fact]
+    public void TurningAwayFromSomeoneElsesPageSavesNothing()
+    {
+        (BookPanelController controller, RuntimeBookState state,
+            UiElement root, Sent sent) = Bind();
+        state.ApplyOpenBook(
+            Open(4, Other, Page(Other, "theirs"), Page(Other, "two")));
+        controller.Tick();
+
+        Click(root, BookPanelController.NextButtonId);
+
+        Assert.Empty(sent.Saved);
+        Assert.Empty(sent.Deleted);
+    }
+
+    [Fact]
+    public void BlankingYourOwnPageAndTurningForwardDeletesItAndFollowsTheShift()
+    {
+        (BookPanelController controller, RuntimeBookState state,
+            UiElement root, Sent sent) = Bind();
+        state.ApplyOpenBook(Open(
+            4, Other, Page(Player, "one"), Page(Player, "two"), Page(Player, "three")));
+        controller.Tick();
+        Click(root, BookPanelController.NextButtonId);
+        PageField(root).SetText("   ");
+
+        Click(root, BookPanelController.NextButtonId);
+
+        Assert.Equal([(BookGuid, 1)], sent.Deleted);
+        // Turning off page one saved it on the way past, unchanged --
+        // every turn away from a writable page saves it.
+        Assert.Equal([(BookGuid, 0, "one")], sent.Saved);
+        Assert.Equal("three", PageField(root).Text);
+        Assert.Equal(2, state.Snapshot.PageCount);
+    }
+
+    [Fact]
+    public void ClosingThePanelSavesTheOpenPageFirst()
+    {
+        (BookPanelController controller, RuntimeBookState state,
+            UiElement root, Sent sent) = Bind();
+        state.ApplyOpenBook(Open(4, Other, Page(Player, "old")));
+        controller.Tick();
+        PageField(root).SetText("final words");
+
+        controller.OnHidden();
+
+        Assert.Equal([(BookGuid, 0, "final words")], sent.Saved);
+        Assert.False(state.Snapshot.IsOpen);
+    }
+
+    [Fact]
+    public void ClosingThePanelOnAReadOnlyBookSavesNothing()
+    {
+        (BookPanelController controller, RuntimeBookState state,
+            _, Sent sent) = Bind();
+        state.ApplyOpenBook(Open(4, Other, Page(Other, "lore")));
+        controller.Tick();
+
+        controller.OnHidden();
+
+        Assert.Empty(sent.Saved);
+        Assert.Empty(sent.Deleted);
+    }
+
+    [Fact]
+    public void AddingAPageAndGettingTheAnswerLeavesABlankTypeablePage()
+    {
+        (BookPanelController controller, RuntimeBookState state,
+            UiElement root, Sent sent) = Bind();
+        state.ApplyOpenBook(Open(4, Other, Page(Player, "one")));
+        controller.Tick();
+
+        Click(root, BookPanelController.NextButtonId);
+        Assert.Equal([BookGuid], sent.AddPageRequests);
+
+        state.ApplyAddPageResponse(
+            new BookEvents.PageResponse(BookGuid, 1, true), "Acdream");
+        controller.Tick();
+
+        Assert.Equal(string.Empty, PageField(root).Text);
+        Assert.True(PageField(root).Editable);
+        Assert.Equal(2, state.Snapshot.PageCount);
+    }
+
+    [Fact]
+    public void NoTurnHappensWhileARequestIsStillInFlight()
+    {
+        (BookPanelController controller, RuntimeBookState state,
+            UiElement root, Sent sent) = Bind();
+        state.ApplyOpenBook(Open(4, Other, Page(Player, "one")));
+        controller.Tick();
+
+        Click(root, BookPanelController.NextButtonId);
+        Click(root, BookPanelController.NextButtonId);
+
+        Assert.Single(sent.AddPageRequests);
     }
 }
