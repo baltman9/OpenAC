@@ -33,7 +33,7 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
     internal const uint PlayerPackBaseIcon = 0x0600127Eu;
 
     private readonly ClientObjectTable _objects;
-    private readonly Func<ClientObject, string>? _resolveAppropriateName;
+    private readonly Func<ClientObject, string> _resolveAppropriateName;
     private readonly Func<uint> _playerGuid;
     private readonly Func<ItemType, uint, uint, uint, uint, uint> _iconIds;
     private readonly Func<ItemType, uint, uint, uint, uint, uint>? _dragIconIds;
@@ -99,8 +99,9 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         ShortcutStore? shortcuts,
         UiShortcutDigitGraphics? shortcutDigits,
         CombatState? combat,
-        Func<ClientObject, string>? resolveAppropriateName)
+        Func<ClientObject, string> resolveAppropriateName)
     {
+        ArgumentNullException.ThrowIfNull(resolveAppropriateName);
         _objects    = objects;
         _resolveAppropriateName = resolveAppropriateName;
         _shortcuts  = shortcuts;
@@ -238,6 +239,10 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         Func<int?> strength,
         SelectionState selection,
         UiDatFont? datFont,
+        /// <summary>Composes an item's displayed name, material prefix
+        /// included. Required: without it a cell would quietly caption the
+        /// plain name and disagree with the selection caption.</summary>
+        Func<ClientObject, string> resolveAppropriateName,
         Func<string>? ownerName = null,
         uint contentsEmptySprite = 0u,
         uint sideBagEmptySprite  = 0u,
@@ -254,8 +259,7 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         Spellbook? burdenSpellbook = null,
         ShortcutStore? shortcuts = null,
         UiShortcutDigitGraphics? shortcutDigits = null,
-        CombatState? combat = null,
-        Func<ClientObject, string>? resolveAppropriateName = null)
+        CombatState? combat = null)
         => new InventoryController(layout, objects, playerGuid, iconIds, dragIconIds, strength, selection,
                                    ownerName, datFont,
                                    contentsEmptySprite, sideBagEmptySprite, mainPackEmptySprite,

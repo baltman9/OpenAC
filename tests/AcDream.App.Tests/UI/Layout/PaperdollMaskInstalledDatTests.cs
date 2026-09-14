@@ -73,7 +73,8 @@ public sealed class PaperdollMaskInstalledDatTests
             iconIds: (_, _, _, _, _) => 0x1234u,
             selection: selection,
             itemInteraction: interaction,
-            clickMap: clickMap);
+            clickMap: clickMap,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         Assert.True(
             mask.PointerRegion is not null,

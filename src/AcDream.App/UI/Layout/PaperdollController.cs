@@ -34,7 +34,7 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
     private readonly SelectionState _selection;
     private readonly PaperdollClickMap? _clickMap;
     private readonly IPaperdollFigureLighting? _figureLighting;
-    private readonly Func<ClientObject, string>? _resolveAppropriateName;
+    private readonly Func<ClientObject, string> _resolveAppropriateName;
     private readonly List<(EquipMask Mask, UiItemList List)> _slots = new();
     private readonly List<(AetheriaUnlockState Bit, UiItemList List)> _aetheriaSlots = new();
 
@@ -55,8 +55,9 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
         IReadOnlyDictionary<uint, uint>? emptySlotSprites,
         bool ownsItemInteraction,
         IPaperdollFigureLighting? figureLighting,
-        Func<ClientObject, string>? resolveAppropriateName)
+        Func<ClientObject, string> resolveAppropriateName)
     {
+        ArgumentNullException.ThrowIfNull(resolveAppropriateName);
         _resolveAppropriateName = resolveAppropriateName;
         _objects = objects; _playerGuid = playerGuid; _iconIds = iconIds;
         _dragIconIds = dragIconIds;
@@ -154,13 +155,16 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
         ImportedLayout layout, ClientObjectTable objects, Func<uint> playerGuid,
         Func<ItemType, uint, uint, uint, uint, uint> iconIds, SelectionState selection,
         ItemInteractionController itemInteraction,
+        /// <summary>Composes an item's displayed name, material prefix
+        /// included. Required: without it a cell would quietly caption the
+        /// plain name and disagree with the selection caption.</summary>
+        Func<ClientObject, string> resolveAppropriateName,
         uint emptySlotSprite = 0u, UiDatFont? datFont = null,
         PaperdollClickMap? clickMap = null,
         Func<ItemType, uint, uint, uint, uint, uint>? dragIconIds = null,
         IReadOnlyDictionary<uint, uint>? emptySlotSprites = null,
         bool ownsItemInteraction = false,
-        IPaperdollFigureLighting? figureLighting = null,
-        Func<ClientObject, string>? resolveAppropriateName = null)
+        IPaperdollFigureLighting? figureLighting = null)
         => new PaperdollController(
             layout, objects, playerGuid, iconIds, selection, itemInteraction, emptySlotSprite,
             datFont, clickMap, dragIconIds, emptySlotSprites, ownsItemInteraction, figureLighting,
