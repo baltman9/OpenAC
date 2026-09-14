@@ -735,7 +735,8 @@ public sealed class UiRoot : UiElement
                 && Math.Abs(y - _pressY) <= DragDistanceThreshold)
             {
                 var click = new UiEvent(target.EventId, target, UiEventType.RightClick,
-                                        Data0: (int)flags);
+                                        Data0: (int)flags,
+                                        Data1: (int)(x - sp.X), Data2: (int)(y - sp.Y));
                 BubbleEvent(target, in click);
             }
 
@@ -959,7 +960,10 @@ public sealed class UiRoot : UiElement
         DragSource  = source;
         DragPayload = payload;
         _dragGhost  = source.GetDragGhost();
-        var e = new UiEvent(source.EventId, source, UiEventType.DragBegin, Payload: payload);
+        var sp = source.ScreenPosition;
+        var e = new UiEvent(source.EventId, source, UiEventType.DragBegin,
+                            Data1: (int)(_pressX - sp.X), Data2: (int)(_pressY - sp.Y),
+                            Payload: payload);
         source.OnEvent(in e);
         source.SetDragSourceActive(true, payload);
     }
