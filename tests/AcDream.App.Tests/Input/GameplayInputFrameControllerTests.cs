@@ -1,5 +1,7 @@
 using AcDream.App.Input;
 using AcDream.App.Update;
+using AcDream.Core.Combat;
+using AcDream.Runtime.Gameplay;
 using AcDream.UI.Abstractions.Input;
 using Silk.NET.Input;
 
@@ -111,6 +113,77 @@ public sealed class GameplayInputFrameControllerTests
         controller.EndMouseLook();
 
         Assert.Equal(["mouse-action", "mouse-delta", "mouse-lifecycle-end"], calls);
+    }
+
+    // Every movement command ends a repeating attack, so a turn or a sidestep
+    // stops the swing cycle exactly where a step backward does. Only forward,
+    // backward, run-lock and jump used to, which left a player who turned to
+    // face a moving target still swinging.
+    [Theory]
+    [InlineData(InputAction.MovementForward)]
+    [InlineData(InputAction.MovementBackup)]
+    [InlineData(InputAction.MovementStop)]
+    [InlineData(InputAction.MovementStrafeLeft)]
+    [InlineData(InputAction.MovementStrafeRight)]
+    [InlineData(InputAction.MovementTurnLeft)]
+    [InlineData(InputAction.MovementTurnRight)]
+    [InlineData(InputAction.MovementRunLock)]
+    [InlineData(InputAction.MovementJump)]
+    public void MovementInputEndsTheRepeatingAttack(InputAction action)
+    {
+        double now = 10d;
+        int cancels = 0;
+        var combat = new CombatState();
+        using var owner = new RuntimeCombatAttackState(
+            combat,
+            canStartAttack: () => true,
+            sendAttack: (_, _) => true,
+            sendCancelAttack: () => cancels++,
+            autoRepeatAttack: () => true,
+            now: () => now);
+        combat.SetCombatMode(CombatMode.Melee);
+        var adapter = new CombatAttackInputFrameAdapter(owner);
+
+        owner.PressAttack(AttackHeight.Medium);
+        now += 0.5d;
+        owner.ReleaseAttack();
+        Assert.True(owner.RepeatAttackInProgress);
+
+        adapter.HandleMovementInput(action, ActivationType.Press);
+
+        Assert.Equal(1, cancels);
+        Assert.False(owner.RepeatAttackInProgress);
+    }
+
+    // Walk mode never becomes a movement command of its own - it only changes
+    // the speed a later command carries - so holding it leaves the cycle alone.
+    [Fact]
+    public void WalkModeLeavesTheRepeatingAttackRunning()
+    {
+        double now = 10d;
+        int cancels = 0;
+        var combat = new CombatState();
+        using var owner = new RuntimeCombatAttackState(
+            combat,
+            canStartAttack: () => true,
+            sendAttack: (_, _) => true,
+            sendCancelAttack: () => cancels++,
+            autoRepeatAttack: () => true,
+            now: () => now);
+        combat.SetCombatMode(CombatMode.Melee);
+        var adapter = new CombatAttackInputFrameAdapter(owner);
+
+        owner.PressAttack(AttackHeight.Medium);
+        now += 0.5d;
+        owner.ReleaseAttack();
+        Assert.True(owner.RepeatAttackInProgress);
+
+        adapter.HandleMovementInput(
+            InputAction.MovementWalkMode,
+            ActivationType.Press);
+
+        Assert.Equal(0, cancels);
+        Assert.True(owner.RepeatAttackInProgress);
     }
 
     private sealed class FakeCombat : ICombatInputFrameController
