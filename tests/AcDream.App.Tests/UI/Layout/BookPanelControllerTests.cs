@@ -510,5 +510,128 @@ public sealed class BookPanelControllerTests
         Click(root, BookPanelController.NextButtonId);
 
         Assert.Single(sent.AddPageRequests);
+    
+    }
+
+    [Fact]
+    public void MarkPageTextTypeable_TurnsAnAuthoredReadOnlyPageIntoATypeableOne()
+    {
+        // Retail authors the page text read-only and flips it at run
+        // time. Our importer decides field-or-text once, at build, so
+        // the flag has to be on before the tree is built or there is
+        // nothing to flip and the whole edit path is dead.
+        var root = new ElementInfo { Id = BookPanelController.SlotElementId };
+        var pageText = new ElementInfo { Id = BookPanelController.PageTextId };
+        root.Children.Add(pageText);
+
+        Assert.False(pageText.TryGetEffectiveBool(0x16u, out _));
+
+        BookPanelController.MarkPageTextTypeable(root);
+
+        Assert.True(pageText.TryGetEffectiveBool(0x16u, out bool editable));
+        Assert.True(editable);
+    }
+
+    [Fact]
+    public void MarkPageTextTypeable_KeepsAnAlreadyTypeablePageTypeable()
+    {
+        var root = new ElementInfo { Id = BookPanelController.SlotElementId };
+        var pageText = new ElementInfo { Id = BookPanelController.PageTextId };
+        root.Children.Add(pageText);
+        BookPanelController.MarkPageTextTypeable(root);
+
+        BookPanelController.MarkPageTextTypeable(root);
+
+        Assert.True(pageText.TryGetEffectiveBool(0x16u, out bool editable));
+        Assert.True(editable);
+    }
+
+    [Fact]
+    public void MarkPageTextTypeable_IgnoresASlotWithoutAPageText()
+    {
+        var root = new ElementInfo { Id = BookPanelController.SlotElementId };
+
+        BookPanelController.MarkPageTextTypeable(root);
+
+        Assert.Empty(root.Children);
+    }
+
+    [Fact]
+    public void PageTextElementKind_ReportsWhatTheSlotActuallyBuilt()
+    {
+        (BookPanelController typeable, _, _, _) = Bind();
+        Assert.Equal("typeable field", typeable.PageTextElementKind);
+
+        // The same slot with a read-only text in place of the field.
+        var root = new UiPanel { Width = 400f, Height = 300f };
+        root.AddChild(Text(BookPanelController.PageTextId));
+        BookPanelController? readOnly = BookPanelController.BindTo(
+            root,
+            new BookPanelController.Bindings(
+                Book: new RuntimeBookState().View,
+                Commands: new RuntimeBookState(),
+                ResolveBookName: _ => string.Empty,
+                RequestPageText: (_, _) => { },
+                RequestAddPage: _ => { },
+                SetVisible: _ => { }));
+
+        Assert.NotNull(readOnly);
+        Assert.Equal("read-only text", readOnly!.PageTextElementKind);
+    }
+
+    [Fact]
+    public void ThePageButtonsAreOffAtTheEndsOfTheBook()
+    {
+        (BookPanelController controller, RuntimeBookState state,
+            UiElement root, _) = Bind();
+        state.ApplyOpenBook(Open(2, Other, Page(Other, "one"), Page(Other, "two")));
+        controller.Tick();
+
+        UiButton previous =
+            (UiButton)UiElement.FindDescendant(root, BookPanelController.PreviousButtonId)!;
+        UiButton next =
+            (UiButton)UiElement.FindDescendant(root, BookPanelController.NextButtonId)!;
+
+        Assert.False(previous.Enabled);
+        Assert.True(next.Enabled);
+
+        Click(root, BookPanelController.NextButtonId);
+
+        Assert.True(previous.Enabled);
+        Assert.False(next.Enabled);
+    }
+
+    [Fact]
+    public void ThePageButtonsAreOffWithNoBookOpen()
+    {
+        (BookPanelController controller, _, UiElement root, _) = Bind();
+        controller.Refresh();
+
+        Assert.False(
+            ((UiButton)UiElement.FindDescendant(
+                root, BookPanelController.PreviousButtonId)!).Enabled);
+        Assert.False(
+            ((UiButton)UiElement.FindDescendant(
+                root, BookPanelController.NextButtonId)!).Enabled);
+    }
+
+    [Fact]
+    public void PressingNextOffABlankPageYouWroteAtTheEndDoesNothing()
+    {
+        (BookPanelController controller, RuntimeBookState state,
+            UiElement root, Sent sent) = Bind();
+        state.ApplyOpenBook(Open(4, Other, Page(Player, "one"), Page(Player, "two")));
+        controller.Tick();
+        Click(root, BookPanelController.NextButtonId);
+        sent.Saved.Clear();
+        PageField(root).SetText("  ");
+
+        Click(root, BookPanelController.NextButtonId);
+
+        Assert.Empty(sent.Saved);
+        Assert.Empty(sent.Deleted);
+        Assert.Empty(sent.AddPageRequests);
+        Assert.Equal(1, state.Snapshot.CurrentPage);
+        Assert.Equal(2, state.Snapshot.PageCount);
     }
 }

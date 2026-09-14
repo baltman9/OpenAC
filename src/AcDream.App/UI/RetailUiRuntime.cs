@@ -3493,6 +3493,8 @@ public sealed class RetailUiRuntime : IDisposable
                 Layout.BookPanelController.HostLayoutId,
                 Layout.BookPanelController.SlotElementId);
             var resolver = new DatStringResolver(_bindings.Assets.Dats);
+            if (rootInfo is not null)
+                Layout.BookPanelController.MarkPageTextTypeable(rootInfo);
             layout = rootInfo is null
                 ? null
                 : LayoutImporter.Build(
@@ -3559,7 +3561,8 @@ public sealed class RetailUiRuntime : IDisposable
                 out bool restorePrevious)
                 && restorePrevious);
         Console.WriteLine(
-            "[UI] retail book panel from LayoutDesc importer (0x2100006E slot 0x10000182).");
+            "[UI] retail book panel from LayoutDesc importer (0x2100006E slot 0x10000182); "
+            + $"page text 0x10000111 built as {controller.PageTextElementKind}.");
     }
 
     private void MountDialogFactory()

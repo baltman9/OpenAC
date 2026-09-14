@@ -23,6 +23,10 @@ public sealed class BookPanelController : IRetainedPanelController
     public const uint PageMenuId = 0x10000470u;
     public const uint PageNumberTextId = 0x1000047Bu;
 
+    /// <summary>The authored flag that decides whether a text element
+    /// takes typing.</summary>
+    private const uint EditablePropertyId = 0x16u;
+
     public sealed record Bindings(
         IRuntimeBookView Book,
         RuntimeBookState Commands,
@@ -39,6 +43,8 @@ public sealed class BookPanelController : IRetainedPanelController
     private readonly UiField? _pageTextField;
     private readonly UiText? _pageNumber;
     private readonly UiMenu? _pageMenu;
+    private readonly UiButton? _previous;
+    private readonly UiButton? _next;
 
     private long _renderedRevision = -1;
     private bool _wasOpen;
@@ -56,10 +62,12 @@ public sealed class BookPanelController : IRetainedPanelController
         _pageNumber = UiElement.FindDescendant(root, PageNumberTextId) as UiText;
         _pageMenu = UiElement.FindDescendant(root, PageMenuId) as UiMenu;
 
-        if (UiElement.FindDescendant(root, PreviousButtonId) is UiButton previous)
-            previous.OnClick = () => Turn(CurrentPage - 1);
-        if (UiElement.FindDescendant(root, NextButtonId) is UiButton next)
-            next.OnClick = () => Turn(CurrentPage + 1);
+        _previous = UiElement.FindDescendant(root, PreviousButtonId) as UiButton;
+        _next = UiElement.FindDescendant(root, NextButtonId) as UiButton;
+        if (_previous is not null)
+            _previous.OnClick = () => Turn(CurrentPage - 1);
+        if (_next is not null)
+            _next.OnClick = () => Turn(CurrentPage + 1);
         if (_pageMenu is not null)
         {
             _pageMenu.OnSelect = payload =>
@@ -70,6 +78,52 @@ public sealed class BookPanelController : IRetainedPanelController
 
         Refresh();
     }
+
+    /// <summary>
+    /// The page text is switched between read-only and typeable while a
+    /// book is open, so it has to be built as an element that can take
+    /// typing even when the authored default is read-only -- otherwise
+    /// there is nothing to switch and the whole edit path is dead.
+    /// Call this on the imported description before the tree is built.
+    /// </summary>
+    public static void MarkPageTextTypeable(ElementInfo root)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+        ElementInfo? pageText = FindInfo(root, PageTextId);
+        if (pageText is null) return;
+
+        if (!pageText.States.TryGetValue(UiStateInfo.DirectStateId, out UiStateInfo? direct))
+        {
+            direct = new UiStateInfo { Id = UiStateInfo.DirectStateId };
+            pageText.States[UiStateInfo.DirectStateId] = direct;
+        }
+
+        direct.Properties.Values[EditablePropertyId] = new UiPropertyValue
+        {
+            Kind = UiPropertyKind.Bool,
+            MasterPropertyId = EditablePropertyId,
+            BoolValue = true,
+        };
+    }
+
+    private static ElementInfo? FindInfo(ElementInfo info, uint id)
+    {
+        if (info.Id == id) return info;
+        foreach (ElementInfo child in info.Children)
+        {
+            if (FindInfo(child, id) is { } found) return found;
+        }
+
+        return null;
+    }
+
+    /// <summary>What the page text actually built as. The connected gate
+    /// needs to see this: a read-only element here means no typing.
+    /// </summary>
+    public string PageTextElementKind =>
+        _pageTextField is not null ? "typeable field"
+        : _pageTextDisplay is not null ? "read-only text"
+        : "missing";
 
     /// <summary>
     /// Binds against an imported slot. Returns null when the slot did not
@@ -182,6 +236,16 @@ public sealed class BookPanelController : IRetainedPanelController
                 ? (snapshot.CurrentPage + 1).ToString(CultureInfo.InvariantCulture)
                 : string.Empty);
 
+        // The first page has nothing before it and the last slot the
+        // book can hold has nothing after it.
+        if (_previous is not null)
+            _previous.Enabled = snapshot.IsOpen && snapshot.CurrentPage > 0;
+        if (_next is not null)
+        {
+            _next.Enabled = snapshot.IsOpen
+                && snapshot.CurrentPage < snapshot.MaxNumPages - 1;
+        }
+
         RefreshMenu(snapshot);
     }
 
@@ -229,6 +293,7 @@ public sealed class BookPanelController : IRetainedPanelController
             case RuntimeBookPageAction.AddPage:
                 _bindings.RequestAddPage(before.BookGuid);
                 break;
+            case RuntimeBookPageAction.RefusedLastPageBlank:
             case RuntimeBookPageAction.Display:
             case RuntimeBookPageAction.None:
             default:
