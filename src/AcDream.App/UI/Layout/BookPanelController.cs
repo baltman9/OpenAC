@@ -27,6 +27,24 @@ public sealed class BookPanelController : IRetainedPanelController
     /// takes typing.</summary>
     private const uint EditablePropertyId = 0x16u;
 
+    /// <summary>
+    /// What a page with no author of its own is listed as -- every page
+    /// of a book that came written, and every slot not written yet.
+    /// </summary>
+    public const string UnauthoredPageLabel = "<prewritten>";
+
+    /// <summary>
+    /// How one entry of the page list reads: the page number, then who
+    /// wrote it.
+    /// </summary>
+    public static string PageLabel(int pageIndex, string? authorName) =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"Page {pageIndex + 1}  -  {Author(authorName)}");
+
+    private static string Author(string? authorName) =>
+        string.IsNullOrWhiteSpace(authorName) ? UnauthoredPageLabel : authorName;
+
     public sealed record Bindings(
         IRuntimeBookView Book,
         RuntimeBookState Commands,
@@ -74,6 +92,11 @@ public sealed class BookPanelController : IRetainedPanelController
             {
                 if (payload is int page) Turn(page);
             };
+
+            // The drop-down keeps its own face text. The authored text
+            // child that carries it is not built as an element of its
+            // own, so the menu draws it rather than the child.
+            _pageMenu.ButtonLabelProvider = SelectedPageLabel;
         }
 
         Refresh();
@@ -230,11 +253,7 @@ public sealed class BookPanelController : IRetainedPanelController
                 _pageTextField.MaxCharacters = snapshot.MaxNumCharsPerPage;
         }
 
-        SetText(
-            _pageNumber,
-            snapshot.IsOpen && snapshot.CurrentPage >= 0
-                ? (snapshot.CurrentPage + 1).ToString(CultureInfo.InvariantCulture)
-                : string.Empty);
+        SetText(_pageNumber, SelectedPageLabel());
 
         // The first page has nothing before it and the last slot the
         // book can hold has nothing after it.
@@ -268,7 +287,7 @@ public sealed class BookPanelController : IRetainedPanelController
         for (int i = 0; i < items.Length; i++)
         {
             items[i] = new UiMenu.MenuItem(
-                (i + 1).ToString(CultureInfo.InvariantCulture), i);
+                PageLabel(i, _bindings.Book.GetPage(i)?.AuthorName), i);
         }
 
         _pageMenu.Items = items;
@@ -276,6 +295,18 @@ public sealed class BookPanelController : IRetainedPanelController
             snapshot.CurrentPage >= 0 && snapshot.CurrentPage < items.Length
                 ? snapshot.CurrentPage
                 : null;
+    }
+
+    /// <summary>The entry the reader is on, as the list spells it.</summary>
+    private string SelectedPageLabel()
+    {
+        RuntimeBookSnapshot snapshot = _bindings.Book.Snapshot;
+        if (!snapshot.IsOpen || snapshot.CurrentPage < 0)
+            return string.Empty;
+
+        return PageLabel(
+            snapshot.CurrentPage,
+            _bindings.Book.GetPage(snapshot.CurrentPage)?.AuthorName);
     }
 
     private void Turn(int page)
