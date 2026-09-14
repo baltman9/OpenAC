@@ -266,7 +266,7 @@ public class UiDatElementTests
     {
         var e = new UiDatElement(new ElementInfo(), _ => (0, 0, 0))
         {
-            DragPayloadAt = (x, y) => (x, y),
+            PointerRegion = new UiPointerRegion { DragPayloadAt = (x, y) => (x, y) },
         };
 
         Assert.False(e.OnEvent(new UiEvent(0u, e, UiEventType.MouseDown, Data1: 7, Data2: 9)));
@@ -279,7 +279,7 @@ public class UiDatElementTests
     {
         var e = new UiDatElement(new ElementInfo(), _ => (0, 0, 0))
         {
-            DragPayloadAt = (x, y) => (x, y),
+            PointerRegion = new UiPointerRegion { DragPayloadAt = (x, y) => (x, y) },
         };
         var child = new UiDatElement(new ElementInfo(), _ => (0, 0, 0));
         e.AddChild(child);
@@ -298,7 +298,7 @@ public class UiDatElementTests
         var handled = 0;
         var e = new UiDatElement(new ElementInfo(), _ => (0, 0, 0))
         {
-            OnRightClickAt = (_, _) => handled++,
+            PointerRegion = new UiPointerRegion { RightClicked = (_, _) => handled++ },
         };
         var child = new UiDatElement(new ElementInfo(), _ => (0, 0, 0));
         e.AddChild(child);

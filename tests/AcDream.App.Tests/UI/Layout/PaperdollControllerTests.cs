@@ -48,7 +48,9 @@ public class PaperdollControllerTests
             var list = new UiItemList { Width = 32, Height = 32 };
             lists[id] = list; byId[id] = list; root.AddChild(list);
         }
-        var mask = new UiDatElement(new ElementInfo(), static _ => (0u, 0, 0))
+        // The authored mask imports as a button (a hit region with no face), so
+        // the fixture uses the same class the live layout produces.
+        var mask = new UiButton(new ElementInfo(), static _ => (0u, 0, 0))
         {
             Width = MapWidth,
             Height = MapHeight,
@@ -58,8 +60,8 @@ public class PaperdollControllerTests
         return (new ImportedLayout(root, byId), lists);
     }
 
-    private static UiDatElement DollMask(ImportedLayout layout)
-        => (UiDatElement)layout.FindElement(PaperdollController.DollDragMaskId)!;
+    private static UiElement DollMask(ImportedLayout layout)
+        => layout.FindElement(PaperdollController.DollDragMaskId)!;
 
     private static PaperdollClickMap DollClickMap()
     {
@@ -79,19 +81,25 @@ public class PaperdollControllerTests
     private static void SeedPlayer(ClientObjectTable t)
         => t.AddOrUpdate(new ClientObject { ObjectId = Player });
 
-    private static void Press(UiDatElement mask, int x)
+    private static void Press(UiElement mask, int x)
         => mask.OnEvent(new UiEvent(0u, mask, UiEventType.MouseDown, Data1: x, Data2: 0));
 
-    private static void RightClick(UiDatElement mask, int x)
+    private static void LeftClick(UiElement mask, int x)
+    {
+        Press(mask, x);
+        mask.OnEvent(new UiEvent(0u, mask, UiEventType.Click, Data1: x, Data2: 0));
+    }
+
+    private static void RightClick(UiElement mask, int x)
     {
         mask.OnEvent(new UiEvent(0u, mask, UiEventType.RightDown, Data1: x, Data2: 0));
         mask.OnEvent(new UiEvent(0u, mask, UiEventType.RightClick, Data1: x, Data2: 0));
     }
 
-    private static void DragOver(UiDatElement mask, int x, ItemDragPayload payload)
+    private static void DragOver(UiElement mask, int x, ItemDragPayload payload)
         => mask.OnEvent(new UiEvent(0u, mask, UiEventType.DragEnter, Data1: x, Data2: 0, Payload: payload));
 
-    private static void Drop(UiDatElement mask, int x, ItemDragPayload payload)
+    private static void Drop(UiElement mask, int x, ItemDragPayload payload)
         => mask.OnEvent(new UiEvent(0u, mask, UiEventType.DropReleased, Data1: x, Data2: 0, Payload: payload));
 
     private static PaperdollController Bind(ImportedLayout layout, ClientObjectTable objects,
@@ -602,7 +610,7 @@ public class PaperdollControllerTests
         PaperdollClickMap map = DollClickMap();
         Bind(layout, new ClientObjectTable(), clickMap: map);
 
-        UiDatElement mask = DollMask(layout);
+        UiElement mask = DollMask(layout);
         Assert.Equal(map.Width, (int)mask.Width);
         Assert.Equal(map.Height, (int)mask.Height);
     }
@@ -650,7 +658,7 @@ public class PaperdollControllerTests
         SeedEquipped(objects, 0xA01u, EquipMask.HeadWear);
         Bind(layout, objects, clickMap: DollClickMap());
 
-        UiDatElement mask = DollMask(layout);
+        UiElement mask = DollMask(layout);
         Assert.True(mask.IsDragSource);
         Press(mask, HeadX);
         var payload = Assert.IsType<ItemDragPayload>(mask.GetDragPayload());
@@ -670,7 +678,7 @@ public class PaperdollControllerTests
         SeedEquipped(objects, 0xA01u, EquipMask.HeadWear);
         Bind(layout, objects, clickMap: DollClickMap());
 
-        UiDatElement mask = DollMask(layout);
+        UiElement mask = DollMask(layout);
         Press(mask, UnmappedX);
 
         Assert.Null(mask.GetDragPayload());
@@ -686,7 +694,7 @@ public class PaperdollControllerTests
         SeedEquipped(objects, 0xA01u, EquipMask.HeadWear);   // wearing a helm, nothing on the feet
         Bind(layout, objects, clickMap: DollClickMap());
 
-        UiDatElement mask = DollMask(layout);
+        UiElement mask = DollMask(layout);
         Press(mask, FootX);
 
         Assert.Null(mask.GetDragPayload());                  // never the player themselves
@@ -706,7 +714,7 @@ public class PaperdollControllerTests
         var wields = new List<(uint item, uint mask)>();
         Bind(layout, objects, wields, clickMap: DollClickMap());
 
-        UiDatElement mask = DollMask(layout);
+        UiElement mask = DollMask(layout);
         var payload = new ItemDragPayload(0xC10u, ItemDragSource.Inventory, 0, SourceCell: null);
         DragOver(mask, ChestX, payload);
         Drop(mask, ChestX, payload);
@@ -723,7 +731,7 @@ public class PaperdollControllerTests
         var wields = new List<(uint item, uint mask)>();
         var ctrl = Bind(layout, objects, wields, clickMap: DollClickMap());
 
-        UiDatElement mask = DollMask(layout);
+        UiElement mask = DollMask(layout);
         var payload = new ItemDragPayload(0xC11u, ItemDragSource.Inventory, 0, SourceCell: null);
         DragOver(mask, ChestX, payload);
         Assert.Equal(ItemDragAcceptance.Reject, ctrl.DollDragAcceptance);
@@ -741,7 +749,7 @@ public class PaperdollControllerTests
         SeedPackItem(objects, 0xC12u, EquipMask.HeadWear);
         var ctrl = Bind(layout, objects, clickMap: DollClickMap());
 
-        UiDatElement mask = DollMask(layout);
+        UiElement mask = DollMask(layout);
         var payload = new ItemDragPayload(0xC12u, ItemDragSource.Inventory, 0, SourceCell: null);
         DragOver(mask, HeadX, payload);
         Assert.Equal(ItemDragAcceptance.Accept, ctrl.DollDragAcceptance);
@@ -759,7 +767,7 @@ public class PaperdollControllerTests
         var wields = new List<(uint item, uint mask)>();
         var ctrl = Bind(layout, objects, wields, clickMap: DollClickMap());
 
-        UiDatElement mask = DollMask(layout);
+        UiElement mask = DollMask(layout);
         var payload = new ItemDragPayload(0xC13u, ItemDragSource.ShortcutBar, 2, SourceCell: null);
         DragOver(mask, HeadX, payload);
         Assert.Equal(ItemDragAcceptance.None, ctrl.DollDragAcceptance);
@@ -777,12 +785,26 @@ public class PaperdollControllerTests
         SeedPlayer(objects);
         SeedEquipped(objects, 0xA01u, EquipMask.HeadWear);
         var ctrl = Bind(layout, objects, clickMap: DollClickMap());
-        UiDatElement mask = DollMask(layout);
+        UiElement mask = DollMask(layout);
 
         ctrl.Dispose();
 
         Assert.False(mask.IsDragSource);
-        Assert.Null(mask.OnRightClickAt);
-        Assert.Null(mask.OnDropReleasedAt);
+        Assert.Null(mask.PointerRegion);
+    }
+
+    [Fact]
+    public void DollClick_onAMappedRegion_selectsTheWornItem()
+    {
+        var (layout, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayer(objects);
+        SeedEquipped(objects, 0xA01u, EquipMask.HeadWear);
+        var selection = new SelectionState();
+        Bind(layout, objects, selection: selection, clickMap: DollClickMap());
+
+        LeftClick(DollMask(layout), HeadX);
+
+        Assert.Equal(0xA01u, selection.SelectedObjectId);
     }
 }
