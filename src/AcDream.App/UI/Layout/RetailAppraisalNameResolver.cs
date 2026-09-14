@@ -1,4 +1,6 @@
+using System.Diagnostics.CodeAnalysis;
 using AcDream.Content;
+using AcDream.Content.CharGen;
 using AcDream.Core.Items;
 using DatReaderWriter;
 using DatReaderWriter.DBObjs;
@@ -10,10 +12,6 @@ public sealed class RetailAppraisalNameResolver
 {
     private const uint MaterialClientEnum = 0x10000001u;
     private const uint MaterialSubEnum = 1u;
-
-    // The authored skill table. Skill names come from here so an appraisal,
-    // the skills window and character creation all say the same thing.
-    private const uint SkillTableDid = 0x0E000004u;
 
     public static RetailAppraisalNameResolver Empty { get; } = new(
         new Dictionary<uint, string>(),
@@ -65,7 +63,7 @@ public sealed class RetailAppraisalNameResolver
         }
 
         var skills = new Dictionary<uint, string>();
-        if (dats.Get<SkillTable>(SkillTableDid) is { } skillTable)
+        if (dats.Get<SkillTable>(ChargenTableReader.SkillTableDid) is { } skillTable)
         {
             foreach ((DatReaderWriter.Enums.SkillId id, SkillBase skill)
                      in skillTable.Skills)
@@ -83,12 +81,24 @@ public sealed class RetailAppraisalNameResolver
     /// Zero means every name it gives is the offline fallback.</summary>
     internal int AuthoredSkillNameCount => _skills.Count;
 
-    /// <summary>The authored name for a skill, or the offline fallback for
-    /// the retired skills the authored table no longer carries.</summary>
-    public string ResolveSkill(int skillId)
-        => skillId > 0 && _skills.TryGetValue((uint)skillId, out string? name)
-            ? name
-            : RetailSkillNames.Fallback(skillId);
+    /// <summary>
+    /// The authored name for a skill. False when the authored data does not
+    /// name it, which each appraisal line answers its own way — the game has
+    /// no substitute name to fall back on here.
+    /// </summary>
+    public bool TryResolveSkill(
+        int skillId,
+        [MaybeNullWhen(false)] out string name)
+    {
+        if (skillId > 0 && _skills.TryGetValue((uint)skillId, out string? authored))
+        {
+            name = authored;
+            return true;
+        }
+
+        name = null;
+        return false;
+    }
 
     public string ResolveCreature(int creatureType)
         => _creatures.Resolve(creatureType);

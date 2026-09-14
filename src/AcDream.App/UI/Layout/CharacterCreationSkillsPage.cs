@@ -194,7 +194,7 @@ internal sealed class CharacterCreationSkillsPage : IDisposable
             uint minLevel = view.Options.TryGetSkillDetail(skillId, out ChargenSkillDetail detail)
                 ? detail.MinLevel
                 : 1u;
-            string name = RetailSkillNames.Resolve(view.Options, skillId);
+            string name = ChargenSkillNames.Resolve(view.Options, skillId);
             byBucket[ComputeBucket(level, minLevel)].Add((skillId, name));
         }
         foreach (List<(uint SkillId, string Name)> bucketSkills in byBucket.Values)
@@ -393,7 +393,7 @@ internal sealed class CharacterCreationSkillsPage : IDisposable
 
         ChargenSkillAdvancementClass level = view.GetSkillLevel(skillId);
         uint score = _bindings.GetSkillScore?.Invoke(skillId, snapshot.Attributes, level) ?? 0u;
-        string name = RetailSkillNames.Resolve(view.Options, skillId);
+        string name = ChargenSkillNames.Resolve(view.Options, skillId);
 
         if (_infoTitle is { } title)
             SetLine(title, $"{name} ({score.ToString(CultureInfo.InvariantCulture)})");

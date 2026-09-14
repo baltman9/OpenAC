@@ -2,6 +2,7 @@ using System.Numerics;
 using AcDream.App.UI;
 using AcDream.App.UI.Layout;
 using AcDream.Core.CharGen;
+using AcDream.Core.Player;
 using AcDream.Core.Net.Messages;
 using AcDream.Runtime;
 using AcDream.Runtime.Session;
@@ -28,7 +29,7 @@ public sealed class CharacterCreationUiControllerTests
         SkillTrainOnly => SkillTrainOnlyName,
         SkillSpecializable => SkillSpecializableName,
         SkillFreeTrained => SkillFreeTrainedName,
-        _ => RetailSkillNames.Fallback((int)skillId),
+        _ => RetailSkillNames.Describe((int)skillId),
     };
 
     private const uint SkillSpecializable = 2u;
