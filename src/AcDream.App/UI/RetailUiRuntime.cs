@@ -434,6 +434,7 @@ public sealed class RetailUiRuntime : IDisposable
         MountRadar();
         MountChat();
         MountFloatingChatWindows();
+        ApplySavedChatFont();
         MountToolbar();
         MountCombat();
         MountSpellbook();
@@ -1602,6 +1603,30 @@ public sealed class RetailUiRuntime : IDisposable
         Console.WriteLine("[UI] retail floating chat windows 1-4 from LayoutDesc importer (0x2100005B).");
     }
 
+    private void ApplySavedChatFont()
+    {
+        if (_bindings.Chat.Store?.LoadChat() is { } chat)
+            ApplyChatFont(chat.ChatFontFace, chat.ChatFontSizeIndex);
+    }
+
+    private void ApplyChatFont(int faceIndex, int sizeIndex)
+    {
+        UiDatFont? font;
+        lock (_bindings.Assets.DatLock)
+        {
+            if (!ChatFontResolver.TryResolveFontId(
+                    _bindings.Assets.Dats, faceIndex, sizeIndex, out uint fontDid))
+                return;
+            font = _bindings.Assets.ResolveFont(fontDid);
+        }
+        if (font is null)
+            return;
+
+        _chatWindowController?.ApplyChatFont(font);
+        foreach (FloatingChatWindowController? floating in _floatingChatControllers)
+            floating?.ApplyChatFont(font);
+    }
+
     private void MountToolbar()
     {
         ImportedLayout? layout = Import(0x21000016u);
@@ -2613,6 +2638,7 @@ public sealed class RetailUiRuntime : IDisposable
                                 _bindings.Options.LoadRenderPackFailureNotice,
                         }
                         : null,
+                    ApplyChatFont = ApplyChatFont,
                 },
                 resolveSprite: _bindings.Assets.ResolveSprite,
                 datFont: _bindings.Assets.DefaultFont,
