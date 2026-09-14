@@ -1109,24 +1109,12 @@ public static class GameEventWiring
         76u => "Pine", 77u => "Teak", _ => "Unknown",
     };
 
-    private static string SalvageSkillName(uint skillId) => skillId switch
-    {
-        1u => "Axe", 2u => "Bow", 3u => "Crossbow", 4u => "Dagger", 5u => "Mace",
-        6u => "Melee Defense", 7u => "Missile Defense", 8u => "Sling", 9u => "Spear",
-        10u => "Staff", 11u => "Sword", 12u => "Thrown Weapon", 13u => "Unarmed Combat",
-        14u => "Arcane Lore", 15u => "Magic Defense", 16u => "Mana Conversion",
-        17u => "Spellcraft", 18u => "Item Tinkering", 19u => "Assess Person",
-        20u => "Deception", 21u => "Healing", 22u => "Jump", 23u => "Lockpick",
-        24u => "Run", 25u => "Awareness", 26u => "Arms And Armor Repair",
-        27u => "Assess Creature", 28u => "Weapon Tinkering", 29u => "Armor Tinkering",
-        30u => "Magic Item Tinkering", 31u => "Creature Enchantment",
-        32u => "Item Enchantment", 33u => "Life Magic", 34u => "War Magic",
-        35u => "Leadership", 36u => "Loyalty", 37u => "Fletching", 38u => "Alchemy",
-        39u => "Cooking", 40u => "Salvaging", 41u => "Two Handed Combat",
-        42u => "Gearcraft", 43u => "Void Magic", 44u => "Heavy Weapons",
-        45u => "Light Weapons", 46u => "Finesse Weapons", 47u => "Missile Weapons",
-        48u => "Shield", 49u => "Dual Wield", 50u => "Recklessness",
-        51u => "Sneak Attack", 52u => "Dirty Fighting", 53u => "Challenge",
-        54u => "Summoning", _ => "Unknown",
-    };
+    // The salvage message names the skill from the client's built-in list,
+    // the same one an appraisal's weapon line uses, and prints nothing where
+    // that list has no name.
+    private static string SalvageSkillName(uint skillId)
+        => skillId <= int.MaxValue
+           && RetailSkillNames.TryGetName((int)skillId, out string? name)
+            ? name
+            : string.Empty;
 }

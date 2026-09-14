@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using AcDream.Core.Items;
+using AcDream.Core.Player;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Spells;
 
@@ -203,10 +204,15 @@ public static class ItemAppraisalTextFormatter
         if (hasWeaponOrShieldLocation
             && appraisal.WeaponProfile is { } weapon)
         {
-            string skill = names.ResolveSkill((int)weapon.WeaponSkill);
-            int weaponType = properties.GetInt(353u);
-            report.Line(
-                $"Skill: {skill}{WeaponSubtype(weaponType)}");
+            // The weapon line is the one appraisal row named from the
+            // built-in list rather than the authored data, and the game omits
+            // the row outright for a skill that list does not name.
+            if (RetailSkillNames.TryGetName((int)weapon.WeaponSkill, out string? skill))
+            {
+                int weaponType = properties.GetInt(353u);
+                report.Line(
+                    $"Skill: {skill}{WeaponSubtype(weaponType)}");
+            }
 
             bool launcher = (validLocations & (uint)EquipMask.MissileWeapon) != 0
                             && ammoType != 0u;
@@ -715,7 +721,12 @@ public static class ItemAppraisalTextFormatter
         string basePrefix = requirement is 2 or 4 or 6 ? "base " : string.Empty;
         return requirement switch
         {
-            1 or 2 or 8 => basePrefix + names.ResolveSkill(stat),
+            // A wield requirement appends the authored name and nothing at
+            // all when there is none, leaving just the "base " prefix.
+            1 or 2 or 8 => basePrefix
+                + (names.TryResolveSkill(stat, out string? skillName)
+                    ? skillName
+                    : string.Empty),
             3 or 4 => basePrefix + PrimaryAttributeName(stat),
             5 or 6 => basePrefix + SecondaryAttributeName(stat),
             7 => "level",
@@ -826,10 +837,16 @@ public static class ItemAppraisalTextFormatter
 
         int skillLevel = properties.GetInt(115u);
         int skill = properties.GetInt(176u);
-        if (skillLevel > 0 && skill > 0)
+        // Unlike a use requirement, an activation requirement the authored
+        // data cannot name is left out of the list altogether.
+        if (skillLevel > 0
+            && skill > 0
+            && names.TryResolveSkill(skill, out string? activationSkill))
+        {
             requirements.Add(
-                $"{UsageSkillName(skill, names)}: "
+                $"{activationSkill}: "
                 + $"{skillLevel.ToString(CultureInfo.InvariantCulture)}");
+        }
         int attributeLevel = properties.GetInt(258u);
         int attribute = properties.GetInt(257u);
         if (attributeLevel > 0 && attribute > 0)
@@ -1644,16 +1661,13 @@ public static class ItemAppraisalTextFormatter
         _ => string.Empty,
     };
 
-    /// <summary>Names a skill through the authored skill table, falling back
-    /// to the offline table for the retired skills it no longer carries.
-    /// Requirement lines say "Unknown Skill" for an id nothing names.</summary>
+    /// <summary>A use requirement still prints its line for a skill the
+    /// authored data does not name, saying "Unknown Skill" in its place.
+    /// </summary>
     private static string UsageSkillName(
         int skill,
         RetailAppraisalNameResolver names)
-    {
-        string name = names.ResolveSkill(skill);
-        return RetailSkillNames.IsUnnamed(name) ? "Unknown Skill" : name;
-    }
+        => names.TryResolveSkill(skill, out string? name) ? name : "Unknown Skill";
 
     private static string PrimaryAttributeName(int attribute) => attribute switch
     {
