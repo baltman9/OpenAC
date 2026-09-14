@@ -482,6 +482,8 @@ public class ToolbarControllerTests
         UiItemSlot cell = slots[Row1[0]].Cell;
         cell.OnEvent(new UiEvent(0u, cell, UiEventType.MouseDown));
         cell.OnEvent(new UiEvent(0u, cell, UiEventType.Click));
+        cell.OnEvent(new UiEvent(0u, cell, UiEventType.MouseDown));
+        cell.OnEvent(new UiEvent(0u, cell, UiEventType.Click));
         cell.OnEvent(new UiEvent(0u, cell, UiEventType.DoubleClick));
 
         Assert.Equal(new[] { (source, target) }, useWithTarget);
