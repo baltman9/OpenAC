@@ -77,6 +77,7 @@ internal class RuntimeAutomationSurface
         _trackedEnchantments = [];
     private long _trackedCastCompletionRevision;
     private bool _disposed;
+    private bool _remoteBodiesUnsimulated;
 
     private IReadOnlyList<PluginSpellInfo> _knownSelfBuffs = Array.Empty<PluginSpellInfo>();
     private IReadOnlyList<PluginSpellInfo> _knownAttackSpells =
@@ -381,6 +382,13 @@ internal class RuntimeAutomationSurface
         ArgumentNullException.ThrowIfNull(resolver);
         lock (_gate)
             _paletteColors = resolver;
+    }
+
+    // A host that never moves a remote entity's PhysicsBody reads its position from the snapshot instead.
+    internal void BindRemoteBodiesUnsimulated()
+    {
+        lock (_gate)
+            _remoteBodiesUnsimulated = true;
     }
 
     public void BindEquipment(
@@ -1522,8 +1530,9 @@ internal class RuntimeAutomationSurface
             return false;
         }
 
-        Position? position = record.PhysicsBody?.CellPosition
-            ?? ConvertPosition(record.Snapshot.Position);
+        Position? position = ResolveEntityPosition(
+            record,
+            runtime.PlayerIdentity.ServerGuid);
         if (position is not { } current)
         {
             value = default;
@@ -1572,8 +1581,9 @@ internal class RuntimeAutomationSurface
             if (!candidateName.Equals(name, StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            Position? source = record.PhysicsBody?.CellPosition
-                ?? ConvertPosition(record.Snapshot.Position);
+            Position? source = ResolveEntityPosition(
+                record,
+                runtime.PlayerIdentity.ServerGuid);
             if (source is not { } position)
                 continue;
             PluginNavigationPosition candidate = ProjectNavigationPosition(position);
@@ -1603,8 +1613,9 @@ internal class RuntimeAutomationSurface
         var result = new List<PluginNavigationObject>();
         foreach (RuntimeEntityRecord record in runtime.EntityObjects.Entities.ActiveRecords)
         {
-            Position? source = record.PhysicsBody?.CellPosition
-                ?? ConvertPosition(record.Snapshot.Position);
+            Position? source = ResolveEntityPosition(
+                record,
+                runtime.PlayerIdentity.ServerGuid);
             if (source is not { } position)
                 continue;
             ClientObject? item = runtime.InventoryOwner.Objects.Get(record.ServerGuid);
@@ -1804,8 +1815,7 @@ internal class RuntimeAutomationSurface
         uint playerId)
     {
         uint objectId = record?.ServerGuid ?? item!.ObjectId;
-        Position? source = record?.PhysicsBody?.CellPosition
-            ?? (record is null ? null : ConvertPosition(record.Snapshot.Position));
+        Position? source = ResolveEntityPosition(record, playerId);
         bool owned = item is not null
             && IsPlayerOwned(item, playerId, runtime.InventoryOwner.Objects);
         IReadOnlyList<uint> activeSpells = objectId == playerId
@@ -1950,6 +1960,18 @@ internal class RuntimeAutomationSurface
             LockDifficulty = item.Properties.GetInt(
                 (uint)PropertyInt.ResistLockpick),
         };
+    }
+
+    // The GUI keeps every remote body's position current; a host that binds
+    // BindRemoteBodiesUnsimulated hasn't, so it reads the snapshot instead.
+    private Position? ResolveEntityPosition(RuntimeEntityRecord? record, uint playerId)
+    {
+        if (record is null)
+            return null;
+        if (_remoteBodiesUnsimulated && record.ServerGuid != playerId)
+            return ConvertPosition(record.Snapshot.Position);
+        return record.PhysicsBody?.CellPosition
+            ?? ConvertPosition(record.Snapshot.Position);
     }
 
     private static Position? ConvertPosition(

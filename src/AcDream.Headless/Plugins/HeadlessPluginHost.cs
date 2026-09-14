@@ -60,6 +60,7 @@ internal sealed class HeadlessPluginHost
         _sessionSettingsByPlugin = CopySessionSettings(sessionSettings);
         _automation = new RuntimeAutomationSurface();
         _automation.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        _automation.BindRemoteBodiesUnsimulated();
         _automation.BindSubmit(submitChatText);
         if (magicCatalog is not null)
             _automation.BindMagicCatalog(magicCatalog);

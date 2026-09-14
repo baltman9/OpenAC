@@ -1,10 +1,13 @@
 using AcDream.Runtime.Plugins;
 using AcDream.Core.Chat;
 using AcDream.Core.Items;
+using AcDream.Core.Net;
+using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 using AcDream.Core.Selection;
 using AcDream.Core.Spells;
 using AcDream.Plugin.Abstractions;
+using AcDream.Runtime.Entities;
 using AcDream.Runtime.Gameplay;
 using System.Numerics;
 
@@ -316,6 +319,50 @@ public sealed class RuntimeAutomationSurfaceTests
             [runtime, null, item, 0u])!;
 
         Assert.Equal(0x06000165u, result.IconId);
+    }
+
+    [Fact]
+    public void ProjectWorldObject_PrefersThePhysicsBodyPositionOnTheGraphicalHost()
+    {
+        const uint remote = 0x50000321u;
+        const uint cell = 0x01010100u;
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+
+        RuntimeEntityRecord record = runtime.EntityObjects
+            .RegisterEntity(new WorldSession.EntitySpawn(
+                remote,
+                new CreateObject.ServerPosition(cell, 51f, 10f, 5f, 1f, 0f, 0f, 0f),
+                null,
+                [],
+                [],
+                [],
+                null,
+                null,
+                "Remote",
+                null,
+                null,
+                null))
+            .Canonical!;
+        var body = new PhysicsBody { Position = new Vector3(1f, 10f, 5f) };
+        body.SnapToCell(cell, body.Position, body.Position);
+        runtime.EntityObjects.Entities.SetPhysicsBody(record, body);
+
+        System.Reflection.MethodInfo method = typeof(RuntimeAutomationSurface)
+            .GetMethod(
+                "ProjectWorldObject",
+                System.Reflection.BindingFlags.NonPublic
+                    | System.Reflection.BindingFlags.Instance)
+            ?? throw new InvalidOperationException(
+                "RuntimeAutomationSurface.ProjectWorldObject was not found by reflection.");
+        var result = (PluginWorldObject)method.Invoke(
+            surface,
+            [runtime, record, null, 0u])!;
+
+        PluginNavigationPosition bodyPosition = RuntimeAutomationSurface.ProjectNavigationPosition(
+            new Position(cell, new Vector3(1f, 10f, 5f), Quaternion.Identity));
+        Assert.Equal(0d, result.Position.HorizontalDistanceMeters(bodyPosition), 3);
     }
 
 

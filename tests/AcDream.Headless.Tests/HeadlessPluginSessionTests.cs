@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Numerics;
 using System.Reflection;
 using System.Text.Json;
 using System.Net;
@@ -6,6 +7,7 @@ using AcDream.Content;
 using AcDream.Core.Chat;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
+using AcDream.Core.Physics;
 using AcDream.Core.Plugins;
 using AcDream.Headless.Configuration;
 using AcDream.Headless.Credentials;
@@ -14,6 +16,8 @@ using AcDream.Headless.Hosting;
 using AcDream.Headless.Plugins;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
+using AcDream.Runtime.Entities;
+using AcDream.Runtime.Plugins;
 using AcDream.Runtime.Session;
 using AcDream.Tests.Fixtures.LauncherSession;
 using DatReaderWriter;
@@ -583,6 +587,55 @@ public sealed class HeadlessPluginSessionTests
         Assert.True(session.Plugins.Host.Automation.Equipment.IsAvailable);
     }
 
+    [Fact]
+    public void RemoteObjectPositionTracksTheLatestUpdatePositionNotWhereItSpawned()
+    {
+        const uint remote = 0x50000099u;
+        const uint cell = 0x01010100u;
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+        _ = session.Start();
+
+        RuntimeEntityRecord record = session.Runtime.EntityObjects
+            .RegisterEntity(Spawn(remote, 1f, cell))
+            .Canonical!;
+        var body = new PhysicsBody { Position = new Vector3(1f, 10f, 5f) };
+        body.SnapToCell(cell, body.Position, body.Position);
+        session.Runtime.EntityObjects.Entities.SetPhysicsBody(record, body);
+
+        session.Runtime.EntityObjects.TryApplyPosition(
+            new WorldSession.EntityPositionUpdate(
+                remote,
+                new CreateObject.ServerPosition(cell, 51f, 10f, 5f, 1f, 0f, 0f, 0f),
+                Velocity: null,
+                PlacementId: null,
+                IsGrounded: true,
+                InstanceSequence: 0,
+                PositionSequence: 1,
+                TeleportSequence: 0,
+                ForcePositionSequence: 0),
+            isLocalPlayer: false,
+            forcePositionRotation: null,
+            currentLocalVelocity: null,
+            acknowledgeProjection: null,
+            out _,
+            out _,
+            out _);
+
+        Assert.True(session.Plugins.Host.Automation.Objects.TryGet(
+            remote,
+            out PluginWorldObject value));
+        PluginNavigationPosition moved = RuntimeAutomationSurface.ProjectNavigationPosition(
+            new Position(cell, new Vector3(51f, 10f, 5f), Quaternion.Identity));
+        Assert.Equal(0d, value.Position.HorizontalDistanceMeters(moved), 3);
+    }
+
     [Trait("Lane", "InstalledDat")]
     [Fact]
     public void SpellComponentsResolveThroughTheSessionsContentLeaseMagicCatalog()
@@ -728,10 +781,13 @@ public sealed class HeadlessPluginSessionTests
             PluginSettings = pluginSettings,
         };
 
-    private static WorldSession.EntitySpawn Spawn(uint guid, float x) => new(
+    private static WorldSession.EntitySpawn Spawn(
+        uint guid,
+        float x,
+        uint cell = 0x01010001u) => new(
         guid,
         new CreateObject.ServerPosition(
-            0x01010001u,
+            cell,
             x,
             10f,
             5f,
