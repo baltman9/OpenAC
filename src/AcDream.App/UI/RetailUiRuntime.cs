@@ -74,7 +74,7 @@ public sealed record MagicRuntimeBindings(
     Func<uint, IReadOnlyList<SpellExamineComponent>> SpellComponents,
     Func<MagicSchool, uint> MagicSkill,
     Action<uint> SelectObject,
-    Action<uint> UseItem,
+    Action<uint> ActivateEndowment,
     Action<int, int, uint> AddFavorite,
     Action<int, uint> RemoveFavorite,
     Action<uint> SendSpellbookFilter,
@@ -1712,7 +1712,7 @@ public sealed class RetailUiRuntime : IDisposable
             item => _bindings.Magic.ResolveDragIcon(
                 item.Type, item.IconId, item.IconUnderlayId,
                 item.IconOverlayId, item.Effects),
-            _bindings.Magic.UseItem,
+            _bindings.Magic.ActivateEndowment,
             _bindings.Magic.Selection,
             _bindings.Magic.AddFavorite,
             _bindings.Magic.RemoveFavorite,
