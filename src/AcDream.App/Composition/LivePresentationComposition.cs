@@ -905,6 +905,8 @@ internal sealed class LivePresentationCompositionPhase
                 static value => value.Dispose());
             IUiViewportRenderer? previousRenderer = viewport.Renderer;
             viewport.Renderer = paperdollLease.Resource;
+            interaction.RetainedUi.Runtime.PaperdollFigureLighting.Target =
+                new DollFigureLighting(selectionScene);
             bindings.AdoptRelease(
                 "paperdoll viewport target",
                 () =>
