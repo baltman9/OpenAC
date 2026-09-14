@@ -28,6 +28,35 @@ public sealed class SettingsStoreTests : System.IDisposable
     }
 
     [Fact]
+    public void UiOnly_round_trips_as_its_own_flag()
+    {
+        var store = new SettingsStore(_tempPath);
+        store.SaveDisplay(DisplaySettings.Default with { UiOnly = true, UiOnlyWhenUnfocused = true });
+
+        DisplaySettings loaded = store.LoadDisplay();
+        Assert.True(loaded.UiOnly);
+        Assert.True(loaded.UiOnlyWhenUnfocused);
+        Assert.False(DisplaySettings.Default.UiOnly);
+        Assert.False(DisplaySettings.Default.UiOnlyWhenUnfocused);
+    }
+
+    [Fact]
+    public void PotatoMode_round_trips_as_its_own_flag_beside_the_stored_quality()
+    {
+        var store = new SettingsStore(_tempPath);
+        store.SaveDisplay(DisplaySettings.Default with
+        {
+            PotatoMode = true,
+            Quality = AcDream.UI.Abstractions.Settings.QualityPreset.Ultra,
+        });
+
+        var loaded = store.LoadDisplay();
+        Assert.True(loaded.PotatoMode);
+        Assert.Equal(AcDream.UI.Abstractions.Settings.QualityPreset.Ultra, loaded.Quality);
+        Assert.False(DisplaySettings.Default.PotatoMode);
+    }
+
+    [Fact]
     public void SaveDisplay_then_LoadDisplay_round_trips_all_fields()
     {
         var store = new SettingsStore(_tempPath);
@@ -72,6 +101,29 @@ public sealed class SettingsStoreTests : System.IDisposable
         var loaded = store.LoadDisplay();
 
         Assert.Equal(DisplaySettings.Default, loaded);
+    }
+
+    [Fact]
+    public void KeepDistantBuildings_round_trips_and_defaults_on_for_older_files()
+    {
+        // A settings file written before the setting existed keeps distant
+        // buildings, the same as a fresh install.
+        File.WriteAllText(_tempPath, """
+            {
+              "version": 1,
+              "display": { "resolution": "1366x768" }
+            }
+            """);
+        var store = new SettingsStore(_tempPath);
+        Assert.True(store.LoadDisplay().KeepDistantBuildings);
+
+        store.SaveDisplay(
+            DisplaySettings.Default with { KeepDistantBuildings = false });
+        Assert.False(new SettingsStore(_tempPath).LoadDisplay().KeepDistantBuildings);
+
+        store.SaveDisplay(
+            DisplaySettings.Default with { KeepDistantBuildings = true });
+        Assert.True(new SettingsStore(_tempPath).LoadDisplay().KeepDistantBuildings);
     }
 
     [Fact]
@@ -176,10 +228,50 @@ public sealed class SettingsStoreTests : System.IDisposable
         var store = new SettingsStore(_tempPath);
 
         DisplaySettings migrated = store.LoadDisplay();   // 60 → 90
-        store.SaveDisplay(migrated);                      // stamps version 3
+        store.SaveDisplay(migrated);                      // stamps the current version
 
         // A second load must NOT re-migrate the already-migrated 90.
         Assert.Equal(90f, store.LoadDisplay().FieldOfView);
+    }
+
+    [Theory]
+    [InlineData(3, 2, 4, 0, 1)]   // the dead rows reset: labels ran the other way before v4
+    [InlineData(3, 4, 4, 0, 1)]   // "Very High" under the old labels would now mean an eighth
+    [InlineData(2, 0, 0, 0, 1)]
+    [InlineData(4, 2, 4, 2, 4)]   // a v4 file's values are real choices
+    public void LoadDisplay_pre_v4_texture_detail_rows_reset_to_defaults(
+        int version, int storedLandscape, int storedEnvironment, int expectedLandscape, int expectedEnvironment)
+    {
+        File.WriteAllText(_tempPath, $$"""
+            {
+              "version": {{version}},
+              "display": { "landscapeTextureDetail": {{storedLandscape}}, "environmentTextureDetail": {{storedEnvironment}} }
+            }
+            """);
+        var store = new SettingsStore(_tempPath);
+
+        DisplaySettings display = store.LoadDisplay();
+        Assert.Equal(expectedLandscape, display.LandscapeTextureDetail);
+        Assert.Equal(expectedEnvironment, display.EnvironmentTextureDetail);
+    }
+
+    [Fact]
+    public void Saving_another_section_migrates_the_display_section_before_stamping_the_version()
+    {
+        File.WriteAllText(_tempPath, """
+            {
+              "version": 3,
+              "display": { "landscapeTextureDetail": 4, "environmentTextureDetail": 4, "resolution": "1920x1080" }
+            }
+            """);
+        var store = new SettingsStore(_tempPath);
+
+        store.SaveAudio(AudioSettings.Default with { Master = 0.4f });   // stamps version 4
+
+        DisplaySettings display = store.LoadDisplay();
+        Assert.Equal(0, display.LandscapeTextureDetail);
+        Assert.Equal(1, display.EnvironmentTextureDetail);
+        Assert.Equal("1920x1080", display.Resolution);
     }
 
     [Fact]

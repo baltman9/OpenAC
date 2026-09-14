@@ -31,6 +31,7 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
     private readonly Action<uint, uint, uint, uint> _sendSplitToContainer;
     private readonly Func<uint, bool> _isWithinUseRange;
     private readonly RetailWindowHandle _window;
+    private readonly Func<ClientObject, string> _resolveAppropriateName;
     private readonly UiItemList _topContainer;
     private readonly UiItemList _containerList;
     private readonly UiItemList _contentsList;
@@ -55,8 +56,11 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
         Func<uint, bool> isWithinUseRange,
         RetailWindowHandle window,
         uint contentsEmptySprite,
-        uint containerEmptySprite)
+        uint containerEmptySprite,
+        Func<ClientObject, string> resolveAppropriateName)
     {
+        ArgumentNullException.ThrowIfNull(resolveAppropriateName);
+        _resolveAppropriateName = resolveAppropriateName;
         _state = state;
         _objects = objects;
         _selection = selection;
@@ -124,6 +128,10 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
         Action<uint, uint, uint, uint> sendSplitToContainer,
         Func<uint, bool> isWithinUseRange,
         RetailWindowHandle window,
+        /// <summary>Composes an item's displayed name, material prefix
+        /// included. Required: without it a cell would quietly caption the
+        /// plain name and disagree with the selection caption.</summary>
+        Func<ClientObject, string> resolveAppropriateName,
         uint contentsEmptySprite = 0u,
         uint containerEmptySprite = 0u)
         => new(
@@ -141,7 +149,8 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
             isWithinUseRange,
             window,
             contentsEmptySprite,
-            containerEmptySprite);
+            containerEmptySprite,
+            resolveAppropriateName);
 
     internal static RetailWindowFrame.Options CreateWindowOptions(UiElement root)
         => new()
@@ -159,7 +168,6 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
             ResizeX = true,
             ResizeY = false,
             ResizableEdges = ResizeEdges.Left | ResizeEdges.Right,
-            ConstrainDragToParent = true,
             ConstrainResizeToParent = true,
             DrawChromeCenter = false,
         };
@@ -232,9 +240,13 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
             item.ObjectId,
             _selection.SelectedObjectId ?? 0u,
             fullStack);
-        int placement = targetCell.ItemId != 0u
-            ? Math.Max(0, targetCell.SlotIndex)
-            : _objects.GetContents(_openContainer).Count;
+        // Reordering inside the container keeps the hovered slot; an item
+        // arriving from the inventory goes to the top, the way the game does it.
+        int placement = item.ContainerId != _openContainer
+            ? 0
+            : targetCell.ItemId != 0u
+                ? Math.Max(0, targetCell.SlotIndex)
+                : _objects.GetContents(_openContainer).Count;
 
         InventoryRequestKind kind = amount < fullStack
             ? InventoryRequestKind.SplitToContainer
@@ -447,7 +459,8 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
             SpriteResolve = owner.SpriteResolve,
             SlotIndex = owner.GetNumUIItems(),
             SourceKind = source,
-            TooltipTextResolve = g => _objects.Get(g)?.GetTooltipDisplayName(),
+            TooltipTextResolve = g => ItemTooltipCaption.Resolve(
+                _objects, g, _resolveAppropriateName),
         };
         cell.SetItem(guid, icon, dragIconTexture: dragIcon);
         return cell;

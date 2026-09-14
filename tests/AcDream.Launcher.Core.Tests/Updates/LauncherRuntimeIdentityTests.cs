@@ -16,4 +16,16 @@ public sealed class LauncherRuntimeIdentityTests
 
         Assert.Equal("osx-arm64", rid);
     }
+
+    [Fact]
+    public void MacIntelUsesOsxX64()
+    {
+        string rid = LauncherRuntimeIdentity.DetectRid(
+            isWindows: false,
+            isLinux: false,
+            isMacOS: true,
+            Architecture.X64);
+
+        Assert.Equal("osx-x64", rid);
+    }
 }

@@ -384,7 +384,11 @@ internal sealed class LiveSessionRuntimeFactory
             else
                 _interaction.ItemInteraction.AcceptAppraisalResponse(appraisal.Guid);
         },
-        Vendor: _domain.Inventory.Vendor);
+        Vendor: _domain.Inventory.Vendor,
+        Book: _domain.Runtime.BookOwner,
+        PlayerName: () =>
+            _domain.Inventory.Objects.Get(_player.Identity.ServerGuid)?.Name
+            ?? string.Empty);
 
     private LiveCharacterSessionBindings CreateCharacterBindings(
         SkillTable? skillTable)
@@ -519,8 +523,11 @@ internal sealed class LiveSessionRuntimeFactory
             {
                 session.SendClearDesiredComponents();
             },
-            HasOpenVendor: () => false,
-            FillComponentBuyList: (_, _) => { },
+            HasOpenVendor: () => _domain.Inventory.Vendor.VendorId != 0u,
+            FillComponentBuyList: (category, maximumPrice) =>
+                _ui.RetailUi?.FillComponentBuyList(
+                    category ?? VendorComponentFill.AnyCategory,
+                    maximumPrice),
             EnterPkLite: session.SendEnterPkLite,
             IsUsingTurbineChat: () => _domain.Communication.TurbineChat.Enabled,
             SetChatTitle: _ => { },
@@ -599,6 +606,7 @@ internal sealed class LiveSessionRuntimeFactory
         PlayerGuid: () => _player.Identity.ServerGuid,
         SendTalk: session.SendTalk,
         SendTell: session.SendTell,
+        SendTalkDirect: session.SendTalkDirect,
         SendChannel: session.SendChannel,
         SendTurbineChat: (
             roomId,

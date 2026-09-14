@@ -17,10 +17,14 @@
   `VK_ICD_FILENAMES=$(brew --prefix)/etc/vulkan/icd.d/MoltenVK_icd.json`.
   The Apple-silicon launcher distribution supplies its own validated loader,
   MoltenVK, and ICD manifest for launched clients.
+  The Intel (`osx-x64`) distribution does too, from a different source; see
+  [docs/ci-and-releases.md](ci-and-releases.md#macos-vulkan-runtime).
 
 Windows and Linux (x64), plus macOS (arm64), are supported by the launcher,
 graphical client, and bake step. The examples below use PowerShell; the bash
 equivalents differ only in how variables are set.
+Intel macOS (`osx-x64`) is also supported, best effort until August 2027; see
+[docs/ci-and-releases.md](ci-and-releases.md#retiring-intel-macos-support).
 
 ## Build and test
 
@@ -33,6 +37,13 @@ dotnet test AcDream.slnx -c Release --no-build --filter "Lane!=InstalledDat&Lane
 The filter is the portable gate described in `release-gate.md`. Tests behind a
 `Lane` need a specific resource; run them when you have it, for example
 `--filter "Lane=Vulkan"` on a machine with a GPU.
+
+On Linux, `bash tools/build-linux.sh` runs the Release build with .NET and
+NuGet state isolated under
+`XDG_CACHE_HOME` (or `/tmp`). This is useful in containers and CI workers with
+a read-only home directory. It redirects generated package locks to that cache
+so local restores do not rewrite tracked package-lock files. Pass `--test` to
+run the portable test filter afterward.
 
 ## Prepare the content package
 

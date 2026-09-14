@@ -472,6 +472,33 @@ public sealed class LocalPlayerStateTests
     }
 
     [Fact]
+    public void GetEffectiveAttribute_AllAttributeEnchantment_StacksWithANormalBuffAndFeedsHealthAndSkills()
+    {
+        var book = new Spellbook(SpellTable.Create([TestSpell(1u), TestSpell(2u)]));
+        book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
+            SpellId: 1u, LayerId: 1u, Duration: 60d, CasterGuid: 0u,
+            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Attribute,
+            StatModKey: 1u /* Strength */, StatModValue: 40f, Bucket: 2u));
+        book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
+            SpellId: 2u, LayerId: 2u, Duration: 60d, CasterGuid: 0u,
+            StatModType: (uint)(EnchantmentMath.EnchantmentTypeFlag.Attribute
+                | EnchantmentMath.EnchantmentTypeFlag.MultipleStat),
+            StatModKey: 0u, StatModValue: 9f, Bucket: 2u));   // Society Knight's Blessing
+        var s = new LocalPlayerState(book);
+        s.SkillFormulaBonusResolver = (skillId, attrs) => attrs[2u];   // Endurance, unscaled
+        s.OnAttributeUpdate(atType: 1u, ranks: 0u, start: 300u, xp: 0u);   // Strength base 300
+        s.OnAttributeUpdate(atType: 2u, ranks: 0u, start: 200u, xp: 0u);   // Endurance base 200
+        s.OnVitalUpdate(vitalId: 7u, ranks: 0u, start: 0u, xp: 0u, current: 0u);
+        s.OnSkillUpdate(skillId: 24u, ranks: 0u, status: 2u, xp: 0u,
+            init: 0u, resistance: 0u, lastUsed: 0d, formulaBonus: 200u);
+
+        Assert.Equal(349, s.GetEffectiveAttribute(LocalPlayerState.AttributeKind.Strength));
+        Assert.Equal(100u, s.GetBaseMaxApprox(LocalPlayerState.VitalKind.Health));
+        Assert.Equal(105u, s.GetMaxApprox(LocalPlayerState.VitalKind.Health));
+        Assert.Equal(9, s.AttributeEnchantmentSkillDelta(24u));
+    }
+
+    [Fact]
     public void GetEffectiveSkill_NoSpellbook_ReturnsBaseValue()
     {
         var s = new LocalPlayerState();

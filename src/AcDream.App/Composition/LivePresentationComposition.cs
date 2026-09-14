@@ -828,6 +828,11 @@ internal sealed class LivePresentationCompositionPhase
                 CharacterOptionId.CoordinatesOnRadar),
             uiLocked: () => d.Character.Options.GetOptionBit(
                 CharacterOptionId.LockUI),
+            // Fellows and the fellowship leader take their own blip colours;
+            // without this the radar never learned who was in the fellowship.
+            relationshipFor: guid => new AcDream.Core.Ui.RadarRelationshipTraits(
+                IsFellowshipMember: d.Runtime.Fellowship.TryGetMember(guid, out _),
+                IsFellowshipLeader: d.Runtime.Fellowship.Snapshot.LeaderGuid == guid),
             spatialQuery: () => worldState);
         bindings.Adopt(
             "radar snapshot",
@@ -841,6 +846,7 @@ internal sealed class LivePresentationCompositionPhase
             new PlayerInteractionMovementSink(
                 () => d.PlayerController.Controller,
                 d.PlayerApproachCompletions),
+            d.Runtime.ActionOwner.CombatTarget,
             d.Toast,
             d.PlayerApproachCompletions,
             splitStack: guid =>
@@ -899,12 +905,17 @@ internal sealed class LivePresentationCompositionPhase
                 static value => value.Dispose());
             IUiViewportRenderer? previousRenderer = viewport.Renderer;
             viewport.Renderer = paperdollLease.Resource;
+            interaction.RetainedUi.Runtime.PaperdollFigureLighting.Target =
+                new DollFigureLighting(selectionScene);
             bindings.AdoptRelease(
                 "paperdoll viewport target",
                 () =>
                 {
                     if (ReferenceEquals(viewport.Renderer, paperdollLease.Resource))
                         viewport.Renderer = previousRenderer;
+                    // The relay outlives this build, so leaving it pointed at a
+                    // released scene would flash into nothing until the next one.
+                    interaction.RetainedUi.Runtime.PaperdollFigureLighting.Target = null;
                 });
             paperdollPresenter = new PaperdollFramePresenter(
                 paperdollLease.Resource,

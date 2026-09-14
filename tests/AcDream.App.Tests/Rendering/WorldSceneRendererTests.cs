@@ -304,6 +304,104 @@ public sealed class WorldSceneRendererTests
     }
 
     [Fact]
+    public void PViewWorld_DistantBuildingPolicyIsReadAgainOnEveryFrame()
+    {
+        var root = new LoadedCell { CellId = 0x01010001u };
+        var rig = new Rig(false, false, root);
+
+        rig.Renderer.Render(default);
+        Assert.True(rig.PView.LastInput!.KeepDistantBuildings);
+
+        rig.BuildingDetail.KeepDistantBuildings = false;
+        rig.Renderer.Render(default);
+        Assert.False(rig.PView.LastInput!.KeepDistantBuildings);
+
+        rig.BuildingDetail.KeepDistantBuildings = true;
+        rig.Renderer.Render(default);
+        Assert.True(rig.PView.LastInput!.KeepDistantBuildings);
+    }
+
+    private sealed class MutableBuildingDetailPolicy
+        : IWorldSceneBuildingDetailPolicy, IWorldScenePresentationPolicy
+    {
+        public bool KeepDistantBuildings { get; set; } = true;
+
+        public bool DrawWorld { get; set; } = true;
+    }
+
+    [Fact]
+    public void PrepareResources_UploadsTheSkyBeforeThePass_OnlyWhenTheWorldWillDraw()
+    {
+        var drawn = new Rig(portalVisible: false, waitingForLogin: false, clipRoot: null);
+        drawn.Renderer.PrepareResources(default);
+        Assert.Equal(["sky:prepare"], drawn.Calls);
+
+        var portal = new Rig(portalVisible: true, waitingForLogin: false, clipRoot: null);
+        portal.Renderer.PrepareResources(default);
+        Assert.Empty(portal.Calls);
+
+        var uiOnly = new Rig(portalVisible: false, waitingForLogin: false, clipRoot: null);
+        uiOnly.BuildingDetail.DrawWorld = false;
+        uiOnly.Renderer.PrepareResources(default);
+        Assert.Empty(uiOnly.Calls);
+
+        var unavailable = new Rig(
+            portalVisible: false,
+            waitingForLogin: false,
+            clipRoot: null,
+            availability: new UnavailableWorld());
+        unavailable.Renderer.PrepareResources(default);
+        Assert.Empty(unavailable.Calls);
+    }
+
+    private sealed class UnavailableWorld : IWorldGenerationAvailability
+    {
+        public bool IsWorldAvailable => false;
+
+        public long QuiescedGeneration => 0;
+    }
+
+    [Fact]
+    public void WorldPassEnabled_FollowsThePresentationPolicy()
+    {
+        var rig = new Rig(portalVisible: false, waitingForLogin: false, clipRoot: null);
+        Assert.True(rig.Renderer.WorldPassEnabled);
+        rig.BuildingDetail.DrawWorld = false;
+        Assert.False(rig.Renderer.WorldPassEnabled);
+    }
+
+    [Fact]
+    public void UiOnly_PublishesEmptySelectionFrameAndSkipsWorldOwners()
+    {
+        var rig = new Rig(portalVisible: false, waitingForLogin: false, clipRoot: null);
+        rig.BuildingDetail.DrawWorld = false;
+
+        WorldRenderFrameOutcome result = rig.Renderer.Render(default);
+
+        Assert.Equal(default, result);
+        Assert.Equal(["selection:begin", "selection:complete"], rig.Calls);
+    }
+
+    [Fact]
+    public void UiOnly_PreparesNothing_AndTheWorldReturnsWhenItIsDrawnAgain()
+    {
+        var root = new LoadedCell { CellId = 0x01010001u, IsOutdoorNode = true };
+        var rig = new Rig(portalVisible: false, waitingForLogin: false, clipRoot: root);
+        rig.BuildingDetail.DrawWorld = false;
+
+        PreparedWorldSceneFrame prepared = rig.Renderer.PrepareEnhanced(default);
+        Assert.False(prepared.ShouldRender);
+        Assert.DoesNotContain("frame:build", rig.Calls);
+
+        rig.BuildingDetail.DrawWorld = true;
+        PreparedWorldSceneFrame drawn = rig.Renderer.PrepareEnhanced(default);
+        Assert.True(drawn.ShouldRender);
+        WorldRenderFrameOutcome result = rig.Renderer.Render(default);
+        Assert.True(result.NormalWorldDrawn);
+        Assert.Equal(1, rig.Calls.Count(value => value == "frame:build"));
+    }
+
+    [Fact]
     public void OutdoorPView_SkipsPostWorldParticleReplayAndFlatWeather()
     {
         var root = new LoadedCell
@@ -596,8 +694,12 @@ public sealed class WorldSceneRendererTests
                 Passes,
                 new WorldRenderRangeState(4, 12),
                 diagnostics,
+                BuildingDetail,
+                BuildingDetail,
                 availability);
         }
+
+        public MutableBuildingDetailPolicy BuildingDetail { get; } = new();
 
         public List<string> Calls { get; }
 
@@ -620,6 +722,19 @@ public sealed class WorldSceneRendererTests
         public PassExecutor Passes { get; }
 
         public WorldSceneRenderer Renderer { get; }
+    }
+
+    private static void InjectRenderData(
+        ObjectMeshManager manager, ulong id, ObjectRenderData data)
+    {
+        FieldInfo field = typeof(ObjectMeshManager).GetField(
+            "_renderData", BindingFlags.NonPublic | BindingFlags.Instance)
+            ?? throw new InvalidOperationException(
+                "ObjectMeshManager._renderData field not found — test relies on this exact name.");
+        var dict =
+            (System.Collections.Concurrent.ConcurrentDictionary<ulong, ObjectRenderData>)
+            field.GetValue(manager)!;
+        dict[id] = data;
     }
 
     private sealed class OutdoorAlphaOwnerFixture : IDisposable
@@ -697,6 +812,12 @@ public sealed class WorldSceneRendererTests
                 GfxObjId = 0x0100_0001u,
                 DrawingBsp = new WalkBspNode { InPortals = [] },
             };
+            // The walk refuses a building whose selected shell mesh is not
+            // present, so give this empty-owner fixture a resident (empty)
+            // mesh for the one id it draws; the drain-site order under test
+            // is what this fixture exists to pin.
+            InjectRenderData(
+                _meshAdapter.MeshManager!, building.GfxObjId, new ObjectRenderData());
             var entry = new WalkBuildingFactory.Entry(
                 building,
                 Matrix4x4.Identity,
@@ -752,7 +873,9 @@ public sealed class WorldSceneRendererTests
                 new PViewCells(),
                 new PassExecutor(calls),
                 new WorldRenderRangeState(nearRadius: 4, farRadius: 12),
-                new Diagnostics(calls));
+                new Diagnostics(calls),
+                DefaultBuildingDetailPolicy.Instance,
+                DefaultBuildingDetailPolicy.Instance);
         }
 
         public CountingPView PView { get; }
@@ -1032,6 +1155,8 @@ public sealed class WorldSceneRendererTests
 
         public float WeatherDayFraction { get; private set; }
 
+
+        public void PrepareSky(DayGroupData? activeDayGroup) => calls.Add("sky:prepare");
 
         public void BeginFrame() => calls.Add("passes:begin");
 

@@ -59,6 +59,7 @@ internal sealed unsafe class VulkanGraphicsContext : IDisposable
         GraphicalHostPlatformServices platform,
         FramePacingPolicy pacing,
         int requestedSampleCount,
+        GpuMemoryProfile? memoryProfile = null,
         Action<string>? log = null)
     {
         var context = new VulkanGraphicsContext(
@@ -71,7 +72,7 @@ internal sealed unsafe class VulkanGraphicsContext : IDisposable
         {
             context.CreateInstanceAndSurface();
             context.SelectDeviceAndGate();
-            context.CreateDevice(requestedSampleCount);
+            context.CreateDevice(requestedSampleCount, memoryProfile ?? GpuMemoryProfile.Default);
             return context;
         }
         catch
@@ -311,7 +312,7 @@ internal sealed unsafe class VulkanGraphicsContext : IDisposable
         _log($"vulkan: device selection — {choice.Reason}");
     }
 
-    private void CreateDevice(int requestedSampleCount)
+    private void CreateDevice(int requestedSampleCount, GpuMemoryProfile memoryProfile)
     {
         Silk.NET.Vulkan.Vk vk = _vk!;
         _debugNames = VulkanDebugNames.Create(vk, _instance, _device, [.. _instanceExtensions]);
@@ -340,6 +341,7 @@ internal sealed unsafe class VulkanGraphicsContext : IDisposable
             new SwapchainBackbuffer(_swapchain!, _presentQueue),
             ShaderSpirvDirectory(),
             _platform.Paths.CacheDirectory,
+            memoryProfile: memoryProfile,
             retainBackbufferCapture:
                 !string.IsNullOrWhiteSpace(_options.AutomationArtifactDirectory));
 
@@ -354,7 +356,7 @@ internal sealed unsafe class VulkanGraphicsContext : IDisposable
 
         _log(
             $"vulkan: RHI backend up — {_gpuDevice.Allocator.Describe()}, " +
-            $"{SampleCount}x MSAA, pipeline cache " +
+            $"{SampleCount}x MSAA, {memoryProfile.Name} memory profile, pipeline cache " +
             (_gpuDevice.PipelineCacheLoadedFromDisk ? "reused" : "cold") +
             $", debug names {(_debugNames.IsEnabled ? "on" : "off")}");
     }

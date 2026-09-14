@@ -72,6 +72,10 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
 
     private readonly List<IReadOnlyList<UiText.TextRun>?> _cachedTranscriptRuns = new();
 
+    /// <summary>Line identities parallel to <see cref="_cachedTranscriptLines"/>, so a text
+    /// selection stays on the message it was made on as the transcript moves under it.</summary>
+    private readonly List<UiText.LineKey> _cachedTranscriptLineKeys = new();
+
     private readonly List<IReadOnlyList<(int Start, int Length, ChatTextTag Tag)>?>
         _cachedTranscriptTags = new();
 
@@ -99,6 +103,7 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
     }
 
     private string? _tellTarget;
+    private uint _tellTargetGuid;
 
     private Func<string, string?>? _chatStrings;
 
@@ -163,6 +168,7 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
         BitmapFont? debugFont,
         Func<uint, (uint tex, int w, int h)> resolve,
         Func<string?>? selectedTargetName = null,
+        Func<uint>? selectedTargetGuid = null,
         Func<string, string?>? chatStrings = null,
         Func<uint, UiDatFont?>? resolveFont = null)
     {
@@ -214,6 +220,7 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
         c.Transcript.OneLine = false;
         c.Transcript.Selectable = true;
         c.Transcript.LinesProvider   = () => c.GetTranscriptLines(vm);
+        c.Transcript.LineKeysProvider = () => c._cachedTranscriptLineKeys;
         c.Transcript.LineRunsProvider = index =>
             index >= 0 && index < c._cachedTranscriptRuns.Count
                 ? c._cachedTranscriptRuns[index]
@@ -236,7 +243,12 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
         c.Input.TextReplacer = text =>
             ChatTextReplacements.Expand(text, vm.LastIncomingTellSender);
         c.Input.OnSubmit = text => ChatCommandRouter.Submit(
-            text, vm, busProvider(), c._activeChannel, c._tellTarget);
+            text,
+            vm,
+            busProvider(),
+            c._activeChannel,
+            c._tellTarget,
+            c._tellTargetGuid);
 
         if (c.Input.LayoutPolicy is { } inputPolicy)
         {
@@ -316,12 +328,16 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
                     case ChatChannelKind ch:
                         c._activeChannel = ch;
                         c._tellTarget = null;
+                        c._tellTargetGuid = 0u;
                         menu.Selected = p;
                         break;
 
                     case TalkFocusSpecial.TellToSelected when SelectedName() is { } name:
                         c._activeChannel = ChatChannelKind.Tell;
                         c._tellTarget = name;
+                        // Keep the picked object's id: speaking to whoever is
+                        // selected aims at the object, not at its name.
+                        c._tellTargetGuid = selectedTargetGuid?.Invoke() ?? 0u;
                         menu.Selected = p;
                         break;
 
@@ -498,6 +514,9 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
         var detailed = vm.RecentLinesDetailed();
         if (detailed.Count == 0)
         {
+            _cachedTranscriptRuns.Clear();
+            _cachedTranscriptTags.Clear();
+            _cachedTranscriptLineKeys.Clear();
             return StoreTranscriptLayout(
                 Array.Empty<UiText.Line>(), revision, filter, maxW, datFont, debugFont);
         }
@@ -519,7 +538,8 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
             Transcript.DefaultColor,
             Transcript.TagColor,
             _cachedTranscriptRuns,
-            _cachedTranscriptTags);
+            _cachedTranscriptTags,
+            _cachedTranscriptLineKeys);
         return StoreTranscriptLayout(result, revision, filter, maxW, datFont, debugFont);
     }
 

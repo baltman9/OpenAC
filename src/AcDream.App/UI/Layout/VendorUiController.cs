@@ -129,9 +129,11 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
     private readonly UiButton? _sellClearItemButton;
     private readonly UiButton? _sellClearListButton;
     private readonly VendorStagingList _buyStaging = new();
+    private readonly HashSet<uint> _sellMarked = [];
     private readonly VendorStagingList _sellStaging = new();
     private readonly RetailDialogFactory? _dialogs;
     private readonly Action<string>? _systemMessage;
+    private readonly Func<ClientObject, string> _resolveAppropriateName;
 
     private readonly List<(string Label, ItemType Mask)> _presentCategories = new();
     private int _selectedCategoryIndex = -1;
@@ -194,8 +196,11 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
         Func<uint, (uint tex, int w, int h)> resolveSprite,
         uint emptySlotSprite,
         uint buyingEmptySlotSprite,
-        uint sellingEmptySlotSprite)
+        uint sellingEmptySlotSprite,
+        Func<ClientObject, string> resolveAppropriateName)
     {
+        ArgumentNullException.ThrowIfNull(resolveAppropriateName);
+        _resolveAppropriateName = resolveAppropriateName;
         _vendor = vendor;
         _window = window;
         _resolveIcon = resolveIcon;
@@ -345,6 +350,7 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
 
         _buyStaging.Changed += RebuildBuyingList;
         _buyStaging.Changed += RefreshItemsTabAvailability;
+        _sellStaging.Changed += SyncSellStates;
         _sellStaging.Changed += RebuildSellingList;
         _buyStaging.Changed += UpdateBuyTransactionText;
         _sellStaging.Changed += UpdateSellTransactionText;
@@ -377,6 +383,10 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
         UiDatFont? datFont,
         BitmapFont? debugFont,
         Func<uint, (uint tex, int w, int h)> resolveSprite,
+        /// <summary>Composes an item's displayed name, material prefix
+        /// included. Required: without it a cell would quietly caption the
+        /// plain name and disagree with the selection caption.</summary>
+        Func<ClientObject, string> resolveAppropriateName,
         uint emptySlotSprite = 0u,
         uint buyingEmptySlotSprite = 0u,
         uint sellingEmptySlotSprite = 0u,
@@ -476,7 +486,8 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
             resolveSprite,
             emptySlotSprite,
             buyingEmptySlotSprite,
-            sellingEmptySlotSprite);
+            sellingEmptySlotSprite,
+            resolveAppropriateName);
     }
 
     private enum VendorPanelTab { Items, Buying, Selling }
@@ -624,7 +635,8 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
                         SpriteResolve = _itemList.SpriteResolve,
                         SlotIndex = _itemList.GetNumUIItems(),
                         AllowDragSource = false,
-                        TooltipTextResolve = g => _objects.Get(g)?.GetTooltipDisplayName(),
+                        TooltipTextResolve = g => ItemTooltipCaption.Resolve(
+                            _objects, g, _resolveAppropriateName),
                     };
                     cell.SetItem(item.ItemGuid, icon);
                     cell.Selected = item.ItemGuid == selectedGuid;
@@ -898,6 +910,62 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
         uint quantity = ResolveBuyQuantity(shopItem);
         if (_buyStaging.Add(shopItem.ItemGuid, (int)quantity) == VendorStagingAddOutcome.Capped)
             _systemMessage?.Invoke(VendorStagingList.TooMuchMessage);
+    }
+
+    /// <summary>
+    /// Fills the Buying list from the component book's desired counts: every
+    /// component of the requested category the player is short of is staged
+    /// up to what this shop stocks, stopping once the staged total reaches
+    /// the price ceiling. Shows the Spell Components listing and the Buying
+    /// tab afterwards, the way pressing Add does.
+    /// </summary>
+    /// <param name="category">
+    /// A single component category, or <see cref="VendorComponentFill.AnyCategory"/> for all.
+    /// </param>
+    /// <param name="maximumPrice">The spending ceiling, or 0 for no ceiling.</param>
+    public void FillComponentBuyList(
+        IReadOnlyList<ComponentFillDesire> desires,
+        uint category,
+        int maximumPrice)
+    {
+        ArgumentNullException.ThrowIfNull(desires);
+        if (_vendor.VendorId == 0u)
+            return;
+
+        SelectCategory((uint)ItemType.SpellComponents);
+
+        ComponentFillPlan plan = VendorComponentFill.Plan(
+            desires,
+            category,
+            maximumPrice,
+            _vendor.Items,
+            _vendor.Profile,
+            _buyStaging.Entries);
+
+        foreach (ComponentFillAdd add in plan.Adds)
+        {
+            if (_buyStaging.Add(add.ItemGuid, add.Quantity) == VendorStagingAddOutcome.Capped)
+                _systemMessage?.Invoke(VendorStagingList.TooMuchMessage);
+        }
+
+        // Every buy is applied and the rollback happens at the end, rather
+        // than at the row that hit the ceiling; the outcome is the same only
+        // because staging a guid that is already listed merges into its row
+        // in place and so never moves the newest row.
+        if (plan.AbortedOnPrice)
+        {
+            _buyStaging.RemoveTail();
+            _systemMessage?.Invoke(VendorComponentFill.AbortedOnPriceMessage);
+        }
+
+        if (plan.ShortComponents.Count > 0)
+        {
+            _systemMessage?.Invoke(
+                VendorComponentFill.FormatShortComponents(plan.ShortComponents));
+            _systemMessage?.Invoke(string.Empty);
+        }
+
+        ShowTab(VendorPanelTab.Buying);
     }
 
     private static int BuyStagingRemovalAmount(VendorShopItem item) =>
@@ -1291,7 +1359,8 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
                     SpriteResolve = list.SpriteResolve,
                     SlotIndex = list.GetNumUIItems(),
                     AllowDragSource = false,
-                    TooltipTextResolve = g => _objects.Get(g)?.GetTooltipDisplayName(),
+                    TooltipTextResolve = g => ItemTooltipCaption.Resolve(
+                        _objects, g, _resolveAppropriateName),
                 };
                 cell.SetItem(shopItem.ItemGuid, icon);
                 cell.Selected = shopItem.ItemGuid == selectedGuid;
@@ -1302,6 +1371,42 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
                 list.AddItem(cell);
             }
         }
+    }
+
+    // The sale marker lives on the object, so every window drawing the item
+    // shows it; it follows the sell list exactly and clears with it.
+    private void SyncSellStates()
+    {
+        var staged = new HashSet<uint>();
+        foreach (VendorStagingEntry entry in _sellStaging.Entries)
+            staged.Add(entry.ItemGuid);
+        foreach (uint guid in _sellMarked.ToArray())
+        {
+            if (staged.Contains(guid))
+                continue;
+            _sellMarked.Remove(guid);
+            SetSellState(guid, 0);
+        }
+        foreach (uint guid in staged)
+        {
+            if (_sellMarked.Add(guid))
+                SetSellState(guid, 1);
+        }
+    }
+
+    private void ClearSellStates()
+    {
+        foreach (uint guid in _sellMarked.ToArray())
+            SetSellState(guid, 0);
+        _sellMarked.Clear();
+    }
+
+    private void SetSellState(uint guid, int state)
+    {
+        if (_objects.Get(guid) is not { } item || item.SellState == state)
+            return;
+        item.SellState = state;
+        _objects.NotifyObjectUpdated(guid);
     }
 
     private void RebuildSellingList()
@@ -1326,9 +1431,12 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
                     SlotIndex = list.GetNumUIItems(),
                     AllowDragSource = true,
                     SourceKind = ItemDragSource.Inventory,
-                    TooltipTextResolve = g => _objects.Get(g)?.GetTooltipDisplayName(),
+                    TooltipTextResolve = g => ItemTooltipCaption.Resolve(
+                        _objects, g, _resolveAppropriateName),
                 };
                 cell.SetItem(item.ObjectId, icon);
+                cell.ShowSellOverlay = true;
+                cell.SellOverlaySprite = ItemCellOverlaySprites.Sell;
                 cell.Selected = item.ObjectId == selectedGuid;
                 uint captured = item.ObjectId;
                 cell.Clicked = () =>
@@ -1647,8 +1755,10 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
         _buyStaging.Changed -= RebuildBuyingList;
         _buyStaging.Changed -= RefreshItemsTabAvailability;
         _buyStaging.Changed -= UpdateBuyTransactionText;
+        _sellStaging.Changed -= SyncSellStates;
         _sellStaging.Changed -= RebuildSellingList;
         _sellStaging.Changed -= UpdateSellTransactionText;
+        ClearSellStates();
         DismissCloseConfirmationIfOpen();
         _dragOverSink.Parent?.RemoveChild(_dragOverSink);
         RetailTabBinding.SetClick(_itemsTab, null);

@@ -160,6 +160,8 @@ public sealed class ClientObjectTable
     public const uint SharedCooldownPropertyId = 280u;
     public const uint CooldownDurationPropertyId = 167u;
     public const uint PlayerKillerStatusPropertyId = 134u;
+    public const uint MaxStructurePropertyId = 91u;
+    public const uint StructurePropertyId = 92u;
 
     public int ObjectCount => _objects.Count;
     public int ContainerCount => _containers.Count;
@@ -540,6 +542,17 @@ public sealed class ClientObjectTable
         return Ingest(data);
     }
 
+    /// <summary>
+    /// Publishes a client-side change on an object (a sale or trade marker)
+    /// to every observer, the same way a server property update does.
+    /// </summary>
+    public bool NotifyObjectUpdated(uint itemId)
+    {
+        if (!_objects.TryGetValue(itemId, out var item)) return false;
+        ObjectUpdated?.Invoke(item);
+        return true;
+    }
+
     public bool UpdateProperties(uint itemId, PropertyBundle incoming)
     {
         if (!_objects.TryGetValue(itemId, out var item)) return false;
@@ -622,6 +635,8 @@ public sealed class ClientObjectTable
             item.CurrentlyEquippedLocation = (EquipMask)(uint)value;
         if (propertyId == HookTypePropertyId) item.HookType = (uint)value;
         if (propertyId == HookItemTypesPropertyId) item.HookItemTypes = (uint)value;
+        if (propertyId == MaxStructurePropertyId) item.MaxStructure = value;
+        if (propertyId == StructurePropertyId) item.Structure = value;
         if (propertyId == PlayerKillerStatusPropertyId)
         {
             item.PublicWeenieBitfield = PlayerKillerStatusBitfield.Apply(
@@ -645,6 +660,44 @@ public sealed class ClientObjectTable
                 CooldownDurationPropertyId,
                 out double cooldownDuration))
             item.CooldownDuration = cooldownDuration;
+    }
+
+    /// <summary>
+    /// Applies one data-id property the server changed on an object we already
+    /// hold. The three icon ids also live in typed fields the item panels read,
+    /// so they are mirrored there; everything else stays in the property bag.
+    /// </summary>
+    public bool UpdateDataIdProperty(uint itemId, uint propertyId, uint value)
+    {
+        if (!_objects.TryGetValue(itemId, out var item)) return false;
+        item.Properties.DataIds[propertyId] = value;
+        switch ((Properties.PropertyDataId)propertyId)
+        {
+            case Properties.PropertyDataId.Icon:
+                item.IconId = value;
+                break;
+            case Properties.PropertyDataId.IconOverlay:
+                item.IconOverlayId = value;
+                break;
+            case Properties.PropertyDataId.IconUnderlay:
+                item.IconUnderlayId = value;
+                break;
+        }
+        ObjectUpdated?.Invoke(item);
+        return true;
+    }
+
+    /// <summary>
+    /// Applies one instance-id property the server changed on an object we
+    /// already hold. Placement (container, wielder) has its own ordered routes,
+    /// so this only records the value and republishes the object.
+    /// </summary>
+    public bool UpdateInstanceIdProperty(uint itemId, uint propertyId, uint value)
+    {
+        if (!_objects.TryGetValue(itemId, out var item)) return false;
+        item.Properties.InstanceIds[propertyId] = value;
+        ObjectUpdated?.Invoke(item);
+        return true;
     }
 
     public bool UpdateInt64Property(uint itemId, uint propertyId, long value)

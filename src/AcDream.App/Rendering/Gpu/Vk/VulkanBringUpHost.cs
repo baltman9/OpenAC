@@ -59,7 +59,7 @@ internal sealed class VulkanBringUpHost : IDisposable
             // off; this is not that gate, and a resolve path that is never
             // exercised is a resolve path that does not work.
             requestedSampleCount: 4,
-            _log);
+            log: _log);
         CreateScenes();
         Present();
     }

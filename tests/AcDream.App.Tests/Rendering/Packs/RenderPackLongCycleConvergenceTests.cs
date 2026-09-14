@@ -98,6 +98,35 @@ public sealed class RenderPackLongCycleConvergenceTests
     }
 
     [Fact]
+    public void ReleasingWorldTargets_FreesThemAndTheNextPrepareBuildsThemAgain()
+    {
+        using var device = new RecordingGpuDevice();
+        PrimeDeviceOwnedSamplerCache(device);
+        var lifetime = new RecordingRendererLifetime(device);
+        try
+        {
+            AtmosphericPostProcessGraph low = lifetime.Activate("low", 640, 360);
+            RenderOnePostFrame(device, low, 640, 360);
+            int withTargets = device.CreatedRenderTargets.Count(static value => !value.IsDisposed);
+            long generation = low.ResourceGeneration;
+
+            low.ReleaseWorldTargets();
+            int released = device.CreatedRenderTargets.Count(static value => !value.IsDisposed);
+            Assert.True(released < withTargets, $"{released} live targets after release, {withTargets} before");
+            Assert.Equal(generation + 1, low.ResourceGeneration);
+            low.ReleaseWorldTargets(); // idempotent
+            Assert.Equal(generation + 1, low.ResourceGeneration);
+
+            RenderOnePostFrame(device, low, 640, 360);
+            Assert.Equal(withTargets, device.CreatedRenderTargets.Count(static value => !value.IsDisposed));
+        }
+        finally
+        {
+            lifetime.Dispose();
+        }
+    }
+
+    [Fact]
     public void DeviceRecreationIsFullRendererTeardownThenANewContextAndDevice()
     {
         RecordingGpuDevice firstDevice = new();
@@ -427,9 +456,13 @@ public sealed class RenderPackLongCycleConvergenceTests
         Assert.Null(lifetime.ActiveRuntime);
     }
 
+    // Samplers are device-owned and de-duplicated by description, so the
+    // first graph that asks for a description grows the cache once and never
+    // again; priming keeps the ledger about the graph's own resources.
     private static void PrimeDeviceOwnedSamplerCache(RecordingGpuDevice device)
     {
         _ = device.CreateSampler(GpuSamplerDescription.WorldClamp);
+        _ = device.CreateSampler(GpuSamplerDescription.ShadowNearestClamp);
     }
 
     private static IRenderPackAssets BuiltInAssets() =>
@@ -466,7 +499,7 @@ public sealed class RenderPackLongCycleConvergenceTests
         internal static LiveGpuLedger Capture(RecordingGpuDevice device) => new(
             device.CreatedBuffers.Count(static value => !value.IsDisposed),
             device.CreatedPipelines.Count(static value => !value.IsDisposed),
-            device.CreatedSamplers.Count(static value => !value.IsDisposed),
+            device.CreatedSamplers.Count, // de-duplicated by description, device-owned
             device.CreatedTextures.Count(static value => !value.IsDisposed),
             device.CreatedRenderTargets.Count(static value => !value.IsDisposed),
             device.CreatedDirectionalDepthTargets.Count(static value => !value.IsDisposed),

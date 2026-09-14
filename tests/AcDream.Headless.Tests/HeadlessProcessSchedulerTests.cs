@@ -261,7 +261,10 @@ public sealed class HeadlessProcessSchedulerTests
         Assert.True(session.Runtime.Session.IsInWorld);
     }
 
+    // Exact allocation count: a loaded shared runner can charge one-time
+    // runtime work to the test thread mid-loop, so this runs in the Timing lane.
     [Fact]
+    [Trait("Lane", "Timing")]
     public void IdleDispatchBeforeDeadlineAllocatesNothingAndDoesNotTick()
     {
         var time = new ManualTimeProvider();

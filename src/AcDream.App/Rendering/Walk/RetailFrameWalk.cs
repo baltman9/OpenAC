@@ -15,6 +15,18 @@ public interface IRetailFrameWalkContext : IWalkBuildingFrameContext
 
     bool WeatherGateOpen => false;
     bool BuildingDegradesDisabled => false;
+
+    /// <summary>True when a building whose detail ladder would have it draw
+    /// nothing at this distance falls back to the nearest cheaper mesh the
+    /// ladder does name. Defaults to false so the ladder is honoured exactly
+    /// as authored unless a host asks otherwise.</summary>
+    bool KeepDistantBuildings => false;
+
+    /// <summary>True when the shell mesh the degrade ladder just selected can
+    /// actually be drawn this frame. Defaults to true so a context that has no
+    /// asynchronous mesh source behaves as though every selected id were
+    /// present.</summary>
+    bool IsBuildingShellDrawable(uint gfxObjId) => true;
 }
 
 public sealed class RetailFrameWalk
@@ -157,8 +169,19 @@ public sealed class RetailFrameWalk
             ctx.ViewerDistanceTo(building),
             _degradation?.DegradeDistance ?? _fixedDegradeDistance ?? 50f,
             _degradation?.ActiveMultiplier ?? _fixedDegradeMultiplier ?? 0f,
-            degradesDisabled: ctx.BuildingDegradesDisabled);
+            degradesDisabled: ctx.BuildingDegradesDisabled,
+            keepDistantBuildings: ctx.KeepDistantBuildings);
         if (selection.GfxObjId == 0)
+            return;
+
+        // A building is one object: the shell and the interior its doorways
+        // look into are drawn from the same selected level, in this one turn.
+        // That level's mesh arrives asynchronously here, so until it is present
+        // this building is not drawable at all. Skipping the portal walk as
+        // well keeps its interior cells out of the frame's visible set, instead
+        // of leaving the stairs and furniture hanging in the air until the
+        // heavier shell catches up.
+        if (!ctx.IsBuildingShellDrawable(selection.GfxObjId))
             return;
 
         sink.OnBuildingTurn(building);

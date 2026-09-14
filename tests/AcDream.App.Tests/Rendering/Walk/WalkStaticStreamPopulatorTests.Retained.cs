@@ -23,11 +23,32 @@ public sealed partial class WalkStaticStreamPopulatorTests
         public readonly Dictionary<uint, RenderProjectionRecord[]> Cells = new();
         public readonly Dictionary<uint, RenderProjectionRecord> Current = new();
         public bool SupportsRevisions = true;
+        public bool SupportsRecordRevisions;
+        public readonly Dictionary<uint, ulong> RecordRevisions = new();
         public bool IsComplete = true;
         public int Reads;
+        public int CurrentReads;
         public uint? ThrowOnceForCell;
         public ulong? GetOutdoorCellRenderRevision(uint cellId) => SupportsRevisions ? Revisions.GetValueOrDefault(cellId) : null;
-        public bool TryGetCurrentProjection(uint id, out RenderProjectionRecord record) => Current.TryGetValue(id, out record);
+        public bool TryGetCurrentProjection(uint id, out RenderProjectionRecord record)
+        {
+            CurrentReads++;
+            return Current.TryGetValue(id, out record);
+        }
+        public bool TryGetCurrentProjectionRevision(uint id, out RenderProjectionId projectionId, out RenderOwnerIncarnation ownerIncarnation, out ulong revision)
+        {
+            if (SupportsRecordRevisions && Current.TryGetValue(id, out RenderProjectionRecord record))
+            {
+                projectionId = record.Id;
+                ownerIncarnation = record.OwnerIncarnation;
+                revision = RecordRevisions.GetValueOrDefault(id, 1UL);
+                return true;
+            }
+            projectionId = default;
+            ownerIncarnation = default;
+            revision = 0;
+            return false;
+        }
         public void Set(params RenderProjectionRecord[] records)
         {
             Cells[RetainedCell] = records;
@@ -73,6 +94,29 @@ public sealed partial class WalkStaticStreamPopulatorTests
             lighting = Value;
             return true;
         }
+
+        public uint PartLitEntityId { get; set; }
+        public uint PartLitServerGuid { get; set; }
+        public uint PartMask { get; set; }
+        public RetailSelectionLighting PartValue = new(0.99f, 1f);
+
+        public bool HasPartLighting(uint serverGuid, uint localEntityId)
+            => PartMask != 0u
+               && localEntityId == PartLitEntityId
+               && serverGuid == PartLitServerGuid;
+
+        public bool TryGetPartLighting(uint serverGuid, uint localEntityId, int partIndex, out RetailSelectionLighting lighting)
+        {
+            if (HasPartLighting(serverGuid, localEntityId)
+                && (uint)partIndex < 32u
+                && (PartMask & (1u << partIndex)) != 0u)
+            {
+                lighting = PartValue;
+                return true;
+            }
+            lighting = default;
+            return false;
+        }
     }
 
     private static RenderProjectionRecord RetainedRecord(uint id, uint mesh = RetainedMesh) =>
@@ -93,6 +137,67 @@ public sealed partial class WalkStaticStreamPopulatorTests
             return stream;
         }
         finally { fx.Dispatcher.EndWalkPartFrame(); }
+    }
+
+    [Fact]
+    public void RetainedCells_EmitGroupsSoConsecutiveDrawsShareACullMode()
+    {
+        using var fx = new DispatcherFixture();
+        InstallRetainedMesh(fx);
+        InjectRenderData(fx.Manager, RetainedMesh + 1, MakeFlatMesh(
+            MakeBatch(RetainedMesh + 1, TranslucencyKind.Opaque, 12, 0, 3, 1, cullMode: DatReaderWriter.Enums.CullMode.None)));
+        var world = new RetainedWorld();
+        world.Set(RetainedRecord(1), RetainedRecord(2, RetainedMesh + 1), RetainedRecord(3));
+        var cache = new FarLandscapeDrawCache(fx.Dispatcher, world);
+
+        var stream = AppendRetainedFrame(fx, cache);
+
+        // CullMode.None sorts before CounterClockwise, so the lone None group
+        // leads instead of splitting the two CounterClockwise entities' run.
+        Assert.Equal(new[] { 12u, 3u, 3u }, stream.Keys.Select(key => key.FirstIndex));
+        Assert.Equal(new[] { 2f, 1f, 3f }, stream.Transforms.Select(transform => transform.M41));
+        Assert.Equal(1, WbDrawDispatcher.BuildOrderedMergeRuns(stream).Count(run => run.CommandCount == 2));
+    }
+
+    [Fact]
+    public void RetainedCells_UnchangedRecordRevisionsSkipRecordReadsAndReclassification()
+    {
+        using var fx = new DispatcherFixture();
+        InstallRetainedMesh(fx);
+        InstallRetainedMesh(fx, RetainedMesh + 1, 12);
+        var world = new RetainedWorld { SupportsRecordRevisions = true };
+        world.Set(RetainedRecord(1), RetainedRecord(2), RetainedRecord(3));
+        var cache = new FarLandscapeDrawCache(fx.Dispatcher, world);
+        var first = AppendRetainedFrame(fx, cache);
+        Assert.Equal(new[] { 3u, 3u, 3u }, first.Keys.Select(key => key.FirstIndex));
+        int classified = cache.EntityClassificationCount;
+        int currentReads = world.CurrentReads;
+
+        var second = AppendRetainedFrame(fx, cache);
+        Assert.Equal(first.Keys, second.Keys);
+        Assert.Equal(first.Transforms, second.Transforms);
+        Assert.Equal(classified, cache.EntityClassificationCount);
+        Assert.Equal(currentReads, world.CurrentReads);
+
+        // The revision is the contract: a record rewritten without a bump is unchanged.
+        world.Current[2] = RetainedRecord(2, RetainedMesh + 1);
+        Assert.Equal(new[] { 3u, 3u, 3u }, AppendRetainedFrame(fx, cache).Keys.Select(key => key.FirstIndex));
+        Assert.Equal(classified, cache.EntityClassificationCount);
+        Assert.Equal(currentReads, world.CurrentReads);
+
+        world.RecordRevisions[2] = 2;
+        var updated = AppendRetainedFrame(fx, cache);
+        Assert.Equal(new[] { 3u, 3u, 12u }, updated.Keys.Select(key => key.FirstIndex));
+        Assert.Equal(classified + 1, cache.EntityClassificationCount);
+        Assert.Equal(currentReads + 1, world.CurrentReads);
+        Assert.Equal(1, cache.RebuildCount);
+
+        // A replaced owner incarnation still forces the entry to rebuild.
+        RenderProjectionRecord reincarnated = RetainedRecord(3) with { OwnerIncarnation = RenderOwnerIncarnation.FromRaw(2) };
+        world.Cells[RetainedCell] = [RetainedRecord(1), RetainedRecord(2, RetainedMesh + 1), reincarnated];
+        world.Current[3] = reincarnated;
+        Assert.Equal(new[] { 3u, 3u, 12u }, AppendRetainedFrame(fx, cache).Keys.Select(key => key.FirstIndex));
+        Assert.Equal(2, cache.RebuildCount);
     }
 
     [Fact]

@@ -2,6 +2,8 @@ using System.Numerics;
 using AcDream.App.UI;
 using AcDream.App.UI.Layout;
 using AcDream.Core.Items;
+using AcDream.Core.Player;
+using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Spells;
 
@@ -9,6 +11,44 @@ namespace AcDream.App.Tests.UI.Layout;
 
 public sealed class ItemAppraisalTextFormatterTests
 {
+    [Fact]
+    public void TheBuiltInList_NamesEverySkillItEverKnew_AndNotShield()
+    {
+        // The client's built-in list runs 1-54 with one hole: Shield, added
+        // after the list was written, is named only by the authored data.
+        for (int skill = 1; skill <= 54; skill++)
+        {
+            if (skill == 48)
+                continue;
+            Assert.True(
+                RetailSkillNames.TryGetName(skill, out _),
+                $"skill {skill} should have a built-in name");
+        }
+
+        Assert.False(RetailSkillNames.TryGetName(48, out _));
+    }
+
+    // OpenAC #83: a use requirement for Shield read "Unknown Skill" because
+    // nothing named skill 48. The authored data does, so the requirement line
+    // names it once the item surfaces hand over the authored resolver.
+    [Fact]
+    public void UseRequirement_ForShield_NamesItFromTheAuthoredData()
+    {
+        var obj = new ClientObject { ObjectId = 0x50000010u, Name = "Buckler" };
+        var properties = new PropertyBundle();
+        properties.Ints[366u] = 48;
+        properties.Ints[367u] = 200;
+
+        string report = ItemAppraisalTextFormatter.Build(
+            obj,
+            Parsed(properties),
+            _ => null,
+            Names(skills: AuthoredSkills));
+
+        Assert.Contains("Use requires Shield of at least 200.", report);
+        Assert.DoesNotContain("Unknown Skill", report);
+    }
+
     [Fact]
     public void WeaponAndMagic_AreProjectedInRetailOrderWithDatDescriptions()
     {
@@ -433,7 +473,10 @@ public sealed class ItemAppraisalTextFormatterTests
         string report = ItemAppraisalTextFormatter.Build(
             obj,
             appraisal,
-            _ => null);
+            _ => null,
+            // A wield requirement names its skill from the authored data, so
+            // the report needs the same resolver the item surfaces hand over.
+            Names(skills: AuthoredSkills));
 
         Assert.Contains("Ratings: Dam 3", report);
         Assert.Contains("Armor Level: 200", report);
@@ -767,6 +810,259 @@ public sealed class ItemAppraisalTextFormatterTests
         Assert.Equal("Ghost", names.ResolveCreature(77));
     }
 
+    // OpenAC #36: a weapon's damage-type mask names every set bit, joined
+    // with "/", in the game's own order and spelling; only a mask with no
+    // type at all is "unknown type".
+    [Theory]
+    [InlineData(0x0003u, "Damage: 30 - 40, Slashing/Piercing")]
+    [InlineData(0x0006u, "Damage: 30 - 40, Piercing/Bludgeoning")]
+    [InlineData(0x0040u, "Damage: 30 - 40, Electrical")]
+    [InlineData(0x0400u, "Damage: 30 - 40, Nether")]
+    [InlineData(0x1000_0000u, "Damage: 30 - 40, Prismatic")]
+    [InlineData(0x1000_0001u, "Damage: 30 - 40, Slashing/Prismatic")]
+    [InlineData(0x0000u, "Damage: 30 - 40, unknown type")]
+    public void WeaponDamageLine_NamesEverySetDamageType(uint damageType, string expected)
+    {
+        var obj = new ClientObject
+        {
+            ObjectId = 0x50000001u,
+            Name = "Spiked Sword",
+            Type = ItemType.MeleeWeapon,
+            ValidLocations = EquipMask.MeleeWeapon,
+        };
+        var properties = new PropertyBundle();
+        properties.Ints[353u] = 2;
+        AppraiseInfoParser.Parsed appraisal = Parsed(
+            properties,
+            weapon: new AppraiseInfoParser.WeaponProfile(
+                DamageType: damageType,
+                WeaponTime: 30u,
+                WeaponSkill: 44u,
+                Damage: 40u,
+                DamageVariance: 0.25d,
+                DamageMod: 1d,
+                WeaponLength: 1d,
+                MaxVelocity: 0d,
+                WeaponOffense: 1d,
+                MaxVelocityEstimated: 0u));
+
+        string report = ItemAppraisalTextFormatter.Build(obj, appraisal, _ => null);
+
+        Assert.Contains(expected, report);
+    }
+
+    [Fact]
+    public void ElementalDamageBonus_NamesTheCombinedTypeTheSameWay()
+    {
+        var obj = new ClientObject
+        {
+            ObjectId = 0x50000001u,
+            Name = "Crackling Sword",
+            Type = ItemType.MeleeWeapon,
+            ValidLocations = EquipMask.MeleeWeapon,
+        };
+        var properties = new PropertyBundle();
+        properties.Ints[353u] = 2;
+        properties.Ints[204u] = 4;
+        AppraiseInfoParser.Parsed appraisal = Parsed(
+            properties,
+            weapon: new AppraiseInfoParser.WeaponProfile(
+                DamageType: 0x0041u,
+                WeaponTime: 30u,
+                WeaponSkill: 44u,
+                Damage: 40u,
+                DamageVariance: 0.25d,
+                DamageMod: 1d,
+                WeaponLength: 1d,
+                MaxVelocity: 0d,
+                WeaponOffense: 1d,
+                MaxVelocityEstimated: 0u));
+
+        string report = ItemAppraisalTextFormatter.Build(obj, appraisal, _ => null);
+
+        Assert.Contains("Damage: 30 - 40, Slashing/Electrical", report);
+        Assert.Contains("Elemental Damage Bonus: 4, Slashing/Electrical.", report);
+    }
+
+    public static TheoryData<string, uint, uint, int, int, bool, string, string?>
+        VendorParityCases()
+        => new()
+        {
+            // name, validLocations, priority, itemsCapacity, containersCapacity,
+            // isHook, a line the case must produce (so parity is never vacuous),
+            // and a line it must not produce
+            {
+                "weapon", (uint)EquipMask.MeleeWeapon, 0u, 0, 0, false,
+                "Damage: 30 - 40", null
+            },
+            {
+                "armor", (uint)EquipMask.ChestArmor, 0x0C00u, 0, 0, false,
+                "Covers Chest, Abdomen", null
+            },
+            {
+                "pack", 0u, 0u, 24, 1, false,
+                "Can hold up to 24 items and 1 containers.", null
+            },
+            {
+                // A hooked item takes its equip locations from the hook report
+                // and drops the capacity lines, so the two reports only match
+                // when the listing knows it is on a hook at all.
+                "hooked", 0u, 0u, 24, 1, true,
+                "Damage: 30 - 40", "Can hold up to 24 items"
+            },
+        };
+
+    [Theory]
+    [MemberData(nameof(VendorParityCases))]
+    public void Issue37_VendorListingAndSpawnedObject_AppraiseIdentically(
+        string label,
+        uint validLocations,
+        uint priority,
+        int itemsCapacity,
+        int containersCapacity,
+        bool isHook,
+        string expectedLine,
+        string? forbiddenLine)
+    {
+        Assert.False(string.IsNullOrEmpty(label));
+
+        const uint ItemGuid = 0x50002000u;
+        const uint VendorGuid = 0x40001000u;
+        const uint HealerFlag = (uint)PublicWeenieFlags.Healer;
+
+        // The one description both paths are handed.
+        const string Name = "Silifi";
+        const uint WeenieClassId = 42u;
+        const uint IconId = 0x1234u;
+        const int Value = 250;
+        const int Burden = 450;
+        const uint MaterialType = 60u;
+        const uint TargetType = 0x00000080u;
+        const byte CombatUse = 1;
+        const ushort AmmoType = 3;
+        const int Structure = 40;
+        const int MaxStructure = 100;
+        const float Workmanship = 8.5f;
+        const uint Useability = 0x00000008u;
+        uint? hookItemTypes = isHook ? 0x0000FFFFu : null;
+        uint? hookType = isHook ? 0x00000002u : null;
+
+        var vendorObjects = new ClientObjectTable();
+        var vendor = new VendorState();
+        using var materializer = new VendorShopItemMaterializer(vendor, vendorObjects);
+        Assert.True(vendor.Apply(
+            VendorGuid,
+            default,
+            new[]
+            {
+                new VendorShopItem(
+                    ItemGuid,
+                    StackSize: -1,
+                    WeenieClassId: WeenieClassId,
+                    Name: Name,
+                    ItemType: (uint)ItemType.MeleeWeapon,
+                    IconId: IconId,
+                    Value: Value,
+                    ValidLocations: validLocations,
+                    Priority: priority,
+                    ItemsCapacity: itemsCapacity,
+                    ContainersCapacity: containersCapacity,
+                    Structure: Structure,
+                    MaxStructure: MaxStructure,
+                    Workmanship: Workmanship,
+                    Burden: Burden,
+                    MaterialType: MaterialType,
+                    TargetType: TargetType,
+                    CombatUse: CombatUse,
+                    AmmoType: AmmoType,
+                    PublicWeenieBitfield: HealerFlag,
+                    Useability: Useability,
+                    HookItemTypes: hookItemTypes,
+                    HookType: hookType),
+            }));
+        ClientObject? listed = vendorObjects.Get(ItemGuid);
+        Assert.NotNull(listed);
+
+        var spawnedObjects = new ClientObjectTable();
+        spawnedObjects.Ingest(ObjectTableWiring.ToWeenieData(
+            new WorldSession.EntitySpawn(
+                Guid: ItemGuid,
+                Position: null,
+                SetupTableId: null,
+                AnimPartChanges: [],
+                TextureChanges: [],
+                SubPalettes: [],
+                BasePaletteId: null,
+                ObjScale: null,
+                Name: Name,
+                ItemType: (uint)ItemType.MeleeWeapon,
+                MotionState: null,
+                MotionTableId: null,
+                ObjectDescriptionFlags: HealerFlag,
+                TargetType: TargetType,
+                IconId: IconId,
+                WeenieClassId: WeenieClassId,
+                Value: Value,
+                Burden: Burden,
+                ItemsCapacity: itemsCapacity,
+                ContainersCapacity: containersCapacity,
+                ValidLocations: validLocations,
+                Priority: priority,
+                Structure: Structure,
+                MaxStructure: MaxStructure,
+                Workmanship: Workmanship,
+                CombatUse: CombatUse,
+                AmmoType: AmmoType,
+                Useability: Useability,
+                HookItemTypes: hookItemTypes,
+                HookType: hookType,
+                MaterialType: MaterialType)));
+        ClientObject? spawned = spawnedObjects.Get(ItemGuid);
+        Assert.NotNull(spawned);
+
+        var properties = new PropertyBundle();
+        properties.Ints[19u] = Value;
+        properties.Ints[5u] = Burden;
+        properties.Ints[105u] = 8;
+        properties.Ints[106u] = 300;
+        properties.Ints[107u] = 250;
+        properties.Ints[108u] = 500;
+        AppraiseInfoParser.Parsed appraisal = Parsed(
+            properties,
+            hook: isHook
+                ? new AppraiseInfoParser.HookProfile(
+                    Flags: 0u,
+                    ValidLocations: (uint)EquipMask.MeleeWeapon,
+                    AmmoType: 0u)
+                : null,
+            weapon: new AppraiseInfoParser.WeaponProfile(
+                DamageType: 1u,
+                WeaponTime: 30u,
+                WeaponSkill: 44u,
+                Damage: 40u,
+                DamageVariance: 0.25d,
+                DamageMod: 1d,
+                WeaponLength: 1d,
+                MaxVelocity: 0d,
+                WeaponOffense: 1d,
+                MaxVelocityEstimated: 0u));
+
+        string listedReport = ItemAppraisalTextFormatter.Build(
+            listed!, appraisal, _ => null);
+        string spawnedReport = ItemAppraisalTextFormatter.Build(
+            spawned!, appraisal, _ => null);
+
+        Assert.Equal(spawnedReport, listedReport);
+        Assert.Contains(expectedLine, listedReport);
+        if (forbiddenLine is not null)
+            Assert.DoesNotContain(forbiddenLine, listedReport);
+    }
+
+    /// <summary>The same minimal appraisal the rows here use, shared with the
+    /// skill-name rows next door.</summary>
+    internal static AppraiseInfoParser.Parsed ParsedFor(PropertyBundle properties)
+        => Parsed(properties);
+
     private static AppraiseInfoParser.Parsed Parsed(
         PropertyBundle properties,
         uint[]? spells = null,
@@ -821,11 +1117,26 @@ public sealed class ItemAppraisalTextFormatterTests
 
     private static RetailAppraisalNameResolver Names(
         IReadOnlyDictionary<uint, string>? materials = null,
-        IReadOnlyDictionary<uint, string>? creatures = null)
+        IReadOnlyDictionary<uint, string>? creatures = null,
+        IReadOnlyDictionary<uint, string>? skills = null)
         => new(
             materials ?? new Dictionary<uint, string>(),
             new CreatureDisplayNameResolver(
-                creatures ?? new Dictionary<uint, string>()));
+                creatures ?? new Dictionary<uint, string>()),
+            skills);
+
+    /// <summary>The authored skill names these reports need, spelled the way
+    /// the installed data spells them.</summary>
+    internal static IReadOnlyDictionary<uint, string> AuthoredSkills =>
+        new Dictionary<uint, string>
+        {
+            [6u] = "Melee Defense",
+            [19u] = "Assess Person",
+            [27u] = "Assess Creature",
+            [34u] = "War Magic",
+            [47u] = "Missile Weapons",
+            [48u] = "Shield",
+        };
 
     private static int Count(string source, string value)
     {

@@ -317,6 +317,19 @@ public sealed class ClientObjectTableTests
     }
 
     [Fact]
+    public void UpdateIntProperty_structure_mirrorsOntoTypedFields()
+    {
+        var repo = new ClientObjectTable();
+        repo.AddOrUpdate(new ClientObject { ObjectId = 0x500000AEu });
+
+        Assert.True(repo.UpdateIntProperty(0x500000AEu, propertyId: 92u, value: 4));
+        Assert.True(repo.UpdateIntProperty(0x500000AEu, propertyId: 91u, value: 10));
+
+        Assert.Equal(4, repo.Get(0x500000AEu)!.Structure);
+        Assert.Equal(10, repo.Get(0x500000AEu)!.MaxStructure);
+    }
+
+    [Fact]
     public void UpdateIntProperty_currentWieldedLocation_updatesTypedEquipLocation()
     {
         var repo = new ClientObjectTable();

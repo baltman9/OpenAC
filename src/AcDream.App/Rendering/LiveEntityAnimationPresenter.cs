@@ -48,8 +48,18 @@ internal sealed class LiveEntityAnimationPresenter
             return;
         }
 
+        sequencer.MotionDoneTarget = CreateMotionDoneTarget(record, animation);
+    }
+
+    // Kept out of PrepareAnimation so the closure (and the captures it
+    // hoists) is only allocated for the one call per sequencer that assigns
+    // it, not for every per-frame call that returns early above.
+    private Action<uint, bool> CreateMotionDoneTarget(
+        LiveEntityRecord record,
+        LiveEntityAnimationState animation)
+    {
         WorldEntity capturedEntity = animation.Entity;
-        sequencer.MotionDoneTarget = (motion, success) =>
+        return (motion, success) =>
         {
             LiveEntityRuntime current = _liveEntities;
             if (!current.IsCurrentAnimationOwner(record, animation)

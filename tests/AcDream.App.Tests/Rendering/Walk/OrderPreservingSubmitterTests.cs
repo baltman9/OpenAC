@@ -730,17 +730,46 @@ public sealed partial class OrderPreservingSubmitterTests
     }
 
     [Fact]
-    public void DrawOrderedRange_RangeStraddlingAMergeRun_Throws()
+    public void DrawOrderedRange_RangeEndingInsideAMergeRun_DrawsOnlyThatPartInOrder()
     {
         using var fx = new DispatcherFixture();
         using DrawScope draw = fx.BeginDraw();
 
+        // One merge run of four single-command draws; a range may end at any
+        // draw boundary inside it and draws just the commands it covers.
         OrderedDrawStream stream = StreamOf(
             MakeCommand(0), MakeCommand(1), MakeCommand(2), MakeCommand(3));
         fx.Dispatcher.PrepareOrderedStream(draw.Frame, stream, Matrix4x4.Identity);
 
+        fx.Dispatcher.DrawOrderedRange(draw.Pass, 0, 2);
+        fx.Dispatcher.DrawOrderedRange(draw.Pass, 2, 2);
+
+        Assert.Equal([(0, 2), (2, 2)], DecodeDrawRanges(fx.Device));
+    }
+
+    [Fact]
+    public void DrawOrderedRange_RangeSplittingAnInstancedDraw_Throws()
+    {
+        using var fx = new DispatcherFixture();
+        using DrawScope draw = fx.BeginDraw();
+
+        // Four identical merge-allowed commands form one instanced draw
+        // unless a flush point was declared between them.
+        OrderedDrawStream stream = StreamOf(
+            MakeCommand(0) with { AllowInstanceMerge = true },
+            MakeCommand(0) with { AllowInstanceMerge = true },
+            MakeCommand(0) with { AllowInstanceMerge = true },
+            MakeCommand(0) with { AllowInstanceMerge = true });
+        fx.Dispatcher.PrepareOrderedStream(draw.Frame, stream, Matrix4x4.Identity);
         Assert.Throws<InvalidOperationException>(
             () => fx.Dispatcher.DrawOrderedRange(draw.Pass, 0, 2));
+
+        // Declaring the flush point ends the instanced draw there instead:
+        // two indirect draws of two instances each, one per range.
+        fx.Dispatcher.PrepareOrderedStream(draw.Frame, stream, Matrix4x4.Identity, [2]);
+        fx.Dispatcher.DrawOrderedRange(draw.Pass, 0, 2);
+        fx.Dispatcher.DrawOrderedRange(draw.Pass, 2, 2);
+        Assert.Equal([(0, 1), (1, 1)], DecodeDrawRanges(fx.Device));
     }
 
     [Fact]

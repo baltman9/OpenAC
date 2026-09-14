@@ -103,6 +103,7 @@ internal enum GameRuntimeConstructionPoint
     TradeCreated,
     ContractsCreated,
     JournalCreated,
+    BookCreated,
     HouseCreated,
     MovementCreated,
     ActionsCreated,
@@ -125,6 +126,7 @@ internal sealed class GameRuntimeConstructionContext
     public RuntimeTradeState? Trade { get; set; }
     public RuntimeContractState? Contracts { get; set; }
     public RuntimeJournalState? Journal { get; set; }
+    public RuntimeBookState? Book { get; set; }
     public RuntimeHouseState? House { get; set; }
     public RuntimeLocalPlayerMovementState? Movement { get; set; }
     public RuntimeActionState? Actions { get; set; }
@@ -275,6 +277,13 @@ public sealed class GameRuntime
                 context,
                 faultInjection);
 
+            context.Book = new RuntimeBookState(
+                () => context.PlayerIdentity!.ServerGuid);
+            Fault(
+                GameRuntimeConstructionPoint.BookCreated,
+                context,
+                faultInjection);
+
             context.House = new RuntimeHouseState(context.EntityObjects.Objects);
             Fault(
                 GameRuntimeConstructionPoint.HouseCreated,
@@ -346,7 +355,8 @@ public sealed class GameRuntime
                 context.Trade,
                 context.House,
                 context.Contracts,
-                context.Journal);
+                context.Journal,
+                context.Book);
 
             context.Movement.AttachPhysicsPublication(
                 new RuntimeLocalPlayerPhysicsPublicationState(
@@ -386,6 +396,7 @@ public sealed class GameRuntime
             TradeOwner = context.Trade;
             ContractsOwner = context.Contracts;
             JournalOwner = context.Journal;
+            BookOwner = context.Book;
             HouseOwner = context.House;
             MovementOwner = context.Movement;
             ActionOwner = context.Actions;
@@ -456,6 +467,7 @@ public sealed class GameRuntime
     public RuntimeTradeState TradeOwner { get; }
     public RuntimeContractState ContractsOwner { get; }
     public RuntimeJournalState JournalOwner { get; }
+    public RuntimeBookState BookOwner { get; }
 
     public RuntimeHouseState HouseOwner { get; }
     public RuntimeActionState ActionOwner { get; }
@@ -518,6 +530,7 @@ public sealed class GameRuntime
     public IRuntimeTradeView Trade => TradeOwner.View;
     public IRuntimeContractView Contracts => ContractsOwner.View;
     public IRuntimeJournalView Journal => JournalOwner.View;
+    public IRuntimeBookView Book => BookOwner.View;
     public IRuntimeActionView Actions => ActionOwner.View;
     public IRuntimeMovementView Movement => MovementOwner.View;
     public IRuntimeWorldEnvironmentView Environment => EnvironmentOwner;

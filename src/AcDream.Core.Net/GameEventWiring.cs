@@ -64,7 +64,11 @@ public static class GameEventWiring
         Action<IReadOnlyDictionary<uint, ContractTracker>>? onContractTable = null,
         Action<ContractTrackerUpdate>? onContractUpdate = null,
         Action<uint /*displayTitleId*/, IReadOnlyList<uint> /*titleIds*/>? onCharacterTitleTable = null,
-        Action<uint /*titleId*/, bool /*setAsDisplay*/>? onUpdateTitle = null)
+        Action<uint /*titleId*/, bool /*setAsDisplay*/>? onUpdateTitle = null,
+        Action<BookEvents.OpenBook>? onBookOpen = null,
+        Action<BookEvents.PageDataResponse>? onBookPageData = null,
+        Action<BookEvents.PageResponse>? onBookAddPageResponse = null,
+        Action<BookEvents.Inscription>? onBookInscription = null)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentNullException.ThrowIfNull(items);
@@ -538,31 +542,34 @@ public static class GameEventWiring
                     ToActiveEnchantment(entry, receivedAt)));
             }
         });
+        // An enchantment that ran out is announced here, because nothing
+        // else says so; one that was dispelled is not, because the dispel's
+        // own text arrives as ordinary chat.
         registrar.Register(GameEventType.MagicRemoveEnchantment, e =>
         {
             var p = GameEvents.ParseMagicRemoveEnchantment(e.Payload.Span);
-            if (p is not null) spellbook.OnEnchantmentRemoved(p.Value.Layer, p.Value.SpellId);
-        });
-        registrar.Register(GameEventType.MagicRemoveMultipleEnchantments, e =>
-        {
-            var entries = GameEvents.ParseMagicLayeredSpellList(e.Payload.Span);
-            if (entries is not null)
-                spellbook.OnEnchantmentsRemoved(entries.Select(item => ((uint)item.SpellId, (uint)item.Layer)));
-        });
-        registrar.Register(GameEventType.MagicDispelEnchantment, e =>
-        {
-            var p = GameEvents.ParseMagicDispelEnchantment(e.Payload.Span);
             if (p is null) return;
             spellbook.OnEnchantmentRemoved(p.Value.Layer, p.Value.SpellId);
             NotifyOfEnchantmentRemoval((uint)p.Value.SpellId);
         });
-        registrar.Register(GameEventType.MagicDispelMultipleEnchantments, e =>
+        registrar.Register(GameEventType.MagicRemoveMultipleEnchantments, e =>
         {
             var entries = GameEvents.ParseMagicLayeredSpellList(e.Payload.Span);
             if (entries is null) return;
             spellbook.OnEnchantmentsRemoved(entries.Select(item => ((uint)item.SpellId, (uint)item.Layer)));
             foreach (var entry in entries)
                 NotifyOfEnchantmentRemoval((uint)entry.SpellId);
+        });
+        registrar.Register(GameEventType.MagicDispelEnchantment, e =>
+        {
+            var p = GameEvents.ParseMagicDispelEnchantment(e.Payload.Span);
+            if (p is not null) spellbook.OnEnchantmentRemoved(p.Value.Layer, p.Value.SpellId);
+        });
+        registrar.Register(GameEventType.MagicDispelMultipleEnchantments, e =>
+        {
+            var entries = GameEvents.ParseMagicLayeredSpellList(e.Payload.Span);
+            if (entries is not null)
+                spellbook.OnEnchantmentsRemoved(entries.Select(item => ((uint)item.SpellId, (uint)item.Layer)));
         });
 
         const uint VitaePenaltySpellId = 0x29Au;
@@ -614,6 +621,46 @@ public static class GameEventWiring
                 containerTypeHint: p.Value.ContainerType);
         });
 
+        if (onBookInscription is not null)
+        {
+            registrar.Register(GameEventType.GetInscriptionResponse, e =>
+            {
+                var p = BookEvents.ParseInscription(e.Payload.Span);
+                if (p is null) return;
+                onBookInscription(p.Value);
+            });
+        }
+
+        if (onBookOpen is not null)
+        {
+            registrar.Register(GameEventType.BookDataResponse, e =>
+            {
+                var p = BookEvents.ParseOpenBook(e.Payload.Span);
+                if (p is null) return;
+                onBookOpen(p.Value);
+            });
+        }
+
+        if (onBookPageData is not null)
+        {
+            registrar.Register(GameEventType.BookPageDataResponse, e =>
+            {
+                var p = BookEvents.ParsePageData(e.Payload.Span);
+                if (p is null) return;
+                onBookPageData(p.Value);
+            });
+        }
+
+        if (onBookAddPageResponse is not null)
+        {
+            registrar.Register(GameEventType.BookAddPageResponse, e =>
+            {
+                var p = BookEvents.ParsePageResponse(e.Payload.Span);
+                if (p is null) return;
+                onBookAddPageResponse(p.Value);
+            });
+        }
+
         registrar.Register(GameEventType.HouseUpdateRestrictions, e =>
         {
             var p = GameEvents.ParseHouseUpdateRestrictions(e.Payload.Span);
@@ -655,7 +702,23 @@ public static class GameEventWiring
                     item.Desc.IconUnderlayId,
                     item.Desc.IconOverlayId,
                     item.Desc.UiEffects,
-                    item.Desc.PluralName);
+                    item.Desc.PluralName,
+                    item.Desc.ValidLocations,
+                    item.Desc.Priority,
+                    item.Desc.ItemsCapacity,
+                    item.Desc.ContainersCapacity,
+                    item.Desc.Structure,
+                    item.Desc.MaxStructure,
+                    item.Desc.Workmanship,
+                    item.Desc.Burden,
+                    item.Desc.MaterialType,
+                    item.Desc.TargetType,
+                    item.Desc.CombatUse,
+                    item.Desc.AmmoType,
+                    item.Desc.ObjectDescriptionFlags,
+                    item.Desc.Useability,
+                    item.Desc.HookItemTypes,
+                    item.Desc.HookType);
             }
 
             vendor?.Apply(p.Value.VendorGuid, profile, shopItems);
@@ -820,13 +883,7 @@ public static class GameEventWiring
                 localPlayer.OnProperties(p.Value.Properties);
                 localPlayer.OnPositions(p.Value.Positions.ToDictionary(
                     static pair => pair.Key,
-                    static pair => new AcDream.Core.Physics.Position(
-                        pair.Value.LandblockId,
-                        new System.Numerics.Vector3(
-                            pair.Value.X, pair.Value.Y, pair.Value.Z),
-                        new System.Numerics.Quaternion(
-                            pair.Value.Qx, pair.Value.Qy,
-                            pair.Value.Qz, pair.Value.Qw))));
+                    static pair => ObjectTableWiring.ToPosition(pair.Value)));
 
                 foreach (var attr in p.Value.Attributes)
                 {
@@ -1052,24 +1109,12 @@ public static class GameEventWiring
         76u => "Pine", 77u => "Teak", _ => "Unknown",
     };
 
-    private static string SalvageSkillName(uint skillId) => skillId switch
-    {
-        1u => "Axe", 2u => "Bow", 3u => "Crossbow", 4u => "Dagger", 5u => "Mace",
-        6u => "Melee Defense", 7u => "Missile Defense", 8u => "Sling", 9u => "Spear",
-        10u => "Staff", 11u => "Sword", 12u => "Thrown Weapon", 13u => "Unarmed Combat",
-        14u => "Arcane Lore", 15u => "Magic Defense", 16u => "Mana Conversion",
-        17u => "Spellcraft", 18u => "Item Tinkering", 19u => "Assess Person",
-        20u => "Deception", 21u => "Healing", 22u => "Jump", 23u => "Lockpick",
-        24u => "Run", 25u => "Awareness", 26u => "Arms And Armor Repair",
-        27u => "Assess Creature", 28u => "Weapon Tinkering", 29u => "Armor Tinkering",
-        30u => "Magic Item Tinkering", 31u => "Creature Enchantment",
-        32u => "Item Enchantment", 33u => "Life Magic", 34u => "War Magic",
-        35u => "Leadership", 36u => "Loyalty", 37u => "Fletching", 38u => "Alchemy",
-        39u => "Cooking", 40u => "Salvaging", 41u => "Two Handed Combat",
-        42u => "Gearcraft", 43u => "Void Magic", 44u => "Heavy Weapons",
-        45u => "Light Weapons", 46u => "Finesse Weapons", 47u => "Missile Weapons",
-        48u => "Shield", 49u => "Dual Wield", 50u => "Recklessness",
-        51u => "Sneak Attack", 52u => "Dirty Fighting", 53u => "Challenge",
-        54u => "Summoning", _ => "Unknown",
-    };
+    // The salvage message names the skill from the client's built-in list,
+    // the same one an appraisal's weapon line uses, and prints nothing where
+    // that list has no name.
+    private static string SalvageSkillName(uint skillId)
+        => skillId <= int.MaxValue
+           && RetailSkillNames.TryGetName((int)skillId, out string? name)
+            ? name
+            : string.Empty;
 }

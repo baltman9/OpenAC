@@ -145,6 +145,7 @@ jobs:
           dotnet test tests/AcDream.Platform.Tests/AcDream.Platform.Tests.csproj -c Release --no-build --nologo --filter $filter
           dotnet test tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --no-build --nologo --filter 'FullyQualifiedName~MacMonotonicFramePacingWaiterTests'
           dotnet test tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --no-build --nologo --filter 'FullyQualifiedName~AppCredentialResolverTests&Lane=MacOS'
+          dotnet test tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --no-build --nologo --filter 'FullyQualifiedName~GraphicalVulkanLoaderTests'
 
       - name: Build and verify the Apple-silicon release payloads
         shell: pwsh
@@ -203,6 +204,107 @@ jobs:
             bin/client-osx-arm64.zip
             bin/launcher-osx-arm64.zip
 
+  macos-intel:
+    # osx-x64: GitHub's last x86_64 macOS image; a failure here never blocks the release (see release's `if`).
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install the pinned .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # osx-x64: keys the cache off the build script, which holds the pins.
+      - name: Restore the pinned x86_64 Vulkan runtime
+        uses: actions/cache@v4
+        with:
+          path: artifacts/macos-x64-vulkan
+          key: macos-x64-vulkan-${{ hashFiles('tools/build-macos-x64-vulkan.ps1') }}
+
+      - name: Build the pinned x86_64 Vulkan runtime
+        shell: pwsh
+        run: ./tools/build-macos-x64-vulkan.ps1 -OutputDirectory artifacts/macos-x64-vulkan
+
+      - name: Build the macOS native test and launcher closures
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet build src/AcDream.Launcher/AcDream.Launcher.csproj -c Release --nologo
+          dotnet build tests/AcDream.Launcher.Core.Tests/AcDream.Launcher.Core.Tests.csproj -c Release --nologo
+          dotnet build tests/AcDream.Platform.Tests/AcDream.Platform.Tests.csproj -c Release --nologo
+          dotnet build tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --nologo
+
+      - name: Test the macOS launcher and native seams
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $filter = 'Lane!=InstalledDat&Lane!=PreparedPackage&Lane!=Live&Lane!=Manual&Lane!=Timing&Lane!=Windows&Lane!=Linux&Lane!=Vulkan&Lane!=SystemFont&Purpose!=Diagnostic&Status!=KnownFailure'
+          dotnet test tests/AcDream.Launcher.Core.Tests/AcDream.Launcher.Core.Tests.csproj -c Release --no-build --nologo --filter $filter
+          dotnet test tests/AcDream.Launcher.Tests/AcDream.Launcher.Tests.csproj -c Release --nologo --filter $filter
+          dotnet test tests/AcDream.Platform.Tests/AcDream.Platform.Tests.csproj -c Release --no-build --nologo --filter $filter
+          dotnet test tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --no-build --nologo --filter 'FullyQualifiedName~MacMonotonicFramePacingWaiterTests'
+          dotnet test tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --no-build --nologo --filter 'FullyQualifiedName~AppCredentialResolverTests&Lane=MacOS'
+          dotnet test tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --no-build --nologo --filter 'FullyQualifiedName~GraphicalVulkanLoaderTests'
+
+      - name: Build and verify the Intel release payloads
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./tools/publish-bin.ps1 -MacOnly -MacRid osx-x64
+          $expanded = Join-Path $env:RUNNER_TEMP 'openac-macos-launcher'
+          $clientExpanded = Join-Path $env:RUNNER_TEMP 'openac-macos-client'
+          & /usr/bin/ditto -x -k bin/launcher-osx-x64.zip $expanded
+          if ($LASTEXITCODE -ne 0) { throw 'Could not expand launcher-osx-x64.zip.' }
+          & /usr/bin/ditto -x -k bin/client-osx-x64.zip $clientExpanded
+          if ($LASTEXITCODE -ne 0) { throw 'Could not expand client-osx-x64.zip.' }
+          & /usr/bin/plutil -lint "$expanded/OpenAC.app/Contents/Info.plist"
+          if ($LASTEXITCODE -ne 0) { throw 'OpenAC.app Info.plist is invalid.' }
+          foreach ($path in @(
+            "$expanded/OpenAC.app/Contents/MacOS/acdream-launcher",
+            "$expanded/OpenAC.app/Contents/MacOS/acdream-bake",
+            "$expanded/OpenAC.app/Contents/Resources/OpenAC.icns",
+            "$expanded/OpenAC.app/Contents/Resources/PrivacyInfo.xcprivacy")) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing packaged path '$path'." }
+          }
+          & /bin/test -x "$expanded/OpenAC.app/Contents/MacOS/acdream-launcher"
+          if ($LASTEXITCODE -ne 0) { throw 'The packaged launcher is not executable.' }
+          foreach ($path in @(
+            "$clientExpanded/acdream-client",
+            "$clientExpanded/Frameworks/libvulkan.1.dylib",
+            "$clientExpanded/Frameworks/libMoltenVK.dylib",
+            "$clientExpanded/Resources/vulkan/icd.d/MoltenVK_icd.json",
+            "$clientExpanded/Resources/PrivacyInfo.xcprivacy")) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing packaged client path '$path'." }
+          }
+          & /bin/test -x "$clientExpanded/acdream-client"
+          if ($LASTEXITCODE -ne 0) { throw 'The packaged client is not executable.' }
+          foreach ($signed in @(
+            "$expanded/OpenAC.app",
+            "$clientExpanded/acdream-client",
+            "$clientExpanded/acdream-headless",
+            "$clientExpanded/Frameworks/libvulkan.1.dylib",
+            "$clientExpanded/Frameworks/libMoltenVK.dylib")) {
+            & /usr/bin/codesign --verify --deep --strict $signed
+            if ($LASTEXITCODE -ne 0) { throw "Invalid ad-hoc signature '$signed'." }
+          }
+          $env:DOTNET_ROOT = '/definitely-not-installed'
+          $env:DOTNET_ROOT_X64 = '/definitely-not-installed'
+          $env:DOTNET_MULTILEVEL_LOOKUP = '0'
+          & "$expanded/OpenAC.app/Contents/MacOS/acdream-launcher" --verify-publish
+          if ($LASTEXITCODE -ne 0) { throw 'The packaged launcher is not self-contained.' }
+
+      - name: Upload macOS Intel release assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-intel-release-assets
+          if-no-files-found: error
+          path: |
+            bin/client-osx-x64.zip
+            bin/launcher-osx-x64.zip
+
   vulkan-hardware:
     # Real-GPU lane. Only on pushes (never for fork PRs) and only on the
     # NVIDIA runner, which runs in an interactive session so a device opens.
@@ -224,9 +326,15 @@ jobs:
 
   release:
     # Tag pushes only, and only after every gate is green: `needs` guarantees a
-    # red gate cannot publish.
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows-gate, linux-portable, macos-portable, vulkan-hardware]
+    # red gate cannot publish. macos-intel (osx-x64) is best effort and is not
+    # one of those gates: `!cancelled()` lets this job run even if it failed.
+    if: >-
+      !cancelled() && startsWith(github.ref, 'refs/tags/v') &&
+      needs.windows-gate.result == 'success' &&
+      needs.linux-portable.result == 'success' &&
+      needs.macos-portable.result == 'success' &&
+      needs.vulkan-hardware.result == 'success'
+    needs: [windows-gate, linux-portable, macos-portable, vulkan-hardware, macos-intel]
     runs-on: openac-windows
     timeout-minutes: 60
     permissions:
@@ -238,6 +346,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: macos-release-assets
+          path: artifacts/macos-release-assets
+
+      # osx-x64: downloaded into the same directory publish-bin.ps1 reads.
+      - name: Download macOS Intel release assets
+        if: needs.macos-intel.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-intel-release-assets
           path: artifacts/macos-release-assets
 
       - name: Build payloads with release-asset URLs
@@ -272,3 +388,17 @@ jobs:
           # which skips pre-releases. The beta state lives in the version.
           prerelease: false
           make_latest: true
+
+      # osx-x64: attached only when macos-intel succeeds.
+      - name: Attach the Intel macOS assets
+        if: needs.macos-intel.result == 'success'
+        continue-on-error: true
+        uses: softprops/action-gh-release@v2
+        with:
+          append_body: true
+          body: |
+            **macOS (Intel):** download `launcher-osx-x64.zip`, unzip it, drag `OpenAC.app` to `~/Applications`, then open it in Finder.
+          files: |
+            bin/client-osx-x64.zip
+            bin/launcher-osx-x64.zip
+          fail_on_unmatched_files: true

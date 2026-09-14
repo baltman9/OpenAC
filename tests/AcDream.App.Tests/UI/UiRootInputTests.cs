@@ -20,6 +20,47 @@ public class UiRootInputTests
     }
 
     [Fact]
+    public void SemanticChatActivation_OnAPrintableKey_SwallowsOnlyThatKeysOwnChar()
+    {
+        // The action can be bound to a letter; the letter must not be typed
+        // into the field it just focused, but anything typed after it must.
+        var root = new UiRoot { Width = 800, Height = 600 };
+        var field = new UiField { Width = 100, Height = 20 };
+        field.SetText("hello");
+        root.AddChild(field);
+        root.SetKeyboardFocus(field);
+        root.SuppressPhysicalKeyUntilRelease(Silk.NET.Input.Key.A);
+
+        root.OnKeyDown((int)Silk.NET.Input.Key.A);
+        root.OnChar('a');                                  // the activating key's own char
+        Assert.Equal("hello", field.Text);
+
+        root.OnKeyDown((int)Silk.NET.Input.Key.Slash);     // still holding A
+        root.OnChar('/');
+        Assert.Equal("hello/", field.Text);
+
+        root.OnKeyUp((int)Silk.NET.Input.Key.A);
+        root.OnKeyDown((int)Silk.NET.Input.Key.A);
+        root.OnChar('a');
+        Assert.Equal("hello/a", field.Text);
+    }
+
+    [Fact]
+    public void SemanticChatActivation_OnAKeyWithoutAChar_DoesNotEatTheNextTypedChar()
+    {
+        var root = new UiRoot { Width = 800, Height = 600 };
+        var field = new UiField { Width = 100, Height = 20 };
+        root.AddChild(field);
+        root.SetKeyboardFocus(field);
+        root.SuppressPhysicalKeyUntilRelease(Silk.NET.Input.Key.F1);
+
+        root.OnKeyDown((int)Silk.NET.Input.Key.F1);        // no char follows F1
+        root.OnKeyDown((int)Silk.NET.Input.Key.A);
+        root.OnChar('a');
+        Assert.Equal("a", field.Text);
+    }
+
+    [Fact]
     public void SemanticChatActivation_SuppressesTheSameNativeEnterTail()
     {
         var root = new UiRoot { Width = 800, Height = 600 };
@@ -33,15 +74,20 @@ public class UiRootInputTests
         root.SuppressPhysicalKeyUntilRelease(Silk.NET.Input.Key.Enter);
 
         root.OnKeyDown((int)Silk.NET.Input.Key.Enter);
-        root.OnChar('x');
+        root.OnChar(13);   // Enter's own char tail: swallowed, so it cannot submit
 
         Assert.Equal(0, submissions);
         Assert.Equal("hello", field.Text);
         Assert.Same(field, root.KeyboardFocus);
 
+        // A character typed before Enter comes back up is real input - a fast "/"
+        // after opening chat must not be lost.
+        root.OnChar('/');
+        Assert.Equal("hello/", field.Text);
+
         root.OnKeyUp((int)Silk.NET.Input.Key.Enter);
         root.OnChar('x');
-        Assert.Equal("hellox", field.Text);
+        Assert.Equal("hello/x", field.Text);
     }
 
     [Fact]
@@ -287,10 +333,44 @@ public class UiRootInputTests
         Assert.Equal(450f, window.Top);
     }
 
+    [Theory]
+    [InlineData(-500, 0, 0f, 100f)]        // past the left edge
+    [InlineData(2000, 0, 500f, 100f)]      // past the right edge: 800 - 300
+    [InlineData(0, -500, 100f, 0f)]        // past the top edge
+    [InlineData(0, 2000, 100f, 450f)]      // past the bottom edge: 600 - 150
+    public void Drag_KeepsEveryWindowInsideItsParent(int dx, int dy, float left, float top)
+    {
+        var root = new UiRoot { Width = 800, Height = 600 };
+        var window = new UiPanel { Left = 100, Top = 100, Width = 300, Height = 150, Draggable = true };
+        root.AddChild(window);
+
+        root.OnMouseDown(UiMouseButton.Left, 110, 110);
+        root.OnMouseMove(110 + dx, 110 + dy);
+
+        Assert.Equal(left, window.Left);
+        Assert.Equal(top, window.Top);
+    }
+
+    [Fact]
+    public void Drag_OfAWindowLargerThanItsParent_PinsItToTheOrigin()
+    {
+        var root = new UiRoot { Width = 800, Height = 600 };
+        var window = new UiPanel { Left = 0, Top = 0, Width = 1000, Height = 700, Draggable = true };
+        root.AddChild(window);
+
+        root.OnMouseDown(UiMouseButton.Left, 10, 10);
+        root.OnMouseMove(300, 200);
+
+        Assert.Equal(0f, window.Left);
+        Assert.Equal(0f, window.Top);
+    }
+
     [Fact]
     public void DragHandle_MovedAnchoredWindow_SurvivesTheNextLayoutPass()
     {
-        var root = new UiRoot { Width = 800, Height = 600 };
+        // 900 wide: the window is 610 wide and every window is kept on screen, so an
+        // 800-wide root would clamp the drag at Left=190 before the layout pass ran.
+        var root = new UiRoot { Width = 900, Height = 600 };
         var window = new UiPanel
         {
             Left = 0, Top = 510, Width = 610, Height = 90,
@@ -367,7 +447,6 @@ public class UiRootInputTests
             Width = 120,
             Height = 100,
             Draggable = true,
-            ConstrainDragToParent = true,
         };
         root.AddChild(panel);
         root.RegisterWindow("radar", panel);
@@ -953,5 +1032,63 @@ public class UiRootInputTests
     private sealed class GlobalTimeAction(Action action) : UiElement, IUiGlobalTimeListener
     {
         public void OnGlobalUiTime(double nowSeconds) => action();
+    }
+
+    [Fact]
+    public void RightClickAndDragBegin_reachADatElement_inElementLocalCoordinates()
+    {
+        var root = new UiRoot { Width = 800, Height = 600 };
+        var el = new AcDream.App.UI.Layout.UiDatElement(
+            new AcDream.App.UI.Layout.ElementInfo(), static _ => (0u, 0, 0))
+        {
+            Left = 100, Top = 50, Width = 40, Height = 40, ClickThrough = false,
+        };
+        (int x, int y) rightClick = (-1, -1);
+        (int x, int y) lift = (-1, -1);
+        el.PointerRegion = new UiPointerRegion
+        {
+            RightClicked = (x, y) => rightClick = (x, y),
+            DragPayloadAt = (x, y) => { lift = (x, y); return "lifted"; },
+        };
+        root.AddChild(el);
+
+        root.OnMouseDown(UiMouseButton.Right, 110, 60);
+        root.OnMouseUp(UiMouseButton.Right, 110, 60);
+        Assert.Equal((10, 10), rightClick);
+
+        root.OnMouseDown(UiMouseButton.Left, 130, 70);
+        root.OnMouseMove(130, 90);                       // past the drag threshold
+        Assert.Equal("lifted", root.DragPayload);
+        Assert.Equal((30, 20), lift);                    // the press point, not the move point
+    }
+
+    [Fact]
+    public void AButtonWithAPointerRegion_isADragSourceAndTakesTheRightClick()
+    {
+        // The paperdoll mask imports as a button, so a region on a button has to
+        // behave exactly as it does on a plain element.
+        var root = new UiRoot { Width = 800, Height = 600 };
+        var el = new UiButton(new AcDream.App.UI.Layout.ElementInfo(), static _ => (0u, 0, 0))
+        {
+            Left = 100, Top = 50, Width = 40, Height = 40,
+        };
+        (int x, int y) rightClick = (-1, -1);
+        (int x, int y) lift = (-1, -1);
+        el.PointerRegion = new UiPointerRegion
+        {
+            RightClicked = (x, y) => rightClick = (x, y),
+            DragPayloadAt = (x, y) => { lift = (x, y); return "lifted"; },
+        };
+        root.AddChild(el);
+
+        root.OnMouseDown(UiMouseButton.Right, 110, 60);
+        root.OnMouseUp(UiMouseButton.Right, 110, 60);
+        Assert.Equal((10, 10), rightClick);
+
+        Assert.True(el.IsDragSource);
+        root.OnMouseDown(UiMouseButton.Left, 130, 70);
+        root.OnMouseMove(130, 90);
+        Assert.Equal("lifted", root.DragPayload);
+        Assert.Equal((30, 20), lift);
     }
 }

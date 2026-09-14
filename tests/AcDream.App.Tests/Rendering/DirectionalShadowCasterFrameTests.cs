@@ -175,6 +175,64 @@ public sealed class DirectionalShadowCasterFrameTests
     }
 
     [Fact]
+    public void Select_ReusesCellArraysAndSelectionUntilAnInputChanges()
+    {
+        const uint visible = 0x12340002u;
+        const uint other = 0x12340003u;
+        RenderProjectionRecord[] statics =
+        [
+            Record(301, RenderProjectionClass.OutdoorStatic),
+            Record(302, RenderProjectionClass.OutdoorStatic),
+        ];
+        var cells = new Dictionary<uint, IReadOnlyList<uint>>
+        {
+            [301] = [visible],
+            [302] = [other],
+        };
+        var source = new QuerySource(statics, []);
+        var frame = new DirectionalShadowCasterFrame();
+        frame.Build(new RenderSceneQuery(source, Generation));
+        var membership = new RecordingMembership(cells);
+
+        var visibility = new RetailLandscapeVisibilityFrame(
+            new HashSet<uint> { visible }, HasCompletedWorldView: true);
+        frame.Select(in visibility, membership);
+        Assert.Equal([true, false], frame.SelectedCasters.ToArray());
+        int lookups = membership.Lookups;
+        ulong sequence = frame.SelectionSequence;
+
+        // Identical inputs: no membership lookups, same selection, sequence still advances.
+        frame.Select(in visibility, membership);
+        Assert.Equal(lookups, membership.Lookups);
+        Assert.Equal([true, false], frame.SelectedCasters.ToArray());
+        Assert.Equal(1, frame.Stats.ActiveSelected);
+        Assert.Equal(sequence + 1, frame.SelectionSequence);
+
+        // A different visible set re-selects from the cached cell arrays.
+        var moved = new RetailLandscapeVisibilityFrame(
+            new HashSet<uint> { other }, HasCompletedWorldView: true);
+        frame.Select(in moved, membership);
+        Assert.Equal(lookups, membership.Lookups);
+        Assert.Equal([false, true], frame.SelectedCasters.ToArray());
+
+        // A membership revision change refetches the arrays and re-selects.
+        cells[302] = [visible];
+        membership.Revision++;
+        frame.Select(in moved, membership);
+        Assert.True(membership.Lookups > lookups);
+        Assert.Equal([false, false], frame.SelectedCasters.ToArray());
+        Assert.Equal(0, frame.Stats.ActiveSelected);
+
+        // Losing the completed world view deselects everything.
+        var incomplete = new RetailLandscapeVisibilityFrame(
+            new HashSet<uint> { visible }, HasCompletedWorldView: false);
+        frame.Select(in visibility, membership);
+        Assert.Equal([true, true], frame.SelectedCasters.ToArray());
+        frame.Select(in incomplete, membership);
+        Assert.Equal([false, false], frame.SelectedCasters.ToArray());
+    }
+
+    [Fact]
     public void WarmPriorLandscapeSelection_AllocatesZeroWithStreamingBoundedScratch()
     {
         const uint visible = 0x12340002u;
@@ -723,10 +781,14 @@ public sealed class DirectionalShadowCasterFrameTests
         IReadOnlyDictionary<uint, IReadOnlyList<uint>> cellsByEntity)
         : IDirectionalShadowCellMembership
     {
+        public ulong Revision { get; set; } = 1UL;
+        public int Lookups { get; private set; }
+
         public bool TryGetRetailCellArray(
             uint entityId,
             out IReadOnlyList<uint> cells)
         {
+            Lookups++;
             if (cellsByEntity.TryGetValue(entityId, out IReadOnlyList<uint>? found))
             {
                 cells = found;
@@ -779,6 +841,21 @@ public sealed class DirectionalShadowCasterFrameTests
         }
 
         public ulong GetIndexRevision(RenderSceneGeneration generation) => 1;
+
+        public ulong GetBuildingShellRevision(RenderSceneGeneration generation) => 1;
+
+        public bool TryGetRevisionByLocalEntityId(
+            RenderSceneGeneration generation,
+            uint localEntityId,
+            out RenderProjectionId id,
+            out RenderOwnerIncarnation ownerIncarnation,
+            out ulong revision)
+        {
+            id = default;
+            ownerIncarnation = default;
+            revision = 0;
+            return false;
+        }
 
         public ulong GetDirectionalShadowTopologyRevision(
             RenderSceneGeneration generation) => TopologyRevision;

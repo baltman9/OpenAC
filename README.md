@@ -18,6 +18,14 @@
   <a href="https://discord.gg/mBWtvgmuF"><img alt="Join Discord" src="https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&logoColor=white"></a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/eriknihlen/OpenAC/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/eriknihlen/OpenAC/total"></a>
+  <a href="https://github.com/eriknihlen/OpenAC/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/eriknihlen/OpenAC"></a>
+  <a href="https://github.com/eriknihlen/OpenAC/graphs/contributors"><img alt="Contributors" src="https://img.shields.io/github/contributors/eriknihlen/OpenAC"></a>
+  <a href="https://github.com/eriknihlen/OpenAC/commits/main"><img alt="Last commit" src="https://img.shields.io/github/last-commit/eriknihlen/OpenAC"></a>
+  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-blue">
+</p>
+
 ## What is OpenAC
 
 OpenAC is a from-scratch client for Asheron's Call that reproduces the

@@ -102,6 +102,34 @@ public static class DatWidgetFactory
         };
         if (label?.FontColor is { } color)
             menu.TextColor = color;
+
+        // A drop-down authors its own face on the text child and its own
+        // open/closed arrow on the little image child beside it. Without
+        // these the menu falls back to generic button art, which is the
+        // wrong size for the row it sits in and has no arrow at all.
+        uint face = label is null ? 0u : DefaultImage(label);
+        if (face != 0u)
+        {
+            menu.NormalSprite = face;
+            menu.PressedSprite = face;
+        }
+
+        ElementInfo? arrowCap = info.Children.FirstOrDefault(
+            static child => child.Type == 3u);
+        uint closedCap = ButtonStateImage(arrowCap, "Normal");
+        if (arrowCap is not null && closedCap != 0u)
+        {
+            menu.ArrowCapClosedSprite = closedCap;
+            uint openCap = ButtonStateImage(arrowCap, "Highlight");
+            menu.ArrowCapOpenSprite = openCap != 0u ? openCap : closedCap;
+            if (arrowCap.Width > 0f) menu.ArrowCapWidth = arrowCap.Width;
+            if (arrowCap.Height > 0f) menu.ArrowCapHeight = arrowCap.Height;
+        }
+
+        if (label is { Height: > 0f })
+            menu.RowHeight = label.Height;
+        if (info.Width > 0f)
+            menu.ColumnWidth = info.Width;
         return menu;
     }
 
@@ -141,6 +169,10 @@ public static class DatWidgetFactory
         bar.DownPressedSprite = ButtonStateImage(trailingButton, "Normal_pressed");
         if (info.TryGetEffectiveBool(0x79u, out bool hideDisabled))
             bar.HideWhenDisabled = hideDisabled;
+        if (info.TryGetEffectiveBool(0x82u, out bool proportional))
+            bar.Proportional = proportional;
+        if (info.TryGetEffectiveInteger(0x89u, out int minThumbExtent) && minThumbExtent > 0)
+            bar.MinThumbExtent = minThumbExtent;
 
         if (bar.Horizontal)
         {
@@ -152,6 +184,34 @@ public static class DatWidgetFactory
             ElementInfo? scalarThumb = info.Children.FirstOrDefault(child => child.Id == 1u);
             bar.TrackSprite = DefaultImage(info);
             bar.ThumbSprite = scalarThumb is null ? 0u : DefaultImage(scalarThumb);
+            if (scalarThumb is { Width: > 0f })
+                bar.ThumbExtent = scalarThumb.Width;
+
+            // A composited thumb authors its art on left cap / middle / right cap
+            // children, the same way the vertical bars do top to bottom.
+            ElementInfo[] horizontalSlices = scalarThumb?.Children
+                .Where(child => DefaultImage(child) != 0u)
+                .OrderBy(child => child.X)
+                .ThenBy(child => child.ReadOrder)
+                .ToArray() ?? [];
+            if (horizontalSlices.Length > 0)
+            {
+                bar.ThumbTopSprite = ButtonStateImage(horizontalSlices[0], "Normal");
+                bar.ThumbTopRolloverSprite = ButtonStateImage(horizontalSlices[0], "Normal_rollover");
+                bar.ThumbTopPressedSprite = ButtonStateImage(horizontalSlices[0], "Normal_pressed");
+            }
+            if (horizontalSlices.Length > 1)
+            {
+                bar.ThumbSprite = ButtonStateImage(horizontalSlices[1], "Normal");
+                bar.ThumbRolloverSprite = ButtonStateImage(horizontalSlices[1], "Normal_rollover");
+                bar.ThumbPressedSprite = ButtonStateImage(horizontalSlices[1], "Normal_pressed");
+            }
+            if (horizontalSlices.Length > 2)
+            {
+                bar.ThumbBotSprite = ButtonStateImage(horizontalSlices[^1], "Normal");
+                bar.ThumbBotRolloverSprite = ButtonStateImage(horizontalSlices[^1], "Normal_rollover");
+                bar.ThumbBotPressedSprite = ButtonStateImage(horizontalSlices[^1], "Normal_pressed");
+            }
 
             if (bar.TrackSprite == 0u)
             {
@@ -191,6 +251,8 @@ public static class DatWidgetFactory
             child.Type == 1u && child.Id != incrementId && child.Id != decrementId);
         if (thumb is not null)
         {
+            if (thumb.Height > 0f)
+                bar.ThumbExtent = thumb.Height;
             ElementInfo[] slices = thumb.Children
                 .Where(child => DefaultImage(child) != 0u)
                 .OrderBy(child => child.Y)

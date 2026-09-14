@@ -4,8 +4,10 @@ using System.Globalization;
 using System.Numerics;
 using AcDream.App.Rendering;
 using AcDream.App.UI;
+using AcDream.Core.Audio;
 using AcDream.Plugin.Abstractions.Rendering;
 using AcDream.UI.Abstractions.Panels.Settings;
+using AcDream.UI.Abstractions.Settings;
 
 namespace AcDream.App.UI.Layout;
 
@@ -111,10 +113,22 @@ public static class ConfigOptionsPageController
         Func<CameraTurningSettings> LoadCameraTurning,
         Action<CameraTurningSettings> SaveCameraTurning,
         Func<ChatSettings> LoadChat,
-        Action<ChatSettings> SaveChat)
+        Action<ChatSettings> SaveChat,
+        AudioMixerBindings AudioMixer)
     {
         public RenderPackBindings? RenderPacks { get; init; }
     }
+
+    /// <summary>
+    /// How the mixer rows read and change the mixer settings: the same
+    /// save-then-apply owner the <c>/mixer</c> command uses, so the command and
+    /// the panel cannot disagree. <c>Save</c> answers false when the settings
+    /// could not be written down — nothing changed, and the row goes back to
+    /// showing what is remembered.
+    /// </summary>
+    public sealed record AudioMixerBindings(
+        Func<AudioMixerOptions> Load,
+        Func<AudioMixerOptions, bool> Save);
 
     public sealed record RenderPackBindings(
         Func<IReadOnlyList<RenderPackChoice>> LoadChoices)
@@ -578,7 +592,11 @@ public static class ConfigOptionsPageController
                         bool.Parse(defaultValue),
                         page,
                         read: () => bool.Parse(Read()),
-                        apply: value => Apply(value ? "true" : "false"),
+                        apply: value =>
+                        {
+                            Apply(value ? "true" : "false");
+                            return true;
+                        },
                         IsCurrent);
                     break;
 
@@ -598,7 +616,11 @@ public static class ConfigOptionsPageController
                         double.Parse(defaultValue, CultureInfo.InvariantCulture),
                         page,
                         read: () => double.Parse(Read(), CultureInfo.InvariantCulture),
-                        apply: value => Apply(FormatNumeric(value, setting.Kind)),
+                        apply: value =>
+                        {
+                            Apply(FormatNumeric(value, setting.Kind));
+                            return true;
+                        },
                         IsCurrent);
                     break;
 
@@ -781,7 +803,97 @@ public static class ConfigOptionsPageController
             apply: value => bindings.SaveAudio(bindings.LoadAudio() with { PlaySoundOnlyWhenActive = value }),
             storeOnly: true);
 
+        BindMixerRows(listBox, page, bindings.AudioMixer);
+
         audio = bindings.LoadAudio();
+    }
+
+    /// <summary>
+    /// The four acdream-only mixer rows, in the Sound block they belong to:
+    /// how many sounds can play at once and what happens when they all are.
+    /// They have no authored captions of their own, so they are built with
+    /// explicit text the way this page's other acdream-only rows are. Every
+    /// change is live and remembered through the one shared seam; while
+    /// "Retail Mixer" is on it overrides the three below, which are shown
+    /// dimmed and keep their values.
+    /// </summary>
+    private static void BindMixerRows(
+        UiTemplateListBox listBox,
+        OptionPage page,
+        AudioMixerBindings mixer)
+    {
+        AudioMixerOptions defaults = AudioMixerOptions.Default;
+        bool Overridden() => mixer.Load().RetailMixer;
+
+        BuildExplicitToggleRow(
+            listBox,
+            "Retail Mixer",
+            defaults.RetailMixer,
+            page,
+            read: () => mixer.Load().RetailMixer,
+            apply: value => mixer.Save(mixer.Load() with { RetailMixer = value }),
+            isCurrent: static () => true,
+            tooltip:
+                "Mix exactly like the original client: 16 voices, no priority, "
+                + "no per-sound cap. Overrides the three settings below.");
+
+        BuildExplicitNumericSliderRow(
+            listBox,
+            "Voices",
+            AudioMixerOptions.MinimumVoiceCount,
+            AudioMixerOptions.MaximumVoiceCount,
+            step: 1d,
+            integer: true,
+            defaults.VoiceCount,
+            page,
+            read: () => mixer.Load().VoiceCount,
+            apply: value => mixer.Save(mixer.Load() with
+            {
+                VoiceCount = (int)Math.Round(value),
+            }),
+            isCurrent: static () => true,
+            tooltip: "How many sounds can play at once. The original client used 16.",
+            dimmed: Overridden);
+
+        BuildExplicitToggleRow(
+            listBox,
+            "Priority",
+            defaults.UseAuthoredPriority,
+            page,
+            read: () => mixer.Load().UseAuthoredPriority,
+            apply: value => mixer.Save(mixer.Load() with
+            {
+                UseAuthoredPriority = value,
+            }),
+            isCurrent: static () => true,
+            tooltip:
+                "An important sound (a hit, a spell, an interface cue) may take "
+                + "the voice of a quieter one such as a footstep when all voices "
+                + "are busy.",
+            dimmed: Overridden);
+
+        BuildExplicitNumericSliderRow(
+            listBox,
+            "Voices Per Sound",
+            AudioMixerOptions.NoPerWaveCap,
+            AudioMixerOptions.MaximumMaxVoicesPerWave,
+            step: 1d,
+            integer: true,
+            defaults.MaxVoicesPerWave,
+            page,
+            read: () => mixer.Load().MaxVoicesPerWave,
+            apply: value => mixer.Save(mixer.Load() with
+            {
+                MaxVoicesPerWave = (int)Math.Round(value),
+            }),
+            isCurrent: static () => true,
+            tooltip:
+                "How many copies of the same sound may play at once; a further "
+                + "copy replaces the oldest.",
+            dimmed: Overridden,
+            rangeLowText: "Off",
+            rangeHighText: AudioMixerOptions.MaximumMaxVoicesPerWave
+                .ToString(CultureInfo.InvariantCulture));
     }
 
 
@@ -896,15 +1008,155 @@ public static class ConfigOptionsPageController
             storeOnly: false,
             rangeLowKey: "ID_Graphics_Value_Close", rangeHighKey: "ID_Graphics_Value_Far");
 
+        // An acdream-only row, in the Graphics block beside the three settings
+        // it qualifies. It has no authored caption of its own, so it is built
+        // with explicit text the way this page's other acdream-only rows are.
+        // The change is live: it is read again on the next frame drawn.
+        BuildExplicitToggleRow(
+            listBox,
+            "Keep Distant Buildings",
+            DisplaySettings.Default.KeepDistantBuildings,
+            page,
+            read: () => bindings.LoadDisplay().KeepDistantBuildings,
+            apply: value =>
+            {
+                bindings.SaveDisplay(
+                    bindings.LoadDisplay() with { KeepDistantBuildings = value });
+                return true;
+            },
+            isCurrent: static () => true,
+            tooltip:
+                "A building whose detail levels end in \"draw nothing\" falls "
+                + "back to its simplest mesh instead of disappearing. We draw "
+                + "objects much further out than those levels were made for, so "
+                + "without this a distant building can vanish while the fences "
+                + "and stairs around it stay.");
+
+        // The graphics profile: acdream's one-choice quality setting (the
+        // streaming window, anti-aliasing, texture filtering). Not a retail
+        // option, so it is built with explicit text like the row above. The
+        // window and filtering apply live; anti-aliasing is sized at startup.
+        BuildExplicitStringMenuRow(
+            listBox,
+            "Graphics Profile",
+            GraphicsProfileChoices,
+            page,
+            read: () => bindings.LoadDisplay().Quality.ToString(),
+            apply: value =>
+            {
+                if (!Enum.TryParse(value, ignoreCase: true, out QualityPreset preset))
+                    return;
+                bindings.SaveDisplay(bindings.LoadDisplay() with { Quality = preset });
+            },
+            defaultValue: DisplaySettings.Default.Quality.ToString(),
+            resolveSprite,
+            datFont,
+            debugFont);
+
+        // Potato Mode: one switch that turns every quality choice down to its
+        // cheapest value for running many clients on one machine. It is an
+        // overlay (DisplaySettings.Effective) over the choices above and below,
+        // which stay stored as they are and come back when it is turned off.
+        BuildExplicitToggleRow(
+            listBox,
+            "Potato Mode",
+            DisplaySettings.Default.PotatoMode,
+            page,
+            read: () => bindings.LoadDisplay().PotatoMode,
+            apply: value =>
+            {
+                bindings.SaveDisplay(bindings.LoadDisplay() with { PotatoMode = value });
+                return true;
+            },
+            isCurrent: static () => true,
+            tooltip:
+                "Everything at its cheapest, for running many clients on one "
+                + "machine: full detail only in the nearest landblocks, landscape "
+                + "draw distance 3, no anti-aliasing, plain texture filtering, no "
+                + "building detail textures, the plain render pack, retail "
+                + "particle range, and compact video-memory pools. Your other "
+                + "settings are kept and come back when this is off. "
+                + "Texture detail, anti-aliasing and the memory pools change at "
+                + "the next start.");
+
+        // UI Only: the world is not drawn and the streaming window shrinks to
+        // the landblocks the simulation needs; panels, chat, radar and plugins
+        // keep working. For the clients of an army that nobody is looking at.
+        BuildExplicitToggleRow(
+            listBox,
+            "UI Only",
+            DisplaySettings.Default.UiOnly,
+            page,
+            read: () => bindings.LoadDisplay().UiOnly,
+            apply: value =>
+            {
+                bindings.SaveDisplay(bindings.LoadDisplay() with { UiOnly = value });
+                return true;
+            },
+            isCurrent: static () => true,
+            tooltip:
+                "Stop drawing the world and keep only the landblocks around you "
+                + "loaded; the panels, chat, radar and plugins keep working. For "
+                + "a client nobody is watching. Off again brings the world back "
+                + "as it streams in.");
+
+        BuildExplicitToggleRow(
+            listBox,
+            "UI Only in Background",
+            DisplaySettings.Default.UiOnlyWhenUnfocused,
+            page,
+            read: () => bindings.LoadDisplay().UiOnlyWhenUnfocused,
+            apply: value =>
+            {
+                bindings.SaveDisplay(bindings.LoadDisplay() with { UiOnlyWhenUnfocused = value });
+                return true;
+            },
+            isCurrent: static () => true,
+            tooltip:
+                "Switch to UI Only whenever this window is not the active one, "
+                + "and back when it is: the client you are looking at draws the "
+                + "world, the others do not.");
+
         display = bindings.LoadDisplay();
     }
 
+    private static readonly ExplicitMenuChoice[] GraphicsProfileChoices =
+    [
+        new(
+            nameof(QualityPreset.Low),
+            "Low",
+            true,
+            "Full detail within 2 landblocks, no anti-aliasing, 4x texture "
+            + "filtering. Landscape range is the draw distance below."),
+        new(
+            nameof(QualityPreset.Medium),
+            "Medium",
+            true,
+            "Full detail within 3 landblocks, 2x anti-aliasing, 8x texture "
+            + "filtering. Landscape range is the draw distance below."),
+        new(
+            nameof(QualityPreset.High),
+            "High",
+            true,
+            "Full detail within 4 landblocks, 4x anti-aliasing, 16x texture "
+            + "filtering. Landscape range is the draw distance below."),
+        new(
+            nameof(QualityPreset.Ultra),
+            "Ultra",
+            true,
+            "Full detail within 5 landblocks, 4x anti-aliasing, 16x texture "
+            + "filtering. Landscape range is the draw distance below."),
+    ];
+
     // ── Section 4: Rendering Quality Options ────────────────────────────
 
+    // Stored value 0 is the highest detail (source size) and 4 the lowest (an
+    // eighth), so the labels run from Very High down to Very Low. The choice
+    // applies when the world is next started.
     private static readonly string[] TextureDetailChoices =
     {
-        "ID_Graphics_Value_VeryLow", "ID_Graphics_Value_Low", "ID_Graphics_Value_Medium",
-        "ID_Graphics_Value_High", "ID_Graphics_Value_VeryHigh",
+        "ID_Graphics_Value_VeryHigh", "ID_Graphics_Value_High", "ID_Graphics_Value_Medium",
+        "ID_Graphics_Value_Low", "ID_Graphics_Value_VeryLow",
     };
 
     private static readonly string[] TextureFilteringChoices =
@@ -940,16 +1192,16 @@ public static class ConfigOptionsPageController
             listBox, "ID_Graphics_LandscapeTextureDetail", TextureDetailChoices, page, resolveString,
             read: () => bindings.LoadDisplay().LandscapeTextureDetail,
             apply: value => bindings.SaveDisplay(bindings.LoadDisplay() with { LandscapeTextureDetail = value }),
-            defaultValue: 2,
-            storeOnly: true,
+            defaultValue: DisplaySettings.Default.LandscapeTextureDetail,
+            storeOnly: false,
             resolveSprite, datFont, debugFont);
 
         BuildMenuRow(
             listBox, "ID_Graphics_EnvironmentTextureDetail", TextureDetailChoices, page, resolveString,
             read: () => bindings.LoadDisplay().EnvironmentTextureDetail,
             apply: value => bindings.SaveDisplay(bindings.LoadDisplay() with { EnvironmentTextureDetail = value }),
-            defaultValue: 1,
-            storeOnly: true,
+            defaultValue: DisplaySettings.Default.EnvironmentTextureDetail,
+            storeOnly: false,
             resolveSprite, datFont, debugFont);
 
         BuildMenuRow(
@@ -1095,7 +1347,8 @@ public static class ConfigOptionsPageController
         if (listBox.AddItemFromTemplateList(HeaderTemplateIndex) is not UiText header)
         {
             Console.WriteLine(
-                "[render-pack] Config header template did not build as UiText.");
+                "[UI] ConfigOptionsPageController: explicit header template "
+                + "did not build as UiText.");
             return;
         }
 
@@ -1493,7 +1746,8 @@ public static class ConfigOptionsPageController
         if (row is null)
         {
             Console.WriteLine(
-                $"[render-pack] Config menu template did not build for '{labelText}'.");
+                "[UI] ConfigOptionsPageController: menu template did not "
+                + $"build for '{labelText}'.");
             return null;
         }
 
@@ -1508,7 +1762,8 @@ public static class ConfigOptionsPageController
         if (UiElement.FindDescendant(row, MenuElementId) is not UiMenu menu)
         {
             Console.WriteLine(
-                $"[render-pack] No UiMenu leaf found for '{labelText}'.");
+                "[UI] ConfigOptionsPageController: no UiMenu leaf found for "
+                + $"'{labelText}'.");
             return null;
         }
 
@@ -1566,35 +1821,57 @@ public static class ConfigOptionsPageController
         return menu;
     }
 
+    /// <param name="apply">
+    /// Makes the change; false when it was refused (a failed save), and then
+    /// the row goes back to showing what is actually stored.
+    /// </param>
+    /// <param name="dimmed">
+    /// Asked every frame whether the caption should be dimmed, for a row whose
+    /// setting is currently overridden by another one.
+    /// </param>
     private static UiButton? BuildExplicitToggleRow(
         UiTemplateListBox listBox,
         string labelText,
         bool defaultValue,
         OptionPage page,
         Func<bool> read,
-        Action<bool> apply,
-        Func<bool> isCurrent)
+        Func<bool, bool> apply,
+        Func<bool> isCurrent,
+        string? tooltip = null,
+        Func<bool>? dimmed = null)
     {
         UiElement? row = listBox.AddItemFromTemplateList(ToggleTemplateIndex);
         UiButton? checkbox = row is null ? null : FindCheckbox(row);
         if (checkbox is null)
         {
             Console.WriteLine(
-                $"[render-pack] Toggle template did not build for '{labelText}'.");
+                "[UI] ConfigOptionsPageController: toggle template did not "
+                + $"build for '{labelText}'.");
             return null;
         }
 
         checkbox.Label = labelText;
         checkbox.LabelColor = Vector4.One;
+        if (dimmed is not null)
+            checkbox.LabelColorProvider = () => dimmed()
+                ? UiRenderContext.StoreOnlyCaptionColor
+                : Vector4.One;
+        if (tooltip is not null)
+            checkbox.TooltipText = tooltip;
         bool initial = read();
         checkbox.Selected = initial;
-        var option = new BoolOptionRow(
+        BoolOptionRow? option = null;
+        option = new BoolOptionRow(
             initial,
             defaultValue,
             apply: value =>
             {
                 checkbox.Selected = value;
-                if (isCurrent()) apply(value);
+                if (!isCurrent() || apply(value))
+                    return;
+                bool stored = read();
+                checkbox.Selected = stored;
+                option!.RefreshFromLink(stored);
             },
             read: () => isCurrent() ? read() : initial,
             refresh: value => checkbox.Selected = value);
@@ -1606,6 +1883,18 @@ public static class ConfigOptionsPageController
         return checkbox;
     }
 
+    /// <param name="apply">
+    /// Makes the change; false when it was refused (a failed save), and then
+    /// the row goes back to showing what is actually stored.
+    /// </param>
+    /// <param name="dimmed">
+    /// Asked every frame whether the caption should be dimmed, for a row whose
+    /// setting is currently overridden by another one.
+    /// </param>
+    /// <param name="rangeLowText">
+    /// The caption under the low end of the slider, for a value whose meaning
+    /// is a word rather than the number itself. Defaults to the number.
+    /// </param>
     private static UiScrollbar? BuildExplicitNumericSliderRow(
         UiTemplateListBox listBox,
         string labelText,
@@ -1616,51 +1905,69 @@ public static class ConfigOptionsPageController
         double defaultValue,
         OptionPage page,
         Func<double> read,
-        Action<double> apply,
-        Func<bool> isCurrent)
+        Func<double, bool> apply,
+        Func<bool> isCurrent,
+        string? tooltip = null,
+        Func<bool>? dimmed = null,
+        string? rangeLowText = null,
+        string? rangeHighText = null)
     {
         UiElement? row = listBox.AddItemFromTemplateList(RangedSliderTemplateIndex);
         if (row is null)
         {
             Console.WriteLine(
-                $"[render-pack] Slider template did not build for '{labelText}'.");
+                "[UI] ConfigOptionsPageController: slider template did not "
+                + $"build for '{labelText}'.");
             return null;
         }
         if (UiElement.FindDescendant(row, SliderLabelElementId) is UiText label)
         {
             label.LinesProvider = () =>
             [
-                new UiText.Line(labelText, label.DefaultColor),
+                new UiText.Line(
+                    labelText,
+                    dimmed?.Invoke() == true
+                        ? UiRenderContext.StoreOnlyCaptionColor
+                        : label.DefaultColor),
             ];
         }
         if (UiElement.FindDescendant(row, SliderRangeMinElementId) is UiText low)
         {
-            string text = FormatExplicitNumber(min, integer);
+            string text = rangeLowText ?? FormatExplicitNumber(min, integer);
             low.LinesProvider = () => [new UiText.Line(text, low.DefaultColor)];
         }
         if (UiElement.FindDescendant(row, SliderRangeMaxElementId) is UiText high)
         {
-            string text = FormatExplicitNumber(max, integer);
+            string text = rangeHighText ?? FormatExplicitNumber(max, integer);
             high.LinesProvider = () => [new UiText.Line(text, high.DefaultColor)];
         }
         if (UiElement.FindDescendant(row, SliderElementId) is not UiScrollbar slider)
         {
             Console.WriteLine(
-                $"[render-pack] No slider leaf found for '{labelText}'.");
+                "[UI] ConfigOptionsPageController: no slider leaf found for "
+                + $"'{labelText}'.");
             return null;
         }
+
+        if (tooltip is not null)
+            slider.TooltipText = tooltip;
 
         double initialValue = SnapExplicitNumber(read(), min, max, step, integer);
         float initial = (float)initialValue;
         slider.SetScalarPosition((float)((initialValue - min) / (max - min)));
-        var option = new FloatOptionRow(
+        FloatOptionRow? option = null;
+        option = new FloatOptionRow(
             initial,
             (float)SnapExplicitNumber(defaultValue, min, max, step, integer),
             apply: value =>
             {
                 double snapped = SnapExplicitNumber(value, min, max, step, integer);
                 slider.SetScalarPosition((float)((snapped - min) / (max - min)));
-                if (isCurrent()) apply(snapped);
+                if (!isCurrent() || apply(snapped))
+                    return;
+                double stored = SnapExplicitNumber(read(), min, max, step, integer);
+                slider.SetScalarPosition((float)((stored - min) / (max - min)));
+                option!.RefreshFromLink((float)stored);
             },
             read: () => isCurrent()
                 ? (float)SnapExplicitNumber(read(), min, max, step, integer)

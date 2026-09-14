@@ -82,6 +82,18 @@ internal sealed class DirectionalShadowCasterFrame
     private RenderProjectionRecord[] _outdoorDynamicScratch = [];
     private DirectionalShadowCaster[] _casters = [];
     private bool[] _selectedCasters = [];
+
+    // Each non-building caster's retail cell array, fetched once per
+    // (caster set, membership revision) instead of once per caster per frame.
+    private IReadOnlyList<uint>?[] _casterCells = [];
+    private ulong _casterCellsBuildSequence;
+    private ulong _casterCellsRevision;
+    private IDirectionalShadowCellMembership? _casterCellsMembership;
+
+    // The inputs of the last selection; identical inputs select identically.
+    private readonly HashSet<uint> _lastVisibleCells = new();
+    private bool _lastSelectionValid;
+    private bool _lastHasCompletedWorldView;
     private int[] _refreshCasterSlots = [];
     private DirectionalShadowChangedPose[] _changedCasterPoses = [];
     private bool[] _changedCasterFlags = [];
@@ -136,6 +148,7 @@ internal sealed class DirectionalShadowCasterFrame
             + (long)_casters.Length
                 * System.Runtime.CompilerServices.Unsafe.SizeOf<DirectionalShadowCaster>()
             + _selectedCasters.Length
+            + (long)_casterCells.Length * IntPtr.Size
             + (long)_refreshCasterSlots.Length * sizeof(int)
             + (long)_changedCasterPoses.Length
                 * System.Runtime.CompilerServices.Unsafe.SizeOf<
@@ -380,39 +393,119 @@ internal sealed class DirectionalShadowCasterFrame
         ArgumentNullException.ThrowIfNull(membership);
         IReadOnlySet<uint> visible = visibility.CellIds
             ?? RetailLandscapeVisibilityFrame.None.CellIds;
+
+        bool cellsCurrent = RefreshCasterCells(membership);
+        if (cellsCurrent
+            && _lastSelectionValid
+            && _lastHasCompletedWorldView == visibility.HasCompletedWorldView
+            && SameCells(visible, _lastVisibleCells))
+        {
+            // Same casters, same cell arrays, same visible cells: the
+            // selection this would compute is the one already stored.
+            SelectionSequence = checked(SelectionSequence + 1);
+            return;
+        }
+
         int selected = 0;
         for (int casterIndex = 0; casterIndex < _casterCount; casterIndex++)
         {
             ref readonly DirectionalShadowCaster caster =
                 ref _casters[casterIndex];
             bool active = visibility.HasCompletedWorldView
-                && SelectsCaster(in caster, visible, membership);
+                && SelectsCaster(in caster, _casterCells[casterIndex], visible);
             _selectedCasters[casterIndex] = active;
             if (active)
                 selected++;
         }
 
+        _lastVisibleCells.Clear();
+        CopyCells(visible, _lastVisibleCells);
+        _lastHasCompletedWorldView = visibility.HasCompletedWorldView;
+        _lastSelectionValid = true;
         SelectionSequence = checked(SelectionSequence + 1);
         Stats = Stats with { ActiveSelected = selected };
     }
 
+    /// <summary>Fetches every caster's retail cell array when the caster set
+    /// or the membership changed; returns whether they were already current.</summary>
+    private bool RefreshCasterCells(IDirectionalShadowCellMembership membership)
+    {
+        ulong revision = membership.Revision;
+        if (BuildSequence != 0
+            && _casterCellsBuildSequence == BuildSequence
+            && _casterCellsRevision == revision
+            && ReferenceEquals(_casterCellsMembership, membership))
+        {
+            return true;
+        }
+
+        EnsureCapacity(ref _casterCells, _casterCount);
+        for (int casterIndex = 0; casterIndex < _casterCount; casterIndex++)
+        {
+            ref readonly DirectionalShadowCaster caster = ref _casters[casterIndex];
+            _casterCells[casterIndex] =
+                caster.Kind is not DirectionalShadowCasterKind.Building
+                && membership.TryGetRetailCellArray(
+                    caster.Projection.Source.LocalEntityId,
+                    out IReadOnlyList<uint>? cells)
+                && cells.Count != 0
+                    ? cells
+                    : null;
+        }
+        _casterCellsBuildSequence = BuildSequence;
+        _casterCellsRevision = revision;
+        _casterCellsMembership = membership;
+        _lastSelectionValid = false;
+        return false;
+    }
+
+    private static bool SameCells(IReadOnlySet<uint> visible, HashSet<uint> previous)
+    {
+        if (visible.Count != previous.Count)
+            return false;
+        if (visible is HashSet<uint> set)
+        {
+            foreach (uint cellId in set)
+            {
+                if (!previous.Contains(cellId))
+                    return false;
+            }
+            return true;
+        }
+        foreach (uint cellId in visible)
+        {
+            if (!previous.Contains(cellId))
+                return false;
+        }
+        return true;
+    }
+
+    private static void CopyCells(IReadOnlySet<uint> visible, HashSet<uint> destination)
+    {
+        if (visible is HashSet<uint> set)
+        {
+            foreach (uint cellId in set)
+                destination.Add(cellId);
+            return;
+        }
+        foreach (uint cellId in visible)
+            destination.Add(cellId);
+    }
+
     private static bool SelectsCaster(
         in DirectionalShadowCaster caster,
-        IReadOnlySet<uint> visible,
-        IDirectionalShadowCellMembership membership)
+        IReadOnlyList<uint>? cells,
+        IReadOnlySet<uint> visible)
     {
-        RenderSourceMetadata source = caster.Projection.Source;
         if (caster.Kind is DirectionalShadowCasterKind.Building)
-            return IsOutdoorLandCell(source.EffectCellId)
-                && visible.Contains(source.EffectCellId);
-
-        if (!membership.TryGetRetailCellArray(
-                source.LocalEntityId,
-                out IReadOnlyList<uint>? cells)
-            || cells.Count == 0)
         {
-            return false;
+            uint effectCellId = caster.Projection.Source.EffectCellId;
+            return IsOutdoorLandCell(effectCellId)
+                && visible.Contains(effectCellId);
         }
+
+        if (cells is null)
+            return false;
 
         for (int cellIndex = 0; cellIndex < cells.Count; cellIndex++)
         {
@@ -592,17 +685,10 @@ internal sealed class DirectionalShadowCasterFrame
         };
     }
 
-    private static void EnsureCapacity<T>(ref T[] values, int required)
-    {
-        if (required < 0)
-            throw new ArgumentOutOfRangeException(nameof(required));
-        if (values.Length >= required)
-            return;
-        int capacity = values.Length == 0 ? 4 : values.Length;
-        while (capacity < required)
-            capacity = checked(capacity * 2);
-        Array.Resize(ref values, capacity);
-    }
+    // Every array sized here is rewritten from index zero right after, so
+    // the refill policy may shrink it when the window got much smaller.
+    private static void EnsureCapacity<T>(ref T[] values, int required) =>
+        ScratchArrays.EnsureRefillCapacity(ref values, required, minimum: 4);
 
     private void SortCasters()
     {

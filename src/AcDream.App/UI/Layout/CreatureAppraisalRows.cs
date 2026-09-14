@@ -530,7 +530,7 @@ public sealed class CreatureAppraisalRowTemplateFactory
             label.LinesProvider = () =>
                 [new UiText.Line(row.Label, label.DefaultColor)];
             value.LinesProvider = () =>
-                [new UiText.Line(row.Value, ResolveColor(row.Style, value.DefaultColor))];
+                [new UiText.Line(row.Value, ResolveColor(row.Style, value))];
         }
 
         if (layer == CreatureAppraisalRowLayer.Foreground
@@ -550,10 +550,18 @@ public sealed class CreatureAppraisalRowTemplateFactory
 
     private static Vector4 ResolveColor(
         CreatureAppraisalValueStyle style,
-        Vector4 normal)
+        UiText value)
     {
-        _ = style;
-        return normal;
+        int index = style switch
+        {
+            CreatureAppraisalValueStyle.Positive => 1,
+            CreatureAppraisalValueStyle.Negative => 2,
+            CreatureAppraisalValueStyle.Incomplete => 3,
+            _ => -1,
+        };
+        return index >= 0 && index < value.FontColorPalette.Count
+            ? value.FontColorPalette[index]
+            : value.DefaultColor;
     }
 
     private static T Required<T>(ImportedLayout content, uint id)

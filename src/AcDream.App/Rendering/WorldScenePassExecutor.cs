@@ -8,6 +8,9 @@ namespace AcDream.App.Rendering;
 
 internal interface IWorldScenePassExecutor
 {
+    /// <summary>Uploads the day group's sky objects; runs before the pass opens.</summary>
+    void PrepareSky(DayGroupData? activeDayGroup);
+
     void BeginFrame();
 
     void PrepareFlatWorldClip();
@@ -92,6 +95,8 @@ internal sealed class WorldScenePassExecutor : IWorldScenePassExecutor
         _visibleParticleOwners.Clear();
         _clipFrame.Reset();
     }
+
+    public void PrepareSky(DayGroupData? activeDayGroup) => _sky?.PrepareDayGroup(activeDayGroup);
 
     public void PrepareFlatWorldClip() => _surface.PrepareClipFrame();
 

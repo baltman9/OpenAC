@@ -58,7 +58,6 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
         Top = DefaultTop;
         Anchors = AnchorEdges.None;
         Draggable = false;
-        ConstrainDragToParent = true;
         Resizable = false;
         // Nit 10: the shelf's Width/Height are entirely derived (Reflow), so a
         // restored layout's saved dimensions must never stomp them via ResizeTo.
@@ -114,7 +113,6 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
         if (_entries.ContainsKey(handle))
             return;
 
-        handle.OuterFrame.ConstrainDragToParent = true;
         handle.OuterFrame.ConstrainResizeToParent = true;
         KeepWindowReachable(handle);
 

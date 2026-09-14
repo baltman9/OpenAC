@@ -237,7 +237,7 @@ public sealed class NoOpRenderPackProductionIntegrationTests
         device.CreatedPipelines.Count,
         device.CreatedPipelines.Count(resource => !resource.IsDisposed),
         device.CreatedSamplers.Count,
-        device.CreatedSamplers.Count(resource => !resource.IsDisposed),
+        device.CreatedSamplers.Count, // device-owned for its lifetime
         device.CreatedTextures.Count,
         device.CreatedTextures.Count(resource => !resource.IsDisposed),
         device.CreatedRenderTargets.Count,

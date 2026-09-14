@@ -75,25 +75,84 @@ public sealed partial class WbDrawDispatcher
         uint GfxObjId,
         Matrix4x4 LocalToWorld);
 
+    /// <summary>A classified part kept across frames by the far-landscape
+    /// cache. The drawing sphere is transformed once here because a retained
+    /// part's placement does not change until it is reclassified.</summary>
     internal readonly record struct WalkCachedPart(
         ObjectRenderData RenderData,
         WalkClassifiedSelectionPart Selection,
         int BatchStart,
-        int BatchCount);
+        int BatchCount,
+        Vector3 SphereCenter,
+        float SphereRadius,
+        bool HasSphere)
+    {
+        internal static WalkCachedPart Create(
+            ObjectRenderData renderData,
+            WalkClassifiedSelectionPart selection,
+            int batchStart,
+            int batchCount)
+        {
+            Vector3 center = Vector3.Zero;
+            float radius = 0f;
+            bool hasSphere = false;
+            if (renderData.SelectionSphere is { Radius: > 0f } sphere)
+            {
+                hasSphere = true;
+                TransformDrawingSphere(sphere, selection.LocalToWorld, out center, out radius);
+            }
+            return new WalkCachedPart(
+                renderData, selection, batchStart, batchCount, center, radius, hasSphere);
+        }
+    }
 
     internal long WalkMeshAvailabilityVersion =>
         _meshAdapter.MeshManager?.RenderDataAvailabilityVersion ?? 0;
 
     internal bool WalkClassificationPending { get; private set; }
 
+    /// <summary>The walk's building-shell residency question. A shell is
+    /// drawable once its geometry is prepared. Two answers are permanent
+    /// refusals rather than waits: a level authored blank (id zero), and an id
+    /// the mesh layer classifies as a never-drawn placement marker, whose own
+    /// ladder resolves to nothing at every viewing distance. Both are the same
+    /// "this level has no object" state, and a building that selects one draws
+    /// nothing at all — no shell and no look-in — so neither asks for
+    /// preparation. Only a genuine miss does, exactly once per frame and by the
+    /// same route classification uses, so a waiting building cannot starve the
+    /// request that would let it in.</summary>
+    public bool IsShellDrawable(uint gfxObjId)
+    {
+        if (gfxObjId == 0)
+            return false;
+        if (_meshAdapter.MeshManager is null)
+            return true;   // no mesh source in this composition: nothing to wait for
+        if (_meshAdapter.IsRuntimeHiddenMarker(gfxObjId))
+            return false;  // never drawn at any distance: a refusal, not a wait
+        if (_meshAdapter.TryGetRenderData(gfxObjId) is not null)
+            return true;
+        if (_missRequested.Add(gfxObjId))
+            _meshAdapter.EnsureLoaded(gfxObjId);
+        return false;
+    }
+
     internal bool AdmitCachedWalkPart(
         in RenderProjectionRecord record,
         in WalkCachedPart part,
         IWalkLookInViewSource views,
-        int routeIndex) =>
-        ResolvePartVisible(views, routeIndex, part.RenderData,
-            part.Selection.LocalToWorld, out _, out _, out _)
-        && TryStampWalkPart(in record, part.Selection.PartIndex);
+        int routeIndex)
+    {
+        if (views is not null)
+        {
+            Vector3 center = part.SphereCenter;
+            if (!views.SphereVisibleInLookInTurn(
+                    routeIndex, in center, part.SphereRadius, testSphere: part.HasSphere))
+            {
+                return false;
+            }
+        }
+        return TryStampWalkPart(in record, part.Selection.PartIndex);
+    }
 
     internal void ResolveCachedWalkLighting(
         in RenderProjectionRecord record,
@@ -102,12 +161,26 @@ public sealed partial class WbDrawDispatcher
         out uint indoorFlag,
         out Vector2 selection)
     {
-        RenderInstanceCandidate entity = RenderInstanceCandidate.FromProjection(
-            in record, tupleLandblockId, animated: false);
-        ResolveWalkLightSet(in entity, out lights, out bool indoor);
+        // Point lights only reach indoor objects, so an outdoor record needs
+        // neither the candidate projection nor the light selection.
+        uint parentCellId = record.Source.ParentCellId;
+        bool indoor = IndoorObjectReceivesTorches(
+            parentCellId == 0 ? null : parentCellId);
+        if (indoor)
+        {
+            RenderInstanceCandidate entity = RenderInstanceCandidate.FromProjection(
+                in record, tupleLandblockId, animated: false);
+            ResolveWalkLightSet(in entity, out lights, out _);
+        }
+        else
+        {
+            lights = InstanceLightSet.Disabled;
+        }
         indoorFlag = indoor ? 1u : 0u;
         selection = _selectionLighting?.TryGetLighting(
-            entity.ServerGuid, entity.LocalEntityId, out RetailSelectionLighting lighting) == true
+            record.Source.ServerGuid,
+            record.Source.LocalEntityId,
+            out RetailSelectionLighting lighting) == true
             ? new Vector2(lighting.Luminosity, lighting.Diffuse)
             : new Vector2(0f, 1f);
     }
@@ -287,7 +360,7 @@ public sealed partial class WbDrawDispatcher
                     selectionParts.Add(new WalkClassifiedSelectionPart(
                         entity.ServerGuid, entity.LocalEntityId, selectionPartIndex,
                         (uint)gfxObjId, model));
-                    retainedParts?.Add(new WalkCachedPart(
+                    retainedParts?.Add(WalkCachedPart.Create(
                         partData, selectionParts[^1], batchStart, batches.Count - batchStart));
                 }
             }
@@ -326,7 +399,7 @@ public sealed partial class WbDrawDispatcher
                 selectionParts.Add(new WalkClassifiedSelectionPart(
                     entity.ServerGuid, entity.LocalEntityId, partIndex,
                     (uint)meshRef.GfxObjId, model));
-                retainedParts?.Add(new WalkCachedPart(
+                retainedParts?.Add(WalkCachedPart.Create(
                     renderData, selectionParts[^1], batchStart, batches.Count - batchStart));
             }
         }

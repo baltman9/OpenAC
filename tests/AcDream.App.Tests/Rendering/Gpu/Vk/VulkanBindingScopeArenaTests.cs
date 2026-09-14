@@ -45,6 +45,52 @@ public sealed class VulkanBindingScopeArenaTests
     }
 
     [Fact]
+    public void Seeding_ResetsTheDynamicOffsets_SoADummyBindingNeverCarriesAnOldOffset()
+    {
+        VulkanBindingScopeArena arena = CreateArena();
+        arena.BeginFrame();
+        arena.SetUniform(GpuBindingModel.UniformSceneLighting, DispatcherBuffer, 832, 4096);
+        arena.SetStorage(GpuBindingModel.StorageInstances, DispatcherBuffer, 4096, 4096);
+        Assert.Equal(832u, arena.UniformOffset(GpuBindingModel.UniformSceneLighting));
+
+        arena.SeedUniform(GpuBindingModel.UniformSceneLighting, DummyBuffer, 65536);
+        arena.SeedStorage(GpuBindingModel.StorageInstances, DummyBuffer, 0, 65536);
+
+        Assert.Equal(0u, arena.UniformOffset(GpuBindingModel.UniformSceneLighting));
+        Assert.Equal(0u, arena.StorageOffset(GpuBindingModel.StorageInstances));
+    }
+
+    [Fact]
+    public void InvalidateEntriesReferencing_RewritesOnlyTheEntriesThatNameADestroyedBuffer_Once()
+    {
+        VulkanBindingScopeArena arena = CreateArena();
+        arena.BeginFrame();
+        arena.SetStorage(GpuBindingModel.StorageInstances, DispatcherBuffer, 0, 4096);
+        (int dispatcher, _, _) = arena.Resolve();
+        arena.AssignSlot(dispatcher, slot: 0);
+        arena.SetStorage(GpuBindingModel.StorageInstances, EnvCellBuffer, 0, 4096);
+        (int envCell, _, _) = arena.Resolve();
+        arena.AssignSlot(envCell, slot: 1);
+
+        // The dispatcher's buffer died; the env-cell entry names only live buffers.
+        arena.BeginFrame();
+        arena.InvalidateEntriesReferencing([DispatcherBuffer]);
+        arena.SetStorage(GpuBindingModel.StorageInstances, EnvCellBuffer, 0, 4096);
+        (_, _, bool envCellWrite) = arena.Resolve();
+        Assert.False(envCellWrite);
+        arena.SetStorage(GpuBindingModel.StorageInstances, DispatcherBuffer, 0, 4096);
+        (_, int slot, bool rewrite) = arena.Resolve();
+        Assert.Equal(0, slot); // the same descriptor set, written again
+        Assert.True(rewrite);
+
+        arena.BeginFrame();
+        arena.InvalidateEntriesReferencing(ReadOnlySpan<ulong>.Empty);
+        arena.SetStorage(GpuBindingModel.StorageInstances, DispatcherBuffer, 0, 4096);
+        (_, _, bool third) = arena.Resolve();
+        Assert.False(third);
+    }
+
+    [Fact]
     public void ReturningToAnEarlierRenderersBuffersReusesItsEntryWithoutRewriting()
     {
         VulkanBindingScopeArena arena = CreateArena();

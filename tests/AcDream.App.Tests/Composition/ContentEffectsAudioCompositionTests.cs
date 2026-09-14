@@ -63,6 +63,29 @@ public sealed class ContentEffectsAudioCompositionTests
         Assert.Equal(4, result.HookRegistrations.ActiveCount);
     }
 
+    // OpenAC #42 follow-up: the mixer settings come from the client settings
+    // through this dependency and end up in the engine's own pool. A mixer
+    // built from the defaults instead would be 32 voices whatever the player
+    // chose.
+    [Fact]
+    public void TheAudioEngineIsBuiltWithTheMixerSettingsItWasGiven()
+    {
+        var mixer = new AudioMixerOptions
+        {
+            VoiceCount = 48,
+            MaxVoicesPerWave = 6,
+        };
+        using var fixture = new Fixture(mixer: mixer);
+
+        ContentEffectsAudioResult result = fixture.Phase().Compose(
+            fixture.Platform,
+            fixture.Host);
+
+        Assert.Same(mixer, fixture.Factory.LastMixerOptions);
+        Assert.Equal(48, result.Audio!.Engine.MixerOptions.EffectiveVoiceCount);
+        Assert.Equal(6, result.Audio!.Engine.MixerOptions.EffectiveMaxVoicesPerWave);
+    }
+
     [Fact]
     public void NoAudioAcquiresNothingFromTheOptionalFactoryPrefix()
     {
@@ -241,7 +264,8 @@ public sealed class ContentEffectsAudioCompositionTests
 
         public Fixture(
             bool noAudio = false,
-            ContentEffectsAudioCompositionPoint? failurePoint = null)
+            ContentEffectsAudioCompositionPoint? failurePoint = null,
+            AudioMixerOptions? mixer = null)
         {
             _failurePoint = failurePoint;
             Router = new AnimationHookRouter();
@@ -268,7 +292,10 @@ public sealed class ContentEffectsAudioCompositionTests
                 new TranslucencyFadeManager(),
                 noAudio,
                 Logs.Add,
-                Logs.Add);
+                Logs.Add)
+            {
+                MixerOptions = mixer ?? AudioMixerOptions.Default,
+            };
         }
 
         public List<ContentEffectsAudioCompositionPoint> Points { get; } = [];
@@ -466,13 +493,17 @@ public sealed class ContentEffectsAudioCompositionTests
             return new DatSoundCache(dats, maximumDecodedBytes);
         }
 
-        public OpenAlAudioEngine CreateAudioEngine()
+        public OpenAlAudioEngine CreateAudioEngine(AudioMixerOptions mixer)
         {
             AudioFactoryCalls++;
+            LastMixerOptions = mixer;
             LastAudioEngine = new OpenAlAudioEngine(
-                new AudioApiFactory(new FakeAudioApi()));
+                new AudioApiFactory(new FakeAudioApi()),
+                mixer);
             return LastAudioEngine;
         }
+
+        internal AudioMixerOptions? LastMixerOptions { get; private set; }
 
         public DictionaryEntitySoundTable CreateEntitySoundTables() => new();
         public AudioHookSink CreateAudioSink(
@@ -543,11 +574,12 @@ public sealed class ContentEffectsAudioCompositionTests
         public AL? AudioApi => null;
         public ALContext? ContextApi => null;
         public nint OpenDevice() => 1;
-        public nint CreateContext(nint device) => 2;
+        public bool SupportsOutputLimiterControl(nint device) => false;
+        public nint CreateContext(nint device, int[]? attributes) => 2;
+        public int? ReadOutputLimiterState(nint device) => OpenAlContextAttributes.Off;
         public bool MakeContextCurrent(nint context) => true;
         public uint GenerateSource() => _nextSource++;
         public void Configure3DSource(uint source) { }
-        public void ConfigureUiSource(uint source) { }
         public void DisableAlDistanceAttenuation() { }
         public void StopSource(uint source) { }
         public void DeleteSource(uint source) { }

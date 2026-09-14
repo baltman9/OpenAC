@@ -26,7 +26,7 @@ internal sealed class VulkanRingBufferState
             throw new InvalidOperationException(
                 $"Ring allocation of {byteCount} bytes at aligned offset {aligned} needs {end} bytes; " +
                 $"this flight slot's ring is {CapacityBytes} bytes. Increase the per-slot ring " +
-                "capacity (VulkanGpuDevice's ringCapacityBytesPerSlot).");
+                "capacity (GpuMemoryProfile.RingCapacityBytesPerSlot).");
         }
 
         _cursor = end;

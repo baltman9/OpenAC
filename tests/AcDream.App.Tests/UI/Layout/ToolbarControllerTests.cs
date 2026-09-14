@@ -104,6 +104,28 @@ public class ToolbarControllerTests
         }
     }
 
+    // #87: the hover caption is the same name flavour the selection caption
+    // shows - the composed name, material prefix included.
+    [Fact]
+    public void HoverCaption_carriesTheMaterialPrefix_andStaysPlainWithoutOne()
+    {
+        var (layout, slots, _) = FakeToolbar();
+        var repo = new ClientObjectTable();
+        repo.AddOrUpdate(ItemTooltipCaptionNames.Material(0x5001u));
+        repo.AddOrUpdate(ItemTooltipCaptionNames.Plain(0x5002u));
+
+        ToolbarController.Bind(layout, repo, Store(new List<ShortcutEntry>
+            {
+                new(Index: 0, ObjectId: 0x5001u, SpellId: 0),
+                new(Index: 1, ObjectId: 0x5002u, SpellId: 0),
+            }),
+            iconIds: (_, _, _, _, _) => 0x77u, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
+
+        Assert.Equal("Pyreal Scarab", slots[Row1[0]].Cell.GetTooltipText());
+        Assert.Equal("Bread Loaf", slots[Row1[1]].Cell.GetTooltipText());
+    }
+
     [Fact]
     public void Populate_bindsShortcutToCorrectSlot()
     {
@@ -114,11 +136,143 @@ public class ToolbarControllerTests
         { new(Index: 0, ObjectId: 0x5001u, SpellId: 0) };
 
         ToolbarController.Bind(layout, repo, Store(shortcuts),
-            iconIds: (_,_,_,_,_) => 0x77u, useItem: _ => { });
+            iconIds: (_,_,_,_,_) => 0x77u, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         Assert.Equal(0x5001u, slots[Row1[0]].Cell.ItemId);
         Assert.Equal(0x77u,   slots[Row1[0]].Cell.IconTexture);
         Assert.Equal(0u,      slots[Row1[1]].Cell.ItemId); // others empty
+    }
+
+    [Fact]
+    public void Populate_partlyUsedItem_setsSlotStructureFill()
+    {
+        var (layout, slots, _) = FakeToolbar();
+        var repo = new ClientObjectTable();
+        repo.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 0x5001u, WeenieClassId = 1u, IconId = 0x06001234u,
+            Structure = 5, MaxStructure = 10,
+        });
+        var shortcuts = new List<ShortcutEntry>
+        { new(Index: 0, ObjectId: 0x5001u, SpellId: 0) };
+
+        ToolbarController.Bind(layout, repo, Store(shortcuts),
+            iconIds: (_,_,_,_,_) => 0x77u, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
+
+        Assert.Equal(0.5f, slots[Row1[0]].Cell.StructureFill);
+    }
+
+    [Fact]
+    public void LiveStructureUpdate_refreshesSlotFillWithoutRebind()
+    {
+        var (layout, slots, _) = FakeToolbar();
+        var repo = new ClientObjectTable();
+        repo.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 0x5001u, WeenieClassId = 1u, IconId = 0x06001234u,
+            Structure = 5, MaxStructure = 10,
+        });
+        var shortcuts = new List<ShortcutEntry>
+        { new(Index: 0, ObjectId: 0x5001u, SpellId: 0) };
+
+        ToolbarController.Bind(layout, repo, Store(shortcuts),
+            iconIds: (_,_,_,_,_) => 0x77u, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
+        repo.UpdateIntProperty(0x5001u, 92u, 2);
+
+        Assert.Equal(0.2f, slots[Row1[0]].Cell.StructureFill);
+    }
+
+    [Fact]
+    public void Populate_fullItem_hidesStructureFill()
+    {
+        var (layout, slots, _) = FakeToolbar();
+        var repo = new ClientObjectTable();
+        repo.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 0x5001u, WeenieClassId = 1u, IconId = 0x06001234u,
+            Structure = 10, MaxStructure = 10,
+        });
+        var shortcuts = new List<ShortcutEntry>
+        { new(Index: 0, ObjectId: 0x5001u, SpellId: 0) };
+        var store = Store(shortcuts);
+
+        ToolbarController.Bind(layout, repo, store,
+            iconIds: (_,_,_,_,_) => 0x77u, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
+        Assert.Equal(-1f, slots[Row1[0]].Cell.StructureFill);
+    }
+
+    [Fact]
+    public void Populate_removedShortcut_clearsStructureFillOfHalfUsedItem()
+    {
+        var (layout, slots, _) = FakeToolbar();
+        var repo = new ClientObjectTable();
+        repo.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 0x5001u, WeenieClassId = 1u, IconId = 0x06001234u,
+            Structure = 5, MaxStructure = 10,
+        });
+        var shortcuts = new List<ShortcutEntry>
+        { new(Index: 0, ObjectId: 0x5001u, SpellId: 0) };
+        var store = Store(shortcuts);
+
+        ToolbarController.Bind(layout, repo, store,
+            iconIds: (_,_,_,_,_) => 0x77u, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
+        Assert.Equal(0.5f, slots[Row1[0]].Cell.StructureFill);
+
+        store.Load(Array.Empty<ShortcutEntry>());
+
+        Assert.Equal(-1f, slots[Row1[0]].Cell.StructureFill);
+    }
+
+    [Fact]
+    public void Populate_playerShortcut_usesPackIconNotPlayerIcon()
+    {
+        var (layout, _, _) = FakeToolbar();
+        var repo = new ClientObjectTable();
+        const uint player = 0x50000001u;
+        repo.AddOrUpdate(new ClientObject { ObjectId = player, Type = ItemType.Creature, IconId = 0x06009999u });
+        var shortcuts = new List<ShortcutEntry>
+        { new(Index: 0, ObjectId: player, SpellId: 0) };
+
+        (ItemType type, uint icon, uint underlay, uint overlay, uint effects)? iconArgs = null;
+        (ItemType type, uint icon, uint underlay, uint overlay, uint effects)? dragArgs = null;
+
+        ToolbarController.Bind(layout, repo, Store(shortcuts),
+            iconIds: (t, i, u, o, e) => { iconArgs = (t, i, u, o, e); return 0x77u; },
+            useItem: _ => { },
+            playerGuid: () => player,
+            dragIconIds: (t, i, u, o, e) => { dragArgs = (t, i, u, o, e); return 0x78u; },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
+
+        Assert.Equal((ItemType.Container, 0x0600127Eu, 0u, 0u, 0u), iconArgs);
+        Assert.Equal((ItemType.Container, 0x0600127Eu, 0u, 0u, 0u), dragArgs);
+    }
+
+    [Fact]
+    public void Populate_nonPlayerShortcut_usesItemsOwnIcon()
+    {
+        var (layout, _, _) = FakeToolbar();
+        var repo = new ClientObjectTable();
+        const uint player = 0x50000001u;
+        repo.AddOrUpdate(new ClientObject { ObjectId = player, Type = ItemType.Creature, IconId = 0x06009999u });
+        repo.AddOrUpdate(new ClientObject { ObjectId = 0x5001u, Type = ItemType.Misc, IconId = 0x06001234u });
+        var shortcuts = new List<ShortcutEntry>
+        { new(Index: 0, ObjectId: 0x5001u, SpellId: 0) };
+
+        (ItemType type, uint icon, uint underlay, uint overlay, uint effects)? iconArgs = null;
+
+        ToolbarController.Bind(layout, repo, Store(shortcuts),
+            iconIds: (t, i, u, o, e) => { iconArgs = (t, i, u, o, e); return 0x77u; },
+            useItem: _ => { },
+            playerGuid: () => player,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
+
+        Assert.Equal((ItemType.Misc, 0x06001234u, 0u, 0u, 0u), iconArgs);
     }
 
     [Fact]
@@ -141,7 +295,8 @@ public class ToolbarControllerTests
             repo,
             Store(shortcuts),
             iconIds: (_, _, _, _, _) => 0x77u,
-            useItem: _ => { });
+            useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         Assert.Equal(0x5001u, slots[Row1[0]].Cell.ItemId);
 
         repo.Clear();
@@ -158,7 +313,8 @@ public class ToolbarControllerTests
         { new(Index: 2, ObjectId: 0x5002u, SpellId: 0) };
 
         ToolbarController.Bind(layout, repo, Store(shortcuts),
-            iconIds: (_,_,_,_,_) => 0x88u, useItem: _ => { });
+            iconIds: (_,_,_,_,_) => 0x88u, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         Assert.Equal(0u, slots[Row1[2]].Cell.ItemId); // not bound yet
 
         repo.AddOrUpdate(new ClientObject { ObjectId = 0x5002u, WeenieClassId = 1u, IconId = 0x06005678u });
@@ -174,7 +330,8 @@ public class ToolbarControllerTests
         var shortcuts = new List<ShortcutEntry>
         { new(Index: 2, ObjectId: 0x5002u, SpellId: 0) };
         var controller = ToolbarController.Bind(layout, repo, Store(shortcuts),
-            iconIds: (_,_,_,_,_) => 0x88u, useItem: _ => { });
+            iconIds: (_,_,_,_,_) => 0x88u, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         controller.Dispose();
         controller.Dispose();
@@ -189,7 +346,7 @@ public class ToolbarControllerTests
     }
 
     [Fact]
-    public void Click_emitsUseForBoundItem()
+    public void SingleClick_selectsWithoutUse()
     {
         var (layout, slots, _) = FakeToolbar();
         var repo = new ClientObjectTable();
@@ -202,15 +359,43 @@ public class ToolbarControllerTests
         ToolbarController.Bind(layout, repo, Store(shortcuts),
             iconIds: (_,_,_,_,_) => 0x77u,
             useItem: g => used = g,
-            selection: selection);
+            selection: selection,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         UiItemSlot cell = slots[Row1[0]].Cell;
         cell.OnEvent(new UiEvent(0u, cell, UiEventType.MouseDown));
+        cell.OnEvent(new UiEvent(0u, cell, UiEventType.Click));
 
         Assert.Equal(0x5001u, selection.SelectedObjectId);
         Assert.Equal(0u, used);
-        cell.OnEvent(new UiEvent(0u, cell, UiEventType.Click));
+    }
 
-        Assert.Equal(0x5001u, used);
+    [Fact]
+    public void DoubleClick_usesBoundItemOnce()
+    {
+        var root = new UiRoot { Width = 800, Height = 600 };
+        var list = new UiItemList(_ => (0u, 0, 0)) { Left = 5, Top = 5, Width = 32, Height = 32 };
+        list.LayoutCells();                          // size the single cell to the resized list
+        root.AddChild(list);
+        var layout = new ImportedLayout(root, new Dictionary<uint, UiElement> { [Row1[0]] = list });
+        var repo = new ClientObjectTable();
+        repo.AddOrUpdate(new ClientObject { ObjectId = 0x5001u, WeenieClassId = 1u, IconId = 0x06001234u });
+        var shortcuts = new List<ShortcutEntry>
+        { new(Index: 0, ObjectId: 0x5001u, SpellId: 0) };
+        var used = new List<uint>();
+
+        ToolbarController.Bind(layout, repo, Store(shortcuts),
+            iconIds: (_,_,_,_,_) => 0x77u,
+            useItem: used.Add,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
+
+        root.Tick(0, nowMs: 1_000);
+        root.OnMouseDown(UiMouseButton.Left, 20, 20);
+        root.OnMouseUp(UiMouseButton.Left, 20, 20);
+        root.Tick(0, nowMs: 1_300);
+        root.OnMouseDown(UiMouseButton.Left, 20, 20);
+        root.OnMouseUp(UiMouseButton.Left, 20, 20);
+
+        Assert.Equal(new[] { 0x5001u }, used);
     }
 
     [Fact]
@@ -222,7 +407,8 @@ public class ToolbarControllerTests
 
         var ctrl = ToolbarController.Bind(layout, repo,
             new ShortcutStore(),
-            iconIds: (_,_,_,_,_) => 0u, useItem: _ => { });
+            iconIds: (_,_,_,_,_) => 0u, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         ctrl.BindPanelButtons(
             panelId => panelId is RetailPanelCatalog.Inventory or RetailPanelCatalog.Character,
             toggles.Add);
@@ -275,7 +461,8 @@ public class ToolbarControllerTests
             new ShortcutStore(),
             iconIds: (_,_,_,_,_) => 0u,
             useItem: _ => { },
-            itemInteraction: interaction);
+            itemInteraction: interaction,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         ctrl.BindPanelButtons(
             panelId => panelId == RetailPanelCatalog.Inventory,
             _ => inventoryClicks++);
@@ -285,6 +472,59 @@ public class ToolbarControllerTests
 
         Assert.Equal(0, inventoryClicks);
         Assert.Equal(new[] { (kit, player) }, useWithTarget);
+        Assert.False(interaction.IsTargetModeActive);
+    }
+
+    [Fact]
+    public void TargetMode_singlePressOnHotbarItem_targetsIt()
+    {
+        const uint player = 0x50000001u;
+        const uint pack = 0x50000002u;
+        const uint source = 0x50000003u;
+        const uint target = 0x50000004u;
+        var (layout, slots, _) = FakeToolbar();
+        var repo = new ClientObjectTable();
+        repo.AddOrUpdate(new ClientObject { ObjectId = player, Type = ItemType.Creature });
+        repo.AddOrUpdate(new ClientObject { ObjectId = pack, Type = ItemType.Container });
+        repo.MoveItem(pack, player, 0);
+        repo.AddOrUpdate(new ClientObject
+        {
+            ObjectId = source, Type = ItemType.Misc,
+            Useability = 0x00220008u,
+            TargetType = (uint)ItemType.Creature,
+        });
+        repo.MoveItem(source, pack, 0);
+        repo.AddOrUpdate(new ClientObject { ObjectId = target, Type = ItemType.Creature });
+        var useWithTarget = new List<(uint Source, uint Target)>();
+        var interaction = new ItemInteractionController(
+            repo,
+            new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(repo)),
+            new InteractionState(),
+            playerGuid: () => player,
+            sendUse: null,
+            sendUseWithTarget: (s, t) => useWithTarget.Add((s, t)),
+            sendWield: null,
+            sendDrop: null,
+            nowMs: () => 1_000);
+        var shortcuts = new List<ShortcutEntry> { new(0, target, 0) };
+        var used = new List<uint>();
+
+        ToolbarController.Bind(layout, repo, Store(shortcuts),
+            iconIds: (_,_,_,_,_) => 1u,
+            useItem: used.Add,
+            itemInteraction: interaction,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
+        interaction.ActivateItem(source);
+
+        UiItemSlot cell = slots[Row1[0]].Cell;
+        cell.OnEvent(new UiEvent(0u, cell, UiEventType.MouseDown));
+        cell.OnEvent(new UiEvent(0u, cell, UiEventType.Click));
+        cell.OnEvent(new UiEvent(0u, cell, UiEventType.MouseDown));
+        cell.OnEvent(new UiEvent(0u, cell, UiEventType.Click));
+        cell.OnEvent(new UiEvent(0u, cell, UiEventType.DoubleClick));
+
+        Assert.Equal(new[] { (source, target) }, useWithTarget);
+        Assert.Empty(used);
         Assert.False(interaction.IsTargetModeActive);
     }
 
@@ -303,7 +543,8 @@ public class ToolbarControllerTests
             iconIds: (_, _, _, _, _) => 0u,
             useItem: _ => { },
             playerGuid: () => player,
-            sendPutItemInContainer: (i, c, p) => puts.Add((i, c, p)));
+            sendPutItemInContainer: (i, c, p) => puts.Add((i, c, p)),
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         var button = (UiButton)layout.FindElement(InventoryButtonId)!;
         var payload = new ItemDragPayload(item, ItemDragSource.Inventory, 12, new UiItemSlot());
 
@@ -344,7 +585,8 @@ public class ToolbarControllerTests
             useItem: static _ => { },
             itemInteraction: interaction,
             playerGuid: () => player,
-            sendPutItemInContainer: (i, c, p) => directPuts.Add((i, c, p)));
+            sendPutItemInContainer: (i, c, p) => directPuts.Add((i, c, p)),
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         var button = (UiButton)layout.FindElement(InventoryButtonId)!;
         var payload = new ItemDragPayload(item, ItemDragSource.Ground, 0, new UiItemSlot());
 
@@ -394,7 +636,8 @@ public class ToolbarControllerTests
             useItem: static _ => { },
             itemInteraction: interaction,
             playerGuid: () => player,
-            sendPutItemInContainer: (i, c, p) => puts.Add((i, c, p)));
+            sendPutItemInContainer: (i, c, p) => puts.Add((i, c, p)),
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         var button = (UiButton)layout.FindElement(InventoryButtonId)!;
 
         foreach (uint item in new[] { first, second })
@@ -425,7 +668,8 @@ public class ToolbarControllerTests
             iconIds: (_, _, _, _, _) => 0u,
             useItem: _ => { },
             playerGuid: () => player,
-            sendPutItemInContainer: (i, c, p) => puts.Add((i, c, p)));
+            sendPutItemInContainer: (i, c, p) => puts.Add((i, c, p)),
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         var button = (UiButton)layout.FindElement(InventoryButtonId)!;
         var payload = new ItemDragPayload(item, ItemDragSource.ShortcutBar, 3, new UiItemSlot());
 
@@ -443,7 +687,8 @@ public class ToolbarControllerTests
         var repo = new ClientObjectTable();
         var ctrl = ToolbarController.Bind(layout, repo,
             new ShortcutStore(),
-            iconIds: (_,_,_,_,_) => 0u, useItem: _ => { });
+            iconIds: (_,_,_,_,_) => 0u, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         var inventoryButton = (UiButton)layout.FindElement(InventoryButtonId)!;
         var characterButton = (UiButton)layout.FindElement(CharacterButtonId)!;
 
@@ -473,7 +718,8 @@ public class ToolbarControllerTests
             new ClientObjectTable(),
             new ShortcutStore(),
             iconIds: (_, _, _, _, _) => 0u,
-            useItem: _ => { });
+            useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         controller.BindPanelButtons(
             _ => true,
             panelId => controller.SetPanelOpen(panelId, open: true));
@@ -590,7 +836,8 @@ public class ToolbarControllerTests
             iconIds: (_, _, _, _, _) => 0u,
             useItem: _ => { },
             itemInteraction: interaction,
-            selectedObjectId: () => selected);
+            selectedObjectId: () => selected,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         ((UiButton)layout.FindElement(UseButtonId)!).OnClick!.Invoke();
         ((UiButton)layout.FindElement(ExamineButtonId)!).OnClick!.Invoke();
@@ -649,7 +896,8 @@ public class ToolbarControllerTests
             useItem: _ => { },
             itemInteraction: interaction,
             selectedObjectId: () => selection.SelectedObjectId ?? 0u,
-            selection: selection);
+            selection: selection,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         var use = Assert.IsType<UiButton>(layout.FindElement(UseButtonId));
 
         Assert.False(use.Enabled);
@@ -715,7 +963,8 @@ public class ToolbarControllerTests
             useItem: _ => { },
             itemInteraction: interaction,
             selectedObjectId: () => selection.SelectedObjectId ?? 0u,
-            selection: selection);
+            selection: selection,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         var use = Assert.IsType<UiButton>(layout.FindElement(UseButtonId));
 
         Assert.True(use.Enabled);
@@ -755,7 +1004,8 @@ public class ToolbarControllerTests
             new ShortcutStore(),
             iconIds: (_, _, _, _, _) => 0u,
             useItem: _ => { },
-            playerGuid: () => player);
+            playerGuid: () => player,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         var ammoButton = (UiButton)layout.FindElement(0x10000194u)!;
 
         Assert.Equal("7", ammoButton.Label);
@@ -794,7 +1044,8 @@ public class ToolbarControllerTests
             new ShortcutStore(),
             iconIds: (_, _, _, _, _) => 0u,
             useItem: _ => { },
-            playerGuid: () => player);
+            playerGuid: () => player,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         var ammoButton = (UiButton)layout.FindElement(0x10000194u)!;
 
         Assert.Equal("42", ammoButton.Label);
@@ -816,7 +1067,8 @@ public class ToolbarControllerTests
             new ShortcutStore(),
             iconIds: (_, _, _, _, _) => 0u,
             useItem: _ => { },
-            toggleCombat: () => toggles++);
+            toggleCombat: () => toggles++,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         foreach (uint id in CombatIds)
             ((UiButton)indicators[id]).OnClick?.Invoke();
@@ -843,7 +1095,8 @@ public class ToolbarControllerTests
             Store(shortcuts),
             iconIds: (_, _, _, _, _) => 1u,
             useItem: id => used = id,
-            selectItem: id => selected = id);
+            selectItem: id => selected = id,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         Assert.True(controller.UseShortcut(0, use: true));
         Assert.Equal(itemId, used);
@@ -882,7 +1135,8 @@ public class ToolbarControllerTests
             useItem: _ => { },
             itemInteraction: interaction,
             selectItem: id => selection.Select(id, SelectionChangeSource.Toolbar),
-            selection: selection);
+            selection: selection,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         UiItemSlot cell = slots[Row1[0]].Cell;
         cell.OnEvent(new UiEvent(0u, cell, UiEventType.RightClick));
@@ -934,7 +1188,8 @@ public class ToolbarControllerTests
             Store(shortcuts),
             iconIds: (_, _, _, _, _) => 1u,
             useItem: _ => { },
-            itemInteraction: interaction);
+            itemInteraction: interaction,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         Assert.True(interaction.ActivateItem(source));
         Assert.True(controller.UseShortcut(0, use: false));
@@ -974,7 +1229,8 @@ public class ToolbarControllerTests
             iconIds: (_, _, _, _, _) => 1u,
             useItem: _ => { },
             itemInteraction: interaction,
-            sendAddShortcut: entry => sends.Add(((uint)entry.Index, entry.ObjectId)));
+            sendAddShortcut: entry => sends.Add(((uint)entry.Index, entry.ObjectId)),
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         Assert.True(controller.CreateShortcutToItem(item));
         Assert.Equal(item, slots[Row1[0]].Cell.ItemId);
@@ -992,7 +1248,8 @@ public class ToolbarControllerTests
 
         ToolbarController.Bind(layout, repo,
             new ShortcutStore(),
-            iconIds: (_,_,_,_,_) =>0u, useItem: _ => { });
+            iconIds: (_,_,_,_,_) =>0u, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         Assert.True (indicators[0x10000192u].Visible, "peace indicator should be visible after bind");
         Assert.False(indicators[0x10000193u].Visible, "melee indicator should be hidden after bind");
@@ -1011,7 +1268,8 @@ public class ToolbarControllerTests
 
         var ctrl = ToolbarController.Bind(layout, repo,
             new ShortcutStore(),
-            iconIds: (_,_,_,_,_) =>0u, useItem: _ => { });
+            iconIds: (_,_,_,_,_) =>0u, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         ctrl.SetCombatMode(CombatMode.Melee);
 
@@ -1031,7 +1289,8 @@ public class ToolbarControllerTests
         ToolbarController.Bind(layout, repo,
             new ShortcutStore(),
             iconIds: (_,_,_,_,_) =>0u, useItem: _ => { },
-            combatState: combat);
+            combatState: combat,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         // Initially NonCombat after bind.
         Assert.True(indicators[0x10000192u].Visible, "peace should be visible initially");
@@ -1060,7 +1319,8 @@ public class ToolbarControllerTests
         ToolbarController.Bind(layout, repo,
             new ShortcutStore(),
             iconIds: (_,_,_,_,_) => 0u, useItem: _ => { },
-            regularDigits: FakeRegular, ghostedDigits: FakeGhosted);
+            regularDigits: FakeRegular, ghostedDigits: FakeGhosted,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         // Top row: ShortcutNum == slot index, ghosted == false.
         for (int i = 0; i < Row1.Length; i++)
@@ -1085,7 +1345,8 @@ public class ToolbarControllerTests
         var ctrl = ToolbarController.Bind(layout, repo,
             new ShortcutStore(),
             iconIds: (_,_,_,_,_) => 0u, useItem: _ => { },
-            regularDigits: FakeRegular, ghostedDigits: FakeGhosted);
+            regularDigits: FakeRegular, ghostedDigits: FakeGhosted,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         ctrl.SetCombatMode(mode);
 
@@ -1113,7 +1374,8 @@ public class ToolbarControllerTests
         var ctrl = ToolbarController.Bind(layout, repo,
             new ShortcutStore(),
             iconIds: (_,_,_,_,_) => 0u, useItem: _ => { },
-            regularDigits: FakeRegular, ghostedDigits: FakeGhosted);
+            regularDigits: FakeRegular, ghostedDigits: FakeGhosted,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         ctrl.SetCombatMode(CombatMode.Magic);
         foreach (var id in Row1)
@@ -1142,7 +1404,8 @@ public class ToolbarControllerTests
         ToolbarController.Bind(layout, repo,
             new ShortcutStore(),
             iconIds: (_,_,_,_,_) => 0u, useItem: _ => { },
-            regularDigits: FakeRegular, ghostedDigits: FakeGhosted);
+            regularDigits: FakeRegular, ghostedDigits: FakeGhosted,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         foreach (var id in Row1)
         {
@@ -1160,7 +1423,8 @@ public class ToolbarControllerTests
         ToolbarController.Bind(layout, repo,
             new ShortcutStore(),
             iconIds: (_,_,_,_,_) => 0u, useItem: _ => { },
-            regularDigits: FakeRegular, ghostedDigits: FakeGhosted, emptyDigits: FakeEmpty);
+            regularDigits: FakeRegular, ghostedDigits: FakeGhosted, emptyDigits: FakeEmpty,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         foreach (var id in Row1)
             Assert.Same(FakeEmpty, slots[id].Cell.EmptyDigits);
@@ -1177,7 +1441,8 @@ public class ToolbarControllerTests
         ToolbarController.Bind(layout, repo,
             new ShortcutStore(),
             iconIds: (_,_,_,_,_) => 0u, useItem: _ => { },
-            regularDigits: FakeRegular, ghostedDigits: FakeGhosted, emptyDigits: null);
+            regularDigits: FakeRegular, ghostedDigits: FakeGhosted, emptyDigits: null,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         foreach (var id in Row1)
             Assert.Null(slots[id].Cell.EmptyDigits);
@@ -1196,7 +1461,8 @@ public class ToolbarControllerTests
 
         int iconCallCount = 0;
         ToolbarController.Bind(layout, repo, Store(shortcuts),
-            iconIds: (_,_,_,_,_) => { iconCallCount++; return 0x77u; }, useItem: _ => { });
+            iconIds: (_,_,_,_,_) => { iconCallCount++; return 0x77u; }, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         int callsAfterBind = iconCallCount;
 
@@ -1215,7 +1481,8 @@ public class ToolbarControllerTests
 
         int iconCallCount = 0;
         ToolbarController.Bind(layout, repo, Store(shortcuts),
-            iconIds: (_,_,_,_,_) => { iconCallCount++; return 0x99u; }, useItem: _ => { });
+            iconIds: (_,_,_,_,_) => { iconCallCount++; return 0x99u; }, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         Assert.Equal(0, iconCallCount);
         Assert.Equal(0u, slots[Row1[1]].Cell.ItemId);
@@ -1237,7 +1504,8 @@ public class ToolbarControllerTests
         { new(Index: 3, ObjectId: 0x5004u, SpellId: 0) };
 
         ToolbarController.Bind(layout, repo, Store(shortcuts),
-            iconIds: (_,_,_,_,_) => 0xAAu, useItem: _ => { });
+            iconIds: (_,_,_,_,_) => 0xAAu, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         Assert.Equal(0x5004u, slots[Row1[3]].Cell.ItemId); // bound
 
@@ -1258,7 +1526,8 @@ public class ToolbarControllerTests
 
         int iconCallCount = 0;
         ToolbarController.Bind(layout, repo, Store(shortcuts),
-            iconIds: (_,_,_,_,_) => { iconCallCount++; return 0xBBu; }, useItem: _ => { });
+            iconIds: (_,_,_,_,_) => { iconCallCount++; return 0xBBu; }, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         int callsAfterBind = iconCallCount;
 
@@ -1278,7 +1547,8 @@ public class ToolbarControllerTests
 
         var ctrl = ToolbarController.Bind(layout, repo,
             new ShortcutStore(),
-            iconIds: (_,_,_,_,_) => 0u, useItem: _ => { });
+            iconIds: (_,_,_,_,_) => 0u, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         for (int i = 0; i < Row1.Length; i++)
         {
@@ -1303,7 +1573,8 @@ public class ToolbarControllerTests
         var (layout, slots, _) = FakeToolbar();
         var ctrl = ToolbarController.Bind(layout, new ClientObjectTable(),
             new ShortcutStore(),
-            iconIds: (_,_,_,_,_) => 0u, useItem: _ => { });
+            iconIds: (_,_,_,_,_) => 0u, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         var list = slots[Row1[0]];
         var payload = new ItemDragPayload(0x5001u, ItemDragSource.Inventory, 0, new UiItemSlot());
@@ -1316,7 +1587,8 @@ public class ToolbarControllerTests
         var (layout, slots, _) = FakeToolbar();
         var ctrl = ToolbarController.Bind(layout, new ClientObjectTable(),
             new ShortcutStore(),
-            iconIds: (_,_,_,_,_) => 0u, useItem: _ => { });
+            iconIds: (_,_,_,_,_) => 0u, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         var list = slots[Row1[0]];
         var payload = new ItemDragPayload(0u, ItemDragSource.Inventory, 0, new UiItemSlot());
         Assert.Equal(ItemDragAcceptance.None, ctrl.OnDragOver(list, list.Cell, payload));
@@ -1347,7 +1619,8 @@ public class ToolbarControllerTests
         var ctrl = ToolbarController.Bind(layout, repo, Store(shortcuts),
             iconIds: (_,_,_,_,_) => 0x77u, useItem: _ => { },
             sendAddShortcut: add, sendRemoveShortcut: rem,
-            selectItem: item => selected = item, selectedObjectId: () => selected);
+            selectItem: item => selected = item, selectedObjectId: () => selected,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         Assert.Equal(0x5001u, slots[Row1[3]].Cell.ItemId);
 
         var payload = new ItemDragPayload(0x5001u, ItemDragSource.ShortcutBar, 3, slots[Row1[3]].Cell);
@@ -1371,7 +1644,8 @@ public class ToolbarControllerTests
         var (adds, removes) = NewSpies(out var add, out var rem);
         var ctrl = ToolbarController.Bind(layout, repo, Store(shortcuts),
             iconIds: (_,_,_,_,_) => 0x77u, useItem: _ => { },
-            sendAddShortcut: add, sendRemoveShortcut: rem);
+            sendAddShortcut: add, sendRemoveShortcut: rem,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         var payload = new ItemDragPayload(0x5001u, ItemDragSource.ShortcutBar, 3, slots[Row1[3]].Cell);
         ctrl.OnDragLift(slots[Row1[3]], slots[Row1[3]].Cell, payload);
@@ -1402,7 +1676,8 @@ public class ToolbarControllerTests
             iconIds: (_, _, _, _, _) => 1u,
             useItem: _ => { },
             sendAddShortcut: add,
-            sendRemoveShortcut: remove);
+            sendRemoveShortcut: remove,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         var payload = Assert.IsType<ItemDragPayload>(slots[Row1[3]].Cell.GetDragPayload());
         controller.OnDragLift(slots[Row1[3]], slots[Row1[3]].Cell, payload);
@@ -1423,7 +1698,8 @@ public class ToolbarControllerTests
         var (adds, removes) = NewSpies(out var add, out var rem);
         var ctrl = ToolbarController.Bind(layout, repo, Store(shortcuts),
             iconIds: (_,_,_,_,_) => 0x77u, useItem: _ => { },
-            sendAddShortcut: add, sendRemoveShortcut: rem);
+            sendAddShortcut: add, sendRemoveShortcut: rem,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         var payload = new ItemDragPayload(0x5001u, ItemDragSource.ShortcutBar, 3, slots[Row1[3]].Cell);
         ctrl.OnDragLift(slots[Row1[3]], slots[Row1[3]].Cell, payload);
@@ -1451,7 +1727,8 @@ public class ToolbarControllerTests
             iconIds: (_, _, _, _, _) => 1u,
             useItem: _ => { },
             sendAddShortcut: entry => wire.Add($"add:{entry.Index}:{entry.ObjectId:X8}:{entry.SpellId:X8}"),
-            sendRemoveShortcut: slot => wire.Add($"remove:{slot}"));
+            sendRemoveShortcut: slot => wire.Add($"remove:{slot}"),
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         var payload = new ItemDragPayload(
             0x5001u, ItemDragSource.Inventory, SourceSlot: 12, new UiItemSlot());
@@ -1484,7 +1761,8 @@ public class ToolbarControllerTests
             iconIds: (_, _, _, _, _) => 1u,
             useItem: _ => { },
             sendAddShortcut: entry => wire.Add($"add:{entry.Index}:{entry.ObjectId:X8}:{entry.SpellId:X8}"),
-            sendRemoveShortcut: slot => wire.Add($"remove:{slot}"));
+            sendRemoveShortcut: slot => wire.Add($"remove:{slot}"),
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         ctrl.ReplaceFullyMergedShortcut(0x5001u, 0x5002u);
 
@@ -1507,7 +1785,8 @@ public class ToolbarControllerTests
         var (adds, removes) = NewSpies(out var add, out var rem);
         var ctrl = ToolbarController.Bind(layout, repo, Store(shortcuts),
             iconIds: (_,_,_,_,_) => 0x77u, useItem: _ => { },
-            sendAddShortcut: add, sendRemoveShortcut: rem);
+            sendAddShortcut: add, sendRemoveShortcut: rem,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         var payload = new ItemDragPayload(0x5001u, ItemDragSource.ShortcutBar, 3, slots[Row1[3]].Cell);
         ctrl.OnDragLift(slots[Row1[3]], slots[Row1[3]].Cell, payload);            // slot 3 emptied
@@ -1525,7 +1804,8 @@ public class ToolbarControllerTests
         var (layout, slots, _) = FakeToolbar();
         ToolbarController.Bind(layout, new ClientObjectTable(),
             new ShortcutStore(),
-            iconIds: (_,_,_,_,_) => 0u, useItem: _ => { });
+            iconIds: (_,_,_,_,_) => 0u, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         Assert.Equal(0x060011FAu, slots[Row1[0]].Cell.DragAcceptSprite);
     }
 

@@ -17,7 +17,7 @@ using DatReaderWriter.Enums;
 
 namespace AcDream.App.Rendering.Wb;
 
-public sealed partial class WbDrawDispatcher : IDisposable
+public sealed partial class WbDrawDispatcher : IDisposable, Walk.IWalkShellResidency
 {
     public enum EntitySet
     {
@@ -410,6 +410,14 @@ public sealed partial class WbDrawDispatcher : IDisposable
     private bool _currentEntityIndoor;
     private bool _currentEntityBuildingDetail;
     private Vector2 _currentEntitySelectionLighting = new(0f, 1f);
+
+    // Per-part selection lighting. The doll flashes only the parts the selected
+    // item covers, so the value appended per instance is the part's, not the
+    // entity's. _currentEntityHasPartLighting is resolved ONCE per entity: while
+    // it is false - which is every entity of every ordinary frame - the per-part
+    // path is one bool test and the part value stays the entity value.
+    private bool _currentEntityHasPartLighting;
+    private Vector2 _currentPartSelectionLighting = new(0f, 1f);
 
     private uint _sharedClipRegionSsbo;
 
@@ -881,6 +889,9 @@ public sealed partial class WbDrawDispatcher : IDisposable
                         out var lighting) == true
                         ? new Vector2(lighting.Luminosity, lighting.Diffuse)
                         : new Vector2(0f, 1f);
+                _currentEntityHasPartLighting =
+                    _selectionLighting?.HasPartLighting(entity.ServerGuid, entity.Id) == true;
+                _currentPartSelectionLighting = _currentEntitySelectionLighting;
 
             }
             prevTupleEntityId = entity.Id;
@@ -996,6 +1007,7 @@ public sealed partial class WbDrawDispatcher : IDisposable
                         opacityMultiplier *= 1f - translucencyValue;
                     }
 
+                    SetCurrentPartSelectionLighting(entity.ServerGuid, entity.Id, setupPartIndex);
                     if (!ClassifyBatches(partData, model, entity, meshRef, paletteIdentity, restPose, opacityMultiplier, collector, entityHasCutoutSubset))
                         currentEntityIncomplete = true;
                     _selectionSink?.AddVisiblePart(
@@ -1026,6 +1038,7 @@ public sealed partial class WbDrawDispatcher : IDisposable
                 if (!fullyInvisible)
                 {
                     var model = meshRef.PartTransform * entityWorld;
+                    SetCurrentPartSelectionLighting(entity.ServerGuid, entity.Id, partIdx);
                     if (!ClassifyBatches(renderData, model, entity, meshRef, paletteIdentity, restPose: meshRef.PartTransform, opacityMultiplier: opacityMultiplier, collector: collector))
                         currentEntityIncomplete = true;
                     _selectionSink?.AddVisiblePart(
@@ -1691,6 +1704,30 @@ public sealed partial class WbDrawDispatcher : IDisposable
         }
     }
 
+    /// <summary>Retail's routing of one walk alpha instance: deferred to the
+    /// alpha queue, or drawn immediately (detail-textured shells, and any
+    /// subset the delay mask does not hold).</summary>
+    private RetailAlphaMeshDecision RouteWalkAlpha(TranslucencyKind kind, bool isBuildingShell)
+    {
+        byte mask = RetailAlphaMeshRouter.MaskFromTranslucencyKind(kind);
+        bool detailSurfaceActive = isBuildingShell
+            && RetailDetailTextureContract.ShouldRender(_buildingDetailEnabled(), _buildingDetail)
+            && _buildingDetail.Tiling != 0f;
+        return RetailAlphaMeshRouter.Route(
+            currentlyDrawingSky: false,
+            delayMask: RetailAlphaMeshRouter.DefaultDelayMask,
+            detailSurfaceActive: detailSurfaceActive,
+            multiPassAlpha: false,
+            subsetMask: mask,
+            materialHasAlpha: false);
+    }
+
+    /// <summary>Whether <see cref="SubmitWalkAlphaInstance"/> would record a
+    /// draw right away for this batch instead of only queueing it.</summary>
+    internal bool WalkAlphaInstanceDrawsImmediately(in WalkClassifiedBatch batch) =>
+        RouteWalkAlpha(batch.Key.Translucency, batch.DetailCategory == 1u).Action
+            != RetailAlphaMeshAction.Append;
+
     private void SubmitToAlphaQueue(
         RetailAlphaQueue queue,
         TranslucencyKind kind,
@@ -1698,17 +1735,7 @@ public sealed partial class WbDrawDispatcher : IDisposable
         bool isBuildingShell,
         Matrix4x4 viewProjection)
     {
-        byte mask = RetailAlphaMeshRouter.MaskFromTranslucencyKind(kind);
-        bool detailSurfaceActive = isBuildingShell
-            && RetailDetailTextureContract.ShouldRender(_buildingDetailEnabled(), _buildingDetail)
-            && _buildingDetail.Tiling != 0f;
-        RetailAlphaMeshDecision decision = RetailAlphaMeshRouter.Route(
-            currentlyDrawingSky: false,
-            delayMask: RetailAlphaMeshRouter.DefaultDelayMask,
-            detailSurfaceActive: detailSurfaceActive,
-            multiPassAlpha: false,
-            subsetMask: mask,
-            materialHasAlpha: false);
+        RetailAlphaMeshDecision decision = RouteWalkAlpha(kind, isBuildingShell);
 
         if (decision.Action == RetailAlphaMeshAction.Immediate)
         {
@@ -2130,7 +2157,7 @@ public sealed partial class WbDrawDispatcher : IDisposable
         grp.Slots.Add(_currentEntitySlot);
         AppendCurrentLightSet(grp);        // Fix B — 8 ints per instance, parallel to Matrices
         grp.Opacities.Add(1.0f);
-        grp.SelectionLighting.Add(_currentEntitySelectionLighting);
+        grp.SelectionLighting.Add(_currentPartSelectionLighting);
     }
 
     private void ComputeEntityLightSet(
@@ -2158,6 +2185,24 @@ public sealed partial class WbDrawDispatcher : IDisposable
         => parentCellId.HasValue
            && (parentCellId.Value & 0xFFFFu) >= 0x0100u
            && (parentCellId.Value & 0xFFFFu) != 0xFFFFu;   // 0xFFFF = landblock marker, not an EnvCell → outdoor
+
+    /// <summary>Pick the lighting the next part's instances carry. Off the hot
+    /// path unless this entity has a part flashing: the gate was answered once
+    /// when the entity changed.</summary>
+    private void SetCurrentPartSelectionLighting(uint serverGuid, uint localEntityId, int partIndex)
+    {
+        if (!_currentEntityHasPartLighting)
+        {
+            _currentPartSelectionLighting = _currentEntitySelectionLighting;
+            return;
+        }
+
+        _currentPartSelectionLighting =
+            _selectionLighting!.TryGetPartLighting(
+                serverGuid, localEntityId, partIndex, out RetailSelectionLighting part)
+                ? new Vector2(part.Luminosity, part.Diffuse)
+                : _currentEntitySelectionLighting;
+    }
 
     private void AppendCurrentLightSet(InstanceGroup grp)
     {
@@ -2200,7 +2245,7 @@ public sealed partial class WbDrawDispatcher : IDisposable
             grp.Slots.Add(_currentEntitySlot);
             AppendCurrentLightSet(grp);        // Fix B — 8 ints per instance, parallel to Matrices
             grp.Opacities.Add(opacityMultiplier);
-            grp.SelectionLighting.Add(_currentEntitySelectionLighting);
+            grp.SelectionLighting.Add(_currentPartSelectionLighting);
             collector?.Add(new CachedBatch(
                 key,
                 texSlot,

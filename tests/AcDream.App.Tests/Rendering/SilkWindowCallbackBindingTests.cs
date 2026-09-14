@@ -412,14 +412,22 @@ public sealed class SilkWindowCallbackBindingTests
             pacing,
             gate);
 
-        Task<Exception> first = Task.Run(() => Record.Exception(binding.Attach));
+        Task<Exception> first = Task.Factory.StartNew(
+            () => Record.Exception(binding.Attach),
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
         Assert.True(surface.AddEntered.Wait(TimeSpan.FromSeconds(5)));
         using var secondStarted = new ManualResetEventSlim(false);
-        Task<Exception> second = Task.Run(() =>
-        {
-            secondStarted.Set();
-            return Record.Exception(binding.Attach);
-        });
+        Task<Exception> second = Task.Factory.StartNew(
+            () =>
+            {
+                secondStarted.Set();
+                return Record.Exception(binding.Attach);
+            },
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
         Assert.True(secondStarted.Wait(TimeSpan.FromSeconds(5)));
         Exception secondError = await second.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.IsType<InvalidOperationException>(secondError);
@@ -498,6 +506,21 @@ public sealed class SilkWindowCallbackBindingTests
         Assert.Equal(0, surface.SubscriptionCount);
     }
 
+    // The two sides of the race run on their own threads, not the shared
+    // pool: under a parallel test run the pool can take seconds to hand out
+    // a thread, and the 5-second entry waits below would time out.
+    private static Task<Exception> RunOnDedicatedThread(Action work)
+    {
+        var completion = new TaskCompletionSource<Exception>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() => completion.SetResult(Record.Exception(work)!))
+        {
+            IsBackground = true,
+        };
+        thread.Start();
+        return completion.Task;
+    }
+
     [Fact]
     public async Task ConcurrentCallbackDisposeAndLaterAddFailureCannotDeadlock()
     {
@@ -525,12 +548,12 @@ public sealed class SilkWindowCallbackBindingTests
             if (name != "update")
                 return;
 
-            callback = Task.Run(() => Record.Exception(surface.RaiseLoad));
+            callback = RunOnDedicatedThread(surface.RaiseLoad);
             Assert.True(loadEntered.Wait(TimeSpan.FromSeconds(5)));
             throw new InvalidOperationException("synthetic later add failure");
         };
 
-        Task<Exception> attach = Task.Run(() => Record.Exception(binding.Attach));
+        Task<Exception> attach = RunOnDedicatedThread(binding.Attach);
         Exception attachError = await attach.WaitAsync(TimeSpan.FromSeconds(5));
         Exception callbackError = await callback!.WaitAsync(TimeSpan.FromSeconds(5));
 

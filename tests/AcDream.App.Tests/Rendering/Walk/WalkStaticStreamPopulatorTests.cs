@@ -107,6 +107,7 @@ public sealed partial class WalkStaticStreamPopulatorTests
             IndexCount = indexCount,
             TextureSlot = new GpuTextureSlot(textureSlotIndex),
             TextureIndex = (int)textureLayer,
+            CullMode = cullMode,
         };
 
     private static ObjectRenderData MakeFlatMesh(params ObjectRenderBatch[] batches) =>

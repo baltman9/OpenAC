@@ -2,6 +2,7 @@ using AcDream.App.Diagnostics;
 using AcDream.App.Net;
 using AcDream.App.Rendering;
 using AcDream.App.Settings;
+using AcDream.Core.Audio;
 using AcDream.Core.Net.Messages;
 using AcDream.UI.Abstractions;
 using AcDream.UI.Abstractions.Panels.Settings;
@@ -43,6 +44,154 @@ public sealed partial class RuntimeSettingsControllerTests
             .ApplyLandscapeDrawDistance(original, value);
 
         Assert.Equal(original, result);
+    }
+
+    [Fact]
+    public void UiOnly_ShrinksTheStreamingWindowToTheNeighboursOnly_AndOffRestoresIt()
+    {
+        QualitySettings ultra = QualitySettings.From(QualityPreset.Ultra);
+
+        QualitySettings uiOnly = RuntimeSettingsController.ApplyUiOnly(ultra, uiOnly: true);
+        Assert.Equal(1, uiOnly.NearRadius);
+        Assert.Equal(1, uiOnly.FarRadius);
+        Assert.Equal(ultra.MsaaSamples, uiOnly.MsaaSamples);
+        Assert.Equal(ultra, RuntimeSettingsController.ApplyUiOnly(ultra, uiOnly: false));
+
+        // Potato's near 1 is already the floor; far still drops from 3 to 1.
+        QualitySettings potato = RuntimeSettingsController.ApplyUiOnly(
+            QualitySettings.From(QualityPreset.Potato), uiOnly: true);
+        Assert.Equal(1, potato.NearRadius);
+        Assert.Equal(1, potato.FarRadius);
+    }
+
+    [Fact]
+    public void UiOnlySwitch_ReappliesTheWindowLive_ThroughTheRuntimeTargets()
+    {
+        var storage = new FakeStorage();
+        var events = new List<string>();
+        var controller = new RuntimeSettingsController(storage, log: _ => { });
+        controller.BindRuntimeTargets(new FakeRuntimeTargets(events) { RecordRetention = true });
+
+        Assert.Equal("target-retain", events[^1]); // binding applies the current state
+
+        controller.SaveDisplay(controller.Display with { UiOnly = true });
+        Assert.Equal(1, controller.ResolvedQuality.FarRadius);
+        Assert.Contains("target-quality", events);
+        Assert.Equal("target-release", events[^1]);
+
+        controller.SaveDisplay(controller.Display with { UiOnly = false });
+        Assert.Equal("target-retain", events[^1]);
+        Assert.Equal(
+            RuntimeSettingsController.ApplyLandscapeDrawDistance(
+                QualitySettings.From(DisplaySettings.Default.Quality),
+                DisplaySettings.Default.LandscapeDrawDistance).FarRadius,
+            controller.ResolvedQuality.FarRadius);
+    }
+
+    [Fact]
+    public void BackgroundUiOnly_FollowsWindowFocus_OnlyWhileTheOptionIsOn()
+    {
+        var storage = new FakeStorage();
+        var events = new List<string>();
+        var controller = new RuntimeSettingsController(storage, log: _ => { });
+        controller.BindRuntimeTargets(new FakeRuntimeTargets(events) { RecordRetention = true });
+
+        // Option off: focus changes nothing.
+        controller.SetWindowFocused(false);
+        Assert.False(controller.EffectiveDisplay.UiOnly);
+        Assert.DoesNotContain("target-release", events);
+        controller.SetWindowFocused(true);
+
+        controller.SaveDisplay(controller.Display with { UiOnlyWhenUnfocused = true });
+        Assert.False(controller.EffectiveDisplay.UiOnly);
+
+        controller.SetWindowFocused(false);
+        Assert.True(controller.EffectiveDisplay.UiOnly);
+        Assert.False(controller.Display.UiOnly); // stored switch untouched
+        Assert.Equal(1, controller.ResolvedQuality.FarRadius);
+        Assert.Equal("target-release", events[^1]);
+
+        controller.SetWindowFocused(true);
+        Assert.False(controller.EffectiveDisplay.UiOnly);
+        Assert.Equal("target-retain", events[^1]);
+
+        // A stored UI Only stays on regardless of focus.
+        controller.SaveDisplay(controller.Display with { UiOnly = true });
+        controller.SetWindowFocused(false);
+        controller.SetWindowFocused(true);
+        Assert.True(controller.EffectiveDisplay.UiOnly);
+    }
+
+    [Fact]
+    public void PotatoMode_RunsTheCheapestSettings_WhileTheStoredChoicesStayTheUsers()
+    {
+        var pack = new RenderPackSelectionSettings("pack.alpha", "1.0.0", "high");
+        var storage = new FakeStorage
+        {
+            DisplayValue = DisplaySettings.Default with
+            {
+                PotatoMode = true,
+                Quality = QualityPreset.Ultra,
+                LandscapeDrawDistance = 25,
+                ParticleRange = ParticleRange.Extended,
+                RenderPack = pack,
+            },
+        };
+        var resolvedFor = new List<QualityPreset>();
+
+        var controller = new RuntimeSettingsController(
+            storage,
+            preset =>
+            {
+                resolvedFor.Add(preset);
+                return RuntimeSettingsController.ApplyLandscapeDrawDistance(
+                    QualitySettings.From(preset),
+                    storage.DisplayValue.Effective.LandscapeDrawDistance);
+            },
+            log: _ => { });
+
+        Assert.Equal([QualityPreset.Potato], resolvedFor);
+        Assert.Equal(1, controller.ResolvedQuality.NearRadius);
+        Assert.Equal(3, controller.ResolvedQuality.FarRadius);
+        Assert.Equal(0, controller.ResolvedQuality.MsaaSamples);
+        Assert.Equal(QualityPreset.Potato, controller.Startup.Display.Quality);
+        Assert.True(controller.DisplayPreview.RenderPack.IsRetail);
+        Assert.Equal(ParticleRange.Retail, controller.DisplayPreview.ParticleRange);
+        Assert.False(controller.DisplayPreview.BuildingDetailTextures);
+        // The stored settings are untouched: the panel shows and edits these.
+        Assert.Same(storage.DisplayValue, controller.Display);
+        Assert.Equal(QualityPreset.Ultra, controller.Display.Quality);
+        Assert.Same(pack, controller.Display.RenderPack);
+    }
+
+    [Fact]
+    public void TurningPotatoModeOff_PublishesTheStoredChoicesAgain()
+    {
+        var pack = new RenderPackSelectionSettings("pack.alpha", "1.0.0", "high");
+        var storage = new FakeStorage
+        {
+            DisplayValue = DisplaySettings.Default with
+            {
+                PotatoMode = true,
+                Quality = QualityPreset.Ultra,
+                RenderPack = pack,
+            },
+        };
+        var events = new List<string>();
+        var controller = new RuntimeSettingsController(
+            storage,
+            static preset => QualitySettings.From(preset),
+            static _ => { });
+        controller.BindRuntimeTargets(new FakeRuntimeTargets(events));
+        var published = new List<DisplaySettings>();
+        controller.DisplayChanged += published.Add;
+
+        controller.SaveDisplay(controller.Display with { PotatoMode = false });
+
+        Assert.Equal(QualitySettings.From(QualityPreset.Ultra), controller.ResolvedQuality);
+        Assert.Same(pack, Assert.Single(published).RenderPack);
+        Assert.Same(controller.Display, controller.EffectiveDisplay);
+        Assert.Contains("target-quality", events);
     }
 
     [Fact]
@@ -484,6 +633,62 @@ public sealed partial class RuntimeSettingsControllerTests
             Assert.Single(bus.Published));
         Assert.Equal((uint)CharacterOptionId.ListenToRoleplayChat, cmd.OptionId);
         Assert.False(cmd.Value);
+    }
+
+    // OpenAC #42 follow-up: the mixer settings are read once at startup, from
+    // storage, and handed to the audio composition from this property. Nothing
+    // else reads the file.
+    [Fact]
+    public void TheMixerSettingsAreReadFromStorageOnce()
+    {
+        var storage = new FakeStorage
+        {
+            AudioMixerValue = new AudioMixerOptions
+            {
+                VoiceCount = 48,
+                MaxVoicesPerWave = 6,
+            },
+        };
+
+        var controller = CreateController(storage);
+
+        Assert.Equal(1, storage.AudioMixerLoads);
+        Assert.Same(storage.AudioMixerValue, controller.AudioMixer);
+        Assert.Equal(48, controller.AudioMixer.VoiceCount);
+    }
+
+    [Fact]
+    public void SaveAudioMixerWritesItDownAndRemembersIt()
+    {
+        var events = new List<string>();
+        var storage = new FakeStorage(events);
+        var controller = CreateController(storage, events);
+        events.Clear();
+
+        var chosen = new AudioMixerOptions { VoiceCount = 64, RetailMixer = false };
+        Assert.True(controller.SaveAudioMixer(chosen));
+
+        Assert.Equal(["save-audio-mixer"], events);
+        Assert.Same(chosen, controller.AudioMixer);
+        Assert.Same(chosen, storage.AudioMixerValue);
+    }
+
+    // A failed save must report failure and leave the remembered settings
+    // alone: its caller does not change the running mixer unless this said yes.
+    [Fact]
+    public void SaveAudioMixerThatFails_ReportsFailureAndKeepsTheOldSettings()
+    {
+        var events = new List<string>();
+        var storage = new FakeStorage(events) { ThrowOnAudioMixerSave = true };
+        var controller = CreateController(storage, events);
+        AudioMixerOptions before = controller.AudioMixer;
+        events.Clear();
+
+        Assert.False(controller.SaveAudioMixer(
+            new AudioMixerOptions { VoiceCount = 64 }));
+
+        Assert.Equal(["save-audio-mixer"], events);
+        Assert.Same(before, controller.AudioMixer);
     }
 
     [Fact]
@@ -1182,6 +1387,15 @@ public sealed partial class RuntimeSettingsControllerTests
             return DisplayResult ?? new RuntimeDisplayApplyResult(display.Fullscreen);
         }
 
+        /// <summary>Only the retention tests care about this event; the exact-sequence tests keep their lists.</summary>
+        public bool RecordRetention { get; init; }
+
+        public void SetUnownedContentRetained(bool retained)
+        {
+            if (RecordRetention)
+                events.Add(retained ? "target-retain" : "target-release");
+        }
+
         public void ApplyQuality(QualitySettings quality)
         {
             events.Add("target-quality");
@@ -1378,6 +1592,8 @@ public sealed partial class RuntimeSettingsControllerTests
 
         public bool ThrowOnAudioSave { get; init; }
 
+        public bool ThrowOnAudioMixerSave { get; init; }
+
         public bool ThrowOnChatSave { get; init; }
 
         public DisplaySettings LoadDisplay()
@@ -1390,6 +1606,25 @@ public sealed partial class RuntimeSettingsControllerTests
         {
             AudioLoads++;
             return AudioValue;
+        }
+
+        public AudioMixerOptions AudioMixerValue { get; set; } =
+            AudioMixerOptions.Default;
+
+        public int AudioMixerLoads { get; private set; }
+
+        public AudioMixerOptions LoadAudioMixer()
+        {
+            AudioMixerLoads++;
+            return AudioMixerValue;
+        }
+
+        public void SaveAudioMixer(AudioMixerOptions mixer)
+        {
+            _events.Add("save-audio-mixer");
+            if (ThrowOnAudioMixerSave)
+                throw new IOException("audio mixer persistence failed");
+            AudioMixerValue = mixer;
         }
 
         public ChatSettings LoadChat()

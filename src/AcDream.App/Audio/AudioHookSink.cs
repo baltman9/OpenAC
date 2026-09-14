@@ -35,7 +35,14 @@ public sealed class AudioHookSink : IAnimationHookSink
         switch (hook)
         {
             case SoundHook s:
-                Play(entityId, entityWorldPosition, (uint)s.Id, volume: 1f, priority: 1f);
+                // A bare sound hook names a sound and nothing else: no volume,
+                // no odds, and no priority to weigh it against other sounds.
+                Play(
+                    entityId,
+                    entityWorldPosition,
+                    (uint)s.Id,
+                    volume: 1f,
+                    priority: 0f);
                 break;
 
             case SoundTableHook st:
@@ -43,10 +50,19 @@ public sealed class AudioHookSink : IAnimationHookSink
                 break;
 
             case SoundTweakedHook stw:
-                Play(entityId, entityWorldPosition,
-                    waveId: (uint)stw.SoundId,
-                    volume: stw.Volume > 0 ? stw.Volume : 1f,
-                    priority: stw.Priority);
+                // A tweaked hook carries its own odds of making a sound at all.
+                // Thunder is authored this way: the hook comes round on its
+                // cadence and usually loses the roll.
+                if (TweakedSoundHooks.TryRoll(stw, _rng, out uint tweakedWave, out float tweakedVolume))
+                {
+                    Play(
+                        entityId,
+                        entityWorldPosition,
+                        tweakedWave,
+                        tweakedVolume,
+                        TweakedSoundHooks.AuthoredPriority(stw));
+                }
+
                 break;
 
             // All the visual-only hooks (Scale, Luminous, Diffuse, …)
@@ -106,7 +122,7 @@ public sealed class AudioHookSink : IAnimationHookSink
         switch (hook)
         {
             case SoundHook s:
-                PlayUi((uint)s.Id, volume: 1f);
+                PlayUi((uint)s.Id, volume: 1f, priority: 0f);
                 break;
 
             case SoundTableHook st:
@@ -116,23 +132,28 @@ public sealed class AudioHookSink : IAnimationHookSink
                 if (table is null) return;
                 var entry = SoundCookbook.Select(table, st.SoundType, _rng);
                 if (entry is null) return;
-                PlayUi((uint)entry.Id, entry.Volume);
+                PlayUi((uint)entry.Id, entry.Volume, entry.Priority);
                 break;
 
             case SoundTweakedHook stw:
-                PlayUi(
-                    (uint)stw.SoundId,
-                    stw.Volume > 0 ? stw.Volume : 1f);
+                if (TweakedSoundHooks.TryRoll(stw, _rng, out uint tweakedWave, out float tweakedVolume))
+                {
+                    PlayUi(
+                        tweakedWave,
+                        tweakedVolume,
+                        TweakedSoundHooks.AuthoredPriority(stw));
+                }
+
                 break;
         }
     }
 
-    private void PlayUi(uint waveId, float volume)
+    private void PlayUi(uint waveId, float volume, float priority)
     {
         if (waveId == 0) return;
         WaveData? wave = _cache.GetWave(waveId);
         if (wave is null) return;
-        _engine.PlayUiWave(waveId, wave, volume);
+        _engine.PlayUiWave(waveId, wave, volume, priority);
     }
 
     private void PlayFromSoundTable(
@@ -155,8 +176,12 @@ public sealed class AudioHookSink : IAnimationHookSink
             priority: entry.Priority);
     }
 
-    private void Play(uint entityId, Vector3 worldPos, uint waveId,
-        float volume, float priority)
+    private void Play(
+        uint entityId,
+        Vector3 worldPos,
+        uint waveId,
+        float volume,
+        float priority)
     {
         if (waveId == 0) return;
         WaveData? wave = _cache.GetWave(waveId);

@@ -852,7 +852,8 @@ public sealed class CurrentGameRuntimeAdapterTests
                 query,
                 _items,
                 new SelectionTransport(() => _session?.IsInWorld == true),
-                new NoopInteractionMovement());
+                new NoopInteractionMovement(),
+                _gameRuntime.ActionOwner.CombatTarget);
 
             Host = CreateHost(
                 _session,
@@ -1365,6 +1366,7 @@ public sealed class CurrentGameRuntimeAdapterTests
             new(target, DistanceSquared: 4f);
         public bool IsUseable(uint serverGuid) => serverGuid == target;
         public bool IsPickupable(uint serverGuid) => false;
+        public bool IsStuckInWorld(uint serverGuid) => false;
         public bool IsWieldedByPlayer(uint serverGuid) => false;
         public bool IsWieldedPositionState(uint serverGuid) => false;
 

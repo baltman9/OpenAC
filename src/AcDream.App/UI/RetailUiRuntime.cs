@@ -74,7 +74,7 @@ public sealed record MagicRuntimeBindings(
     Func<uint, IReadOnlyList<SpellExamineComponent>> SpellComponents,
     Func<MagicSchool, uint> MagicSkill,
     Action<uint> SelectObject,
-    Action<uint> UseItem,
+    Action<uint> ActivateEndowment,
     Action<int, int, uint> AddFavorite,
     Action<int, uint> RemoveFavorite,
     Action<uint> SendSpellbookFilter,
@@ -145,6 +145,7 @@ public sealed record OptionsRuntimeBindings(
     Action<DisplaySettings> SaveDisplay,
     Func<AudioSettings> LoadAudio,
     Action<AudioSettings> SaveAudio,
+    Layout.ConfigOptionsPageController.AudioMixerBindings AudioMixer,
     Func<IReadOnlyList<Layout.ConfigOptionsPageController.RenderPackChoice>>?
         LoadRenderPackChoices = null,
     Func<long>? LoadRenderPackCatalogRevision = null,
@@ -281,6 +282,17 @@ public sealed record ConnectionRuntimeBindings(
     Action RequestExit,
     bool ShowProgress = true);
 
+public sealed record BookRuntimeBindings(
+    AcDream.Runtime.Gameplay.IRuntimeBookView Book,
+    AcDream.Runtime.Gameplay.RuntimeBookState Commands,
+    Action<uint /*bookGuid*/, int /*page*/> SendBookPageData,
+    Action<uint /*bookGuid*/> SendBookAddPage,
+    Action<uint /*bookGuid*/, int /*page*/, string /*text*/> SendBookModifyPage,
+    Action<uint /*bookGuid*/, int /*page*/> SendBookDeletePage,
+    /// <summary>Whether the server tells this player the truth about
+    /// author accounts. Everyone else is handed a stand-in.</summary>
+    Func<bool>? ShowsAuthorAccount = null);
+
 public sealed record RetailUiRuntimeBindings(
     UiHost Host,
     RetailUiAssets Assets,
@@ -318,7 +330,8 @@ public sealed record RetailUiRuntimeBindings(
         ProjectileDebugSamples = null,
     ConnectionRuntimeBindings? Connection = null,
     Func<bool>? IsGameplayDisplay = null,
-    Action? SynchronizeDisplayPhase = null);
+    Action? SynchronizeDisplayPhase = null,
+    BookRuntimeBindings? Book = null);
 
 public sealed class RetailUiRuntime : IDisposable
 {
@@ -343,8 +356,14 @@ public sealed class RetailUiRuntime : IDisposable
 
     private string? ResolveSelectedObjectName(uint guid) =>
         _bindings.Toolbar.Objects.Get(guid) is { } obj
-            ? ItemNames.ResolveAppropriateName(obj)
+            ? ResolveAppropriateItemName(obj)
             : _bindings.Toolbar.ResolveName(guid);
+
+    /// <summary>The composed name for one object - material prefix included.
+    /// Item captions and the selection caption share it, so a hover and a
+    /// selection never disagree about what an item is called.</summary>
+    private string ResolveAppropriateItemName(ClientObject obj)
+        => ItemNames.ResolveAppropriateName(obj);
 
     private StackSplitQuantityState StackSplitQuantity => _bindings.StackSplitQuantity;
     private RetailWindowLayoutPersistence? _persistence;
@@ -430,6 +449,7 @@ public sealed class RetailUiRuntime : IDisposable
         MountSocialPanel();
         MountMapHousePanel();
         MountJournalPanel();
+        MountBookPanel();
         MountCharacter();
         MountPlugins();
         MountInventory();
@@ -525,6 +545,10 @@ public sealed class RetailUiRuntime : IDisposable
     public RetailFpsController? FpsController { get; private set; }
     public SelectedObjectController? SelectedObjectController { get; private set; }
     public UiViewport? PaperdollViewportWidget { get; private set; }
+
+    /// <summary>Set by the composition once the doll viewport exists; the panel
+    /// already holds it, so the flash starts working the moment it is filled in.</summary>
+    public PaperdollFigureLightingRelay PaperdollFigureLighting { get; } = new();
     public UiNineSlicePanel? InventoryFrame { get; private set; }
     public InventoryController? InventoryPanelController { get; private set; }
     public RetailDialogFactory? DialogFactory { get; private set; }
@@ -536,6 +560,8 @@ public sealed class RetailUiRuntime : IDisposable
     private CharacterStatController.Binding? _characterStatBinding;
 
     public Layout.JournalPanelController? JournalPanelController { get; private set; }
+
+    public Layout.BookPanelController? BookPanelController { get; private set; }
 
     private JournalPersistence? _journalFile;
 
@@ -677,6 +703,7 @@ public sealed class RetailUiRuntime : IDisposable
         ExternalContainerController?.Tick();
         SocialPanelController?.Tick();
         JournalPanelController?.Tick();
+        BookPanelController?.Tick();
         MapHousePanelController?.Tick(deltaSeconds);
         _itemCooldownController?.Tick();
         _connectionMount?.Tick();
@@ -1125,6 +1152,37 @@ public sealed class RetailUiRuntime : IDisposable
         });
     }
 
+    /// <summary>
+    /// Fills the open vendor's buy list from the component book's desired
+    /// counts. Reads each desired component's category and name from the
+    /// component catalog and its owned count from everything the player is
+    /// carrying, then lets the vendor panel stage the buys.
+    /// </summary>
+    /// <param name="category">
+    /// A single component category, or <see cref="VendorComponentFill.AnyCategory"/> for all.
+    /// </param>
+    /// <param name="maximumPrice">The spending ceiling, or 0 for no ceiling.</param>
+    public void FillComponentBuyList(uint category, uint maximumPrice)
+    {
+        if (VendorController is null)
+            return;
+
+        MagicRuntimeBindings magic = _bindings.Magic;
+        VendorController.FillComponentBuyList(
+            VendorComponentFill.BuildDesires(
+                magic.Spellbook.DesiredComponents,
+                magic.Objects,
+                magic.PlayerGuid(),
+                weenieClassId => magic.Components.TryGetValue(
+                    weenieClassId,
+                    out SpellComponentDescriptor? descriptor)
+                    ? new ComponentDescription(descriptor.Category, descriptor.Name)
+                    : null,
+                _bindings.Vendor.State.Items),
+            category,
+            (int)maximumPrice);
+    }
+
     public void CloseWindow(string name)
     {
         if (RetailPanelCatalog.TryGetPanelId(name, out uint panelId))
@@ -1373,7 +1431,6 @@ public sealed class RetailUiRuntime : IDisposable
                 Resizable = false,
                 ResizeX = false,
                 ResizeY = false,
-                ConstrainDragToParent = true,
                 ContentClickThrough = false,
                 Controller = controller,
             });
@@ -1422,6 +1479,8 @@ public sealed class RetailUiRuntime : IDisposable
                 string? name = _bindings.Toolbar.ResolveName(selected);
                 return string.IsNullOrWhiteSpace(name) ? null : name;
             },
+            selectedTargetGuid: () =>
+                _bindings.Toolbar.Selection.SelectedObjectId ?? 0u,
             chatStrings: key => new DatStringResolver(_bindings.Assets.Dats)
                 .Resolve(0x23000001u, DatStringResolver.ComputeHash(key)),
             resolveFont: _bindings.Assets.ResolveFont);
@@ -1559,7 +1618,8 @@ public sealed class RetailUiRuntime : IDisposable
         UiShortcutDigitGraphics shortcutDigits = LoadShortcutDigitGraphics();
         ToolbarRuntimeBindings b = _bindings.Toolbar;
         ToolbarController = Layout.ToolbarController.Bind(
-            layout, b.Objects, b.Shortcuts, b.ResolveIcon, b.UseItem, b.Combat,
+            layout, b.Objects, b.Shortcuts, b.ResolveIcon, b.UseItem,
+            ResolveAppropriateItemName, b.Combat,
             shortcutDigits.RegularDigits, shortcutDigits.GhostedDigits,
             shortcutDigits.EmptyDigits, b.ItemInteraction,
             b.SendAddShortcut, b.SendRemoveShortcut,
@@ -1683,7 +1743,7 @@ public sealed class RetailUiRuntime : IDisposable
             item => _bindings.Magic.ResolveDragIcon(
                 item.Type, item.IconId, item.IconUnderlayId,
                 item.IconOverlayId, item.Effects),
-            _bindings.Magic.UseItem,
+            _bindings.Magic.ActivateEndowment,
             _bindings.Magic.Selection,
             _bindings.Magic.AddFavorite,
             _bindings.Magic.RemoveFavorite,
@@ -1714,7 +1774,6 @@ public sealed class RetailUiRuntime : IDisposable
                 OuterAnchors = AnchorEdges.Left | AnchorEdges.Bottom,
                 Visible = false,
                 Draggable = false,
-                ConstrainDragToParent = true,
                 ContentClickThrough = false,
                 Controller = controllerOwner,
             }));
@@ -1801,7 +1860,6 @@ public sealed class RetailUiRuntime : IDisposable
                 ResizeX = false,
                 ResizeY = true,
                 ResizableEdges = ResizeEdges.Bottom,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
                 ContentAnchors = AnchorEdges.Left | AnchorEdges.Top | AnchorEdges.Bottom,
                 ContentClickThrough = false,
@@ -1906,7 +1964,6 @@ public sealed class RetailUiRuntime : IDisposable
                 ResizeY = true,
                 MinWidth = 310f,
                 MinHeight = 400f,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
                 ContentClickThrough = false,
                 Controller = controller,
@@ -1997,7 +2054,6 @@ public sealed class RetailUiRuntime : IDisposable
                 ResizeX = false,
                 ResizeY = true,
                 ResizableEdges = ResizeEdges.Bottom,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
                 ContentAnchors = AnchorEdges.Left | AnchorEdges.Top
                     | AnchorEdges.Right | AnchorEdges.Bottom,
@@ -2220,7 +2276,6 @@ public sealed class RetailUiRuntime : IDisposable
                 ResizeX = false,
                 ResizeY = true,
                 ResizableEdges = ResizeEdges.Bottom,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
                 ContentAnchors = AnchorEdges.Left | AnchorEdges.Top
                     | AnchorEdges.Right | AnchorEdges.Bottom,
@@ -2305,7 +2360,6 @@ public sealed class RetailUiRuntime : IDisposable
                 Resizable = false,
                 ResizeX = false,
                 ResizeY = false,
-                ConstrainDragToParent = true,
                 ContentClickThrough = false,
                 Controller = controller,
             });
@@ -2551,7 +2605,8 @@ public sealed class RetailUiRuntime : IDisposable
                     LoadCameraTurning: _bindings.Options.LoadCameraTurning,
                     SaveCameraTurning: _bindings.Options.SaveCameraTurning,
                     LoadChat: () => _bindings.Chat.Store?.LoadChat() ?? ChatSettings.Default,
-                    SaveChat: chat => _bindings.Chat.Store?.SaveChat(chat))
+                    SaveChat: chat => _bindings.Chat.Store?.SaveChat(chat),
+                    AudioMixer: _bindings.Options.AudioMixer)
                 {
                     RenderPacks = _bindings.Options.LoadRenderPackChoices is { } load
                         ? new Layout.ConfigOptionsPageController.RenderPackBindings(load)
@@ -2588,7 +2643,6 @@ public sealed class RetailUiRuntime : IDisposable
                 ResizeX = false,
                 ResizeY = true,
                 ResizableEdges = ResizeEdges.Bottom,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
                 ContentAnchors = AnchorEdges.Left | AnchorEdges.Top
                     | AnchorEdges.Right | AnchorEdges.Bottom,
@@ -3010,12 +3064,23 @@ public sealed class RetailUiRuntime : IDisposable
                 Resizable = true,
                 ResizeX = true,
                 ResizeY = true,
-                ConstrainDragToParent = true,
                 ContentClickThrough = false,
                 Controller = controller,
             });
         controller.SyncVisibility();
         Console.WriteLine("[UI] retail jump bar from gmFloatyPowerBarUI LayoutDesc 0x21000072.");
+    }
+
+    /// <summary>The experience a fellow needs to go from their level to the next.</summary>
+    private static long ExperienceToRaiseLevel(
+        DatReaderWriter.DBObjs.ExperienceTable? table, uint level)
+    {
+        var levels = table?.Levels;
+        if (levels is null || level + 1 >= levels.Length)
+            return 0L;
+        ulong current = levels[level];
+        ulong next = levels[level + 1];
+        return next > current ? (long)Math.Min(next - current, (ulong)long.MaxValue) : 0L;
     }
 
     private void MountSocialPanel()
@@ -3064,6 +3129,11 @@ public sealed class RetailUiRuntime : IDisposable
         }
 
         var fellowshipStrings = new DatStringResolver(_bindings.Assets.Dats);
+        DatReaderWriter.DBObjs.ExperienceTable? experienceTable;
+        lock (_bindings.Assets.DatLock)
+        {
+            experienceTable = Layout.CharacterSheetProvider.LoadExperienceTable(_bindings.Assets.Dats);
+        }
 
         var callbacks = new Layout.SocialPanelController.Callbacks(
             Toggle: () => ToggleWindow(WindowNames.SocialPanel),
@@ -3083,7 +3153,15 @@ public sealed class RetailUiRuntime : IDisposable
                 CurrentCharacterOption: id => _bindings.Options.CurrentCharacterOption((uint)id),
                 SetCharacterOption: (id, value) => _bindings.Options.CommandBus().Publish(
                     new SetSingleCharacterOptionRuntimeCmd((uint)id, value)),
-                ResolveString: (tableId, stringId) => fellowshipStrings.Resolve(tableId, stringId)),
+                ResolveString: (tableId, stringId) => fellowshipStrings.Resolve(tableId, stringId),
+                ResolveTemplate: (tableId, keyHash, variables) =>
+                {
+                    lock (_bindings.Assets.DatLock)
+                    {
+                        return fellowshipStrings.ResolveTemplate(tableId, keyHash, variables);
+                    }
+                },
+                ExperienceToRaiseLevel: level => ExperienceToRaiseLevel(experienceTable, level)),
             Allegiance: new Layout.SocialAllegiancePageController.Bindings(
                 Snapshot: _bindings.Social.AllegianceSnapshot,
                 Monarch: _bindings.Social.AllegianceMonarch,
@@ -3114,6 +3192,13 @@ public sealed class RetailUiRuntime : IDisposable
                             {
                                 [Layout.DatStringResolver.PlayerVariable] = playerName,
                             });
+                    }
+                },
+                ResolveTemplate: (tableId, keyHash, variables) =>
+                {
+                    lock (_bindings.Assets.DatLock)
+                    {
+                        return fellowshipStrings.ResolveTemplate(tableId, keyHash, variables);
                     }
                 }),
             Friends: _bindings.Social.Friends,
@@ -3165,7 +3250,6 @@ public sealed class RetailUiRuntime : IDisposable
                 ResizeX = false,
                 ResizeY = true,
                 ResizableEdges = ResizeEdges.Bottom,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
                 ContentAnchors = AnchorEdges.Left | AnchorEdges.Top
                     | AnchorEdges.Right | AnchorEdges.Bottom,
@@ -3280,7 +3364,6 @@ public sealed class RetailUiRuntime : IDisposable
                 ResizeX = false,
                 ResizeY = true,
                 ResizableEdges = ResizeEdges.Bottom,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
                 ContentAnchors = AnchorEdges.Left | AnchorEdges.Top
                     | AnchorEdges.Right | AnchorEdges.Bottom,
@@ -3396,7 +3479,6 @@ public sealed class RetailUiRuntime : IDisposable
                 Visible = false,
                 ResizeX = false,
                 ResizeY = false,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
                 ContentAnchors = AnchorEdges.Left | AnchorEdges.Top
                     | AnchorEdges.Right | AnchorEdges.Bottom,
@@ -3413,6 +3495,93 @@ public sealed class RetailUiRuntime : IDisposable
                 out bool restorePrevious)
                 && restorePrevious);
         Console.WriteLine("[UI] retail Map/House panel from LayoutDesc importer (0x2100006E slot 0x1000018C).");
+    }
+
+    private void MountBookPanel()
+    {
+        if (_bindings.Book is not { } book)
+            return;
+
+        ElementInfo? rootInfo;
+        ImportedLayout? layout;
+        lock (_bindings.Assets.DatLock)
+        {
+            rootInfo = LayoutImporter.ImportInfos(
+                _bindings.Assets.Dats,
+                Layout.BookPanelController.HostLayoutId,
+                Layout.BookPanelController.SlotElementId);
+            var resolver = new DatStringResolver(_bindings.Assets.Dats);
+            if (rootInfo is not null)
+                Layout.BookPanelController.MarkPageTextTypeable(rootInfo);
+            layout = rootInfo is null
+                ? null
+                : LayoutImporter.Build(
+                    rootInfo,
+                    _bindings.Assets.ResolveSprite,
+                    _bindings.Assets.DefaultFont,
+                    _bindings.Assets.ResolveFont,
+                    resolver.Resolve);
+        }
+        if (rootInfo is null || layout is null)
+        {
+            Console.WriteLine(
+                "[UI] book panel: LayoutDesc 0x2100006E slot 0x10000182 not found.");
+            return;
+        }
+
+        var callbacks = new Layout.BookPanelController.Bindings(
+            Book: book.Book,
+            Commands: book.Commands,
+            ResolveBookName: guid => ResolveSelectedObjectName(guid) ?? string.Empty,
+            RequestPageText: book.SendBookPageData,
+            RequestAddPage: book.SendBookAddPage,
+            SetVisible: visible =>
+                _panelUi.SetPanelVisibility(RetailPanelCatalog.Book, visible),
+            SavePage: book.SendBookModifyPage,
+            DeletePage: book.SendBookDeletePage,
+            ShowsAuthorAccount: book.ShowsAuthorAccount);
+
+        Layout.BookPanelController? controller;
+        lock (_bindings.Assets.DatLock)
+            controller = Layout.BookPanelController.Bind(layout, callbacks);
+        if (controller is null)
+        {
+            Console.WriteLine(
+                "[UI] book panel: the authored slot carried no page text.");
+            return;
+        }
+
+        BookPanelController = controller;
+
+        RetailWindowHandle handle = RetailWindowFrame.Mount(
+            Host.Root,
+            controller.Root,
+            _bindings.Assets.ResolveSprite,
+            new RetailWindowFrame.Options
+            {
+                WindowName = WindowNames.Book,
+                Chrome = RetailWindowChrome.NineSlice,
+                Left = 250f,
+                Top = 150f,
+                Visible = false,
+                ResizeX = false,
+                ResizeY = false,
+                ContentAnchors = AnchorEdges.Left | AnchorEdges.Top,
+                ContentClickThrough = false,
+                DrawChromeCenter = !AuthorsFullPanelCenter(rootInfo),
+                Controller = controller,
+            });
+        _panelUi.RegisterMainPanel(
+            RetailPanelCatalog.Book,
+            WindowNames.Book,
+            handle,
+            rootInfo.TryGetEffectiveBool(
+                RetailPanelUiController.RestorePreviousPropertyId,
+                out bool restorePrevious)
+                && restorePrevious);
+        Console.WriteLine(
+            "[UI] retail book panel from LayoutDesc importer (0x2100006E slot 0x10000182); "
+            + $"page text 0x10000111 built as {controller.PageTextElementKind}.");
     }
 
     private void MountDialogFactory()
@@ -3870,19 +4039,25 @@ public sealed class RetailUiRuntime : IDisposable
             : ToolbarController.ReplaceFullyMergedShortcut;
         InventoryController inventory = InventoryController.Bind(
             layout, b.Objects, b.PlayerGuid, b.ResolveIcon, b.Strength, b.Selection,
-            _bindings.Assets.DefaultFont, _bindings.Character.Provider.CharacterName,
+            _bindings.Assets.DefaultFont, ResolveAppropriateItemName,
+            _bindings.Character.Provider.CharacterName,
             contents, sideBag, mainPack, b.SendUse,
             b.SendPutItemInContainer, b.SendStackableSplitToContainer, b.SendStackableMerge,
             notifyMergeAttempt, b.ItemInteraction,
             () => CloseWindow(WindowNames.Inventory),
             StackSplitQuantity,
             b.ResolveDragIcon,
-            b.Spellbook);
+            b.Spellbook,
+            _bindings.Toolbar.Shortcuts,
+            LoadShortcutDigitGraphics(),
+            _bindings.Toolbar.Combat);
         InventoryPanelController = inventory;
         PaperdollController paperdoll = PaperdollController.Bind(
             layout, b.Objects, b.PlayerGuid, b.ResolveIcon, b.Selection, b.ItemInteraction,
+            ResolveAppropriateItemName,
             contents, _bindings.Assets.DefaultFont, paperdollClickMap,
-            b.ResolveDragIcon, paperdollEmptySprites);
+            b.ResolveDragIcon, paperdollEmptySprites,
+            figureLighting: PaperdollFigureLighting);
         Host.WindowManager.AttachController(
             WindowNames.Inventory,
             new RetainedPanelControllerGroup(inventory, paperdoll));
@@ -3947,6 +4122,7 @@ public sealed class RetailUiRuntime : IDisposable
             b.SendStackableSplitToContainer,
             b.IsWithinUseRange,
             handle,
+            ResolveAppropriateItemName,
             contentsEmpty,
             containerEmpty);
         Host.WindowManager.AttachController(
@@ -4008,7 +4184,6 @@ public sealed class RetailUiRuntime : IDisposable
                 Visible = false,
                 ResizeX = false,
                 ResizeY = false,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
                 DrawChromeCenter = false,
             });
@@ -4027,6 +4202,7 @@ public sealed class RetailUiRuntime : IDisposable
             _bindings.Assets.DefaultFont,
             _bindings.Assets.DebugFont,
             _bindings.Assets.ResolveSprite,
+            ResolveAppropriateItemName,
             emptySlotSprite,
             buyingEmptySlotSprite,
             sellingEmptySlotSprite,
@@ -4077,6 +4253,7 @@ public sealed class RetailUiRuntime : IDisposable
                     else Host.HideWindow(WindowNames.Salvage);
                 },
                 _bindings.Options.DisplaySystemMessage,
+                ResolveAppropriateItemName,
                 emptySlot));
         if (controller is null)
         {
@@ -4101,7 +4278,6 @@ public sealed class RetailUiRuntime : IDisposable
                 ResizeX = true,
                 ResizeY = false,
                 ResizableEdges = ResizeEdges.Left | ResizeEdges.Right,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
                 Controller = controller,
             });
@@ -4186,7 +4362,8 @@ public sealed class RetailUiRuntime : IDisposable
                                         count.ToString(),
                                 }) ?? count.ToString();
                         }
-                    }));
+                    },
+                    ResolveAppropriateName: ResolveAppropriateItemName));
         if (controller is null)
         {
             Console.WriteLine("[UI] secure trade: required authored grids are missing.");
@@ -4211,7 +4388,6 @@ public sealed class RetailUiRuntime : IDisposable
                 Visible = false,
                 ResizeX = false,
                 ResizeY = false,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
             });
 

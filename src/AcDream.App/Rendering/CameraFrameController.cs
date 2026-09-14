@@ -76,10 +76,13 @@ internal sealed class CameraFrameController : ICameraFramePhase
                 retail.AdjustPitch(+adjustment);
             if (input.Lower)
                 retail.AdjustPitch(-adjustment);
+            // Keypad 4 orbits the camera to the player's left, which is a negative
+            // yaw offset in this frame - the signs were the other way round and the
+            // keys rotated backwards. Same below for the legacy camera.
             if (input.RotateLeft)
-                retail.AdjustYaw(+adjustment);
-            if (input.RotateRight)
                 retail.AdjustYaw(-adjustment);
+            if (input.RotateRight)
+                retail.AdjustYaw(+adjustment);
         }
         else
         {
@@ -95,9 +98,9 @@ internal sealed class CameraFrameController : ICameraFramePhase
             if (input.Lower)
                 legacy.AdjustPitch(-adjustment * 0.02f);
             if (input.RotateLeft)
-                legacy.YawOffset += adjustment * 0.02f;
-            if (input.RotateRight)
                 legacy.YawOffset -= adjustment * 0.02f;
+            if (input.RotateRight)
+                legacy.YawOffset += adjustment * 0.02f;
         }
 
         if (!_localFrame.TryGetPresentationAfterNetwork(out var playerFrame))

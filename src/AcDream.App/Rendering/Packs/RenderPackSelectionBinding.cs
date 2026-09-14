@@ -21,7 +21,7 @@ internal sealed class RenderPackSelectionBinding : IDisposable
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _log = log ?? (_ => { });
         _settings.DisplayChanged += OnDisplayChanged;
-        _controller.Request(_settings.Display.RenderPack);
+        _controller.Request(_settings.EffectiveDisplay.RenderPack);
     }
 
     internal RenderPackActivationSnapshot ApplyAtFrameBoundary(
@@ -31,7 +31,7 @@ internal sealed class RenderPackSelectionBinding : IDisposable
         RenderPackActivationSnapshot snapshot = _controller.ApplyAtFrameBoundary(extent);
         if (snapshot.State != RenderPackActivationState.FailedToRetail
             || snapshot.ActivationGeneration == _fallbackPersistedGeneration
-            || _settings.Display.RenderPack.IsRetail)
+            || _settings.EffectiveDisplay.RenderPack.IsRetail)
             return snapshot;
 
         _fallbackPersistedGeneration = snapshot.ActivationGeneration;
@@ -48,7 +48,7 @@ internal sealed class RenderPackSelectionBinding : IDisposable
             _suppressDisplayEdge = false;
         }
 
-        if (_settings.Display.RenderPack.IsRetail)
+        if (_settings.EffectiveDisplay.RenderPack.IsRetail)
         {
             _log(
                 $"[render-pack] selection failed; persisted acdream default (retail-faithful): "

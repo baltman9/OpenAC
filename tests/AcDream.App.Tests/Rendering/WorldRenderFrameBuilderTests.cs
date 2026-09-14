@@ -818,6 +818,8 @@ public sealed class WorldRenderFrameBuilderTests
 
     private sealed class RecordingMembership : IDirectionalShadowCellMembership
     {
+        public ulong Revision => 1UL;
+
         public bool TryGetRetailCellArray(
             uint entityId,
             out IReadOnlyList<uint> cells)

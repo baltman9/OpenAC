@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Silk.NET.Vulkan;
 using Semaphore = Silk.NET.Vulkan.Semaphore;
 
@@ -27,7 +28,6 @@ internal interface IVulkanBackbuffer
 
 internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineFormatVariantHost
 {
-    internal const int DefaultRingCapacityBytesPerSlot = 16 * 1024 * 1024;
 
     internal const PipelineStageFlags2 AcquiredImageWaitStage =
         PipelineStageFlags2.ColorAttachmentOutputBit;
@@ -76,7 +76,7 @@ internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineF
         IVulkanBackbuffer? backbuffer = null,
         string? shaderSpirvDirectory = null,
         string? pipelineCacheDirectory = null,
-        int ringCapacityBytesPerSlot = DefaultRingCapacityBytesPerSlot,
+        GpuMemoryProfile? memoryProfile = null,
         int framesInFlight = VulkanFrameFlightController.DefaultFramesInFlight,
         bool retainBackbufferCapture = false)
     {
@@ -93,7 +93,9 @@ internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineF
         _backbuffer = backbuffer;
         _debugNames = debugNames ?? throw new ArgumentNullException(nameof(debugNames));
         DepthStencilFormat = formats.DepthStencilFormat;
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(ringCapacityBytesPerSlot);
+        GpuMemoryProfile memory = memoryProfile ?? GpuMemoryProfile.Default;
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(memory.RingCapacityBytesPerSlot);
+        MemoryProfile = memory;
 
         Capabilities = new GpuCapabilityRecord
         {
@@ -153,8 +155,20 @@ internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineF
         _flights = new VulkanFrameFlightController(
             new VulkanTimelineApi(_vk, _device, _timeline),
             framesInFlight);
-        _allocator = new VulkanDeviceMemoryAllocator(_vk, physicalDevice, _device);
-        _uploads = new VulkanUploadQueue(_vk, _device, _allocator, _flights, _debugNames);
+        _destroyedBuffers = new VulkanDestroyedBufferLedger(_flights.SlotCount);
+        _allocator = new VulkanDeviceMemoryAllocator(
+            _vk,
+            physicalDevice,
+            _device,
+            memory.BlockSizeBytes,
+            memory.DedicatedThresholdBytes);
+        _uploads = new VulkanUploadQueue(
+            _vk,
+            _device,
+            _allocator,
+            _flights,
+            _debugNames,
+            memory.StagingCapacityBytes);
 
         int slots = _flights.SlotCount;
         _commandPools = new CommandPool[slots];
@@ -192,7 +206,7 @@ internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineF
                 "vkCreateSemaphore (RHI image acquired)");
             _imageAcquired[slot] = acquired;
 
-            _ringStates[slot] = new VulkanRingBufferState((ulong)ringCapacityBytesPerSlot);
+            _ringStates[slot] = new VulkanRingBufferState((ulong)memory.RingCapacityBytesPerSlot);
             _ringBuffers[slot] = new VulkanGpuBuffer(
                 _vk,
                 _device,
@@ -202,13 +216,14 @@ internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineF
                 _debugNames,
                 new GpuBufferDescription(
                     $"vk-ring-slot-{slot}",
-                    ringCapacityBytesPerSlot,
+                    memory.RingCapacityBytesPerSlot,
                     GpuBufferUsage.Storage
                         | GpuBufferUsage.Uniform
                         | GpuBufferUsage.Indirect
                         | GpuBufferUsage.Vertex
                         | GpuBufferUsage.Index,
-                    GpuMemoryResidency.HostWritable));
+                    GpuMemoryResidency.HostWritable),
+            NoteBufferDestroyed);
 
             if (!_ringBuffers[slot].IsMapped)
             {
@@ -246,8 +261,15 @@ internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineF
     public IGpuBuffer CreateBuffer(in GpuBufferDescription description)
     {
         ThrowIfDisposed();
-        return new VulkanGpuBuffer(_vk, _device, _allocator, _uploads, _flights, _debugNames, description);
+        return new VulkanGpuBuffer(
+            _vk, _device, _allocator, _uploads, _flights, _debugNames, description, NoteBufferDestroyed);
     }
+
+    // Destroyed buffer handles, taken per flight slot at BeginFrame so the
+    // slot's descriptor sets drop them; see the ledger for the bookkeeping.
+    private readonly VulkanDestroyedBufferLedger _destroyedBuffers;
+
+    private void NoteBufferDestroyed(ulong handle) => _destroyedBuffers.Note(handle);
 
     public void QueueDeviceAction(Action action)
     {
@@ -282,7 +304,7 @@ internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineF
 
         _uploads.ReleaseCompleted(CompletedSerial());
         _ringStates[slot].Reset();
-        FrameBindingsAt(slot).BeginFrame();
+        FrameBindingsAt(slot).BeginFrame(_destroyedBuffers.Take(slot));
 
         _acquiredImageIndex = null;
         if (_backbuffer is not null)
@@ -348,10 +370,29 @@ internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineF
         return new GpuRingAllocation(buffer, (uint)offset, data);
     }
 
+    private int _memoryReportFrames;
+
+    public GpuMemoryProfile MemoryProfile { get; }
+
     internal void EndFrame(VulkanGpuFrame frame)
     {
         if (!ReferenceEquals(_openFrame, frame))
             return;
+
+        // Opt-in with the frame profiler: one line every ~600 frames naming
+        // what holds the device memory, so a memory question starts from
+        // the allocator's own accounting instead of the process counters.
+        if (AcDream.Core.Rendering.RenderingDiagnostics.FrameProfEnabled
+            && ++_memoryReportFrames >= 600)
+        {
+            _memoryReportFrames = 0;
+            ulong ringPeak = 0;
+            foreach (VulkanRingBufferState ring in _ringStates)
+                ringPeak = Math.Max(ringPeak, ring.PeakAllocatedBytes);
+            Console.WriteLine(
+                $"[gpu-mem] {_allocator.Describe()} | {_allocator.DescribeOwners()} | "
+                + $"ring-peak {ringPeak / 1024} KiB of {MemoryProfile.RingCapacityBytesPerSlot / 1024} KiB");
+        }
 
         int slot = frame.SlotIndex;
         CommandBuffer commands = _commandBuffers[slot];

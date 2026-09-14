@@ -124,7 +124,6 @@ public sealed class PluginSidePanelTests
 
         Assert.Equal(0f, handle.Left);
         Assert.Equal(42f, handle.Top);
-        Assert.True(frame.ConstrainDragToParent);
         Assert.True(frame.ConstrainResizeToParent);
 
         frame.Left = 700f;

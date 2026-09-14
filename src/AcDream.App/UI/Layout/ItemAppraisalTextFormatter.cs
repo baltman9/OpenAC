@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using AcDream.Core.Items;
+using AcDream.Core.Player;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Spells;
 
@@ -40,7 +41,7 @@ public static class ItemAppraisalTextFormatter
         ShowValueAndBurden(report, properties);
         ShowTinkering(report, properties);
         ShowSetAndRatings(report, properties);
-        ShowWeaponAndArmor(report, obj, appraisal);
+        ShowWeaponAndArmor(report, obj, appraisal, names);
         ShowDefenseModifiers(report, appraisal);
         ShowArmorModifiers(report, appraisal);
         ShowShortMagicInfo(report, appraisal, resolveSpell);
@@ -48,7 +49,7 @@ public static class ItemAppraisalTextFormatter
         ShowUsage(report, properties);
         ShowLevelLimits(report, properties);
         ShowWieldRequirements(report, properties, names);
-        ShowUsageLimits(report, properties);
+        ShowUsageLimits(report, properties, names);
         ShowItemLevel(report, properties);
         ShowActivationRequirements(
             report,
@@ -173,7 +174,8 @@ public static class ItemAppraisalTextFormatter
     private static void ShowWeaponAndArmor(
         RetailReportBuilder report,
         ClientObject obj,
-        AppraiseInfoParser.Parsed appraisal)
+        AppraiseInfoParser.Parsed appraisal,
+        RetailAppraisalNameResolver names)
     {
         PropertyBundle properties = appraisal.Properties;
         uint validLocations = obj.IsHook && appraisal.HookProfile is { } hook
@@ -202,10 +204,15 @@ public static class ItemAppraisalTextFormatter
         if (hasWeaponOrShieldLocation
             && appraisal.WeaponProfile is { } weapon)
         {
-            string skill = SkillName((int)weapon.WeaponSkill);
-            int weaponType = properties.GetInt(353u);
-            report.Line(
-                $"Skill: {skill}{WeaponSubtype(weaponType)}");
+            // The weapon line is the one appraisal row named from the
+            // built-in list rather than the authored data, and the game omits
+            // the row outright for a skill that list does not name.
+            if (RetailSkillNames.TryGetName((int)weapon.WeaponSkill, out string? skill))
+            {
+                int weaponType = properties.GetInt(353u);
+                report.Line(
+                    $"Skill: {skill}{WeaponSubtype(weaponType)}");
+            }
 
             bool launcher = (validLocations & (uint)EquipMask.MissileWeapon) != 0
                             && ammoType != 0u;
@@ -225,9 +232,11 @@ public static class ItemAppraisalTextFormatter
                     : weapon.Damage.ToString(CultureInfo.InvariantCulture);
                 if (!launcher)
                 {
-                    damage += TryDamageTypeName(weapon.DamageType, out string? type)
-                        ? $", {type}"
-                        : ", unknown type";
+                    // Only a mask with no type at all is "unknown"; any set
+                    // bits are named, however many there are.
+                    damage += weapon.DamageType == 0u
+                        ? ", unknown type"
+                        : $", {DamageTypeToString(weapon.DamageType)}";
                 }
             }
             ItemAppraisalFontStyle damageStyle = EnchantmentStyle(
@@ -246,7 +255,7 @@ public static class ItemAppraisalTextFormatter
                 report.Line(
                     $"Elemental Damage Bonus: "
                     + $"{elementalBonus.ToString(CultureInfo.InvariantCulture)}, "
-                    + $"{DamageTypeName(weapon.DamageType)}.");
+                    + $"{DamageTypeToString(weapon.DamageType)}.");
 
             if (launcher)
             {
@@ -562,7 +571,7 @@ public static class ItemAppraisalTextFormatter
         if (properties.Floats.ContainsKey(157u)
             && properties.Ints.TryGetValue(263u, out int resistanceType))
             special.Add(
-                $"Resistance Cleaving: {DamageTypeName((uint)resistanceType)}");
+                $"Resistance Cleaving: {DamageTypeToString((uint)resistanceType)}");
         if (properties.DataIds.ContainsKey(55u))
             special.Add("Cast on Strike");
         if (properties.GetBool(99u))
@@ -712,7 +721,12 @@ public static class ItemAppraisalTextFormatter
         string basePrefix = requirement is 2 or 4 or 6 ? "base " : string.Empty;
         return requirement switch
         {
-            1 or 2 or 8 => basePrefix + SkillName(stat),
+            // A wield requirement appends the authored name and nothing at
+            // all when there is none, leaving just the "base " prefix.
+            1 or 2 or 8 => basePrefix
+                + (names.TryResolveSkill(stat, out string? skillName)
+                    ? skillName
+                    : string.Empty),
             3 or 4 => basePrefix + PrimaryAttributeName(stat),
             5 or 6 => basePrefix + SecondaryAttributeName(stat),
             7 => "level",
@@ -731,7 +745,8 @@ public static class ItemAppraisalTextFormatter
 
     private static void ShowUsageLimits(
         RetailReportBuilder report,
-        PropertyBundle properties)
+        PropertyBundle properties,
+        RetailAppraisalNameResolver names)
     {
         int level = properties.GetInt(369u);
         int skill = properties.GetInt(366u);
@@ -749,11 +764,12 @@ public static class ItemAppraisalTextFormatter
                 $"Use requires level {level.ToString(CultureInfo.InvariantCulture)}.");
         if (skill > 0 && difficulty > 0)
             report.Line(
-                $"Use requires {UsageSkillName(skill)} of at least "
+                $"Use requires {UsageSkillName(skill, names)} of at least "
                 + $"{difficulty.ToString(CultureInfo.InvariantCulture)}.");
         if (specializedSkill > 0)
             report.Line(
-                $"Use requires specialized {UsageSkillName(specializedSkill)}.");
+                $"Use requires specialized "
+                + $"{UsageSkillName(specializedSkill, names)}.");
     }
 
     private static void ShowItemLevel(
@@ -821,9 +837,16 @@ public static class ItemAppraisalTextFormatter
 
         int skillLevel = properties.GetInt(115u);
         int skill = properties.GetInt(176u);
-        if (skillLevel > 0 && skill > 0)
+        // Unlike a use requirement, an activation requirement the authored
+        // data cannot name is left out of the list altogether.
+        if (skillLevel > 0
+            && skill > 0
+            && names.TryResolveSkill(skill, out string? activationSkill))
+        {
             requirements.Add(
-                $"{UsageSkillName(skill)}: {skillLevel.ToString(CultureInfo.InvariantCulture)}");
+                $"{activationSkill}: "
+                + $"{skillLevel.ToString(CultureInfo.InvariantCulture)}");
+        }
         int attributeLevel = properties.GetInt(258u);
         int attribute = properties.GetInt(257u);
         if (attributeLevel > 0 && attribute > 0)
@@ -875,7 +898,7 @@ public static class ItemAppraisalTextFormatter
             && properties.Ints.TryGetValue(45u, out int damageType))
         {
             report.Paragraph(
-                $"Damage bonus for {DamageTypeName((uint)damageType)} spells:",
+                $"Damage bonus for {DamageTypeToString((uint)damageType)} spells:",
                 EnchantmentStyle(
                     appraisal.ResistEnchantments,
                     0x2000u));
@@ -1259,24 +1282,37 @@ public static class ItemAppraisalTextFormatter
             damage > 10d ? "G4" : "G3",
             CultureInfo.InvariantCulture);
 
-    private static bool TryDamageTypeName(uint type, out string? name)
+    /// <summary>
+    /// The damage types a mask names, in the game's own order and joined
+    /// with "/" — a weapon that both slashes and pierces is
+    /// "Slashing/Piercing". Only the named bits appear; a mask with none of
+    /// them is the empty string, which is what the game shows too.
+    /// </summary>
+    private static readonly (uint Bit, string Name)[] DamageTypeNames =
+    [
+        (0x0000_0001u, "Slashing"),
+        (0x0000_0002u, "Piercing"),
+        (0x0000_0004u, "Bludgeoning"),
+        (0x0000_0008u, "Cold"),
+        (0x0000_0010u, "Fire"),
+        (0x0000_0020u, "Acid"),
+        (0x0000_0040u, "Electrical"),
+        (0x0000_0400u, "Nether"),
+        (0x1000_0000u, "Prismatic"),
+    ];
+
+    private static string DamageTypeToString(uint type)
     {
-        name = type switch
+        var names = new System.Text.StringBuilder();
+        foreach ((uint bit, string name) in DamageTypeNames)
         {
-            1u => "Slashing",
-            2u => "Piercing",
-            4u => "Bludgeoning",
-            8u => "Cold",
-            16u => "Fire",
-            32u => "Acid",
-            64u => "Electric",
-            128u => "Health",
-            256u => "Stamina",
-            512u => "Mana",
-            1024u => "Nether",
-            _ => null,
-        };
-        return name is not null;
+            if ((type & bit) == 0u)
+                continue;
+            if (names.Length > 0)
+                names.Append('/');
+            names.Append(name);
+        }
+        return names.ToString();
     }
 
     private static string ClothingCoverage(uint priority)
@@ -1610,11 +1646,6 @@ public static class ItemAppraisalTextFormatter
             : ItemAppraisalFontStyle.Detrimental;
     }
 
-    private static string DamageTypeName(uint type)
-        => TryDamageTypeName(type, out string? name)
-            ? name!
-            : $"type {type.ToString(CultureInfo.InvariantCulture)}";
-
     private static string WeaponSubtype(int type) => type switch
     {
         1 => " (Unarmed Weapon)",
@@ -1630,71 +1661,13 @@ public static class ItemAppraisalTextFormatter
         _ => string.Empty,
     };
 
-    internal static string SkillName(int skill) => skill switch
-    {
-        1 => "Axe",
-        2 => "Bow",
-        3 => "Crossbow",
-        4 => "Dagger",
-        5 => "Mace",
-        6 => "Melee Defense",
-        7 => "Missile Defense",
-        8 => "Sling",
-        9 => "Spear",
-        10 => "Staff",
-        11 => "Sword",
-        12 => "Thrown Weapon",
-        13 => "Unarmed Combat",
-        14 => "Arcane Lore",
-        15 => "Magic Defense",
-        16 => "Mana Conversion",
-        17 => "Spellcraft",
-        18 => "Item Tinkering",
-        19 => "Person Appraisal",
-        20 => "Deception",
-        21 => "Healing",
-        22 => "Jump",
-        23 => "Lockpick",
-        24 => "Run",
-        25 => "Awareness",
-        26 => "Armor Repair",
-        27 => "Creature Appraisal",
-        28 => "Weapon Tinkering",
-        29 => "Armor Tinkering",
-        30 => "Magic Item Tinkering",
-        31 => "Creature Enchantment",
-        32 => "Item Enchantment",
-        33 => "Life Magic",
-        34 => "War Magic",
-        35 => "Leadership",
-        36 => "Loyalty",
-        37 => "Fletching",
-        38 => "Alchemy",
-        39 => "Cooking",
-        40 => "Salvaging",
-        41 => "Two Handed Combat",
-        42 => "Gearcraft",
-        43 => "Void Magic",
-        44 => "Heavy Weapons",
-        45 => "Light Weapons",
-        46 => "Finesse Weapons",
-        47 => "Missile Weapons",
-        49 => "Dual Wield",
-        50 => "Recklessness",
-        51 => "Sneak Attack",
-        52 => "Dirty Fighting",
-        53 => "Challenge",
-        54 => "Summoning",
-        _ => $"Skill {skill.ToString(CultureInfo.InvariantCulture)}",
-    };
-
-    private static string UsageSkillName(int skill)
-    {
-        string name = SkillName(skill);
-        return name.StartsWith("Skill ", StringComparison.Ordinal)
-            ? "Unknown Skill"
-            : name;
-    }
+    /// <summary>A use requirement still prints its line for a skill the
+    /// authored data does not name, saying "Unknown Skill" in its place.
+    /// </summary>
+    private static string UsageSkillName(
+        int skill,
+        RetailAppraisalNameResolver names)
+        => names.TryResolveSkill(skill, out string? name) ? name : "Unknown Skill";
 
     private static string PrimaryAttributeName(int attribute) => attribute switch
     {

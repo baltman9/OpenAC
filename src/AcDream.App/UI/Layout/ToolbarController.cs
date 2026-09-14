@@ -37,6 +37,7 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
     private readonly UiButton? _ammoIndicator;
     private readonly List<(uint PanelId, UiButton Button)> _panelButtons = new();
     private readonly ClientObjectTable _repo;
+    private readonly Func<ClientObject, string> _resolveAppropriateName;
     private readonly CombatState? _combatState;
     private readonly ShortcutStore _store;
     private readonly Func<ItemType, uint, uint, uint, uint, uint> _iconIds;  // (itemType, icon, underlay, overlay, effects) → GL tex
@@ -64,6 +65,7 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
         ShortcutStore shortcuts,
         Func<ItemType, uint, uint, uint, uint, uint> iconIds,
         Action<uint> useItem,
+        Func<ClientObject, string> resolveAppropriateName,
         CombatState? combatState,
         uint[]? regularDigits,
         uint[]? ghostedDigits,
@@ -80,7 +82,9 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
         UiDatFont? ammoFont = null,
         Func<ItemType, uint, uint, uint, uint, uint>? dragIconIds = null)
     {
+        ArgumentNullException.ThrowIfNull(resolveAppropriateName);
         _repo = repo;
+        _resolveAppropriateName = resolveAppropriateName;
         _combatState = combatState;
         _store = shortcuts ?? throw new ArgumentNullException(nameof(shortcuts));
         _iconIds = iconIds;
@@ -110,7 +114,8 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
                 list.Cell.SlotIndex  = i;
                 list.Cell.SourceKind = ItemDragSource.ShortcutBar;
                 list.Cell.DragAcceptSprite = 0x060011FAu;
-                list.Cell.TooltipTextResolve = g => _repo.Get(g)?.GetTooltipDisplayName();
+                list.Cell.TooltipTextResolve = g => ItemTooltipCaption.Resolve(
+                    _repo, g, _resolveAppropriateName);
             }
         }
 
@@ -253,6 +258,10 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
         ShortcutStore shortcuts,
         Func<ItemType, uint, uint, uint, uint, uint> iconIds,
         Action<uint> useItem,
+        /// <summary>Composes an item's displayed name, material prefix
+        /// included. Required: without it a cell would quietly caption the
+        /// plain name and disagree with the selection caption.</summary>
+        Func<ClientObject, string> resolveAppropriateName,
         CombatState? combatState = null,
         uint[]? regularDigits = null,
         uint[]? ghostedDigits = null,
@@ -269,7 +278,8 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
         UiDatFont? ammoFont = null,
         Func<ItemType, uint, uint, uint, uint, uint>? dragIconIds = null)
     {
-        var c = new ToolbarController(layout, repo, shortcuts, iconIds, useItem, combatState,
+        var c = new ToolbarController(layout, repo, shortcuts, iconIds, useItem,
+                                      resolveAppropriateName, combatState,
                                       regularDigits, ghostedDigits, emptyDigits, itemInteraction,
                                       sendAddShortcut, sendRemoveShortcut, toggleCombat, selectItem,
                                       selectedObjectId, selection, playerGuid, sendPutItemInContainer, ammoFont,
@@ -312,7 +322,12 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
 
     public void Populate()
     {
-        foreach (var list in _slots) list?.Cell.Clear();
+        foreach (var list in _slots)
+        {
+            if (list is null) continue;
+            list.Cell.Clear();
+            list.Cell.SetStructure(0, 0);
+        }
 
         for (int slot = 0; slot < _slots.Length; slot++)
         {
@@ -323,10 +338,13 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
             if (list is null) continue;
             var item = _repo.Get(guid);
             if (item is null) continue;
-            uint tex = _iconIds(item.Type, item.IconId, item.IconUnderlayId, item.IconOverlayId, item.Effects);
-            uint dragTex = _dragIconIds?.Invoke(
-                item.Type, item.IconId, item.IconUnderlayId, item.IconOverlayId, item.Effects) ?? 0u;
+            var (type, icon, underlay, overlay, effects) = guid == (_playerGuid?.Invoke() ?? 0u)
+                ? (ItemType.Container, InventoryController.PlayerPackBaseIcon, 0u, 0u, 0u)
+                : (item.Type, item.IconId, item.IconUnderlayId, item.IconOverlayId, item.Effects);
+            uint tex = _iconIds(type, icon, underlay, overlay, effects);
+            uint dragTex = _dragIconIds?.Invoke(type, icon, underlay, overlay, effects) ?? 0u;
             list.Cell.SetItem(guid, tex, entry, dragTex);
+            list.Cell.SetStructure(item.Structure, item.MaxStructure);
         }
 
         RestampShortcutNumbers();
@@ -370,7 +388,7 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
 
     private void WireClick(UiItemList list)
     {
-        list.Cell.Clicked = () =>
+        list.Cell.DoubleClicked = () =>
         {
             if (list.Cell.ItemId != 0)
             {

@@ -141,7 +141,8 @@ public sealed class AmbientSoundController
 
         if (firing.Position is { } position)
         {
-            _engine.PlayAmbient3DWave(waveId, wave, position, volume, entry.Priority);
+            _engine.PlayAmbient3DWave(
+                waveId, wave, position, volume, entry.Priority);
             return;
         }
 

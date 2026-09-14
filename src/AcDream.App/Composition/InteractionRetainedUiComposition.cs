@@ -49,6 +49,7 @@ internal sealed record InteractionRetainedUiDependencies(
     AcDream.App.Streaming.DeferredLocalPlayerTeleportNetworkSink TeleportSink,
     string KeyBindingsFilePath,
     RuntimeSettingsController Settings,
+    AcDream.App.Audio.AudioMixerSettings AudioMixer,
     BuildingDegradeController BuildingDegrades,
     GameRuntime Runtime,
     IRuntimeCombatAttackOperations CombatAttackOperations,
@@ -291,6 +292,23 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
             () => buildingDegrades.Fps,
             () => buildingDegrades.ActiveMultiplier,
             isVisible);
+    }
+
+    /// <summary>
+    /// The Config tab's mixer seam: the one save-then-apply owner the
+    /// <c>/mixer</c> command uses, and the same line about where the change
+    /// took effect, since a row has no reply of its own to put it in.
+    /// </summary>
+    internal static ConfigOptionsPageController.AudioMixerBindings
+        CreateAudioMixerBindings(
+            AcDream.App.Audio.AudioMixerSettings mixer,
+            Action<string> say)
+    {
+        ArgumentNullException.ThrowIfNull(mixer);
+        ArgumentNullException.ThrowIfNull(say);
+        return new ConfigOptionsPageController.AudioMixerBindings(
+            () => mixer.Current,
+            options => mixer.ChangeAndReport(options, say));
     }
 
     public IDisposable BindCombatTarget(
@@ -607,7 +625,7 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                     guid => d.Actions.Selection.Select(
                         guid,
                         SelectionChangeSource.Inventory),
-                    guid => late.Session.TryUseItem(guid, d.Log),
+                    guid => itemInteraction.UseWithCurrentSelection(guid),
                     (tab, position, spellId) =>
                         late.GameRuntime.AddFavorite(tab, position, spellId),
                     (tab, spellId) =>
@@ -630,7 +648,10 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                     () => d.Character.Options.GetOptionBit(
                         CharacterOptionId.VividTargetingIndicator),
                     late.Selection.ResolveVividTargetInfo,
-                    late.SelectionCamera.UiSnapshot),
+                    late.SelectionCamera.UiSnapshot,
+                    RelationshipFor: guid => new AcDream.Core.Ui.RadarRelationshipTraits(
+                        IsFellowshipMember: d.Runtime.Fellowship.TryGetMember(guid, out _),
+                        IsFellowshipLeader: d.Runtime.Fellowship.Snapshot.LeaderGuid == guid)),
                 Indicators: new IndicatorRuntimeBindings(
                     d.Character.Spellbook,
                     d.Inventory.Objects,
@@ -780,6 +801,11 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                     SaveDisplay: d.Settings.SaveDisplay,
                     LoadAudio: () => d.Settings.Audio,
                     SaveAudio: d.Settings.SaveAudio,
+                    AudioMixer: CreateAudioMixerBindings(
+                        d.AudioMixer,
+                        text => d.Communication.AddText(
+                            text,
+                            RetailLogTextType.ClientLocal)),
                     LoadRenderPackChoices: d.RenderPackCatalog is null
                         ? null
                         : () => d.RenderPackCatalog.Snapshot().Entries
@@ -960,6 +986,30 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                 Connection: new ConnectionRuntimeBindings(
                     () => late.GameRuntime.Connection, d.Window.Close,
                     ShowProgress: d.Options.LiveCharacterSelector is null),
+                Book: new BookRuntimeBindings(
+                    Book: d.Runtime.BookOwner.View,
+                    Commands: d.Runtime.BookOwner,
+                    SendBookPageData: (bookGuid, page) =>
+                        late.Session.CurrentSession?.SendBookPageData(bookGuid, page),
+                    SendBookAddPage: bookGuid =>
+                        late.Session.CurrentSession?.SendBookAddPage(bookGuid),
+                    SendBookModifyPage: (bookGuid, page, text) =>
+                        late.Session.CurrentSession?.SendBookModifyPage(
+                            bookGuid, page, text),
+                    SendBookDeletePage: (bookGuid, page) =>
+                        late.Session.CurrentSession?.SendBookDeletePage(
+                            bookGuid, page),
+                    ShowsAuthorAccount: () =>
+                        d.Character.LocalPlayer.Properties.GetBool(
+                            (uint)AcDream.Core.Properties.PropertyBool.IsAdmin)
+                        || d.Character.LocalPlayer.Properties.GetBool(
+                            (uint)AcDream.Core.Properties.PropertyBool.IsArch)
+                        || d.Character.LocalPlayer.Properties.GetBool(
+                            (uint)AcDream.Core.Properties.PropertyBool.IsSentinel)
+                        || d.Character.LocalPlayer.Properties.GetBool(
+                            (uint)AcDream.Core.Properties.PropertyBool.IsAdvocate)
+                        || d.Character.LocalPlayer.Properties.GetBool(
+                            (uint)AcDream.Core.Properties.PropertyBool.IsPsr)),
                 IsGameplayDisplay: () => d.Settings.IsGameplayDisplay,
                 SynchronizeDisplayPhase: () =>
                 {

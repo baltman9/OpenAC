@@ -9,11 +9,21 @@ internal interface IOpenAlResourceApi
     ALContext? ContextApi { get; }
 
     nint OpenDevice();
-    nint CreateContext(nint device);
+
+    /// <summary>True when this device lets a context turn its output limiter off.</summary>
+    bool SupportsOutputLimiterControl(nint device);
+
+    nint CreateContext(nint device, int[]? attributes);
+
+    /// <summary>
+    /// The device's current output-limiter setting, or null when the device does
+    /// not answer the question.
+    /// </summary>
+    int? ReadOutputLimiterState(nint device);
+
     bool MakeContextCurrent(nint context);
     uint GenerateSource();
     void Configure3DSource(uint source);
-    void ConfigureUiSource(uint source);
     void DisableAlDistanceAttenuation();
     void StopSource(uint source);
     void DeleteSource(uint source);
@@ -45,8 +55,45 @@ internal sealed unsafe class SilkOpenAlResourceApi : IOpenAlResourceApi
 
     public nint OpenDevice() => (nint)ContextApi.OpenDevice(string.Empty);
 
-    public nint CreateContext(nint device) =>
-        (nint)ContextApi.CreateContext((Device*)device, null);
+    public bool SupportsOutputLimiterControl(nint device) =>
+        ContextApi.IsExtensionPresent(
+            (Device*)device,
+            OpenAlContextAttributes.OutputLimiterExtension);
+
+    public nint CreateContext(nint device, int[]? attributes)
+    {
+        if (attributes is null)
+            return (nint)ContextApi.CreateContext((Device*)device, null);
+
+        fixed (int* pinned = attributes)
+            return (nint)ContextApi.CreateContext((Device*)device, pinned);
+    }
+
+    public int? ReadOutputLimiterState(nint device)
+    {
+        int value = OpenAlContextAttributes.Unanswered;
+        ContextApi.GetError((Device*)device);   // clear anything already pending
+        ContextApi.GetContextProperty(
+            (Device*)device,
+            (GetContextInteger)OpenAlContextAttributes.OutputLimiter,
+            1,
+            &value);
+
+        ContextError error = ContextApi.GetError((Device*)device);
+        int? state = OpenAlContextAttributes.ReadLimiterState(
+            value,
+            errored: error != ContextError.NoError);
+        if (state is null)
+        {
+            // Say exactly what the device left behind, so a driver that wrote
+            // nothing can be told apart from one that objected. Silent on a
+            // device that answers, which is every device that supports this.
+            Console.WriteLine(FormattableString.Invariant(
+                $"[audio] output limiter read answered nothing: raw 0x{value:X8}, error 0x{(int)error:X4}"));
+        }
+
+        return state;
+    }
 
     public bool MakeContextCurrent(nint context) =>
         ContextApi.MakeContextCurrent((Context*)context);
@@ -58,13 +105,6 @@ internal sealed unsafe class SilkOpenAlResourceApi : IOpenAlResourceApi
         AudioApi.SetSourceProperty(source, SourceFloat.Gain, 1f);
         AudioApi.SetSourceProperty(source, SourceFloat.RolloffFactor, 0f);
         AudioApi.SetSourceProperty(source, SourceBoolean.SourceRelative, true);
-        AudioApi.SetSourceProperty(source, SourceBoolean.Looping, false);
-    }
-
-    public void ConfigureUiSource(uint source)
-    {
-        AudioApi.SetSourceProperty(source, SourceBoolean.SourceRelative, true);
-        AudioApi.SetSourceProperty(source, SourceFloat.Gain, 1f);
         AudioApi.SetSourceProperty(source, SourceBoolean.Looping, false);
     }
 
@@ -114,6 +154,22 @@ internal sealed class OpenAlResourceLifetime : IRetryableResourceCleanup
     public nint Device => _device;
     public nint Context => _context;
 
+    /// <summary>Whether this device let us ask for the output limiter at all.</summary>
+    public bool OutputLimiterControllable { get; private set; }
+
+    /// <summary>
+    /// What the device reports its limiter doing once the context is live, or
+    /// null when it answered nothing. There is deliberately no reading from
+    /// before the context: the setting does not exist until a context is
+    /// created, so an earlier read can only ever say "off" and would prove
+    /// nothing.
+    /// </summary>
+    public int? OutputLimiterReported { get; private set; }
+
+    /// <summary>The one line saying what we asked for and what the device says.</summary>
+    public string DescribeOutputLimiter() =>
+        OpenAlContextAttributes.Describe(OutputLimiterControllable, OutputLimiterReported);
+
     public bool IsCleanupComplete =>
         _sources.All(static source => source.Released)
         && _buffers.All(static buffer => buffer.Released)
@@ -134,7 +190,12 @@ internal sealed class OpenAlResourceLifetime : IRetryableResourceCleanup
             throw new InvalidOperationException("An OpenAL device is required before its context.");
         if (_context != 0)
             throw new InvalidOperationException("The OpenAL context already exists.");
-        _context = _api.CreateContext(_device);
+
+        OutputLimiterControllable = _api.SupportsOutputLimiterControl(_device);
+
+        _context = _api.CreateContext(
+            _device,
+            OpenAlContextAttributes.Build(OutputLimiterControllable));
         return _context != 0;
     }
 
@@ -143,6 +204,10 @@ internal sealed class OpenAlResourceLifetime : IRetryableResourceCleanup
         if (_context == 0)
             throw new InvalidOperationException("An OpenAL context is required before activation.");
         _contextCurrent = _api.MakeContextCurrent(_context);
+        // The limiter setting only exists once a context is live, so this is the
+        // first and only moment the question can be asked meaningfully.
+        if (_contextCurrent && OutputLimiterControllable)
+            OutputLimiterReported = _api.ReadOutputLimiterState(_device);
         return _contextCurrent;
     }
 
@@ -154,12 +219,21 @@ internal sealed class OpenAlResourceLifetime : IRetryableResourceCleanup
         return source;
     }
 
-    public uint CreateUiSource()
+    /// <summary>
+    /// Release one source while the engine keeps running — the mixer pool
+    /// shrinking. The caller has already stopped whatever it was playing. The
+    /// entry leaves the owned list rather than staying in it as released:
+    /// resizing the pool repeatedly would otherwise grow the list without
+    /// bound, and teardown would walk entries it has nothing to do.
+    /// </summary>
+    public void ReleaseSource(uint source)
     {
-        uint source = _api.GenerateSource();
-        _sources.Add(new SourceState(source));
-        _api.ConfigureUiSource(source);
-        return source;
+        int index = _sources.FindLastIndex(candidate =>
+            candidate.Id == source && !candidate.Released);
+        if (index < 0)
+            throw new InvalidOperationException($"OpenAL source {source} is not owned.");
+        _api.DeleteSource(source);
+        _sources.RemoveAt(index);
     }
 
     public void OwnBuffer(uint buffer)

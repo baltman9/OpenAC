@@ -123,6 +123,16 @@ internal interface IAtmosphericWorldGraphRuntime : IRenderPackRuntime
 {
     IGpuRenderTarget PrepareWorldTarget(int width, int height, int sampleCount);
 
+    /// <summary>
+    /// Releases the world-pass targets (HDR colour and depth, bloom, sun
+    /// mask and rays, volumetric) while no world pass runs; the next
+    /// <see cref="PrepareWorldTarget"/> builds them again. They are the
+    /// largest video-memory owners a background client holds.
+    /// </summary>
+    void ReleaseWorldTargets()
+    {
+    }
+
     void RenderPostProcess(
         IGpuFrame frame,
         in AtmosphericFrameInputs inputs);
@@ -604,6 +614,20 @@ internal sealed class AtmosphericPostProcessGraph :
         _cpuStageProfiler?.Reset();
         previous?.Dispose();
         return candidate.World;
+    }
+
+    public void ReleaseWorldTargets()
+    {
+        if (_disposed)
+            return;
+        _volumetric?.ReleaseTarget();
+        TargetSet? targets = _targets;
+        if (targets is null)
+            return;
+        _targets = null;
+        ResourceGeneration = checked(ResourceGeneration + 1);
+        _cpuStageProfiler?.Reset();
+        targets.Dispose();
     }
 
     public void RenderPostProcess(

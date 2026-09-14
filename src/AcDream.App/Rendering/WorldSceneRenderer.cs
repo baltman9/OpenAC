@@ -2,7 +2,9 @@ using AcDream.App.Rendering.Scene;
 using AcDream.App.Rendering.Selection;
 using AcDream.App.Rendering.Packs;
 using AcDream.App.Rendering.Vfx;
+using AcDream.App.Settings;
 using AcDream.App.Streaming;
+using AcDream.UI.Abstractions.Panels.Settings;
 using AcDream.Core.Rendering;
 
 namespace AcDream.App.Rendering;
@@ -30,6 +32,46 @@ internal interface IPreparedWorldSceneFramePhase : IWorldSceneFramePhase
         in PreparedWorldSceneFrame prepared);
 
     void CancelPreparedEnhanced(in PreparedWorldSceneFrame prepared);
+}
+
+/// <summary>How much of a building's authored detail ladder the frame walk is
+/// allowed to honour. Asked once per frame, so a change the player makes takes
+/// effect on the next one.</summary>
+internal interface IWorldSceneBuildingDetailPolicy
+{
+    /// <summary>True when a building whose ladder would have it draw nothing at
+    /// this distance falls back to the nearest cheaper mesh the ladder does
+    /// name, rather than disappearing.</summary>
+    bool KeepDistantBuildings { get; }
+}
+
+/// <summary>Whether the world is drawn at all this frame. The UI-only switch says no: the panels, chat, radar and plugins stay, the world pass is skipped and the streaming window shrinks.</summary>
+internal interface IWorldScenePresentationPolicy
+{
+    bool DrawWorld { get; }
+}
+
+internal sealed class DefaultBuildingDetailPolicy
+    : IWorldSceneBuildingDetailPolicy, IWorldScenePresentationPolicy
+{
+    public static DefaultBuildingDetailPolicy Instance { get; } = new();
+
+    public bool KeepDistantBuildings => DisplaySettings.Default.KeepDistantBuildings;
+
+    public bool DrawWorld => !DisplaySettings.Default.UiOnly;
+}
+
+internal sealed class DisplayBuildingDetailPolicy
+    : IWorldSceneBuildingDetailPolicy, IWorldScenePresentationPolicy
+{
+    private readonly IRuntimeSettingsPreviewSource _settings;
+
+    public DisplayBuildingDetailPolicy(IRuntimeSettingsPreviewSource settings)
+        => _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+
+    public bool KeepDistantBuildings => _settings.DisplayPreview.KeepDistantBuildings;
+
+    public bool DrawWorld => !_settings.DisplayPreview.UiOnly;
 }
 
 internal sealed class WorldScenePViewRenderer : IWorldScenePViewRenderer
@@ -69,6 +111,8 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
     private readonly IWorldSceneDiagnostics _diagnostics;
     private readonly IWorldGenerationAvailability _availability;
     private readonly IAtmosphericWorldFrameSink? _atmosphere;
+    private readonly IWorldSceneBuildingDetailPolicy _buildingDetail;
+    private readonly IWorldScenePresentationPolicy _presentation;
     private readonly RetailPViewFrameInput _pviewFrameInput = new();
     private WorldRenderFrame _preparedEnhancedWorld;
     private bool _hasPreparedEnhancedWorld;
@@ -87,6 +131,8 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
         IWorldScenePassExecutor passes,
         IWorldRenderRangeSource renderRange,
         IWorldSceneDiagnostics diagnostics,
+        IWorldSceneBuildingDetailPolicy buildingDetail,
+        IWorldScenePresentationPolicy presentation,
         IWorldGenerationAvailability? availability = null,
         IAtmosphericWorldFrameSink? atmosphere = null)
     {
@@ -106,6 +152,20 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
         _diagnostics = diagnostics ?? throw new ArgumentNullException(nameof(diagnostics));
         _availability = availability ?? AlwaysAvailableWorldGeneration.Instance;
         _atmosphere = atmosphere;
+        _buildingDetail = buildingDetail ?? throw new ArgumentNullException(nameof(buildingDetail));
+        _presentation = presentation ?? throw new ArgumentNullException(nameof(presentation));
+    }
+
+    public bool WorldPassEnabled => _presentation.DrawWorld;
+
+    public void PrepareResources(RenderFrameInput input)
+    {
+        _ = input;
+        if (!_availability.IsWorldAvailable
+            || _foundation.Foundation.PortalViewportVisible
+            || !_presentation.DrawWorld)
+            return;
+        _passes.PrepareSky(_sky.ActiveDayGroup);
     }
 
     public WorldRenderFrameOutcome Render(RenderFrameInput input)
@@ -128,7 +188,7 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
             }
 
             RenderFrameFoundation foundation = _foundation.Foundation;
-            if (foundation.PortalViewportVisible)
+            if (foundation.PortalViewportVisible || !_presentation.DrawWorld)
             {
                 _selection?.CompleteFrame();
                 selectionFrameStarted = false;
@@ -211,7 +271,8 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
                         roots.PlayerViewPosition,
                         camera.Camera.View,
                         _diagnostics.CameraCellResolution,
-                        buildingDegradesDisabled: camera.IsOverheadView));
+                        buildingDegradesDisabled: camera.IsOverheadView,
+                        keepDistantBuildings: _buildingDetail.KeepDistantBuildings));
 
                 _particleVisibility.MarkVisibleLandscapeCells(
                     pviewResult.VisibleLandscapeCells);
@@ -281,7 +342,9 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
         }
 
         RenderFrameFoundation foundation = _foundation.Foundation;
-        if (!_availability.IsWorldAvailable || foundation.PortalViewportVisible)
+        if (!_availability.IsWorldAvailable
+            || foundation.PortalViewportVisible
+            || !_presentation.DrawWorld)
             return new PreparedWorldSceneFrame(false, foundation, default, -1);
 
         WorldRenderFrame world = _frames.Build(

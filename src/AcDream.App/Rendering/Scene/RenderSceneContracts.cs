@@ -500,6 +500,19 @@ internal interface IRenderSceneQuerySource
     RenderProjectionCounts GetCounts(RenderSceneGeneration generation);
     RenderSceneIndexCounts GetIndexCounts(RenderSceneGeneration generation);
     ulong GetIndexRevision(RenderSceneGeneration generation);
+
+    /// <summary>Advances whenever a building-shell record registers, changes,
+    /// or unregisters, so per-frame shell lookups can keep their last copy.</summary>
+    ulong GetBuildingShellRevision(RenderSceneGeneration generation);
+
+    /// <summary>Reads the identity and write revision of the projection a
+    /// local entity currently owns without materializing its record.</summary>
+    bool TryGetRevisionByLocalEntityId(
+        RenderSceneGeneration generation,
+        uint localEntityId,
+        out RenderProjectionId id,
+        out RenderOwnerIncarnation ownerIncarnation,
+        out ulong revision);
     ulong GetDirectionalShadowTopologyRevision(
         RenderSceneGeneration generation);
     ulong GetDirectionalShadowTransformRevision(
@@ -559,6 +572,17 @@ internal readonly struct RenderSceneQuery
 
     public ulong IndexRevision =>
         Source.GetIndexRevision(Generation);
+
+    public ulong BuildingShellRevision =>
+        Source.GetBuildingShellRevision(Generation);
+
+    public bool TryGetRevisionByLocalEntityId(
+        uint localEntityId,
+        out RenderProjectionId id,
+        out RenderOwnerIncarnation ownerIncarnation,
+        out ulong revision) =>
+        Source.TryGetRevisionByLocalEntityId(
+            Generation, localEntityId, out id, out ownerIncarnation, out revision);
 
     public ulong DirectionalShadowTopologyRevision =>
         Source.GetDirectionalShadowTopologyRevision(Generation);

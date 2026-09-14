@@ -197,6 +197,14 @@ public sealed partial class WorldSession : IDisposable
 
     public event Action<EntitySpawn>? EntitySpawned;
 
+    /// <summary>
+    /// Fires when the server re-sends a complete description for an object that
+    /// already exists (0xF7DB). The payload carries the same fields a first-time
+    /// description does; it refreshes what we already hold rather than bringing a
+    /// new object into the world.
+    /// </summary>
+    public event Action<EntitySpawn>? EntityDescriptionRefreshed;
+
     public event Action<DeleteObject.Parsed>? EntityDeleted;
 
     public event Action<PickupEvent.Parsed>? EntityPickedUp;
@@ -246,6 +254,41 @@ public sealed partial class WorldSession : IDisposable
     public readonly record struct PlayerInt64PropertyUpdate(uint Property, long Value);
 
     public event Action<PlayerInt64PropertyUpdate>? PlayerInt64PropertyUpdated;
+
+    public readonly record struct ObjectDataIdPropertyUpdate(
+        uint Guid, uint Property, uint Value);
+
+    /// <summary>Fires when the session parses a public data-id property update
+    /// (0x02D8) — one PropertyDataId changed on a visible object. Icon, icon
+    /// overlay and icon underlay travel this way.</summary>
+    public event Action<ObjectDataIdPropertyUpdate>? ObjectDataIdPropertyUpdated;
+
+    public readonly record struct PlayerDataIdPropertyUpdate(uint Property, uint Value);
+
+    /// <summary>Fires when the session parses a private data-id property update
+    /// (0x02D7) — one PropertyDataId changed on the player.</summary>
+    public event Action<PlayerDataIdPropertyUpdate>? PlayerDataIdPropertyUpdated;
+
+    public readonly record struct ObjectInstanceIdPropertyUpdate(
+        uint Guid, uint Property, uint Value);
+
+    /// <summary>Fires when the session parses a public instance-id property update
+    /// (0x02DA) — one PropertyInstanceId changed on a visible object.</summary>
+    public event Action<ObjectInstanceIdPropertyUpdate>? ObjectInstanceIdPropertyUpdated;
+
+    public readonly record struct PlayerInstanceIdPropertyUpdate(uint Property, uint Value);
+
+    /// <summary>Fires when the session parses a private instance-id property update
+    /// (0x02D9) — one PropertyInstanceId changed on the player.</summary>
+    public event Action<PlayerInstanceIdPropertyUpdate>? PlayerInstanceIdPropertyUpdated;
+
+    public readonly record struct PlayerPositionUpdate(
+        uint PositionType, PlayerDescriptionParser.WorldPosition Position);
+
+    /// <summary>Fires when the session parses a private position update (0x02DB) — one
+    /// saved position slot changed on the player. Death rewrites the last-outside-death
+    /// slot this way, so /corpse only follows the current corpse if this is applied.</summary>
+    public event Action<PlayerPositionUpdate>? PlayerPositionUpdated;
 
     public readonly record struct StackSizeUpdate(uint Guid, int StackSize, int Value);
 
@@ -1221,6 +1264,15 @@ public sealed partial class WorldSession : IDisposable
                     EntitySpawned?.Invoke(ToEntitySpawn(parsed.Value));
                 }
             }
+            else if (op == CreateObject.UpdateOpcode)
+            {
+                var parsed = CreateObject.TryParseUpdate(body);
+                if (parsed is not null)
+                {
+                    EntityDescriptionRefreshed?.Invoke(
+                        ToEntitySpawn(parsed.Value));
+                }
+            }
             else if (op == DeleteObject.Opcode)
             {
                 var parsed = DeleteObject.TryParse(body);
@@ -1373,6 +1425,46 @@ public sealed partial class WorldSession : IDisposable
                     PlayerInt64PropertyUpdated?.Invoke(
                         new PlayerInt64PropertyUpdate(p.Value.Property, p.Value.Value));
             }
+            else if (op == PublicUpdatePropertyDataId.Opcode)
+            {
+                var p = PublicUpdatePropertyDataId.TryParse(body);
+                if (p is not null)
+                    ObjectDataIdPropertyUpdated?.Invoke(
+                        new ObjectDataIdPropertyUpdate(
+                            p.Value.Guid, p.Value.Property, p.Value.Value));
+            }
+            else if (op == PrivateUpdatePropertyDataId.Opcode)
+            {
+                var p = PrivateUpdatePropertyDataId.TryParse(body);
+                if (p is not null)
+                    PlayerDataIdPropertyUpdated?.Invoke(
+                        new PlayerDataIdPropertyUpdate(
+                            p.Value.Property, p.Value.Value));
+            }
+            else if (op == PublicUpdatePropertyInstanceId.Opcode)
+            {
+                var p = PublicUpdatePropertyInstanceId.TryParse(body);
+                if (p is not null)
+                    ObjectInstanceIdPropertyUpdated?.Invoke(
+                        new ObjectInstanceIdPropertyUpdate(
+                            p.Value.Guid, p.Value.Property, p.Value.Value));
+            }
+            else if (op == PrivateUpdatePropertyInstanceId.Opcode)
+            {
+                var p = PrivateUpdatePropertyInstanceId.TryParse(body);
+                if (p is not null)
+                    PlayerInstanceIdPropertyUpdated?.Invoke(
+                        new PlayerInstanceIdPropertyUpdate(
+                            p.Value.Property, p.Value.Value));
+            }
+            else if (op == PrivateUpdatePosition.Opcode)
+            {
+                var p = PrivateUpdatePosition.TryParse(body);
+                if (p is not null)
+                    PlayerPositionUpdated?.Invoke(
+                        new PlayerPositionUpdate(
+                            p.Value.PositionType, p.Value.Position));
+            }
             else if (op == SetStackSize.Opcode)
             {
                 var p = SetStackSize.TryParse(body);
@@ -1524,6 +1616,14 @@ public sealed partial class WorldSession : IDisposable
         ArgumentNullException.ThrowIfNull(text);
         uint seq = NextGameActionSequence();
         byte[] body = ChatRequests.BuildTell(seq, targetName, text);
+        SendGameAction(body);
+    }
+
+    public void SendTalkDirect(uint targetGuid, string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        uint seq = NextGameActionSequence();
+        byte[] body = ChatRequests.BuildTalkDirect(seq, targetGuid, text);
         SendGameAction(body);
     }
 
@@ -2292,6 +2392,29 @@ public sealed partial class WorldSession : IDisposable
             itemGuid,
             inscription));
     }
+
+    /// <summary>Re-request an open book in full.</summary>
+    public void SendBookData(uint bookGuid) =>
+        SendGameAction(
+            BookRequests.BuildBookData(NextGameActionSequence(), bookGuid));
+
+    /// <summary>Ask for one page's text.</summary>
+    public void SendBookPageData(uint bookGuid, int page) =>
+        SendGameAction(
+            BookRequests.BuildBookPageData(NextGameActionSequence(), bookGuid, page));
+
+    public void SendBookAddPage(uint bookGuid) =>
+        SendGameAction(
+            BookRequests.BuildBookAddPage(NextGameActionSequence(), bookGuid));
+
+    public void SendBookDeletePage(uint bookGuid, int page) =>
+        SendGameAction(
+            BookRequests.BuildBookDeletePage(NextGameActionSequence(), bookGuid, page));
+
+    public void SendBookModifyPage(uint bookGuid, int page, string text) =>
+        SendGameAction(
+            BookRequests.BuildBookModifyPage(
+                NextGameActionSequence(), bookGuid, page, text));
 
     public void SendPutItemInContainer(uint itemGuid, uint containerGuid, int placement)
     {

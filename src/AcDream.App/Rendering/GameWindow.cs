@@ -91,6 +91,8 @@ public sealed class GameWindow :
     private AcDream.UI.Abstractions.Settings.QualitySettings _startupQuality =
         AcDream.UI.Abstractions.Settings.QualitySettings.From(
             AcDream.UI.Abstractions.Settings.QualityPreset.High);
+    private AcDream.App.Rendering.Gpu.GpuMemoryProfile _startupMemoryProfile =
+        AcDream.App.Rendering.Gpu.GpuMemoryProfile.Default;
     private IInputContext? _input;
     private TerrainModernRenderer? _terrain;
     private CameraController? _cameraController;
@@ -145,6 +147,15 @@ public sealed class GameWindow :
     private Exception? _runFailure;
     private readonly DisplayFramePacingController _displayFramePacing;
     private readonly RuntimeSettingsController _runtimeSettings;
+    private readonly AcDream.App.Input.WindowFocusRouter _windowFocus;
+
+    /// <summary>
+    /// The one owner that writes a mixer setting down and then changes the
+    /// running mixer. The <c>/mixer</c> command and the Options panel's Config
+    /// tab both go through it.
+    /// </summary>
+    private readonly AcDream.App.Audio.AudioMixerSettings _audioMixerSettings;
+
     private readonly BuildingDegradeController _buildingDegrades;
 
     private AcDream.App.Streaming.LandblockStreamer? _streamer;
@@ -232,6 +243,7 @@ public sealed class GameWindow :
     private AcDream.Core.Audio.DatSoundCache? _soundCache;
     private AcDream.App.Audio.DictionaryEntitySoundTable? _entitySoundTables;
     private AcDream.App.Audio.AudioHookSink? _audioSink;
+    private AcDream.App.Audio.AudioMixerCommandBinding? _audioMixerCommand;
 
     private AcDream.Core.Vfx.EmitterDescRegistry? _emitterRegistry;
     private AcDream.Core.Vfx.ParticleSystem? _particleSystem;
@@ -509,6 +521,13 @@ public sealed class GameWindow :
                 _applicationPaths.SettingsFile),
             log: Console.WriteLine,
             characterOptionValue: _runtime.CharacterOwner.Options.GetOptionBit);
+        _windowFocus = new AcDream.App.Input.WindowFocusRouter(
+            () => _cameraPointerInput,
+            _runtimeSettings.SetWindowFocused);
+        _audioMixerSettings = new AcDream.App.Audio.AudioMixerSettings(
+            () => _runtimeSettings.AudioMixer,
+            _runtimeSettings.SaveAudioMixer,
+            mixer => _audioEngine?.ApplyMixerOptions(mixer) ?? false);
         _buildingDegrades = new BuildingDegradeController(
             () => _runtimeSettings.DisplayPreview);
         _animationDiagnostics = AnimationPresentationDiagnostics.FromEnvironment();
@@ -574,6 +593,8 @@ public sealed class GameWindow :
             directCharacterLaunch: _options.LiveCharacterSelector is not null);
         _startupPacing = startupPacing;
         _startupQuality = startup.Quality;
+        _startupMemoryProfile =
+            AcDream.App.Rendering.Gpu.GpuMemoryProfile.For(startup.Display.Quality);
 
         _window = Window.Create(options);
         IWindow window = _window;
@@ -823,6 +844,11 @@ public sealed class GameWindow :
         _audioEngine = value.Engine;
         _entitySoundTables = value.EntitySoundTables;
         _audioSink = value.HookSink;
+        _audioMixerCommand = AcDream.App.Audio.AudioMixerCommandBinding.TryRegister(
+            _automation?.PluginCommands,
+            _audioMixerSettings,
+            line => _runtimeCommunication.AddText(
+                line, AcDream.Core.Chat.RetailLogTextType.ClientLocal));
     }
 
     void IGameWindowWorldRenderPublication.PublishSceneLighting(
@@ -1121,6 +1147,7 @@ public sealed class GameWindow :
                 _platformServices,
                 _startupPacing,
                 _startupQuality.MsaaSamples,
+                _startupMemoryProfile,
                 Console.WriteLine);
         _vulkanGraphics = vulkan;
         return new VulkanGameWindowGraphics(vulkan);
@@ -1182,7 +1209,10 @@ public sealed class GameWindow :
                     _translucencyFades,
                     _options.NoAudio,
                     Console.WriteLine,
-                    Console.Error.WriteLine),
+                    Console.Error.WriteLine)
+                {
+                    MixerOptions = _runtimeSettings.AudioMixer,
+                },
                 this).Compose(platformResult, hostInputCamera),
             (platformResult, hostInputCamera, contentEffectsAudio) =>
                 new SettingsDevToolsCompositionPhase(
@@ -1211,7 +1241,11 @@ public sealed class GameWindow :
                         _applicationPaths.DiagnosticsDirectory,
                         Console.WriteLine,
                         _gpuDevice!,
-                        _gpuFrameLifetime!),
+                        _gpuFrameLifetime!)
+                    {
+                        TextureDetail = AcDream.App.Rendering.Wb.WorldTextureDetail.FromDisplay(
+                            _runtimeSettings.Startup.Display),
+                    },
                     this).Compose(platformResult, contentEffectsAudio, settingsDevTools);
                 Console.WriteLine(
                     $"loading world view centered on " +
@@ -1241,6 +1275,7 @@ public sealed class GameWindow :
                     _localPlayerTeleportSink,
                     _applicationPaths.KeyBindingsFile,
                     _runtimeSettings,
+                    _audioMixerSettings,
                     _buildingDegrades,
                     _runtime,
                     _combatAttackOperations,
@@ -1529,6 +1564,7 @@ public sealed class GameWindow :
         if (!_lifetime.HasShutdownRoots)
         {
             PersistKeyBindingsAtShutdown();
+            _audioMixerCommand?.Dispose();
             if (_runtime.Session.IsInWorld)
                 _statusWriter.Disconnected(_options.SessionId ?? "app", "stopped");
             _lifetime.PublishShutdownRoots(CaptureShutdownRoots());
@@ -1676,7 +1712,7 @@ public sealed class GameWindow :
             _input,
             _graphics));
     private void OnFocusChanged(bool focused)
-        => _cameraPointerInput?.HandleFocusChanged(focused);
+        => _windowFocus.HandleFocusChanged(focused);
 
     public void Dispose()
     {

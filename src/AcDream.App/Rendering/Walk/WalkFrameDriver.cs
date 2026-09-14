@@ -27,6 +27,21 @@ internal interface IWalkFrameWorldData
         return false;
     }
 
+    /// <summary>Reads the identity and write revision of the projection a local
+    /// entity currently owns, without materializing the record. Worlds that do
+    /// not track revisions return false and callers fall back to record reads.</summary>
+    bool TryGetCurrentProjectionRevision(
+        uint localEntityId,
+        out RenderProjectionId id,
+        out RenderOwnerIncarnation ownerIncarnation,
+        out ulong revision)
+    {
+        id = default;
+        ownerIncarnation = default;
+        revision = 0;
+        return false;
+    }
+
     WalkFrameStaticRecords GetCellObjects(uint cellId);
 
     WalkFrameStaticRecords GetOutdoorObjects(uint cellId);
@@ -70,10 +85,17 @@ internal interface IWalkFrameLeafRenderer
     void AlphaBarrier();
 
     void FlushSortCellExit();
+
+    /// <summary>Whether <see cref="FlushSortCellExit"/> would record alpha
+    /// draws now. Renderers that cannot tell answer true.</summary>
+    bool SortCellExitWouldFlush() => true;
 }
 
 internal interface IWalkFrameDriverTrace
 {
+    /// <summary>Reports every retail flush point (stream mark) with the
+    /// commands it closes. Consecutive marks with nothing recorded between
+    /// them reach the GPU as one range; the trace still sees each mark.</summary>
     void OnFlush(int commandCount, IReadOnlyList<WalkDrawStage> stages);
 }
 
@@ -234,6 +256,12 @@ internal sealed class WalkFrameDriver : IWalkEventSink, IWalkLookInViewSource
     internal bool WeatherTurnFired { get; private set; }
 
     private readonly List<(uint LandblockId, int SideCellCount, int CellIndex)> _pendingTerrainBatch = new();
+
+    // Replay keeps the ordered stream's opaque commands pending until
+    // something else must record after them; see FlushPendingRange.
+    private IGpuPassEncoder? _replayEncoder;
+    private int _replayDrawCursor;
+    private int _replayPendingEnd;
 
     private readonly HashSet<uint> _cellShellsDrawnThisFrame = new();
     private readonly HashSet<uint> _cellParticleTurnsDrawnThisFrame = new();
@@ -520,8 +548,17 @@ internal sealed class WalkFrameDriver : IWalkEventSink, IWalkLookInViewSource
                 _dispatcher.PrepareOrderedStream(frame, _stream, _viewProjection, _markPositions);
 
             _pendingTerrainBatch.Clear();
+            _replayEncoder = encoder;
+            _replayDrawCursor = 0;
+            _replayPendingEnd = 0;
 
-            int cursor = 0;
+            // A stream mark is retail's flush point, but recording its range
+            // right there is only required when something else records after
+            // it. Marks followed only by deferred work (terrain batches, alpha
+            // that retail queues, particles that queue) leave their commands
+            // pending, and the next recording event first flushes the whole
+            // pending range: same commands, same order, fewer ranges.
+            int traceCursor = 0;
             int alphaCursor = 0;
             for (int i = 0; i < _events.Count; i++)
             {
@@ -530,24 +567,20 @@ internal sealed class WalkFrameDriver : IWalkEventSink, IWalkLookInViewSource
                 {
                     case WalkFrameEventKind.StreamMark:
                         int end = e.IntArg;
-                        int count = end - cursor;
                         if (_trace is not null)
-                            _trace.OnFlush(count, _stream.Stages.GetRange(cursor, count));
-                        _dispatcher.DrawOrderedRange(encoder, cursor, count);
-                        cursor = end;
+                        {
+                            _trace.OnFlush(
+                                end - traceCursor,
+                                _stream.Stages.GetRange(traceCursor, end - traceCursor));
+                        }
+                        traceCursor = end;
+                        _replayPendingEnd = end;
                         break;
                     case WalkFrameEventKind.AlphaSubmitMark:
-                        int alphaEnd = e.IntArg;
-                        for (; alphaCursor < alphaEnd; alphaCursor++)
-                        {
-                            WbDrawDispatcher.WalkClassifiedBatch batch =
-                                _alphaSubmissions[alphaCursor];
-                            _dispatcher.SubmitWalkAlphaInstance(
-                                in batch,
-                                _viewProjection);
-                        }
+                        SubmitAlphaRange(ref alphaCursor, e.IntArg);
                         break;
                     case WalkFrameEventKind.Sky:
+                        FlushPendingRange();
                         FlushPendingTerrainBatch();
                         _leafRenderer.DrawSky();
                         break;
@@ -555,30 +588,38 @@ internal sealed class WalkFrameDriver : IWalkEventSink, IWalkLookInViewSource
                         _pendingTerrainBatch.Add((e.CellId, e.IntArg >> 8, e.IntArg & 0xFF));
                         break;
                     case WalkFrameEventKind.CellShell:
+                        FlushPendingRange();
                         FlushPendingTerrainBatch();
                         _leafRenderer.DrawCellShell(e.CellId);
                         break;
                     case WalkFrameEventKind.PunchFan:
+                        FlushPendingRange();
                         FlushPendingTerrainBatch();
                         _leafRenderer.DrawPunchFan(e.Polygon!, e.IntArg);
                         break;
                     case WalkFrameEventKind.AlphaBarrier:
+                        FlushPendingRange();
                         FlushPendingTerrainBatch();
                         _leafRenderer.AlphaBarrier();
                         break;
                     case WalkFrameEventKind.SortCellExit:
+                        if (_leafRenderer.SortCellExitWouldFlush())
+                            FlushPendingRange();
                         FlushPendingTerrainBatch();
                         _leafRenderer.FlushSortCellExit();
                         break;
                     case WalkFrameEventKind.LandscapeFlush:
+                        FlushPendingRange();
                         FlushPendingTerrainBatch();
                         _leafRenderer.FlushLandscape();
                         break;
                     case WalkFrameEventKind.ClearInteriorDepth:
+                        FlushPendingRange();
                         FlushPendingTerrainBatch();
                         _leafRenderer.ClearInteriorDepth();
                         break;
                     case WalkFrameEventKind.ExitSeals:
+                        FlushPendingRange();
                         FlushPendingTerrainBatch();
                         PortalsDrawnCount += _leafRenderer.DrawExitSeals();
                         break;
@@ -596,6 +637,7 @@ internal sealed class WalkFrameDriver : IWalkEventSink, IWalkLookInViewSource
                         break;
                 }
             }
+            FlushPendingRange();
             FlushPendingTerrainBatch();
         }
         finally
@@ -608,7 +650,36 @@ internal sealed class WalkFrameDriver : IWalkEventSink, IWalkLookInViewSource
             _alphaSubmitMark = 0;
             _readyToReplay = false;
             _ctx = null;
+            _replayEncoder = null;
+            _replayDrawCursor = 0;
+            _replayPendingEnd = 0;
         }
+    }
+
+    private void FlushPendingRange()
+    {
+        if (_replayPendingEnd == _replayDrawCursor)
+            return;
+        _dispatcher.DrawOrderedRange(
+            _replayEncoder!, _replayDrawCursor, _replayPendingEnd - _replayDrawCursor);
+        _replayDrawCursor = _replayPendingEnd;
+    }
+
+    private void SubmitAlphaRange(ref int alphaCursor, int exclusiveEnd)
+    {
+        for (; alphaCursor < exclusiveEnd; alphaCursor++)
+            SubmitWalkAlpha(alphaCursor);
+    }
+
+    private void SubmitWalkAlpha(int index)
+    {
+        ref readonly WbDrawDispatcher.WalkClassifiedBatch batch =
+            ref CollectionsMarshal.AsSpan(_alphaSubmissions)[index];
+        // Retail draws some alpha right away instead of queueing it; the
+        // opaque commands before it must already be recorded.
+        if (_dispatcher.WalkAlphaInstanceDrawsImmediately(in batch))
+            FlushPendingRange();
+        _dispatcher.SubmitWalkAlphaInstance(in batch, _viewProjection);
     }
 
     private void SubmitCellAlpha(
@@ -623,6 +694,7 @@ internal sealed class WalkFrameDriver : IWalkEventSink, IWalkLookInViewSource
         {
             // Preserve the existing particle-turn terrain boundary: a row-5
             // immediate mesh may draw during preparation.
+            FlushPendingRange();
             FlushPendingTerrainBatch();
             particles = staticParticleTurn
                 ? _leafRenderer.PrepareStaticParticles(e.CellId)
@@ -643,9 +715,7 @@ internal sealed class WalkFrameDriver : IWalkEventSink, IWalkLookInViewSource
             }
             else
             {
-                WbDrawDispatcher.WalkClassifiedBatch batch =
-                    _alphaSubmissions[alphaCursor++];
-                _dispatcher.SubmitWalkAlphaInstance(in batch, _viewProjection);
+                SubmitWalkAlpha(alphaCursor++);
             }
         }
     }

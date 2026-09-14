@@ -485,7 +485,6 @@ public sealed class SocialPanelLiveMountProbeTests
                 ResizeX = false,
                 ResizeY = true,
                 ResizableEdges = ResizeEdges.Bottom,
-                ConstrainDragToParent = true,
                 ConstrainResizeToParent = true,
                 ContentAnchors = AnchorEdges.Left | AnchorEdges.Top
                     | AnchorEdges.Right | AnchorEdges.Bottom,
