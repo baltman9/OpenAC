@@ -605,40 +605,28 @@ public sealed class CharacterOptionsPageControllerTests
 
     private static readonly HashSet<CharacterOptionId> ExpectedStoreOnlyIds =
     [
-        // Group 1 (UI Behavior) — SalvageMultiple (D), MainPackPreferred (B, unbound)
-        CharacterOptionId.SalvageMultiple,
+        // Group 1 (UI Behavior) — MainPackPreferred (B, unbound)
         CharacterOptionId.MainPackPreferred,
-        // Group 2 (UI Display) — 10 of 15 (vitals round: SideBySideVitals is live)
-        CharacterOptionId.ShowTooltips,
+        // Group 2 (UI Display) — 6 of 15
         CharacterOptionId.SpellDuration,
         CharacterOptionId.DisableMostWeatherEffects,
-        CharacterOptionId.PersistentAtDay,
         CharacterOptionId.DisableHouseRestrictionEffects,
         CharacterOptionId.UseCraftSuccessDialog,
         CharacterOptionId.ConfirmVolatileRareUse,
         CharacterOptionId.FilterLanguage,
-        CharacterOptionId.ShowHelm,
-        CharacterOptionId.ShowCloak,
-        CharacterOptionId.IgnoreAllegianceRequests,
-        CharacterOptionId.IgnoreFellowshipRequests,
+        // Group 3 (Grouping) — 1 of 6
         CharacterOptionId.DisplayAllegianceLogonNotifications,
-        CharacterOptionId.FellowshipShareLoot,
-        CharacterOptionId.FellowshipAutoAcceptRequests,
-        // Group 4 (Other Players) — 10 of 11
-        CharacterOptionId.AcceptLootPermits,
+        // Group 4 (Other Players) — 7 of 11
         CharacterOptionId.UseDeception,
-        CharacterOptionId.AllowGive,
-        CharacterOptionId.IgnoreTradeRequests,
         CharacterOptionId.DisplayDateOfBirth,
         CharacterOptionId.DisplayAge,
         CharacterOptionId.DisplayChessRank,
         CharacterOptionId.DisplayFishingSkill,
         CharacterOptionId.DisplayNumberDeaths,
         CharacterOptionId.DisplayNumberCharacterTitles,
+        // Group 5 (Character Behavior) — 1 of 7
         CharacterOptionId.AdvancedCombatUI,
-        CharacterOptionId.UseChargeAttack,
-        CharacterOptionId.LeadMissileTargets,
-        CharacterOptionId.UseFastMissiles,
+        // Group 6 (Chat) — 2 of 8
         CharacterOptionId.StayInChatMode,
         CharacterOptionId.HearPkDeathMessages,
     ];
@@ -652,8 +640,8 @@ public sealed class CharacterOptionsPageControllerTests
             .ToHashSet();
 
         Assert.Equal(ExpectedStoreOnlyIds, actualStoreOnly);
-        Assert.Equal(33, actualStoreOnly.Count);
-        Assert.Equal(17, 50 - actualStoreOnly.Count); // the 17 live rows (vitals round: SideBySideVitals un-dimmed)
+        Assert.Equal(18, actualStoreOnly.Count);
+        Assert.Equal(32, 50 - actualStoreOnly.Count); // the 32 live rows
     }
 
     [Fact]
