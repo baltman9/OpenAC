@@ -16,4 +16,9 @@ internal sealed class DollFigureLighting : IPaperdollFigureLighting
             DollEntityBuilder.DollServerGuid,
             DollEntityBuilder.DollRenderId,
             partMask);
+
+    public void FlashWholeFigure()
+        => _scene.BeginWholeFigureLightingPulse(
+            DollEntityBuilder.DollServerGuid,
+            DollEntityBuilder.DollRenderId);
 }

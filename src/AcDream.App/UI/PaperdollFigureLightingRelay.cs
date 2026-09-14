@@ -10,4 +10,6 @@ public sealed class PaperdollFigureLightingRelay : IPaperdollFigureLighting
     public IPaperdollFigureLighting? Target { get; set; }
 
     public void FlashParts(uint partMask) => Target?.FlashParts(partMask);
+
+    public void FlashWholeFigure() => Target?.FlashWholeFigure();
 }

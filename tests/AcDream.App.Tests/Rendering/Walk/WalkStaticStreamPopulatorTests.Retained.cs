@@ -96,15 +96,18 @@ public sealed partial class WalkStaticStreamPopulatorTests
         }
 
         public uint PartLitEntityId { get; set; }
+        public uint PartLitServerGuid { get; set; }
         public uint PartMask { get; set; }
         public RetailSelectionLighting PartValue = new(0.99f, 1f);
 
-        public bool HasPartLighting(uint localEntityId)
-            => PartMask != 0u && localEntityId == PartLitEntityId;
+        public bool HasPartLighting(uint serverGuid, uint localEntityId)
+            => PartMask != 0u
+               && localEntityId == PartLitEntityId
+               && serverGuid == PartLitServerGuid;
 
-        public bool TryGetPartLighting(uint localEntityId, int partIndex, out RetailSelectionLighting lighting)
+        public bool TryGetPartLighting(uint serverGuid, uint localEntityId, int partIndex, out RetailSelectionLighting lighting)
         {
-            if (HasPartLighting(localEntityId)
+            if (HasPartLighting(serverGuid, localEntityId)
                 && (uint)partIndex < 32u
                 && (PartMask & (1u << partIndex)) != 0u)
             {

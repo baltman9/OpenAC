@@ -8,4 +8,9 @@ namespace AcDream.App.UI;
 public interface IPaperdollFigureLighting
 {
     void FlashParts(uint partMask);
+
+    /// <summary>Flash the whole figure, whatever it is made of. Selecting
+    /// yourself lights everything, and a body can have more parts than any
+    /// mask of named parts covers.</summary>
+    void FlashWholeFigure();
 }

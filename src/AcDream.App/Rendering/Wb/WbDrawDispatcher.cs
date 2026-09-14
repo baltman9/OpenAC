@@ -890,7 +890,7 @@ public sealed partial class WbDrawDispatcher : IDisposable, Walk.IWalkShellResid
                         ? new Vector2(lighting.Luminosity, lighting.Diffuse)
                         : new Vector2(0f, 1f);
                 _currentEntityHasPartLighting =
-                    _selectionLighting?.HasPartLighting(entity.Id) == true;
+                    _selectionLighting?.HasPartLighting(entity.ServerGuid, entity.Id) == true;
                 _currentPartSelectionLighting = _currentEntitySelectionLighting;
 
             }
@@ -1007,7 +1007,7 @@ public sealed partial class WbDrawDispatcher : IDisposable, Walk.IWalkShellResid
                         opacityMultiplier *= 1f - translucencyValue;
                     }
 
-                    SetCurrentPartSelectionLighting(entity.Id, setupPartIndex);
+                    SetCurrentPartSelectionLighting(entity.ServerGuid, entity.Id, setupPartIndex);
                     if (!ClassifyBatches(partData, model, entity, meshRef, paletteIdentity, restPose, opacityMultiplier, collector, entityHasCutoutSubset))
                         currentEntityIncomplete = true;
                     _selectionSink?.AddVisiblePart(
@@ -1038,7 +1038,7 @@ public sealed partial class WbDrawDispatcher : IDisposable, Walk.IWalkShellResid
                 if (!fullyInvisible)
                 {
                     var model = meshRef.PartTransform * entityWorld;
-                    SetCurrentPartSelectionLighting(entity.Id, partIdx);
+                    SetCurrentPartSelectionLighting(entity.ServerGuid, entity.Id, partIdx);
                     if (!ClassifyBatches(renderData, model, entity, meshRef, paletteIdentity, restPose: meshRef.PartTransform, opacityMultiplier: opacityMultiplier, collector: collector))
                         currentEntityIncomplete = true;
                     _selectionSink?.AddVisiblePart(
@@ -2189,7 +2189,7 @@ public sealed partial class WbDrawDispatcher : IDisposable, Walk.IWalkShellResid
     /// <summary>Pick the lighting the next part's instances carry. Off the hot
     /// path unless this entity has a part flashing: the gate was answered once
     /// when the entity changed.</summary>
-    private void SetCurrentPartSelectionLighting(uint localEntityId, int partIndex)
+    private void SetCurrentPartSelectionLighting(uint serverGuid, uint localEntityId, int partIndex)
     {
         if (!_currentEntityHasPartLighting)
         {
@@ -2199,7 +2199,7 @@ public sealed partial class WbDrawDispatcher : IDisposable, Walk.IWalkShellResid
 
         _currentPartSelectionLighting =
             _selectionLighting!.TryGetPartLighting(
-                localEntityId, partIndex, out RetailSelectionLighting part)
+                serverGuid, localEntityId, partIndex, out RetailSelectionLighting part)
                 ? new Vector2(part.Luminosity, part.Diffuse)
                 : _currentEntitySelectionLighting;
     }
