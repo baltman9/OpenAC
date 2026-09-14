@@ -33,6 +33,7 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
     private readonly bool _ownsItemInteraction;
     private readonly SelectionState _selection;
     private readonly PaperdollClickMap? _clickMap;
+    private readonly IPaperdollFigureLighting? _figureLighting;
     private readonly List<(EquipMask Mask, UiItemList List)> _slots = new();
     private readonly List<(AetheriaUnlockState Bit, UiItemList List)> _aetheriaSlots = new();
 
@@ -51,7 +52,8 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
         PaperdollClickMap? clickMap,
         Func<ItemType, uint, uint, uint, uint, uint>? dragIconIds,
         IReadOnlyDictionary<uint, uint>? emptySlotSprites,
-        bool ownsItemInteraction)
+        bool ownsItemInteraction,
+        IPaperdollFigureLighting? figureLighting)
     {
         _objects = objects; _playerGuid = playerGuid; _iconIds = iconIds;
         _dragIconIds = dragIconIds;
@@ -59,6 +61,7 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
         _ownsItemInteraction = ownsItemInteraction;
         _selection = selection ?? throw new ArgumentNullException(nameof(selection));
         _clickMap = clickMap;
+        _figureLighting = figureLighting;
 
         for (int i = 0; i < PaperdollSlotBackgrounds.Definitions.Length; i++)
         {
@@ -151,10 +154,11 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
         PaperdollClickMap? clickMap = null,
         Func<ItemType, uint, uint, uint, uint, uint>? dragIconIds = null,
         IReadOnlyDictionary<uint, uint>? emptySlotSprites = null,
-        bool ownsItemInteraction = false)
+        bool ownsItemInteraction = false,
+        IPaperdollFigureLighting? figureLighting = null)
         => new PaperdollController(
             layout, objects, playerGuid, iconIds, selection, itemInteraction, emptySlotSprite,
-            datFont, clickMap, dragIconIds, emptySlotSprites, ownsItemInteraction);
+            datFont, clickMap, dragIconIds, emptySlotSprites, ownsItemInteraction, figureLighting);
 
     private const int DollDragGhostSize = 32;
 
@@ -290,7 +294,24 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
             || move.Current.WielderId == player)
             Populate();
     }
-    private void OnSelectionChanged(SelectionTransition _) => ApplySelectionIndicators();
+    private void OnSelectionChanged(SelectionTransition _)
+    {
+        ApplySelectionIndicators();
+        FlashSelectedFigureParts();
+    }
+
+    /// <summary>Selecting an item flashes the parts of the figure it covers -
+    /// any selection, not just one made on the doll, and nothing at all for an
+    /// item the figure does not wear.</summary>
+    private void FlashSelectedFigureParts()
+    {
+        if (_figureLighting is null)
+            return;
+        uint parts = PaperdollFigureParts.PartMaskFor(
+            _objects, _playerGuid(), _selection.SelectedObjectId ?? 0u);
+        if (parts != 0u)
+            _figureLighting.FlashParts(parts);
+    }
     private void OnInteractionStateChanged() => Populate();
     private void OnObjectsCleared()
     {

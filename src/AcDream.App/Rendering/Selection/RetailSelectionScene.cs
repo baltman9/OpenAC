@@ -42,6 +42,10 @@ internal sealed class RetailSelectionScene :
     public void BeginLightingPulse(uint serverGuid, uint localEntityId)
         => _lightingPulse.Start(serverGuid, localEntityId);
 
+    /// <summary>Flash only the named parts of one entity (bit N = part N).</summary>
+    public void BeginPartLightingPulse(uint serverGuid, uint localEntityId, uint partMask)
+        => _lightingPulse.StartParts(serverGuid, localEntityId, partMask);
+
     public void TickLighting()
         => _lightingPulse.Tick();
 
@@ -50,6 +54,15 @@ internal sealed class RetailSelectionScene :
         uint localEntityId,
         out RetailSelectionLighting lighting)
         => _lightingPulse.TryGet(serverGuid, localEntityId, out lighting);
+
+    public bool HasPartLighting(uint localEntityId)
+        => _lightingPulse.HasPartLighting(localEntityId);
+
+    public bool TryGetPartLighting(
+        uint localEntityId,
+        int partIndex,
+        out RetailSelectionLighting lighting)
+        => _lightingPulse.TryGetPartLighting(localEntityId, partIndex, out lighting);
 
     internal void SetCurrentRenderSceneObserver(
         ICurrentRenderSelectionObserver? observer) =>

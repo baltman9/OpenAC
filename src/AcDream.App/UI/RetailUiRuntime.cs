@@ -526,6 +526,10 @@ public sealed class RetailUiRuntime : IDisposable
     public RetailFpsController? FpsController { get; private set; }
     public SelectedObjectController? SelectedObjectController { get; private set; }
     public UiViewport? PaperdollViewportWidget { get; private set; }
+
+    /// <summary>Set by the composition once the doll viewport exists; the panel
+    /// already holds it, so the flash starts working the moment it is filled in.</summary>
+    public PaperdollFigureLightingRelay PaperdollFigureLighting { get; } = new();
     public UiNineSlicePanel? InventoryFrame { get; private set; }
     public InventoryController? InventoryPanelController { get; private set; }
     public RetailDialogFactory? DialogFactory { get; private set; }
@@ -3936,7 +3940,8 @@ public sealed class RetailUiRuntime : IDisposable
         PaperdollController paperdoll = PaperdollController.Bind(
             layout, b.Objects, b.PlayerGuid, b.ResolveIcon, b.Selection, b.ItemInteraction,
             contents, _bindings.Assets.DefaultFont, paperdollClickMap,
-            b.ResolveDragIcon, paperdollEmptySprites);
+            b.ResolveDragIcon, paperdollEmptySprites,
+            figureLighting: PaperdollFigureLighting);
         Host.WindowManager.AttachController(
             WindowNames.Inventory,
             new RetainedPanelControllerGroup(inventory, paperdoll));
