@@ -64,7 +64,11 @@ public static class GameEventWiring
         Action<IReadOnlyDictionary<uint, ContractTracker>>? onContractTable = null,
         Action<ContractTrackerUpdate>? onContractUpdate = null,
         Action<uint /*displayTitleId*/, IReadOnlyList<uint> /*titleIds*/>? onCharacterTitleTable = null,
-        Action<uint /*titleId*/, bool /*setAsDisplay*/>? onUpdateTitle = null)
+        Action<uint /*titleId*/, bool /*setAsDisplay*/>? onUpdateTitle = null,
+        Action<BookEvents.OpenBook>? onBookOpen = null,
+        Action<BookEvents.PageDataResponse>? onBookPageData = null,
+        Action<BookEvents.PageResponse>? onBookAddPageResponse = null,
+        Action<BookEvents.Inscription>? onBookInscription = null)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentNullException.ThrowIfNull(items);
@@ -616,6 +620,46 @@ public static class GameEventWiring
                 newSlot: (int)p.Value.Placement,
                 containerTypeHint: p.Value.ContainerType);
         });
+
+        if (onBookInscription is not null)
+        {
+            registrar.Register(GameEventType.GetInscriptionResponse, e =>
+            {
+                var p = BookEvents.ParseInscription(e.Payload.Span);
+                if (p is null) return;
+                onBookInscription(p.Value);
+            });
+        }
+
+        if (onBookOpen is not null)
+        {
+            registrar.Register(GameEventType.BookDataResponse, e =>
+            {
+                var p = BookEvents.ParseOpenBook(e.Payload.Span);
+                if (p is null) return;
+                onBookOpen(p.Value);
+            });
+        }
+
+        if (onBookPageData is not null)
+        {
+            registrar.Register(GameEventType.BookPageDataResponse, e =>
+            {
+                var p = BookEvents.ParsePageData(e.Payload.Span);
+                if (p is null) return;
+                onBookPageData(p.Value);
+            });
+        }
+
+        if (onBookAddPageResponse is not null)
+        {
+            registrar.Register(GameEventType.BookAddPageResponse, e =>
+            {
+                var p = BookEvents.ParsePageResponse(e.Payload.Span);
+                if (p is null) return;
+                onBookAddPageResponse(p.Value);
+            });
+        }
 
         registrar.Register(GameEventType.HouseUpdateRestrictions, e =>
         {

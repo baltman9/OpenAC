@@ -1059,6 +1059,19 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                 Connection: new ConnectionRuntimeBindings(
                     () => late.GameRuntime.Connection, d.Window.Close,
                     ShowProgress: d.Options.LiveCharacterSelector is null),
+                Book: new BookRuntimeBindings(
+                    Book: d.Runtime.BookOwner.View,
+                    Commands: d.Runtime.BookOwner,
+                    SendBookPageData: (bookGuid, page) =>
+                        late.Session.CurrentSession?.SendBookPageData(bookGuid, page),
+                    SendBookAddPage: bookGuid =>
+                        late.Session.CurrentSession?.SendBookAddPage(bookGuid),
+                    SendBookModifyPage: (bookGuid, page, text) =>
+                        late.Session.CurrentSession?.SendBookModifyPage(
+                            bookGuid, page, text),
+                    SendBookDeletePage: (bookGuid, page) =>
+                        late.Session.CurrentSession?.SendBookDeletePage(
+                            bookGuid, page)),
                 IsGameplayDisplay: () => d.Settings.IsGameplayDisplay,
                 SynchronizeDisplayPhase: () =>
                 {
