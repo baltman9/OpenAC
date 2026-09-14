@@ -21,9 +21,34 @@ namespace AcDream.App.Rendering.Wb;
 /// the half-open window is exactly "its block index is within radius of the
 /// camera's block index".
 /// </remarks>
-internal static class EnvCellRenderWindow
+internal readonly struct EnvCellRenderWindow
 {
     internal const float LandblockSize = 192f;
+
+    private EnvCellRenderWindow(float minX, float maxX, float minY, float maxY)
+    {
+        MinX = minX;
+        MaxX = maxX;
+        MinY = minY;
+        MaxY = maxY;
+    }
+
+    internal float MinX { get; }
+    internal float MaxX { get; }
+    internal float MinY { get; }
+    internal float MaxY { get; }
+
+    /// <summary>
+    /// The window for one camera position. Built once per preparation pass, not
+    /// once per landblock.
+    /// </summary>
+    internal static EnvCellRenderWindow Around(Vector3 cameraPosition, int radius)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(radius);
+        (float minX, float maxX) = Axis(cameraPosition.X, radius);
+        (float minY, float maxY) = Axis(cameraPosition.Y, radius);
+        return new EnvCellRenderWindow(minX, maxX, minY, maxY);
+    }
 
     /// <summary>
     /// The half-open world span, on one axis, of the (2 * radius + 1) landblocks
@@ -39,19 +64,17 @@ internal static class EnvCellRenderWindow
     }
 
     /// <summary>
-    /// Whether world-space <paramref name="bounds"/> reach into the window. Both
-    /// the bounds and <paramref name="cameraPosition"/> are in the render frame.
+    /// Whether world-space <paramref name="bounds"/> reach into the window. The
+    /// bounds are in the render frame, the same frame the window was built in.
     /// </summary>
+    internal bool Intersects(in WbBoundingBox bounds) =>
+        bounds.Max.X > MinX && bounds.Min.X < MaxX
+        && bounds.Max.Y > MinY && bounds.Min.Y < MaxY;
+
+    /// <summary>Convenience for a single test against a fresh window.</summary>
     internal static bool Intersects(
         Vector3 cameraPosition,
         int radius,
-        in WbBoundingBox bounds)
-    {
-        (float minX, float maxX) = Axis(cameraPosition.X, radius);
-        if (bounds.Max.X <= minX || bounds.Min.X >= maxX)
-            return false;
-
-        (float minY, float maxY) = Axis(cameraPosition.Y, radius);
-        return bounds.Max.Y > minY && bounds.Min.Y < maxY;
-    }
+        in WbBoundingBox bounds) =>
+        Around(cameraPosition, radius).Intersects(bounds);
 }

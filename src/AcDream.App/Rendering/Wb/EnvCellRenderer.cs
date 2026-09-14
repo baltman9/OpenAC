@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AcDream.Core.Meshing;
 using DatReaderWriter.Enums;
+using Microsoft.Extensions.Logging;
 
 namespace AcDream.App.Rendering.Wb;
 
@@ -358,6 +359,10 @@ public sealed partial class EnvCellRenderer :
         if (_hasPreparedSnapshot
             && !NeedsPrepare
             && meshVersion == _preparedMeshVersion
+            // centerLbX/centerLbY no longer select landblocks - the window
+            // above is measured from cameraPosition. They stay here only to key
+            // the re-prepare check, where they are a cheap "the camera crossed a
+            // landblock boundary" signal.
             && _preparedTrim == (centerLbX, centerLbY, renderRadius)
             && FilterUnchanged(filter)
             && CameraApproximatelyEqual(
@@ -375,22 +380,21 @@ public sealed partial class EnvCellRenderer :
         // Filter loaded landblocks by GpuReady + Instances non-empty.
         List<EnvCellLandblock> landblocks = _prepareLandblocks;
         landblocks.Clear();
+
+        // The window is measured against where each landblock's cells actually
+        // are, not against the grid index of the block they are filed under -
+        // see EnvCellRenderWindow. Its four edges depend only on the camera, so
+        // they are computed once here rather than per landblock.
+        EnvCellRenderWindow window = renderRadius.HasValue
+            ? EnvCellRenderWindow.Around(cameraPosition, renderRadius.Value)
+            : default;
         foreach (var lb in _landblocks.Values)
         {
             if (!lb.GpuReady || lb.Instances.Count == 0)
                 continue;
 
-            // The window is measured against where this landblock's cells
-            // actually are, not against the grid index of the block they are
-            // filed under - see EnvCellRenderWindow.
-            if (renderRadius.HasValue
-                && !EnvCellRenderWindow.Intersects(
-                    cameraPosition,
-                    renderRadius.Value,
-                    lb.TotalEnvCellBounds))
-            {
+            if (renderRadius.HasValue && !window.Intersects(lb.TotalEnvCellBounds))
                 continue;
-            }
 
             landblocks.Add(lb);
         }
@@ -1038,13 +1042,24 @@ public sealed partial class EnvCellRenderer :
     }
 
     /// <summary>
-    /// A cell-shell subset whose texture never reached a texture array has no
-    /// binding to draw with; drawing it anyway samples whatever the unassigned
-    /// table entry holds, which is a blank image, so the subset is dropped and
-    /// reported once. This is never expected: the mesh upload assigns the slot
-    /// with the layer, so a report here means a subset was published without
-    /// one.
+    /// Drops a cell-shell subset whose texture never reached a texture array,
+    /// and reports it once per surface id.
     /// </summary>
+    /// <remarks>
+    /// DO NOT REMOVE THIS AS COSMETIC. An unassigned slot is not a blank
+    /// texture: it is the sentinel <see cref="Gpu.GpuTextureSlot.Unassigned"/>
+    /// (uint.MaxValue). It is written straight into
+    /// <c>ModernBatchData.TextureTableIndex</c> and reaches the shader as
+    /// <c>uTextures[nonuniformEXT(index)]</c> on a variable-count, partially
+    /// bound descriptor array, so drawing the subset is an out-of-range
+    /// descriptor read - undefined behaviour of the device-loss class, not a
+    /// wrong-looking pixel.
+    ///
+    /// The guard is a publication check, not a liveness check: it cannot catch a
+    /// batch whose slot was assigned at upload and whose atlas was released
+    /// afterwards, because the stale index still reads as assigned. That case
+    /// belongs to atlas lifetime, not here.
+    /// </remarks>
     private bool HasResolvedTexture(ObjectRenderBatch batch)
     {
         if (batch.TextureSlot.IsAssigned)
@@ -1052,14 +1067,20 @@ public sealed partial class EnvCellRenderer :
 
         if (_unresolvedSurfacesReported.Add(batch.Key.SurfaceId))
         {
-            Console.WriteLine(
-                $"envcell: surface 0x{batch.Key.SurfaceId:X8} "
-                + $"({batch.TextureSize.Width}x{batch.TextureSize.Height} {batch.TextureFormat}) "
-                + "has no texture binding; its cell subset is not drawn.");
+            _meshManager.Logger.LogError(
+                "Cell surface 0x{SurfaceId:X8} ({Width}x{Height} {Format}) reached "
+                + "the draw list with no texture binding; its cell subset is not drawn.",
+                batch.Key.SurfaceId,
+                batch.TextureSize.Width,
+                batch.TextureSize.Height,
+                batch.TextureFormat);
         }
 
         return false;
     }
+
+    /// <summary>Surface ids this renderer has reported as unbound, for tests.</summary>
+    internal int UnresolvedSurfaceReportCount => _unresolvedSurfacesReported.Count;
 
     internal static bool BatchBelongsToPass(
         ObjectRenderBatch batch,
