@@ -98,7 +98,7 @@ public static class CharacterOptionsPageController
         }),
         new("ID_CharacterOption_Chat_Section", new RowSpec[]
         {
-            new(CharacterOptionId.StayInChatMode, "StayInChatMode", StoreOnly), // Group B, unbound
+            new(CharacterOptionId.StayInChatMode, "StayInChatMode", Live), // Group B, keeps chat entry focused after Submit
             new(CharacterOptionId.ListenToAllegianceChat, "HearAllegianceChat", Live), // TurbineChatMembershipGate.cs:107-110
             new(CharacterOptionId.ListenToGeneralChat, "HearGeneralChat", Live), // TurbineChatMembershipGate.cs:111-114
             new(CharacterOptionId.ListenToTradeChat, "HearTradeChat", Live), // TurbineChatMembershipGate.cs:115-118

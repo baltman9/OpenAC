@@ -1487,7 +1487,9 @@ public sealed class RetailUiRuntime : IDisposable
                 _bindings.Toolbar.Selection.SelectedObjectId ?? 0u,
             chatStrings: key => new DatStringResolver(_bindings.Assets.Dats)
                 .Resolve(0x23000001u, DatStringResolver.ComputeHash(key)),
-            resolveFont: _bindings.Assets.ResolveFont);
+            resolveFont: _bindings.Assets.ResolveFont,
+            stayInChatMode: () => _bindings.Options.CurrentCharacterOption(
+                (uint)CharacterOptionId.StayInChatMode));
         if (controller is null)
         {
             Console.WriteLine("[UI] chat: required role elements missing in 0x2100006F.");

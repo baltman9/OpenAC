@@ -624,8 +624,7 @@ public sealed class CharacterOptionsPageControllerTests
         CharacterOptionId.DisplayNumberCharacterTitles,
         // Group 5 (Character Behavior) — 1 of 7
         CharacterOptionId.AdvancedCombatUI,
-        // Group 6 (Chat) — 2 of 8
-        CharacterOptionId.StayInChatMode,
+        // Group 6 (Chat) — 1 of 8
         CharacterOptionId.HearPkDeathMessages,
     ];
 
@@ -638,8 +637,8 @@ public sealed class CharacterOptionsPageControllerTests
             .ToHashSet();
 
         Assert.Equal(ExpectedStoreOnlyIds, actualStoreOnly);
-        Assert.Equal(16, actualStoreOnly.Count);
-        Assert.Equal(34, 50 - actualStoreOnly.Count); // the 34 live rows
+        Assert.Equal(15, actualStoreOnly.Count);
+        Assert.Equal(35, 50 - actualStoreOnly.Count); // the 35 live rows
     }
 
     [Fact]
