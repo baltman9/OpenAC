@@ -56,8 +56,8 @@ public static class CharacterOptionsPageController
             new(CharacterOptionId.DisableDistanceFog, "DisableDistanceFog", Live), // Group B, bound (GameWindow.cs:657)
             new(CharacterOptionId.PersistentAtDay, "PersistentAtDay", Live), // Group B, bound
             new(CharacterOptionId.DisableHouseRestrictionEffects, "DisableHouseRestrictionEffects", StoreOnly), // Group D
-            new(CharacterOptionId.UseCraftSuccessDialog, "UseCraftSuccessDialog", StoreOnly), // Group A
-            new(CharacterOptionId.ConfirmVolatileRareUse, "ConfirmVolatileRareUse", StoreOnly), // Group A
+            new(CharacterOptionId.UseCraftSuccessDialog, "UseCraftSuccessDialog", Live), // Group A
+            new(CharacterOptionId.ConfirmVolatileRareUse, "ConfirmVolatileRareUse", Live), // Group A
             new(CharacterOptionId.DisplayTimeStamps, "DisplayTimeStamps", Live), // Group B, bound (GameWindow.cs:664)
             new(CharacterOptionId.FilterLanguage, "FilterLanguage", StoreOnly), // Group B, unbound
             new(CharacterOptionId.ShowHelm, "ShowHelm", Live), // Group A

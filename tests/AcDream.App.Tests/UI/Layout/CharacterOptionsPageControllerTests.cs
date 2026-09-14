@@ -607,12 +607,10 @@ public sealed class CharacterOptionsPageControllerTests
     [
         // Group 1 (UI Behavior) — MainPackPreferred (B, unbound)
         CharacterOptionId.MainPackPreferred,
-        // Group 2 (UI Display) — 6 of 15
+        // Group 2 (UI Display) — 4 of 15
         CharacterOptionId.SpellDuration,
         CharacterOptionId.DisableMostWeatherEffects,
         CharacterOptionId.DisableHouseRestrictionEffects,
-        CharacterOptionId.UseCraftSuccessDialog,
-        CharacterOptionId.ConfirmVolatileRareUse,
         CharacterOptionId.FilterLanguage,
         // Group 3 (Grouping) — 1 of 6
         CharacterOptionId.DisplayAllegianceLogonNotifications,
@@ -640,8 +638,8 @@ public sealed class CharacterOptionsPageControllerTests
             .ToHashSet();
 
         Assert.Equal(ExpectedStoreOnlyIds, actualStoreOnly);
-        Assert.Equal(18, actualStoreOnly.Count);
-        Assert.Equal(32, 50 - actualStoreOnly.Count); // the 32 live rows
+        Assert.Equal(16, actualStoreOnly.Count);
+        Assert.Equal(34, 50 - actualStoreOnly.Count); // the 34 live rows
     }
 
     [Fact]
