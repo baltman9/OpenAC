@@ -39,7 +39,9 @@ public sealed record LiveInventorySessionBindings(
     ItemManaState? ItemMana,
     ExternalContainerState? ExternalContainers,
     Action<AppraiseInfoParser.Parsed>? OnAppraisal = null,
-    VendorState? Vendor = null);
+    VendorState? Vendor = null,
+    RuntimeBookState? Book = null,
+    Func<string>? PlayerName = null);
 
 public sealed record LiveCharacterSessionBindings(
     CombatState Combat,
@@ -194,6 +196,35 @@ public sealed class LiveSessionEventRouter : ILiveSessionEventRouting
                 vendor: inventory.Vendor,
                 onInterfaceText: social.AddText,
                 accepting: IsAccepting,
+                onBookOpen: inventory.Book is { } bookOpen
+                    ? bookOpen.ApplyOpenBook
+                    : null,
+                onBookPageData: inventory.Book is { } bookPageData
+                    ? response => bookPageData.ApplyPageData(response)
+                    : null,
+                onBookAddPageResponse: inventory.Book is { } bookAddPage
+                    ? response =>
+                    {
+                        // Retail re-reads the whole book whenever it cannot
+                        // fold the answer into the open one.
+                        if (!bookAddPage.ApplyAddPageResponse(
+                                response,
+                                inventory.PlayerName?.Invoke() ?? string.Empty))
+                        {
+                            session.SendGameAction(
+                                BookRequests.BuildBookData(
+                                    session.NextGameActionSequence(),
+                                    response.BookGuid));
+                            bookAddPage.MarkRequestPending();
+                        }
+                    }
+                    : null,
+                onBookDeletePageResponse: inventory.Book is { } bookDeletePage
+                    ? bookDeletePage.ApplyDeletePageResponse
+                    : null,
+                onBookModifyPageResponse: inventory.Book is { } bookModifyPage
+                    ? bookModifyPage.ApplyModifyPageResponse
+                    : null,
                 onFellowshipFullUpdate: social.Fellowship is { } fellowshipFull
                     ? fellowshipFull.ApplyFullUpdate
                     : null,
