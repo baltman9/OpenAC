@@ -27,6 +27,9 @@ public sealed partial class EnvCellRenderer :
 {
     private readonly object _publicationOwner = new();
 
+    /// <summary>Surface ids already reported as having no texture binding.</summary>
+    private readonly HashSet<uint> _unresolvedSurfacesReported = new();
+
     private readonly ObjectMeshManager _meshManager;
     private readonly WbFrustum _frustum;
 
@@ -374,17 +377,22 @@ public sealed partial class EnvCellRenderer :
         landblocks.Clear();
         foreach (var lb in _landblocks.Values)
         {
-            if (centerLbX.HasValue && centerLbY.HasValue && renderRadius.HasValue)
+            if (!lb.GpuReady || lb.Instances.Count == 0)
+                continue;
+
+            // The window is measured against where this landblock's cells
+            // actually are, not against the grid index of the block they are
+            // filed under - see EnvCellRenderWindow.
+            if (renderRadius.HasValue
+                && !EnvCellRenderWindow.Intersects(
+                    cameraPosition,
+                    renderRadius.Value,
+                    lb.TotalEnvCellBounds))
             {
-                if (Math.Abs(lb.GridX - centerLbX.Value) > renderRadius.Value ||
-                    Math.Abs(lb.GridY - centerLbY.Value) > renderRadius.Value)
-                {
-                    continue;
-                }
+                continue;
             }
 
-            if (lb.GpuReady && lb.Instances.Count > 0)
-                landblocks.Add(lb);
+            landblocks.Add(lb);
         }
         if (landblocks.Count == 0) return;
 
@@ -925,6 +933,9 @@ public sealed partial class EnvCellRenderer :
                     if (!BatchBelongsToPass(batch, renderPass))
                         continue;
 
+                    if (!HasResolvedTexture(batch))
+                        continue;
+
                     if (renderPass == WbRenderPass.Transparent
                         && transparentRoute != EnvCellTransparentRoute.All
                         && !MatchesTransparentRoute(batch, transparentRoute, detailSurfaceActive))
@@ -966,6 +977,9 @@ public sealed partial class EnvCellRenderer :
                 foreach (var batch in call.renderData.Batches)
                 {
                     if (!BatchBelongsToPass(batch, renderPass))
+                        continue;
+
+                    if (!HasResolvedTexture(batch))
                         continue;
 
                     if (renderPass == WbRenderPass.Transparent
@@ -1021,6 +1035,30 @@ public sealed partial class EnvCellRenderer :
         }
 
         SubmitRhi(allInstances, renderPass, totalDraws, uniqueInstanceCount);
+    }
+
+    /// <summary>
+    /// A cell-shell subset whose texture never reached a texture array has no
+    /// binding to draw with; drawing it anyway samples whatever the unassigned
+    /// table entry holds, which is a blank image, so the subset is dropped and
+    /// reported once. This is never expected: the mesh upload assigns the slot
+    /// with the layer, so a report here means a subset was published without
+    /// one.
+    /// </summary>
+    private bool HasResolvedTexture(ObjectRenderBatch batch)
+    {
+        if (batch.TextureSlot.IsAssigned)
+            return true;
+
+        if (_unresolvedSurfacesReported.Add(batch.Key.SurfaceId))
+        {
+            Console.WriteLine(
+                $"envcell: surface 0x{batch.Key.SurfaceId:X8} "
+                + $"({batch.TextureSize.Width}x{batch.TextureSize.Height} {batch.TextureFormat}) "
+                + "has no texture binding; its cell subset is not drawn.");
+        }
+
+        return false;
     }
 
     internal static bool BatchBelongsToPass(
