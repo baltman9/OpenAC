@@ -20,7 +20,7 @@ namespace AcDream.App.Tests.Physics;
 /// sidestep rides on it as a modifier, at run speed.
 /// </summary>
 [Trait("Lane", "InstalledDat")]
-public sealed class PlayerRunSidestepInstalledDatTests
+public sealed partial class PlayerRunSidestepInstalledDatTests
 {
     private const uint HumanSetup = 0x02000001u;
     private const uint HumanMotionTable = 0x09000001u;
