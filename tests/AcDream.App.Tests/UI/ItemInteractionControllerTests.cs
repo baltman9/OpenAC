@@ -192,6 +192,10 @@ public sealed class ItemInteractionControllerTests
         Assert.Equal(new[] { (Caster, Monster) }, h.UseWithTarget);
         Assert.Empty(h.Uses);
         Assert.False(h.Controller.IsTargetModeActive);
+        // The caller already knows the caster is wielded, so the use must not
+        // also run the classification that would strip it back into the pack.
+        Assert.Empty(h.BackpackPlacements);
+        Assert.Empty(h.Wields);
     }
 
     [Fact]
@@ -206,6 +210,7 @@ public sealed class ItemInteractionControllerTests
         Assert.Empty(h.UseWithTarget);
         Assert.Empty(h.Uses);
         Assert.False(h.Controller.IsTargetModeActive);
+        Assert.Empty(h.BackpackPlacements);
         Assert.Contains(
             h.InterfaceTexts,
             entry => entry.Text
@@ -227,6 +232,37 @@ public sealed class ItemInteractionControllerTests
         Assert.True(h.Controller.UseWithCurrentSelection(Caster));
 
         Assert.Single(h.UseWithTarget);
+        Assert.Empty(h.BackpackPlacements);
+    }
+
+    [Fact]
+    public void WieldedCaster_theServerMarkedUnusable_isNotStrippedIntoThePack()
+    {
+        // Some casters are published with a useability that offers no use at
+        // all. Nothing can be sent for one, but the request must still not be
+        // answered by pulling the caster off the player and into a pack: the
+        // caller already knows it is wielded, so no classification runs.
+        var h = new Harness();
+        AddWieldedCaster(h);
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = Caster,
+            Name = "Orb of the Ironsea",
+            Type = ItemType.Caster,
+            WielderId = Player,
+            CurrentlyEquippedLocation = EquipMask.Held,
+            Useability = 0x00000001u,
+            TargetType = (uint)ItemType.Creature,
+            SpellId = 2670u,
+        });
+        h.SelectedObject = Monster;
+
+        h.Controller.UseWithCurrentSelection(Caster);
+
+        Assert.Empty(h.BackpackPlacements);
+        Assert.Empty(h.Wields);
+        Assert.Empty(h.Uses);
+        Assert.Empty(h.UseWithTarget);
     }
 
     [Fact]
