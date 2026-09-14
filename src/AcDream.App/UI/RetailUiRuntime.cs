@@ -288,7 +288,10 @@ public sealed record BookRuntimeBindings(
     Action<uint /*bookGuid*/, int /*page*/> SendBookPageData,
     Action<uint /*bookGuid*/> SendBookAddPage,
     Action<uint /*bookGuid*/, int /*page*/, string /*text*/> SendBookModifyPage,
-    Action<uint /*bookGuid*/, int /*page*/> SendBookDeletePage);
+    Action<uint /*bookGuid*/, int /*page*/> SendBookDeletePage,
+    /// <summary>Whether the server tells this player the truth about
+    /// author accounts. Everyone else is handed a stand-in.</summary>
+    Func<bool>? ShowsAuthorAccount = null);
 
 public sealed record RetailUiRuntimeBindings(
     UiHost Host,
@@ -3520,7 +3523,8 @@ public sealed class RetailUiRuntime : IDisposable
             SetVisible: visible =>
                 _panelUi.SetPanelVisibility(RetailPanelCatalog.Book, visible),
             SavePage: book.SendBookModifyPage,
-            DeletePage: book.SendBookDeletePage);
+            DeletePage: book.SendBookDeletePage,
+            ShowsAuthorAccount: book.ShowsAuthorAccount);
 
         Layout.BookPanelController? controller;
         lock (_bindings.Assets.DatLock)
