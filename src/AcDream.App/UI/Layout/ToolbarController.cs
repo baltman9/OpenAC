@@ -37,6 +37,7 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
     private readonly UiButton? _ammoIndicator;
     private readonly List<(uint PanelId, UiButton Button)> _panelButtons = new();
     private readonly ClientObjectTable _repo;
+    private readonly Func<ClientObject, string>? _resolveAppropriateName;
     private readonly CombatState? _combatState;
     private readonly ShortcutStore _store;
     private readonly Func<ItemType, uint, uint, uint, uint, uint> _iconIds;  // (itemType, icon, underlay, overlay, effects) → GL tex
@@ -78,9 +79,11 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
         Func<uint>? playerGuid = null,
         Action<uint, uint, int>? sendPutItemInContainer = null,
         UiDatFont? ammoFont = null,
-        Func<ItemType, uint, uint, uint, uint, uint>? dragIconIds = null)
+        Func<ItemType, uint, uint, uint, uint, uint>? dragIconIds = null,
+        Func<ClientObject, string>? resolveAppropriateName = null)
     {
         _repo = repo;
+        _resolveAppropriateName = resolveAppropriateName;
         _combatState = combatState;
         _store = shortcuts ?? throw new ArgumentNullException(nameof(shortcuts));
         _iconIds = iconIds;
@@ -110,7 +113,8 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
                 list.Cell.SlotIndex  = i;
                 list.Cell.SourceKind = ItemDragSource.ShortcutBar;
                 list.Cell.DragAcceptSprite = 0x060011FAu;
-                list.Cell.TooltipTextResolve = g => _repo.Get(g)?.GetTooltipDisplayName();
+                list.Cell.TooltipTextResolve = g => ItemTooltipCaption.Resolve(
+                    _repo, g, _resolveAppropriateName);
             }
         }
 
@@ -267,13 +271,14 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
         Func<uint>? playerGuid = null,
         Action<uint, uint, int>? sendPutItemInContainer = null,
         UiDatFont? ammoFont = null,
-        Func<ItemType, uint, uint, uint, uint, uint>? dragIconIds = null)
+        Func<ItemType, uint, uint, uint, uint, uint>? dragIconIds = null,
+        Func<ClientObject, string>? resolveAppropriateName = null)
     {
         var c = new ToolbarController(layout, repo, shortcuts, iconIds, useItem, combatState,
                                       regularDigits, ghostedDigits, emptyDigits, itemInteraction,
                                       sendAddShortcut, sendRemoveShortcut, toggleCombat, selectItem,
                                       selectedObjectId, selection, playerGuid, sendPutItemInContainer, ammoFont,
-                                      dragIconIds);
+                                      dragIconIds, resolveAppropriateName);
         c.Populate();
         return c;
     }

@@ -104,6 +104,28 @@ public class ToolbarControllerTests
         }
     }
 
+    // #87: the hover caption is the same name flavour the selection caption
+    // shows - the composed name, material prefix included.
+    [Fact]
+    public void HoverCaption_carriesTheMaterialPrefix_andStaysPlainWithoutOne()
+    {
+        var (layout, slots, _) = FakeToolbar();
+        var repo = new ClientObjectTable();
+        repo.AddOrUpdate(ItemTooltipCaptionNames.Material(0x5001u));
+        repo.AddOrUpdate(ItemTooltipCaptionNames.Plain(0x5002u));
+
+        ToolbarController.Bind(layout, repo, Store(new List<ShortcutEntry>
+            {
+                new(Index: 0, ObjectId: 0x5001u, SpellId: 0),
+                new(Index: 1, ObjectId: 0x5002u, SpellId: 0),
+            }),
+            iconIds: (_, _, _, _, _) => 0x77u, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
+
+        Assert.Equal("Pyreal Scarab", slots[Row1[0]].Cell.GetTooltipText());
+        Assert.Equal("Bread Loaf", slots[Row1[1]].Cell.GetTooltipText());
+    }
+
     [Fact]
     public void Populate_bindsShortcutToCorrectSlot()
     {

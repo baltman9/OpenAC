@@ -89,7 +89,8 @@ public class InventoryControllerTests
             burdenSpellbook: burdenSpellbook,
             shortcuts: shortcuts,
             shortcutDigits: shortcutDigits,
-            combat: combat);
+            combat: combat,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
     // ── #35: a rend or imbue re-sends the whole item description; the cell has
     //        to pick up the new underlay without a relog.
@@ -161,6 +162,27 @@ public class InventoryControllerTests
     {
         t.AddOrUpdate(new ClientObject { ObjectId = bag, Type = ItemType.Container, ItemsCapacity = itemsCapacity });
         t.MoveItem(bag, Player, slot);
+    }
+
+
+    // #87: the hover caption is the same name flavour the selection caption
+    // shows - the composed name, material prefix included.
+    [Fact]
+    public void HoverCaption_carriesTheMaterialPrefix_andStaysPlainWithoutOne()
+    {
+        var (layout, grid, _, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        ClientObject material = ItemTooltipCaptionNames.Material(0xA);
+        ClientObject plain = ItemTooltipCaptionNames.Plain(0xB);
+        objects.AddOrUpdate(material);
+        objects.MoveItem(material.ObjectId, Player, 0);
+        objects.AddOrUpdate(plain);
+        objects.MoveItem(plain.ObjectId, Player, 1);
+
+        Bind(layout, objects);
+
+        Assert.Equal("Pyreal Scarab", grid.GetItem(0)!.GetTooltipText());
+        Assert.Equal("Bread Loaf", grid.GetItem(1)!.GetTooltipText());
     }
 
     private static void SeedContained(ClientObjectTable t, uint guid, uint container, int slot,

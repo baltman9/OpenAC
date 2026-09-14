@@ -20,7 +20,8 @@ public sealed class SalvageUiController : IRetainedPanelController, IItemListDra
         Func<ItemType, uint, uint, uint, uint, uint> ResolveIcon,
         Action<bool> SetWindowVisible,
         Action<string> Report,
-        uint EmptySlotSprite = 0u);
+        uint EmptySlotSprite = 0u,
+        Func<ClientObject, string>? ResolveAppropriateName = null);
 
     private readonly Bindings _bindings;
     private readonly UiItemList _list;
@@ -210,7 +211,8 @@ public sealed class SalvageUiController : IRetainedPanelController, IItemListDra
                     SourceKind = ItemDragSource.Inventory,
                     ShowTradeOverlay = true,
                     TradeOverlaySprite = TradeOverlaySprite,
-                    TooltipTextResolve = id => _bindings.Objects.Get(id)?.GetTooltipDisplayName(),
+                    TooltipTextResolve = id => ItemTooltipCaption.Resolve(
+                        _bindings.Objects, id, _bindings.ResolveAppropriateName),
                 };
                 slot.SetItem(item.ObjectId, _bindings.ResolveIcon(
                     item.Type, item.IconId, item.IconUnderlayId, item.IconOverlayId, item.Effects));
