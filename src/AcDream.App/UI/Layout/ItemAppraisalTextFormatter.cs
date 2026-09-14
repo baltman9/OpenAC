@@ -40,7 +40,7 @@ public static class ItemAppraisalTextFormatter
         ShowValueAndBurden(report, properties);
         ShowTinkering(report, properties);
         ShowSetAndRatings(report, properties);
-        ShowWeaponAndArmor(report, obj, appraisal);
+        ShowWeaponAndArmor(report, obj, appraisal, names);
         ShowDefenseModifiers(report, appraisal);
         ShowArmorModifiers(report, appraisal);
         ShowShortMagicInfo(report, appraisal, resolveSpell);
@@ -48,7 +48,7 @@ public static class ItemAppraisalTextFormatter
         ShowUsage(report, properties);
         ShowLevelLimits(report, properties);
         ShowWieldRequirements(report, properties, names);
-        ShowUsageLimits(report, properties);
+        ShowUsageLimits(report, properties, names);
         ShowItemLevel(report, properties);
         ShowActivationRequirements(
             report,
@@ -173,7 +173,8 @@ public static class ItemAppraisalTextFormatter
     private static void ShowWeaponAndArmor(
         RetailReportBuilder report,
         ClientObject obj,
-        AppraiseInfoParser.Parsed appraisal)
+        AppraiseInfoParser.Parsed appraisal,
+        RetailAppraisalNameResolver names)
     {
         PropertyBundle properties = appraisal.Properties;
         uint validLocations = obj.IsHook && appraisal.HookProfile is { } hook
@@ -202,7 +203,7 @@ public static class ItemAppraisalTextFormatter
         if (hasWeaponOrShieldLocation
             && appraisal.WeaponProfile is { } weapon)
         {
-            string skill = SkillName((int)weapon.WeaponSkill);
+            string skill = names.ResolveSkill((int)weapon.WeaponSkill);
             int weaponType = properties.GetInt(353u);
             report.Line(
                 $"Skill: {skill}{WeaponSubtype(weaponType)}");
@@ -714,7 +715,7 @@ public static class ItemAppraisalTextFormatter
         string basePrefix = requirement is 2 or 4 or 6 ? "base " : string.Empty;
         return requirement switch
         {
-            1 or 2 or 8 => basePrefix + SkillName(stat),
+            1 or 2 or 8 => basePrefix + names.ResolveSkill(stat),
             3 or 4 => basePrefix + PrimaryAttributeName(stat),
             5 or 6 => basePrefix + SecondaryAttributeName(stat),
             7 => "level",
@@ -733,7 +734,8 @@ public static class ItemAppraisalTextFormatter
 
     private static void ShowUsageLimits(
         RetailReportBuilder report,
-        PropertyBundle properties)
+        PropertyBundle properties,
+        RetailAppraisalNameResolver names)
     {
         int level = properties.GetInt(369u);
         int skill = properties.GetInt(366u);
@@ -751,11 +753,12 @@ public static class ItemAppraisalTextFormatter
                 $"Use requires level {level.ToString(CultureInfo.InvariantCulture)}.");
         if (skill > 0 && difficulty > 0)
             report.Line(
-                $"Use requires {UsageSkillName(skill)} of at least "
+                $"Use requires {UsageSkillName(skill, names)} of at least "
                 + $"{difficulty.ToString(CultureInfo.InvariantCulture)}.");
         if (specializedSkill > 0)
             report.Line(
-                $"Use requires specialized {UsageSkillName(specializedSkill)}.");
+                $"Use requires specialized "
+                + $"{UsageSkillName(specializedSkill, names)}.");
     }
 
     private static void ShowItemLevel(
@@ -825,7 +828,8 @@ public static class ItemAppraisalTextFormatter
         int skill = properties.GetInt(176u);
         if (skillLevel > 0 && skill > 0)
             requirements.Add(
-                $"{UsageSkillName(skill)}: {skillLevel.ToString(CultureInfo.InvariantCulture)}");
+                $"{UsageSkillName(skill, names)}: "
+                + $"{skillLevel.ToString(CultureInfo.InvariantCulture)}");
         int attributeLevel = properties.GetInt(258u);
         int attribute = properties.GetInt(257u);
         if (attributeLevel > 0 && attribute > 0)
@@ -1640,71 +1644,15 @@ public static class ItemAppraisalTextFormatter
         _ => string.Empty,
     };
 
-    internal static string SkillName(int skill) => skill switch
+    /// <summary>Names a skill through the authored skill table, falling back
+    /// to the offline table for the retired skills it no longer carries.
+    /// Requirement lines say "Unknown Skill" for an id nothing names.</summary>
+    private static string UsageSkillName(
+        int skill,
+        RetailAppraisalNameResolver names)
     {
-        1 => "Axe",
-        2 => "Bow",
-        3 => "Crossbow",
-        4 => "Dagger",
-        5 => "Mace",
-        6 => "Melee Defense",
-        7 => "Missile Defense",
-        8 => "Sling",
-        9 => "Spear",
-        10 => "Staff",
-        11 => "Sword",
-        12 => "Thrown Weapon",
-        13 => "Unarmed Combat",
-        14 => "Arcane Lore",
-        15 => "Magic Defense",
-        16 => "Mana Conversion",
-        17 => "Spellcraft",
-        18 => "Item Tinkering",
-        19 => "Person Appraisal",
-        20 => "Deception",
-        21 => "Healing",
-        22 => "Jump",
-        23 => "Lockpick",
-        24 => "Run",
-        25 => "Awareness",
-        26 => "Armor Repair",
-        27 => "Creature Appraisal",
-        28 => "Weapon Tinkering",
-        29 => "Armor Tinkering",
-        30 => "Magic Item Tinkering",
-        31 => "Creature Enchantment",
-        32 => "Item Enchantment",
-        33 => "Life Magic",
-        34 => "War Magic",
-        35 => "Leadership",
-        36 => "Loyalty",
-        37 => "Fletching",
-        38 => "Alchemy",
-        39 => "Cooking",
-        40 => "Salvaging",
-        41 => "Two Handed Combat",
-        42 => "Gearcraft",
-        43 => "Void Magic",
-        44 => "Heavy Weapons",
-        45 => "Light Weapons",
-        46 => "Finesse Weapons",
-        47 => "Missile Weapons",
-        48 => "Shield",
-        49 => "Dual Wield",
-        50 => "Recklessness",
-        51 => "Sneak Attack",
-        52 => "Dirty Fighting",
-        53 => "Challenge",
-        54 => "Summoning",
-        _ => $"Skill {skill.ToString(CultureInfo.InvariantCulture)}",
-    };
-
-    private static string UsageSkillName(int skill)
-    {
-        string name = SkillName(skill);
-        return name.StartsWith("Skill ", StringComparison.Ordinal)
-            ? "Unknown Skill"
-            : name;
+        string name = names.ResolveSkill(skill);
+        return RetailSkillNames.IsUnnamed(name) ? "Unknown Skill" : name;
     }
 
     private static string PrimaryAttributeName(int attribute) => attribute switch
