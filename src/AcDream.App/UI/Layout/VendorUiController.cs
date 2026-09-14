@@ -133,7 +133,7 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
     private readonly VendorStagingList _sellStaging = new();
     private readonly RetailDialogFactory? _dialogs;
     private readonly Action<string>? _systemMessage;
-    private readonly Func<ClientObject, string>? _resolveAppropriateName;
+    private readonly Func<ClientObject, string> _resolveAppropriateName;
 
     private readonly List<(string Label, ItemType Mask)> _presentCategories = new();
     private int _selectedCategoryIndex = -1;
@@ -197,8 +197,9 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
         uint emptySlotSprite,
         uint buyingEmptySlotSprite,
         uint sellingEmptySlotSprite,
-        Func<ClientObject, string>? resolveAppropriateName)
+        Func<ClientObject, string> resolveAppropriateName)
     {
+        ArgumentNullException.ThrowIfNull(resolveAppropriateName);
         _resolveAppropriateName = resolveAppropriateName;
         _vendor = vendor;
         _window = window;
@@ -382,12 +383,15 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
         UiDatFont? datFont,
         BitmapFont? debugFont,
         Func<uint, (uint tex, int w, int h)> resolveSprite,
+        /// <summary>Composes an item's displayed name, material prefix
+        /// included. Required: without it a cell would quietly caption the
+        /// plain name and disagree with the selection caption.</summary>
+        Func<ClientObject, string> resolveAppropriateName,
         uint emptySlotSprite = 0u,
         uint buyingEmptySlotSprite = 0u,
         uint sellingEmptySlotSprite = 0u,
         RetailDialogFactory? dialogs = null,
-        Action<string>? systemMessage = null,
-        Func<ClientObject, string>? resolveAppropriateName = null)
+        Action<string>? systemMessage = null)
     {
         ArgumentNullException.ThrowIfNull(layout);
         ArgumentNullException.ThrowIfNull(vendor);

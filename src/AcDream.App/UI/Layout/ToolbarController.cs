@@ -37,7 +37,7 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
     private readonly UiButton? _ammoIndicator;
     private readonly List<(uint PanelId, UiButton Button)> _panelButtons = new();
     private readonly ClientObjectTable _repo;
-    private readonly Func<ClientObject, string>? _resolveAppropriateName;
+    private readonly Func<ClientObject, string> _resolveAppropriateName;
     private readonly CombatState? _combatState;
     private readonly ShortcutStore _store;
     private readonly Func<ItemType, uint, uint, uint, uint, uint> _iconIds;  // (itemType, icon, underlay, overlay, effects) → GL tex
@@ -65,6 +65,7 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
         ShortcutStore shortcuts,
         Func<ItemType, uint, uint, uint, uint, uint> iconIds,
         Action<uint> useItem,
+        Func<ClientObject, string> resolveAppropriateName,
         CombatState? combatState,
         uint[]? regularDigits,
         uint[]? ghostedDigits,
@@ -79,9 +80,9 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
         Func<uint>? playerGuid = null,
         Action<uint, uint, int>? sendPutItemInContainer = null,
         UiDatFont? ammoFont = null,
-        Func<ItemType, uint, uint, uint, uint, uint>? dragIconIds = null,
-        Func<ClientObject, string>? resolveAppropriateName = null)
+        Func<ItemType, uint, uint, uint, uint, uint>? dragIconIds = null)
     {
+        ArgumentNullException.ThrowIfNull(resolveAppropriateName);
         _repo = repo;
         _resolveAppropriateName = resolveAppropriateName;
         _combatState = combatState;
@@ -257,6 +258,10 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
         ShortcutStore shortcuts,
         Func<ItemType, uint, uint, uint, uint, uint> iconIds,
         Action<uint> useItem,
+        /// <summary>Composes an item's displayed name, material prefix
+        /// included. Required: without it a cell would quietly caption the
+        /// plain name and disagree with the selection caption.</summary>
+        Func<ClientObject, string> resolveAppropriateName,
         CombatState? combatState = null,
         uint[]? regularDigits = null,
         uint[]? ghostedDigits = null,
@@ -271,14 +276,14 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
         Func<uint>? playerGuid = null,
         Action<uint, uint, int>? sendPutItemInContainer = null,
         UiDatFont? ammoFont = null,
-        Func<ItemType, uint, uint, uint, uint, uint>? dragIconIds = null,
-        Func<ClientObject, string>? resolveAppropriateName = null)
+        Func<ItemType, uint, uint, uint, uint, uint>? dragIconIds = null)
     {
-        var c = new ToolbarController(layout, repo, shortcuts, iconIds, useItem, combatState,
+        var c = new ToolbarController(layout, repo, shortcuts, iconIds, useItem,
+                                      resolveAppropriateName, combatState,
                                       regularDigits, ghostedDigits, emptyDigits, itemInteraction,
                                       sendAddShortcut, sendRemoveShortcut, toggleCombat, selectItem,
                                       selectedObjectId, selection, playerGuid, sendPutItemInContainer, ammoFont,
-                                      dragIconIds, resolveAppropriateName);
+                                      dragIconIds);
         c.Populate();
         return c;
     }

@@ -31,7 +31,7 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
     private readonly Action<uint, uint, uint, uint> _sendSplitToContainer;
     private readonly Func<uint, bool> _isWithinUseRange;
     private readonly RetailWindowHandle _window;
-    private readonly Func<ClientObject, string>? _resolveAppropriateName;
+    private readonly Func<ClientObject, string> _resolveAppropriateName;
     private readonly UiItemList _topContainer;
     private readonly UiItemList _containerList;
     private readonly UiItemList _contentsList;
@@ -57,8 +57,9 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
         RetailWindowHandle window,
         uint contentsEmptySprite,
         uint containerEmptySprite,
-        Func<ClientObject, string>? resolveAppropriateName)
+        Func<ClientObject, string> resolveAppropriateName)
     {
+        ArgumentNullException.ThrowIfNull(resolveAppropriateName);
         _resolveAppropriateName = resolveAppropriateName;
         _state = state;
         _objects = objects;
@@ -127,9 +128,12 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
         Action<uint, uint, uint, uint> sendSplitToContainer,
         Func<uint, bool> isWithinUseRange,
         RetailWindowHandle window,
+        /// <summary>Composes an item's displayed name, material prefix
+        /// included. Required: without it a cell would quietly caption the
+        /// plain name and disagree with the selection caption.</summary>
+        Func<ClientObject, string> resolveAppropriateName,
         uint contentsEmptySprite = 0u,
-        uint containerEmptySprite = 0u,
-        Func<ClientObject, string>? resolveAppropriateName = null)
+        uint containerEmptySprite = 0u)
         => new(
             layout,
             state,

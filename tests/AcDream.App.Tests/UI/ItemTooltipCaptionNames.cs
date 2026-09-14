@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using AcDream.App.UI.Layout;
 using AcDream.Core.Items;
 
-namespace AcDream.App.Tests.UI.Layout;
+namespace AcDream.App.Tests.UI;
 
 /// <summary>
 /// The composed-name resolver every item surface is handed in production,

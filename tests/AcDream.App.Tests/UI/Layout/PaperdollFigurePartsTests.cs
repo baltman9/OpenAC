@@ -169,6 +169,7 @@ public class PaperdollFigurePartsTests
             iconIds: (_, _, _, _, _) => 0u,
             selection: selection,
             itemInteraction: interaction,
-            figureLighting: lighting);
+            figureLighting: lighting,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
     }
 }

@@ -61,7 +61,8 @@ public sealed class VendorUiControllerTests
             new StackSplitQuantityState(),
             datFont: null,
             debugFont: null,
-            static _ => (0u, 0, 0));
+            static _ => (0u, 0, 0),
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         Assert.NotNull(controller);
     }
@@ -104,7 +105,8 @@ public sealed class VendorUiControllerTests
             new StackSplitQuantityState(),
             datFont: null,
             debugFont: null,
-            static _ => (0u, 0, 0));
+            static _ => (0u, 0, 0),
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         Assert.NotNull(controller);
 
         var buyingList = Assert.IsType<UiItemList>(layout.FindElement(VendorUiController.BuyingListId));

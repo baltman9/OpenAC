@@ -20,8 +20,11 @@ public sealed class SalvageUiController : IRetainedPanelController, IItemListDra
         Func<ItemType, uint, uint, uint, uint, uint> ResolveIcon,
         Action<bool> SetWindowVisible,
         Action<string> Report,
-        uint EmptySlotSprite = 0u,
-        Func<ClientObject, string>? ResolveAppropriateName = null);
+        /// <summary>Composes an item's displayed name, material prefix
+        /// included. Required: without it a cell would quietly caption the
+        /// plain name and disagree with the selection caption.</summary>
+        Func<ClientObject, string> ResolveAppropriateName,
+        uint EmptySlotSprite = 0u);
 
     private readonly Bindings _bindings;
     private readonly UiItemList _list;
@@ -35,6 +38,7 @@ public sealed class SalvageUiController : IRetainedPanelController, IItemListDra
 
     private SalvageUiController(ImportedLayout layout, Bindings bindings)
     {
+        ArgumentNullException.ThrowIfNull(bindings.ResolveAppropriateName);
         _bindings = bindings;
         _list = (UiItemList)layout.FindElement(ItemListId)!;
         _salvageButton = (UiButton)layout.FindElement(SalvageButtonId)!;

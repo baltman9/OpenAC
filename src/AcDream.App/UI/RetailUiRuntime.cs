@@ -1614,7 +1614,8 @@ public sealed class RetailUiRuntime : IDisposable
         UiShortcutDigitGraphics shortcutDigits = LoadShortcutDigitGraphics();
         ToolbarRuntimeBindings b = _bindings.Toolbar;
         ToolbarController = Layout.ToolbarController.Bind(
-            layout, b.Objects, b.Shortcuts, b.ResolveIcon, b.UseItem, b.Combat,
+            layout, b.Objects, b.Shortcuts, b.ResolveIcon, b.UseItem,
+            ResolveAppropriateItemName, b.Combat,
             shortcutDigits.RegularDigits, shortcutDigits.GhostedDigits,
             shortcutDigits.EmptyDigits, b.ItemInteraction,
             b.SendAddShortcut, b.SendRemoveShortcut,
@@ -1625,8 +1626,7 @@ public sealed class RetailUiRuntime : IDisposable
             playerGuid: b.PlayerGuid,
             sendPutItemInContainer: b.SendPutItemInContainer,
             ammoFont: _bindings.Assets.DefaultFont,
-            dragIconIds: b.ResolveDragIcon,
-            resolveAppropriateName: ResolveAppropriateItemName);
+            dragIconIds: b.ResolveDragIcon);
         ToolbarInputController = new ToolbarInputController(ToolbarController, b.Selection);
         SelectedObjectController = Layout.SelectedObjectController.Bind(
             layout,
@@ -4035,7 +4035,8 @@ public sealed class RetailUiRuntime : IDisposable
             : ToolbarController.ReplaceFullyMergedShortcut;
         InventoryController inventory = InventoryController.Bind(
             layout, b.Objects, b.PlayerGuid, b.ResolveIcon, b.Strength, b.Selection,
-            _bindings.Assets.DefaultFont, _bindings.Character.Provider.CharacterName,
+            _bindings.Assets.DefaultFont, ResolveAppropriateItemName,
+            _bindings.Character.Provider.CharacterName,
             contents, sideBag, mainPack, b.SendUse,
             b.SendPutItemInContainer, b.SendStackableSplitToContainer, b.SendStackableMerge,
             notifyMergeAttempt, b.ItemInteraction,
@@ -4045,15 +4046,14 @@ public sealed class RetailUiRuntime : IDisposable
             b.Spellbook,
             _bindings.Toolbar.Shortcuts,
             LoadShortcutDigitGraphics(),
-            _bindings.Toolbar.Combat,
-            ResolveAppropriateItemName);
+            _bindings.Toolbar.Combat);
         InventoryPanelController = inventory;
         PaperdollController paperdoll = PaperdollController.Bind(
             layout, b.Objects, b.PlayerGuid, b.ResolveIcon, b.Selection, b.ItemInteraction,
+            ResolveAppropriateItemName,
             contents, _bindings.Assets.DefaultFont, paperdollClickMap,
             b.ResolveDragIcon, paperdollEmptySprites,
-            figureLighting: PaperdollFigureLighting,
-            resolveAppropriateName: ResolveAppropriateItemName);
+            figureLighting: PaperdollFigureLighting);
         Host.WindowManager.AttachController(
             WindowNames.Inventory,
             new RetainedPanelControllerGroup(inventory, paperdoll));
@@ -4118,9 +4118,9 @@ public sealed class RetailUiRuntime : IDisposable
             b.SendStackableSplitToContainer,
             b.IsWithinUseRange,
             handle,
+            ResolveAppropriateItemName,
             contentsEmpty,
-            containerEmpty,
-            ResolveAppropriateItemName);
+            containerEmpty);
         Host.WindowManager.AttachController(
             WindowNames.ExternalContainer,
             ExternalContainerController);
@@ -4198,12 +4198,12 @@ public sealed class RetailUiRuntime : IDisposable
             _bindings.Assets.DefaultFont,
             _bindings.Assets.DebugFont,
             _bindings.Assets.ResolveSprite,
+            ResolveAppropriateItemName,
             emptySlotSprite,
             buyingEmptySlotSprite,
             sellingEmptySlotSprite,
             DialogFactory,
-            b.DisplaySystemMessage,
-            ResolveAppropriateItemName);
+            b.DisplaySystemMessage);
         if (VendorController is null)
         {
             Console.WriteLine("[UI] vendor: required authored controls are missing.");
@@ -4249,8 +4249,8 @@ public sealed class RetailUiRuntime : IDisposable
                     else Host.HideWindow(WindowNames.Salvage);
                 },
                 _bindings.Options.DisplaySystemMessage,
-                emptySlot,
-                ResolveAppropriateItemName));
+                ResolveAppropriateItemName,
+                emptySlot));
         if (controller is null)
         {
             Console.WriteLine("[UI] salvage window controls are unavailable.");
