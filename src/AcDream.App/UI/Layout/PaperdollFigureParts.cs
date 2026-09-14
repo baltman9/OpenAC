@@ -15,91 +15,75 @@ namespace AcDream.App.UI.Layout;
 /// </summary>
 internal static class PaperdollFigureParts
 {
-    /// <summary>Every part of a humanoid figure, for the select-yourself case.</summary>
-    public const uint WholeFigure = 0x0001_FFFFu;   // parts 0 through 0x10
-
     /// <summary>A body location, and the bit that stands for it. The location
     /// masks pair each wear slot with its armor slot, because one item can be
     /// the outermost thing at either.</summary>
-    private static readonly (EquipMask Location, int Bit)[] BodyLocations =
+    private static readonly EquipMask[] BodyLocations =
     {
-        (EquipMask.HeadWear, 0),                                          // 0x0001
-        (EquipMask.ChestWear    | EquipMask.ChestArmor, 1),               // 0x0202
-        (EquipMask.AbdomenWear  | EquipMask.AbdomenArmor, 2),             // 0x0404
-        (EquipMask.UpperArmWear | EquipMask.UpperArmArmor, 3),            // 0x0808
-        (EquipMask.LowerArmWear | EquipMask.LowerArmArmor, 4),            // 0x1010
-        (EquipMask.HandWear, 5),                                          // 0x0020
-        (EquipMask.UpperLegWear | EquipMask.UpperLegArmor, 6),            // 0x2040
-        (EquipMask.LowerLegWear | EquipMask.LowerLegArmor, 7),            // 0x4080
-        (EquipMask.FootWear, 8),                                          // 0x0100
+        EquipMask.HeadWear,                                          // 0x0001
+        EquipMask.ChestWear    | EquipMask.ChestArmor,               // 0x0202
+        EquipMask.AbdomenWear  | EquipMask.AbdomenArmor,             // 0x0404
+        EquipMask.UpperArmWear | EquipMask.UpperArmArmor,            // 0x0808
+        EquipMask.LowerArmWear | EquipMask.LowerArmArmor,            // 0x1010
+        EquipMask.HandWear,                                          // 0x0020
+        EquipMask.UpperLegWear | EquipMask.UpperLegArmor,            // 0x2040
+        EquipMask.LowerLegWear | EquipMask.LowerLegArmor,            // 0x4080
+        EquipMask.FootWear,                                          // 0x0100
     };
 
-    /// <summary>The parts each body-location bit is drawn from, by index into the
+    /// <summary>The parts each body location is drawn from, by index into the
     /// figure's part list. Limbs come in pairs; the feet carry four.</summary>
     private static readonly int[][] PartsByBodyLocation =
     {
-        new[] { 0x10 },                 // head
-        new[] { 0x09 },                 // chest
-        new[] { 0x00 },                 // abdomen
-        new[] { 0x0A, 0x0D },           // upper arms
-        new[] { 0x0B, 0x0E },           // lower arms
-        new[] { 0x0C, 0x0F },           // hands
-        new[] { 0x01, 0x05 },           // upper legs
-        new[] { 0x02, 0x06 },           // lower legs
+        new[] { 0x10 },                     // head
+        new[] { 0x09 },                     // chest
+        new[] { 0x00 },                     // abdomen
+        new[] { 0x0A, 0x0D },               // upper arms
+        new[] { 0x0B, 0x0E },               // lower arms
+        new[] { 0x0C, 0x0F },               // hands
+        new[] { 0x01, 0x05 },               // upper legs
+        new[] { 0x02, 0x06 },               // lower legs
         new[] { 0x03, 0x07, 0x04, 0x08 },   // feet
     };
 
-    /// <summary>Highest part index this mapping can name, so a caller can check
-    /// the figure it is lighting actually has them.</summary>
+    /// <summary>Highest part index this mapping can name. A figure with more
+    /// parts than this still flashes whole when the player selects themselves.</summary>
     public const int HighestPartIndex = 0x10;
 
-    /// <summary>The body-location bits the selected object is the outermost worn
-    /// item at. Selecting the player gives every bit; an item worn nowhere on the
-    /// figure, or nothing at all, gives none.</summary>
-    public static uint BodyLocationMask(
+    /// <summary>What to flash for a selected object: the whole figure, some of
+    /// its parts, or nothing.</summary>
+    public readonly record struct FigureFlash(bool WholeFigure, uint PartMask)
+    {
+        public bool Any => WholeFigure || PartMask != 0u;
+
+        public static readonly FigureFlash None = new(false, 0u);
+    }
+
+    /// <summary>Resolve the flash for a selected object. Selecting yourself
+    /// flashes the whole figure; an item flashes the parts it is the outermost
+    /// worn thing at; anything else flashes nothing.</summary>
+    public static FigureFlash Resolve(
         ClientObjectTable objects,
         uint playerId,
         uint selectedObjectId)
     {
         if (objects is null || playerId == 0u || selectedObjectId == 0u)
-            return 0u;
+            return FigureFlash.None;
         if (selectedObjectId == playerId)
-            return uint.MaxValue >> 1;          // the whole figure
+            return new FigureFlash(WholeFigure: true, PartMask: 0u);
 
-        uint mask = 0u;
-        foreach ((EquipMask location, int bit) in BodyLocations)
-        {
-            if (PaperdollSelectionPolicy.GetUpperInventoryObject(objects, playerId, location)
-                == selectedObjectId)
-                mask |= 1u << bit;
-        }
-        return mask;
-    }
-
-    /// <summary>Turn body-location bits into the parts of the figure to flash.</summary>
-    public static uint PartMask(uint bodyLocationMask)
-    {
-        if (bodyLocationMask == 0u)
-            return 0u;
-        if (bodyLocationMask == uint.MaxValue >> 1)
-            return WholeFigure;
+        Span<uint> outermost = stackalloc uint[BodyLocations.Length];
+        PaperdollSelectionPolicy.GetUpperInventoryObjects(
+            objects, playerId, BodyLocations, outermost);
 
         uint parts = 0u;
-        for (int bit = 0; bit < PartsByBodyLocation.Length; bit++)
+        for (int location = 0; location < outermost.Length; location++)
         {
-            if ((bodyLocationMask & (1u << bit)) == 0u)
+            if (outermost[location] != selectedObjectId)
                 continue;
-            foreach (int part in PartsByBodyLocation[bit])
+            foreach (int part in PartsByBodyLocation[location])
                 parts |= 1u << part;
         }
-        return parts;
+        return new FigureFlash(WholeFigure: false, PartMask: parts);
     }
-
-    /// <summary>The parts to flash for a selected object, or 0 for one the figure
-    /// does not wear.</summary>
-    public static uint PartMaskFor(
-        ClientObjectTable objects,
-        uint playerId,
-        uint selectedObjectId)
-        => PartMask(BodyLocationMask(objects, playerId, selectedObjectId));
 }

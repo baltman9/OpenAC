@@ -35,6 +35,11 @@ internal sealed class RetailSelectionLightingPulse
     public void Start(uint serverGuid, uint localEntityId)
         => Start(serverGuid, localEntityId, partMask: 0u, WorldFlipBudget);
 
+    /// <summary>Flash a whole figure on the doll's schedule rather than a world
+    /// pick's - every part of it, however many it has.</summary>
+    public void StartWholeFigure(uint serverGuid, uint localEntityId)
+        => Start(serverGuid, localEntityId, partMask: 0u, PartFlipBudget);
+
     /// <summary>Flash only the named parts of one entity: bit N lights part N.
     /// A mask of 0 lights nothing and clears any pulse in flight.</summary>
     public void StartParts(uint serverGuid, uint localEntityId, uint partMask)
@@ -88,15 +93,21 @@ internal sealed class RetailSelectionLightingPulse
 
     /// <summary>True while some part of this entity is lit. One test per entity
     /// keeps the per-part lookup off the draw path whenever nothing is flashing.</summary>
-    public bool HasPartLighting(uint localEntityId)
-        => _flipCount != 0 && _partMask != 0u && localEntityId == _localEntityId;
+    public bool HasPartLighting(uint serverGuid, uint localEntityId)
+        => _flipCount != 0
+           && _partMask != 0u
+           && serverGuid != 0u
+           && localEntityId != 0u
+           && serverGuid == _serverGuid
+           && localEntityId == _localEntityId;
 
     public bool TryGetPartLighting(
+        uint serverGuid,
         uint localEntityId,
         int partIndex,
         out RetailSelectionLighting lighting)
     {
-        if (HasPartLighting(localEntityId)
+        if (HasPartLighting(serverGuid, localEntityId)
             && (uint)partIndex < 32u
             && (_partMask & (1u << partIndex)) != 0u)
         {

@@ -48,17 +48,16 @@ public sealed class FigurePartOrderInstalledDatTests
         Setup? setup = dats.Get<Setup>(HumanMaleSetupId);
         Assert.True(setup is not null, $"setup 0x{HumanMaleSetupId:X8} is not in the installed data.");
 
+        // The table names parts 0 through 0x10. The installed body carries more
+        // than that (34 at the time of writing - head, torso, limbs, then the
+        // rest), which is exactly why selecting yourself flashes the whole
+        // figure instead of a fixed mask of named parts. What must hold is that
+        // every index the table names is a real part of the body being drawn.
         Assert.True(
             setup!.Parts.Count > PaperdollFigureParts.HighestPartIndex,
-            $"the figure has {setup.Parts.Count} parts but the flash can name part "
-            + $"0x{PaperdollFigureParts.HighestPartIndex:X}, so the mapping is for a "
-            + "different body than the one being drawn.");
-
-        // Every bit the whole-figure mask sets has to be a real part.
-        for (int part = 0; part <= PaperdollFigureParts.HighestPartIndex; part++)
-            Assert.True(
-                (PaperdollFigureParts.WholeFigure & (1u << part)) != 0u,
-                $"part {part} is on the figure but the whole-figure mask misses it.");
+            $"the figure has {setup.Parts.Count} parts but the flash names part "
+            + $"0x{PaperdollFigureParts.HighestPartIndex:X}, so this mapping is for "
+            + "a different body than the one being drawn.");
     }
 
     private static string? ResolveDatDir()

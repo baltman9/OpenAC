@@ -307,10 +307,12 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
     {
         if (_figureLighting is null)
             return;
-        uint parts = PaperdollFigureParts.PartMaskFor(
+        PaperdollFigureParts.FigureFlash flash = PaperdollFigureParts.Resolve(
             _objects, _playerGuid(), _selection.SelectedObjectId ?? 0u);
-        if (parts != 0u)
-            _figureLighting.FlashParts(parts);
+        if (flash.WholeFigure)
+            _figureLighting.FlashWholeFigure();
+        else if (flash.PartMask != 0u)
+            _figureLighting.FlashParts(flash.PartMask);
     }
     private void OnInteractionStateChanged() => Populate();
     private void OnObjectsCleared()
