@@ -356,8 +356,14 @@ public sealed class RetailUiRuntime : IDisposable
 
     private string? ResolveSelectedObjectName(uint guid) =>
         _bindings.Toolbar.Objects.Get(guid) is { } obj
-            ? ItemNames.ResolveAppropriateName(obj)
+            ? ResolveAppropriateItemName(obj)
             : _bindings.Toolbar.ResolveName(guid);
+
+    /// <summary>The composed name for one object - material prefix included.
+    /// Item captions and the selection caption share it, so a hover and a
+    /// selection never disagree about what an item is called.</summary>
+    private string ResolveAppropriateItemName(ClientObject obj)
+        => ItemNames.ResolveAppropriateName(obj);
 
     private StackSplitQuantityState StackSplitQuantity => _bindings.StackSplitQuantity;
     private RetailWindowLayoutPersistence? _persistence;
@@ -1619,7 +1625,8 @@ public sealed class RetailUiRuntime : IDisposable
             playerGuid: b.PlayerGuid,
             sendPutItemInContainer: b.SendPutItemInContainer,
             ammoFont: _bindings.Assets.DefaultFont,
-            dragIconIds: b.ResolveDragIcon);
+            dragIconIds: b.ResolveDragIcon,
+            resolveAppropriateName: ResolveAppropriateItemName);
         ToolbarInputController = new ToolbarInputController(ToolbarController, b.Selection);
         SelectedObjectController = Layout.SelectedObjectController.Bind(
             layout,
@@ -4038,13 +4045,15 @@ public sealed class RetailUiRuntime : IDisposable
             b.Spellbook,
             _bindings.Toolbar.Shortcuts,
             LoadShortcutDigitGraphics(),
-            _bindings.Toolbar.Combat);
+            _bindings.Toolbar.Combat,
+            ResolveAppropriateItemName);
         InventoryPanelController = inventory;
         PaperdollController paperdoll = PaperdollController.Bind(
             layout, b.Objects, b.PlayerGuid, b.ResolveIcon, b.Selection, b.ItemInteraction,
             contents, _bindings.Assets.DefaultFont, paperdollClickMap,
             b.ResolveDragIcon, paperdollEmptySprites,
-            figureLighting: PaperdollFigureLighting);
+            figureLighting: PaperdollFigureLighting,
+            resolveAppropriateName: ResolveAppropriateItemName);
         Host.WindowManager.AttachController(
             WindowNames.Inventory,
             new RetainedPanelControllerGroup(inventory, paperdoll));
@@ -4110,7 +4119,8 @@ public sealed class RetailUiRuntime : IDisposable
             b.IsWithinUseRange,
             handle,
             contentsEmpty,
-            containerEmpty);
+            containerEmpty,
+            ResolveAppropriateItemName);
         Host.WindowManager.AttachController(
             WindowNames.ExternalContainer,
             ExternalContainerController);
@@ -4192,7 +4202,8 @@ public sealed class RetailUiRuntime : IDisposable
             buyingEmptySlotSprite,
             sellingEmptySlotSprite,
             DialogFactory,
-            b.DisplaySystemMessage);
+            b.DisplaySystemMessage,
+            ResolveAppropriateItemName);
         if (VendorController is null)
         {
             Console.WriteLine("[UI] vendor: required authored controls are missing.");
@@ -4238,7 +4249,8 @@ public sealed class RetailUiRuntime : IDisposable
                     else Host.HideWindow(WindowNames.Salvage);
                 },
                 _bindings.Options.DisplaySystemMessage,
-                emptySlot));
+                emptySlot,
+                ResolveAppropriateItemName));
         if (controller is null)
         {
             Console.WriteLine("[UI] salvage window controls are unavailable.");
@@ -4346,7 +4358,8 @@ public sealed class RetailUiRuntime : IDisposable
                                         count.ToString(),
                                 }) ?? count.ToString();
                         }
-                    }));
+                    },
+                    ResolveAppropriateName: ResolveAppropriateItemName));
         if (controller is null)
         {
             Console.WriteLine("[UI] secure trade: required authored grids are missing.");

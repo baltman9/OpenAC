@@ -133,6 +133,7 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
     private readonly VendorStagingList _sellStaging = new();
     private readonly RetailDialogFactory? _dialogs;
     private readonly Action<string>? _systemMessage;
+    private readonly Func<ClientObject, string>? _resolveAppropriateName;
 
     private readonly List<(string Label, ItemType Mask)> _presentCategories = new();
     private int _selectedCategoryIndex = -1;
@@ -195,8 +196,10 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
         Func<uint, (uint tex, int w, int h)> resolveSprite,
         uint emptySlotSprite,
         uint buyingEmptySlotSprite,
-        uint sellingEmptySlotSprite)
+        uint sellingEmptySlotSprite,
+        Func<ClientObject, string>? resolveAppropriateName)
     {
+        _resolveAppropriateName = resolveAppropriateName;
         _vendor = vendor;
         _window = window;
         _resolveIcon = resolveIcon;
@@ -383,7 +386,8 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
         uint buyingEmptySlotSprite = 0u,
         uint sellingEmptySlotSprite = 0u,
         RetailDialogFactory? dialogs = null,
-        Action<string>? systemMessage = null)
+        Action<string>? systemMessage = null,
+        Func<ClientObject, string>? resolveAppropriateName = null)
     {
         ArgumentNullException.ThrowIfNull(layout);
         ArgumentNullException.ThrowIfNull(vendor);
@@ -478,7 +482,8 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
             resolveSprite,
             emptySlotSprite,
             buyingEmptySlotSprite,
-            sellingEmptySlotSprite);
+            sellingEmptySlotSprite,
+            resolveAppropriateName);
     }
 
     private enum VendorPanelTab { Items, Buying, Selling }
@@ -626,7 +631,8 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
                         SpriteResolve = _itemList.SpriteResolve,
                         SlotIndex = _itemList.GetNumUIItems(),
                         AllowDragSource = false,
-                        TooltipTextResolve = g => _objects.Get(g)?.GetTooltipDisplayName(),
+                        TooltipTextResolve = g => ItemTooltipCaption.Resolve(
+                            _objects, g, _resolveAppropriateName),
                     };
                     cell.SetItem(item.ItemGuid, icon);
                     cell.Selected = item.ItemGuid == selectedGuid;
@@ -1349,7 +1355,8 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
                     SpriteResolve = list.SpriteResolve,
                     SlotIndex = list.GetNumUIItems(),
                     AllowDragSource = false,
-                    TooltipTextResolve = g => _objects.Get(g)?.GetTooltipDisplayName(),
+                    TooltipTextResolve = g => ItemTooltipCaption.Resolve(
+                        _objects, g, _resolveAppropriateName),
                 };
                 cell.SetItem(shopItem.ItemGuid, icon);
                 cell.Selected = shopItem.ItemGuid == selectedGuid;
@@ -1420,7 +1427,8 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
                     SlotIndex = list.GetNumUIItems(),
                     AllowDragSource = true,
                     SourceKind = ItemDragSource.Inventory,
-                    TooltipTextResolve = g => _objects.Get(g)?.GetTooltipDisplayName(),
+                    TooltipTextResolve = g => ItemTooltipCaption.Resolve(
+                        _objects, g, _resolveAppropriateName),
                 };
                 cell.SetItem(item.ObjectId, icon);
                 cell.ShowSellOverlay = true;

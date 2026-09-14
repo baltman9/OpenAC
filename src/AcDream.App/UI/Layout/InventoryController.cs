@@ -33,6 +33,7 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
     internal const uint PlayerPackBaseIcon = 0x0600127Eu;
 
     private readonly ClientObjectTable _objects;
+    private readonly Func<ClientObject, string>? _resolveAppropriateName;
     private readonly Func<uint> _playerGuid;
     private readonly Func<ItemType, uint, uint, uint, uint, uint> _iconIds;
     private readonly Func<ItemType, uint, uint, uint, uint, uint>? _dragIconIds;
@@ -97,9 +98,11 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         Spellbook? burdenSpellbook,
         ShortcutStore? shortcuts,
         UiShortcutDigitGraphics? shortcutDigits,
-        CombatState? combat)
+        CombatState? combat,
+        Func<ClientObject, string>? resolveAppropriateName)
     {
         _objects    = objects;
+        _resolveAppropriateName = resolveAppropriateName;
         _shortcuts  = shortcuts;
         _shortcutDigits = shortcutDigits;
         _combat     = combat;
@@ -251,7 +254,8 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         Spellbook? burdenSpellbook = null,
         ShortcutStore? shortcuts = null,
         UiShortcutDigitGraphics? shortcutDigits = null,
-        CombatState? combat = null)
+        CombatState? combat = null,
+        Func<ClientObject, string>? resolveAppropriateName = null)
         => new InventoryController(layout, objects, playerGuid, iconIds, dragIconIds, strength, selection,
                                    ownerName, datFont,
                                    contentsEmptySprite, sideBagEmptySprite, mainPackEmptySprite,
@@ -259,7 +263,8 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
                                    sendStackableSplitToContainer, sendStackableMerge,
                                    notifyMergeAttempt, itemInteraction,
                                    onClose, stackSplitQuantity, burdenSpellbook,
-                                   shortcuts, shortcutDigits, combat);
+                                   shortcuts, shortcutDigits, combat,
+                                   resolveAppropriateName);
 
     private void OnObjectChanged(ClientObject o)
     {
@@ -487,7 +492,8 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
             var main = new UiItemSlot
             {
                 SpriteResolve = _topContainer.SpriteResolve,
-                TooltipTextResolve = g => _objects.Get(g)?.GetTooltipDisplayName(),
+                TooltipTextResolve = g => ItemTooltipCaption.Resolve(
+                    _objects, g, _resolveAppropriateName),
             };
             main.SetItem(
                 p,
@@ -700,7 +706,8 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         var cell = new UiItemSlot
         {
             SpriteResolve = list.SpriteResolve,
-            TooltipTextResolve = g => _objects.Get(g)?.GetTooltipDisplayName(),
+            TooltipTextResolve = g => ItemTooltipCaption.Resolve(
+                _objects, g, _resolveAppropriateName),
         };
         cell.SetItem(guid, tex, dragIconTexture: dragTex);
         SetStructureBar(cell, item);

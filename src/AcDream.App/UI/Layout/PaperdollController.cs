@@ -34,6 +34,7 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
     private readonly SelectionState _selection;
     private readonly PaperdollClickMap? _clickMap;
     private readonly IPaperdollFigureLighting? _figureLighting;
+    private readonly Func<ClientObject, string>? _resolveAppropriateName;
     private readonly List<(EquipMask Mask, UiItemList List)> _slots = new();
     private readonly List<(AetheriaUnlockState Bit, UiItemList List)> _aetheriaSlots = new();
 
@@ -53,8 +54,10 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
         Func<ItemType, uint, uint, uint, uint, uint>? dragIconIds,
         IReadOnlyDictionary<uint, uint>? emptySlotSprites,
         bool ownsItemInteraction,
-        IPaperdollFigureLighting? figureLighting)
+        IPaperdollFigureLighting? figureLighting,
+        Func<ClientObject, string>? resolveAppropriateName)
     {
+        _resolveAppropriateName = resolveAppropriateName;
         _objects = objects; _playerGuid = playerGuid; _iconIds = iconIds;
         _dragIconIds = dragIconIds;
         _itemInteraction = itemInteraction ?? throw new ArgumentNullException(nameof(itemInteraction));
@@ -72,7 +75,8 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
             list.ExamineItemRequested = ExamineItem;
             list.Cell.SourceKind  = ItemDragSource.Equipment;
             list.Cell.SlotIndex   = i;              // definition position = equipped drag-payload SourceSlot
-            list.Cell.TooltipTextResolve = g => _objects.Get(g)?.GetTooltipDisplayName();
+            list.Cell.TooltipTextResolve = g => ItemTooltipCaption.Resolve(
+                _objects, g, _resolveAppropriateName);
             list.Cell.EmptySprite = emptySlotSprites is not null
                 && emptySlotSprites.TryGetValue(element, out uint authoredSprite)
                     ? authoredSprite
@@ -155,10 +159,12 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
         Func<ItemType, uint, uint, uint, uint, uint>? dragIconIds = null,
         IReadOnlyDictionary<uint, uint>? emptySlotSprites = null,
         bool ownsItemInteraction = false,
-        IPaperdollFigureLighting? figureLighting = null)
+        IPaperdollFigureLighting? figureLighting = null,
+        Func<ClientObject, string>? resolveAppropriateName = null)
         => new PaperdollController(
             layout, objects, playerGuid, iconIds, selection, itemInteraction, emptySlotSprite,
-            datFont, clickMap, dragIconIds, emptySlotSprites, ownsItemInteraction, figureLighting);
+            datFont, clickMap, dragIconIds, emptySlotSprites, ownsItemInteraction, figureLighting,
+            resolveAppropriateName);
 
     private const int DollDragGhostSize = 32;
 

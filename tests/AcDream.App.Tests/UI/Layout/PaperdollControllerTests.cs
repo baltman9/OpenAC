@@ -133,7 +133,33 @@ public class PaperdollControllerTests
             emptySlotSprite: emptySlot,
             selection: selection ?? new SelectionState(),
             clickMap: clickMap,
-            emptySlotSprites: emptySlotSprites);
+            emptySlotSprites: emptySlotSprites,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
+    }
+
+    // #87: the hover caption is the same name flavour the selection caption
+    // shows - the composed name, material prefix included.
+    [Fact]
+    public void HoverCaption_carriesTheMaterialPrefix_andStaysPlainWithoutOne()
+    {
+        var (layout, lists) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayer(objects);
+        ClientObject material = ItemTooltipCaptionNames.Material(0xA1);
+        ClientObject plain = ItemTooltipCaptionNames.Plain(0xA2);
+        material.WielderId = Player;
+        plain.WielderId = Player;
+        objects.AddOrUpdate(material);
+        objects.MoveItem(material.ObjectId, Player, newSlot: -1,
+            newEquipLocation: EquipMask.HeadWear);
+        objects.AddOrUpdate(plain);
+        objects.MoveItem(plain.ObjectId, Player, newSlot: -1,
+            newEquipLocation: EquipMask.ChestWear);
+
+        Bind(layout, objects);
+
+        Assert.Equal("Pyreal Scarab", lists[HeadSlot].GetItem(0)!.GetTooltipText());
+        Assert.Equal("Bread Loaf", lists[ChestSlot].GetItem(0)!.GetTooltipText());
     }
 
     private static void SeedEquipped(ClientObjectTable t, uint guid, EquipMask loc)

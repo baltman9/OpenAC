@@ -36,7 +36,8 @@ public sealed class SecureTradeUiController : IRetainedPanelController
         Action<bool> SetWindowVisible,
         uint SelfEmptySlotSprite = 0u,
         uint PartnerEmptySlotSprite = 0u,
-        Func<int, string>? FormatTotalItems = null);
+        Func<int, string>? FormatTotalItems = null,
+        Func<ClientObject, string>? ResolveAppropriateName = null);
 
     private readonly Bindings _bindings;
     private readonly UiText? _partnerName;
@@ -228,7 +229,8 @@ public sealed class SecureTradeUiController : IRetainedPanelController
                     AllowDragSource = false,
                     ShowTradeOverlay = side == RuntimeTradeSide.Self,
                     TradeOverlaySprite = TradeOverlaySpriteId,
-                    TooltipTextResolve = g => _bindings.Objects.Get(g)?.GetTooltipDisplayName(),
+                    TooltipTextResolve = g => ItemTooltipCaption.Resolve(
+                        _bindings.Objects, g, _bindings.ResolveAppropriateName),
                 };
                 cell.SetItem(guid, icon);
                 list.AddItem(cell);
