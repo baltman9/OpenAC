@@ -530,6 +530,43 @@ public sealed class RuntimeBookStateTests
     }
 
     [Fact]
+    public void ApplyInscription_RetitlesTheOpenBookWithoutTouchingThePages()
+    {
+        RuntimeBookState state = NewState();
+        state.ApplyOpenBook(Open(Page(Player, "one")));
+
+        bool applied = state.ApplyInscription(new BookEvents.Inscription(
+            BookGuid, "Newly Inscribed", Player, "Acdream", "testaccount"));
+
+        Assert.True(applied);
+        RuntimeBookSnapshot snapshot = state.Snapshot;
+        Assert.Equal("Newly Inscribed", snapshot.Inscription);
+        Assert.Equal(Player, snapshot.ScribeId);
+        Assert.Equal("Acdream", snapshot.ScribeName);
+        Assert.Equal("one", state.View.GetPage(0)!.Value.PageText);
+    }
+
+    [Fact]
+    public void ApplyInscription_ForAnotherObjectIsDropped()
+    {
+        RuntimeBookState state = NewState();
+        state.ApplyOpenBook(Open(Page(Player, "one")));
+
+        bool applied = state.ApplyInscription(new BookEvents.Inscription(
+            0x80009999u, "Not this one", Player, "Acdream", "testaccount"));
+
+        Assert.False(applied);
+        Assert.Equal("An Inscription", state.Snapshot.Inscription);
+    }
+
+    [Fact]
+    public void ApplyInscription_WithNoBookOpenIsDropped()
+    {
+        Assert.False(NewState().ApplyInscription(new BookEvents.Inscription(
+            BookGuid, "text", Player, "Acdream", "acct")));
+    }
+
+    [Fact]
     public void TurnPage_OffAPageWrittenBySomeoneElseSavesNothing()
     {
         RuntimeBookState state = NewState();

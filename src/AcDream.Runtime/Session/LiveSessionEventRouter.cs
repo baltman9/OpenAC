@@ -225,6 +225,9 @@ public sealed class LiveSessionEventRouter : ILiveSessionEventRouting
                 onBookModifyPageResponse: inventory.Book is { } bookModifyPage
                     ? bookModifyPage.ApplyModifyPageResponse
                     : null,
+                onBookInscription: inventory.Book is { } bookInscription
+                    ? inscription => bookInscription.ApplyInscription(inscription)
+                    : null,
                 onFellowshipFullUpdate: social.Fellowship is { } fellowshipFull
                     ? fellowshipFull.ApplyFullUpdate
                     : null,

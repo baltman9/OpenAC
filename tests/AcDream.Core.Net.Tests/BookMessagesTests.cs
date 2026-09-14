@@ -317,4 +317,47 @@ public sealed class BookMessagesTests
         Assert.Throws<ArgumentNullException>(
             () => BookRequests.BuildBookModifyPage(1u, 1u, 0, null!));
     }
+
+    [Fact]
+    public void ParseInscription_ReadsGuidTextScribeAndAccount()
+    {
+        byte[] payload = new Buf()
+            .U32(0x80004321u)
+            .Str("Property of nobody")
+            .U32(0x5000000Au)
+            .Str("Acdream")
+            .Str("testaccount")
+            .Done();
+
+        BookEvents.Inscription? parsed = BookEvents.ParseInscription(payload);
+
+        Assert.NotNull(parsed);
+        Assert.Equal(0x80004321u, parsed!.Value.ObjectGuid);
+        Assert.Equal("Property of nobody", parsed.Value.Text);
+        Assert.Equal(0x5000000Au, parsed.Value.ScribeId);
+        Assert.Equal("Acdream", parsed.Value.ScribeName);
+        Assert.Equal("testaccount", parsed.Value.ScribeAccount);
+    }
+
+    [Fact]
+    public void ParseInscription_AcceptsAPayloadWithoutTheAccount()
+    {
+        byte[] payload = new Buf()
+            .U32(0x80004321u)
+            .Str("Inscribed")
+            .U32(0u)
+            .Str(string.Empty)
+            .Done();
+
+        BookEvents.Inscription? parsed = BookEvents.ParseInscription(payload);
+
+        Assert.NotNull(parsed);
+        Assert.Equal(string.Empty, parsed!.Value.ScribeAccount);
+    }
+
+    [Fact]
+    public void ParseInscription_RejectsATruncatedPayload()
+    {
+        Assert.Null(BookEvents.ParseInscription(new byte[3]));
+    }
 }

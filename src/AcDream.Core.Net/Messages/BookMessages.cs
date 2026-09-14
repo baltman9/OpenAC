@@ -130,6 +130,13 @@ public static class BookEvents
         int PageNumber,
         BookPage Page);
 
+    public readonly record struct Inscription(
+        uint ObjectGuid,
+        string Text,
+        uint ScribeId,
+        string ScribeName,
+        string ScribeAccount);
+
     /// <summary>The shape shared by the add-page, delete-page and
     /// modify-page answers.</summary>
     public readonly record struct PageResponse(
@@ -172,6 +179,36 @@ public static class BookEvents
             int pos = 8;
             BookPage page = ReadPage(payload, ref pos);
             return new PageDataResponse(bookGuid, pageNumber, page);
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The stand-alone inscription answer. Retail's own client has no
+    /// handler for it and current servers do not send it, so this only
+    /// exists so a server that does send one is not ignored.
+    /// </summary>
+    public static Inscription? ParseInscription(ReadOnlySpan<byte> payload)
+    {
+        try
+        {
+            if (payload.Length < 4) return null;
+            uint objectGuid = BinaryPrimitives.ReadUInt32LittleEndian(payload);
+            int pos = 4;
+            string inscription = StringReader.ReadString16L(payload, ref pos);
+            if (payload.Length - pos < 4) return null;
+            uint scribeId = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(pos));
+            pos += 4;
+            string scribeName = StringReader.ReadString16L(payload, ref pos);
+            string scribeAccount = payload.Length - pos >= 2
+                ? StringReader.ReadString16L(payload, ref pos)
+                : string.Empty;
+
+            return new Inscription(
+                objectGuid, inscription, scribeId, scribeName, scribeAccount);
         }
         catch (FormatException)
         {

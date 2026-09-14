@@ -215,6 +215,25 @@ public sealed class RuntimeBookState
         }
     }
 
+    /// <summary>
+    /// Fold in a stand-alone inscription answer for the open book. It
+    /// retitles the reader without disturbing the pages.
+    /// </summary>
+    public bool ApplyInscription(BookEvents.Inscription inscription)
+    {
+        lock (_gate)
+        {
+            if (_bookGuid == 0u || inscription.ObjectGuid != _bookGuid)
+                return false;
+
+            _inscription = inscription.Text;
+            _scribeId = inscription.ScribeId;
+            _scribeName = inscription.ScribeName;
+            Bump();
+            return true;
+        }
+    }
+
     /// <summary>Fold in a modify-page answer. The text was already stored
     /// locally when it was sent, so this only lifts the in-flight gate.
     /// </summary>

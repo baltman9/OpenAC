@@ -69,7 +69,8 @@ public static class GameEventWiring
         Action<BookEvents.PageDataResponse>? onBookPageData = null,
         Action<BookEvents.PageResponse>? onBookAddPageResponse = null,
         Action<BookEvents.PageResponse>? onBookDeletePageResponse = null,
-        Action<BookEvents.PageResponse>? onBookModifyPageResponse = null)
+        Action<BookEvents.PageResponse>? onBookModifyPageResponse = null,
+        Action<BookEvents.Inscription>? onBookInscription = null)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentNullException.ThrowIfNull(items);
@@ -621,6 +622,16 @@ public static class GameEventWiring
                 newSlot: (int)p.Value.Placement,
                 containerTypeHint: p.Value.ContainerType);
         });
+
+        if (onBookInscription is not null)
+        {
+            registrar.Register(GameEventType.GetInscriptionResponse, e =>
+            {
+                var p = BookEvents.ParseInscription(e.Payload.Span);
+                if (p is null) return;
+                onBookInscription(p.Value);
+            });
+        }
 
         if (onBookOpen is not null)
         {
