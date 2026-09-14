@@ -11,21 +11,28 @@ public sealed class RetailAppraisalNameResolver
     private const uint MaterialClientEnum = 0x10000001u;
     private const uint MaterialSubEnum = 1u;
 
+    // The authored skill table. Skill names come from here so an appraisal,
+    // the skills window and character creation all say the same thing.
+    private const uint SkillTableDid = 0x0E000004u;
+
     public static RetailAppraisalNameResolver Empty { get; } = new(
         new Dictionary<uint, string>(),
         new CreatureDisplayNameResolver(new Dictionary<uint, string>()));
 
     private readonly IReadOnlyDictionary<uint, string> _materials;
     private readonly CreatureDisplayNameResolver _creatures;
+    private readonly IReadOnlyDictionary<uint, string> _skills;
 
     public RetailAppraisalNameResolver(
         IReadOnlyDictionary<uint, string> materials,
-        CreatureDisplayNameResolver creatures)
+        CreatureDisplayNameResolver creatures,
+        IReadOnlyDictionary<uint, string>? skills = null)
     {
         _materials = materials
             ?? throw new ArgumentNullException(nameof(materials));
         _creatures = creatures
             ?? throw new ArgumentNullException(nameof(creatures));
+        _skills = skills ?? new Dictionary<uint, string>();
     }
 
     public static RetailAppraisalNameResolver Load(
@@ -57,8 +64,31 @@ public sealed class RetailAppraisalNameResolver
             }
         }
 
-        return new RetailAppraisalNameResolver(materials, creatures);
+        var skills = new Dictionary<uint, string>();
+        if (dats.Get<SkillTable>(SkillTableDid) is { } skillTable)
+        {
+            foreach ((DatReaderWriter.Enums.SkillId id, SkillBase skill)
+                     in skillTable.Skills)
+            {
+                string name = skill.Name.Value;
+                if (!string.IsNullOrWhiteSpace(name))
+                    skills.TryAdd((uint)id, name);
+            }
+        }
+
+        return new RetailAppraisalNameResolver(materials, creatures, skills);
     }
+
+    /// <summary>How many skills this resolver took from the authored table.
+    /// Zero means every name it gives is the offline fallback.</summary>
+    internal int AuthoredSkillNameCount => _skills.Count;
+
+    /// <summary>The authored name for a skill, or the offline fallback for
+    /// the retired skills the authored table no longer carries.</summary>
+    public string ResolveSkill(int skillId)
+        => skillId > 0 && _skills.TryGetValue((uint)skillId, out string? name)
+            ? name
+            : RetailSkillNames.Fallback(skillId);
 
     public string ResolveCreature(int creatureType)
         => _creatures.Resolve(creatureType);

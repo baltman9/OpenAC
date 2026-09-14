@@ -15,9 +15,9 @@ public sealed class ItemAppraisalTextFormatterTests
     {
         for (int skill = 1; skill <= 54; skill++)
             Assert.False(
-                ItemAppraisalTextFormatter.SkillName(skill).StartsWith("Skill ", StringComparison.Ordinal),
+                RetailSkillNames.Fallback(skill).StartsWith("Skill ", StringComparison.Ordinal),
                 $"skill {skill} has no name");
-        Assert.Equal("Shield", ItemAppraisalTextFormatter.SkillName(48));
+        Assert.Equal("Shield", RetailSkillNames.Fallback(48));
     }
 
     [Fact]
