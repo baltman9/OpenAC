@@ -242,8 +242,11 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
 
     private void ClearDollDragAcceptance() => DollDragAcceptance = ItemDragAcceptance.None;
 
-    /// <summary>The doll takes a drop anywhere on its body, so acceptance asks only
-    /// whether the item is wearable at all, not which region the pointer is over.</summary>
+    /// <summary>The doll takes a drop anywhere on its body, so acceptance ignores
+    /// which region the pointer is over. It is a preview only: it asks whether the
+    /// item is wearable at all, not the full legality the wield transaction runs
+    /// (which does weigh what is already worn against the item's priority), so a
+    /// drag can read as accepted and still be turned away on release.</summary>
     private void HandleDollDragOver(object? payload, int x, int y)
         => DollDragAcceptance = payload is not ItemDragPayload drag
             || drag.SourceKind == ItemDragSource.ShortcutBar

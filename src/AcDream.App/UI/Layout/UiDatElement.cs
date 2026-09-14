@@ -155,7 +155,7 @@ public class UiDatElement : UiElement, IUiDatStateful
         => DragGhostAt?.Invoke(_pressLocalX, _pressLocalY);
 
     private bool TracksPressPoint
-        => DragPayloadAt is not null || OnRightClickAt is not null || OnClickAt is not null;
+        => DragPayloadAt is not null || OnRightClickAt is not null;
 
     public override bool OnEvent(in UiEvent e)
     {
@@ -163,10 +163,14 @@ public class UiDatElement : UiElement, IUiDatStateful
         {
             case UiEventType.MouseDown:
             case UiEventType.RightDown:
-                if (!TracksPressPoint) break;
+                // Coordinates are local to the event's own target and are not
+                // re-based as the event bubbles, so only the target may read
+                // them. Recording the press never consumes it: elements above
+                // still act on a bubbled press.
+                if (!TracksPressPoint || !ReferenceEquals(e.Target, this)) break;
                 _pressLocalX = e.Data1;
                 _pressLocalY = e.Data2;
-                return true;
+                break;
 
             case UiEventType.Click:
                 if (OnClick is null && OnClickAt is null) break;
@@ -175,7 +179,7 @@ public class UiDatElement : UiElement, IUiDatStateful
                 return true;
 
             case UiEventType.RightClick:
-                if (OnRightClickAt is null) break;
+                if (OnRightClickAt is null || !ReferenceEquals(e.Target, this)) break;
                 OnRightClickAt(e.Data1, e.Data2);
                 return true;
 

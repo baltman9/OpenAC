@@ -960,10 +960,7 @@ public sealed class UiRoot : UiElement
         DragSource  = source;
         DragPayload = payload;
         _dragGhost  = source.GetDragGhost();
-        var sp = source.ScreenPosition;
-        var e = new UiEvent(source.EventId, source, UiEventType.DragBegin,
-                            Data1: (int)(_pressX - sp.X), Data2: (int)(_pressY - sp.Y),
-                            Payload: payload);
+        var e = new UiEvent(source.EventId, source, UiEventType.DragBegin, Payload: payload);
         source.OnEvent(in e);
         source.SetDragSourceActive(true, payload);
     }
