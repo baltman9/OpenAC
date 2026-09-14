@@ -144,7 +144,9 @@ public sealed class BookPanelControllerTests
 
         Assert.Equal([true], sent.Visibility);
         Assert.Equal("In the beginning", PageField(root).Text);
-        Assert.Equal("1", TextOf(root, BookPanelController.PageNumberTextId));
+        Assert.Equal(
+            "Page 1  -  Someone",
+            TextOf(root, BookPanelController.PageNumberTextId));
     }
 
     [Fact]
@@ -185,7 +187,9 @@ public sealed class BookPanelControllerTests
 
         Assert.Equal(1, state.Snapshot.CurrentPage);
         Assert.Equal("two", PageField(root).Text);
-        Assert.Equal("2", TextOf(root, BookPanelController.PageNumberTextId));
+        Assert.Equal(
+            "Page 2  -  Someone",
+            TextOf(root, BookPanelController.PageNumberTextId));
         Assert.Empty(sent.PageTextRequests);
         Assert.Empty(sent.AddPageRequests);
     }
@@ -268,7 +272,14 @@ public sealed class BookPanelControllerTests
 
         UiMenu menu = Menu(root);
         Assert.Equal(4, menu.Items.Count);
-        Assert.Equal(["1", "2", "3", "4"], menu.Items.Select(i => i.Label));
+        Assert.Equal(
+            [
+                "Page 1  -  Someone",
+                "Page 2  -  Someone",
+                "Page 3  -  <prewritten>",
+                "Page 4  -  <prewritten>",
+            ],
+            menu.Items.Select(i => i.Label));
         Assert.Equal(0, menu.Selected);
 
         Click(root, BookPanelController.NextButtonId);
@@ -613,6 +624,43 @@ public sealed class BookPanelControllerTests
         Assert.False(
             ((UiButton)UiElement.FindDescendant(
                 root, BookPanelController.NextButtonId)!).Enabled);
+    }
+
+    [Theory]
+    [InlineData(0, "Alinta", "Page 1  -  Alinta")]
+    [InlineData(4, "Alinta", "Page 5  -  Alinta")]
+    [InlineData(0, "", "Page 1  -  <prewritten>")]
+    [InlineData(0, "   ", "Page 1  -  <prewritten>")]
+    [InlineData(2, null, "Page 3  -  <prewritten>")]
+    public void PageLabel_ReadsAsThePageNumberThenWhoWroteIt(
+        int index, string? author, string expected) =>
+        Assert.Equal(expected, BookPanelController.PageLabel(index, author));
+
+    [Fact]
+    public void TheDropDownFaceShowsTheEntryTheReaderIsOn()
+    {
+        (BookPanelController controller, RuntimeBookState state,
+            UiElement root, _) = Bind();
+        state.ApplyOpenBook(Open(4, Other, Page(Other, "one"), Page(Other, "two")));
+        controller.Tick();
+
+        UiMenu menu = Menu(root);
+        Assert.NotNull(menu.ButtonLabelProvider);
+        Assert.Equal("Page 1  -  Someone", menu.ButtonLabelProvider!());
+
+        Click(root, BookPanelController.NextButtonId);
+        Assert.Equal("Page 2  -  Someone", menu.ButtonLabelProvider!());
+    }
+
+    [Fact]
+    public void TheDropDownFaceIsEmptyWithNoBookOpen()
+    {
+        (BookPanelController controller, _, UiElement root, _) = Bind();
+        controller.Refresh();
+
+        Assert.Equal(string.Empty, Menu(root).ButtonLabelProvider!());
+        Assert.Equal(
+            string.Empty, TextOf(root, BookPanelController.PageNumberTextId));
     }
 
     [Fact]
