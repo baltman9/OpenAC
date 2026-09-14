@@ -698,7 +698,7 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                     guid => d.Actions.Selection.Select(
                         guid,
                         SelectionChangeSource.Inventory),
-                    guid => late.Session.TryUseItem(guid, d.Log),
+                    guid => itemInteraction.UseWithCurrentSelection(guid),
                     (tab, position, spellId) =>
                         late.GameRuntime.AddFavorite(tab, position, spellId),
                     (tab, spellId) =>
