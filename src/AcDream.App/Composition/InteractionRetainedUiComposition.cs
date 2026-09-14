@@ -1071,7 +1071,18 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                             bookGuid, page, text),
                     SendBookDeletePage: (bookGuid, page) =>
                         late.Session.CurrentSession?.SendBookDeletePage(
-                            bookGuid, page)),
+                            bookGuid, page),
+                    ShowsAuthorAccount: () =>
+                        d.Character.LocalPlayer.Properties.GetBool(
+                            (uint)AcDream.Core.Properties.PropertyBool.IsAdmin)
+                        || d.Character.LocalPlayer.Properties.GetBool(
+                            (uint)AcDream.Core.Properties.PropertyBool.IsArch)
+                        || d.Character.LocalPlayer.Properties.GetBool(
+                            (uint)AcDream.Core.Properties.PropertyBool.IsSentinel)
+                        || d.Character.LocalPlayer.Properties.GetBool(
+                            (uint)AcDream.Core.Properties.PropertyBool.IsAdvocate)
+                        || d.Character.LocalPlayer.Properties.GetBool(
+                            (uint)AcDream.Core.Properties.PropertyBool.IsPsr)),
                 IsGameplayDisplay: () => d.Settings.IsGameplayDisplay,
                 SynchronizeDisplayPhase: () =>
                 {

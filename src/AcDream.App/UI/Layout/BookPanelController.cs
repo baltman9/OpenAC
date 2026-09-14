@@ -23,6 +23,17 @@ public sealed class BookPanelController : IRetainedPanelController
     public const uint PageMenuId = 0x10000470u;
     public const uint PageNumberTextId = 0x1000047Bu;
 
+    /// <summary>The grey button at the top right of the parchment.</summary>
+    public const uint CloseButtonId = 0x1000010Eu;
+
+    /// <summary>The bar beside the page text, authored as its own child
+    /// of the text element rather than as a sibling.</summary>
+    public const uint PageScrollbarId = 0x1000048Au;
+
+    /// <summary>How many rows of the page list are shown at once before
+    /// the rest have to be scrolled to.</summary>
+    public const int VisiblePageRows = 7;
+
     /// <summary>The authored flag that decides whether a text element
     /// takes typing.</summary>
     private const uint EditablePropertyId = 0x16u;
@@ -35,15 +46,26 @@ public sealed class BookPanelController : IRetainedPanelController
 
     /// <summary>
     /// How one entry of the page list reads: the page number, then who
-    /// wrote it.
+    /// wrote it by name, then the account that wrote it in angle
+    /// brackets. A page that came already written carries the account
+    /// that says so, which is where the placeholder comes from; a page
+    /// with no author at all carries only the brackets.
+    ///
+    /// The account half is only ever shown to a player the server will
+    /// tell the truth about accounts to -- everyone else is handed a
+    /// stand-in, and showing that would be worse than showing nothing.
     /// </summary>
-    public static string PageLabel(int pageIndex, string? authorName) =>
-        string.Create(
-            CultureInfo.InvariantCulture,
-            $"Page {pageIndex + 1}  -  {Author(authorName)}");
-
-    private static string Author(string? authorName) =>
-        string.IsNullOrWhiteSpace(authorName) ? UnauthoredPageLabel : authorName;
+    public static string PageLabel(
+        int pageIndex, string? authorName, string? authorAccount, bool showsAccount)
+    {
+        string label = string.Create(
+            CultureInfo.InvariantCulture, $"Page {pageIndex + 1}  - ");
+        if (!string.IsNullOrWhiteSpace(authorName))
+            label += $"by {authorName} ";
+        if (showsAccount && !string.IsNullOrWhiteSpace(authorAccount))
+            label += $"<{authorAccount}>";
+        return label;
+    }
 
     public sealed record Bindings(
         IRuntimeBookView Book,
@@ -53,7 +75,8 @@ public sealed class BookPanelController : IRetainedPanelController
         Action<uint /*bookGuid*/> RequestAddPage,
         Action<bool> SetVisible,
         Action<uint /*bookGuid*/, int /*page*/, string /*text*/>? SavePage = null,
-        Action<uint /*bookGuid*/, int /*page*/>? DeletePage = null);
+        Action<uint /*bookGuid*/, int /*page*/>? DeletePage = null,
+        Func<bool>? ShowsAuthorAccount = null);
 
     private readonly Bindings _bindings;
     private readonly UiText? _title;
@@ -97,7 +120,22 @@ public sealed class BookPanelController : IRetainedPanelController
             // child that carries it is not built as an element of its
             // own, so the menu draws it rather than the child.
             _pageMenu.ButtonLabelProvider = SelectedPageLabel;
+            ApplyPopupChrome(_pageMenu);
         }
+
+        // The page text is taller than the parchment shows, so it comes
+        // with a bar of its own.
+        if (_pageTextField is not null
+            && UiElement.FindDescendant(root, PageScrollbarId) is UiScrollbar bar)
+        {
+            bar.Model = _pageTextField.Scroll;
+        }
+
+        if (UiElement.FindDescendant(root, CloseButtonId) is UiButton close)
+            close.OnClick = Close;
+        else
+            Console.WriteLine(
+                $"[UI] book panel: close button 0x{CloseButtonId:X8} not found.");
 
         Refresh();
     }
@@ -251,6 +289,10 @@ public sealed class BookPanelController : IRetainedPanelController
             // The book says how much fits on a page.
             if (snapshot.MaxNumCharsPerPage > 0)
                 _pageTextField.MaxCharacters = snapshot.MaxNumCharsPerPage;
+
+            // A page longer than the parchment has to be scrollable the
+            // moment it is shown, not a frame later.
+            _pageTextField.RefreshScrollExtents();
         }
 
         SetText(_pageNumber, SelectedPageLabel());
@@ -285,16 +327,56 @@ public sealed class BookPanelController : IRetainedPanelController
 
         var items = new UiMenu.MenuItem[snapshot.MaxNumPages];
         for (int i = 0; i < items.Length; i++)
-        {
-            items[i] = new UiMenu.MenuItem(
-                PageLabel(i, _bindings.Book.GetPage(i)?.AuthorName), i);
-        }
+            items[i] = new UiMenu.MenuItem(Label(i), i);
 
         _pageMenu.Items = items;
+        _pageMenu.SizePopupToWidth(_pageMenu.Width);
         _pageMenu.Selected =
             snapshot.CurrentPage >= 0 && snapshot.CurrentPage < items.Length
                 ? snapshot.CurrentPage
                 : null;
+    }
+
+    /// <summary>
+    /// The open list is one column the width of the closed row, sat
+    /// directly below it, with a bar down its right only once there are
+    /// more pages than fit. Rows carry no mark of their own; the row the
+    /// reader is on is picked out by the face text, not by a glyph.
+    /// </summary>
+    private static void ApplyPopupChrome(UiMenu menu)
+    {
+        menu.Scrollable = true;
+        menu.PopupSizeToContent = false;
+        menu.PopupScrollbarHideWhenDisabled = true;
+        menu.OpenUpward = false;
+        menu.RowsPerColumn = VisiblePageRows;
+        menu.ItemNormalSprite = menu.NormalSprite;
+        menu.ItemHighlightSprite = menu.PressedSprite;
+        menu.PopupBgSprite = menu.NormalSprite;
+        menu.ItemTextCentered = false;
+        menu.ScrollTrackSprite = PopupScrollbarSprites.Track;
+        menu.ScrollThumbTopSprite = PopupScrollbarSprites.ThumbTop;
+        menu.ScrollThumbSprite = PopupScrollbarSprites.Thumb;
+        menu.ScrollThumbBottomSprite = PopupScrollbarSprites.ThumbBottom;
+        menu.ScrollUpSprite = PopupScrollbarSprites.Up;
+        menu.ScrollDownSprite = PopupScrollbarSprites.Down;
+    }
+
+    private static class PopupScrollbarSprites
+    {
+        public const uint Track = 0x06004C5Fu;
+        public const uint ThumbTop = 0x06004C60u;
+        public const uint Thumb = 0x06004C63u;
+        public const uint ThumbBottom = 0x06004C66u;
+        public const uint Up = RetailScrollbarChrome.UpNormal;
+        public const uint Down = RetailScrollbarChrome.DownNormal;
+    }
+
+    /// <summary>Shuts the book and takes the panel down with it.</summary>
+    public void Close()
+    {
+        OnHidden();
+        _bindings.SetVisible(false);
     }
 
     /// <summary>The entry the reader is on, as the list spells it.</summary>
@@ -304,9 +386,17 @@ public sealed class BookPanelController : IRetainedPanelController
         if (!snapshot.IsOpen || snapshot.CurrentPage < 0)
             return string.Empty;
 
+        return Label(snapshot.CurrentPage);
+    }
+
+    private string Label(int pageIndex)
+    {
+        BookPage? page = _bindings.Book.GetPage(pageIndex);
         return PageLabel(
-            snapshot.CurrentPage,
-            _bindings.Book.GetPage(snapshot.CurrentPage)?.AuthorName);
+            pageIndex,
+            page?.AuthorName,
+            page?.AuthorAccount,
+            _bindings.ShowsAuthorAccount?.Invoke() ?? false);
     }
 
     private void Turn(int page)

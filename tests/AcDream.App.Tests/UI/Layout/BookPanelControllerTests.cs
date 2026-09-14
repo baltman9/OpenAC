@@ -51,15 +51,28 @@ public sealed class BookPanelControllerTests
         root.AddChild(Button(BookPanelController.PreviousButtonId));
         root.AddChild(Button(BookPanelController.NextButtonId));
 
-        var menu = new UiMenu { DatElementId = BookPanelController.PageMenuId };
+        var menu = new UiMenu
+        {
+            DatElementId = BookPanelController.PageMenuId,
+            Width = 292f,
+            Height = 18f,
+        };
         menu.AddChild(Text(BookPanelController.PageNumberTextId));
         root.AddChild(menu);
+        root.AddChild(Button(BookPanelController.CloseButtonId));
+        root.AddChild(new UiScrollbar
+        {
+            DatElementId = BookPanelController.PageScrollbarId,
+            Width = 16f,
+            Height = 240f,
+        });
         return root;
     }
 
     private static BookPage Page(
-        uint author, string text, uint textIncluded = 1u, uint ignoreAuthor = 0u) =>
-        new(author, "Someone", "acct", textIncluded, ignoreAuthor, text);
+        uint author, string text, uint textIncluded = 1u, uint ignoreAuthor = 0u,
+        string authorName = "Someone", string authorAccount = "acct") =>
+        new(author, authorName, authorAccount, textIncluded, ignoreAuthor, text);
 
     private static BookEvents.OpenBook Open(
         int maxPages, uint scribeId, params BookPage[] pages) =>
@@ -72,7 +85,7 @@ public sealed class BookPanelControllerTests
             "Scribbler");
 
     private static (BookPanelController Controller, RuntimeBookState State,
-        UiElement Root, Sent Sent) Bind()
+        UiElement Root, Sent Sent) Bind(bool showsAccount = false)
     {
         var state = new RuntimeBookState(() => Player);
         var sent = new Sent();
@@ -89,7 +102,8 @@ public sealed class BookPanelControllerTests
                 RequestAddPage: book => sent.AddPageRequests.Add(book),
                 SetVisible: sent.Visibility.Add,
                 SavePage: (book, page, text) => sent.Saved.Add((book, page, text)),
-                DeletePage: (book, page) => sent.Deleted.Add((book, page))));
+                DeletePage: (book, page) => sent.Deleted.Add((book, page)),
+                ShowsAuthorAccount: () => showsAccount));
 
         Assert.NotNull(controller);
         return (controller!, state, root, sent);
@@ -145,7 +159,7 @@ public sealed class BookPanelControllerTests
         Assert.Equal([true], sent.Visibility);
         Assert.Equal("In the beginning", PageField(root).Text);
         Assert.Equal(
-            "Page 1  -  Someone",
+            "Page 1  - by Someone ",
             TextOf(root, BookPanelController.PageNumberTextId));
     }
 
@@ -188,7 +202,7 @@ public sealed class BookPanelControllerTests
         Assert.Equal(1, state.Snapshot.CurrentPage);
         Assert.Equal("two", PageField(root).Text);
         Assert.Equal(
-            "Page 2  -  Someone",
+            "Page 2  - by Someone ",
             TextOf(root, BookPanelController.PageNumberTextId));
         Assert.Empty(sent.PageTextRequests);
         Assert.Empty(sent.AddPageRequests);
@@ -274,10 +288,10 @@ public sealed class BookPanelControllerTests
         Assert.Equal(4, menu.Items.Count);
         Assert.Equal(
             [
-                "Page 1  -  Someone",
-                "Page 2  -  Someone",
-                "Page 3  -  <prewritten>",
-                "Page 4  -  <prewritten>",
+                "Page 1  - by Someone ",
+                "Page 2  - by Someone ",
+                "Page 3  - ",
+                "Page 4  - ",
             ],
             menu.Items.Select(i => i.Label));
         Assert.Equal(0, menu.Selected);
@@ -627,14 +641,101 @@ public sealed class BookPanelControllerTests
     }
 
     [Theory]
-    [InlineData(0, "Alinta", "Page 1  -  Alinta")]
-    [InlineData(4, "Alinta", "Page 5  -  Alinta")]
-    [InlineData(0, "", "Page 1  -  <prewritten>")]
-    [InlineData(0, "   ", "Page 1  -  <prewritten>")]
-    [InlineData(2, null, "Page 3  -  <prewritten>")]
+    // Both halves, as the live client shows a book off a shelf.
+    [InlineData(7, "F.P.", "prewritten", true, "Page 8  - by F.P. <prewritten>")]
+    [InlineData(0, "", "prewritten", true, "Page 1  - <prewritten>")]
+    [InlineData(0, "   ", "prewritten", true, "Page 1  - <prewritten>")]
+    // A page written in play carries its writer but no stand-in tail.
+    [InlineData(2, "Alinta", "", true, "Page 3  - by Alinta ")]
+    [InlineData(2, "Alinta", null, true, "Page 3  - by Alinta ")]
+    // A player the server will not tell the truth about accounts to
+    // never sees the account half at all.
+    [InlineData(7, "F.P.", "prewritten", false, "Page 8  - by F.P. ")]
+    [InlineData(0, "", "prewritten", false, "Page 1  - ")]
     public void PageLabel_ReadsAsThePageNumberThenWhoWroteIt(
-        int index, string? author, string expected) =>
-        Assert.Equal(expected, BookPanelController.PageLabel(index, author));
+        int index, string? author, string? account, bool showsAccount, string expected) =>
+        Assert.Equal(
+            expected, BookPanelController.PageLabel(index, author, account, showsAccount));
+
+    [Fact]
+    public void APreWrittenBookListsTheAccountThatWroteIt()
+    {
+        (BookPanelController controller, RuntimeBookState state,
+            UiElement root, _) = Bind(showsAccount: true);
+        state.ApplyOpenBook(Open(
+            8,
+            Other,
+            Page(Other, "one", authorName: "F.P.", authorAccount: "prewritten")));
+        controller.Tick();
+
+        Assert.Equal(
+            "Page 1  - by F.P. <prewritten>",
+            Menu(root).Items[0].Label);
+        Assert.Equal(
+            "Page 1  - by F.P. <prewritten>",
+            TextOf(root, BookPanelController.PageNumberTextId));
+    }
+
+    [Fact]
+    public void TheCloseButtonShutsTheBookAndTakesThePanelDown()
+    {
+        (BookPanelController controller, RuntimeBookState state,
+            UiElement root, Sent sent) = Bind();
+        state.ApplyOpenBook(Open(4, Other, Page(Player, "one")));
+        controller.Tick();
+        PageField(root).SetText("last words");
+
+        Click(root, BookPanelController.CloseButtonId);
+
+        Assert.Equal([(BookGuid, 0, "last words")], sent.Saved);
+        Assert.False(state.Snapshot.IsOpen);
+        Assert.Equal([true, false], sent.Visibility);
+    }
+
+    [Fact]
+    public void ThePageTextDrivesTheBarBesideIt()
+    {
+        (_, _, UiElement root, _) = Bind();
+
+        var bar = (UiScrollbar)UiElement.FindDescendant(
+            root, BookPanelController.PageScrollbarId)!;
+
+        Assert.NotNull(bar.Model);
+        Assert.Same(PageField(root).Scroll, bar.Model);
+    }
+
+    [Fact]
+    public void TheOpenListIsOneColumnTheWidthOfTheClosedRow()
+    {
+        (BookPanelController controller, RuntimeBookState state,
+            UiElement root, _) = Bind();
+        state.ApplyOpenBook(Open(4, Other, Page(Other, "one")));
+        controller.Tick();
+
+        UiMenu menu = Menu(root);
+        Assert.True(menu.Scrollable);
+        Assert.False(menu.OpenUpward);
+        Assert.Equal(menu.Width, menu.PopupOuterWidth, 1);
+
+        // No row wears a mark of its own.
+        Assert.Equal(menu.NormalSprite, menu.ItemNormalSprite);
+    }
+
+    [Fact]
+    public void TheOpenListStaysOneColumnWideOnceItHasToScroll()
+    {
+        (BookPanelController controller, RuntimeBookState state,
+            UiElement root, _) = Bind();
+        state.ApplyOpenBook(Open(40, Other, Page(Other, "one")));
+        controller.Tick();
+
+        UiMenu menu = Menu(root);
+        Assert.Equal(40, menu.Items.Count);
+        Assert.Equal(menu.Width, menu.PopupOuterWidth, 1);
+        Assert.True(
+            menu.PopupOuterHeight < 200f,
+            $"open list is {menu.PopupOuterHeight} tall for 40 pages");
+    }
 
     [Fact]
     public void TheDropDownFaceShowsTheEntryTheReaderIsOn()
@@ -646,10 +747,10 @@ public sealed class BookPanelControllerTests
 
         UiMenu menu = Menu(root);
         Assert.NotNull(menu.ButtonLabelProvider);
-        Assert.Equal("Page 1  -  Someone", menu.ButtonLabelProvider!());
+        Assert.Equal("Page 1  - by Someone ", menu.ButtonLabelProvider!());
 
         Click(root, BookPanelController.NextButtonId);
-        Assert.Equal("Page 2  -  Someone", menu.ButtonLabelProvider!());
+        Assert.Equal("Page 2  - by Someone ", menu.ButtonLabelProvider!());
     }
 
     [Fact]
