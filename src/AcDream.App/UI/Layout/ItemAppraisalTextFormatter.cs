@@ -1689,6 +1689,7 @@ public static class ItemAppraisalTextFormatter
         45 => "Light Weapons",
         46 => "Finesse Weapons",
         47 => "Missile Weapons",
+        48 => "Shield",
         49 => "Dual Wield",
         50 => "Recklessness",
         51 => "Sneak Attack",

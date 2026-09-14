@@ -11,6 +11,16 @@ namespace AcDream.App.Tests.UI.Layout;
 public sealed class ItemAppraisalTextFormatterTests
 {
     [Fact]
+    public void SkillName_NamesEverySkillThroughSummoning()
+    {
+        for (int skill = 1; skill <= 54; skill++)
+            Assert.False(
+                ItemAppraisalTextFormatter.SkillName(skill).StartsWith("Skill ", StringComparison.Ordinal),
+                $"skill {skill} has no name");
+        Assert.Equal("Shield", ItemAppraisalTextFormatter.SkillName(48));
+    }
+
+    [Fact]
     public void WeaponAndMagic_AreProjectedInRetailOrderWithDatDescriptions()
     {
         var obj = new ClientObject
