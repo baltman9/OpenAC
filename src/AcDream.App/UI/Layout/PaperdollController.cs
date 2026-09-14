@@ -97,28 +97,33 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
             if (layout.FindElement(id) is UiItemList armor) _armorSlots.Add(armor);
 
         _dollViewport = layout.FindElement(DollViewportId);
-        Action<int, int> clickDoll = HandleDollClick;
         if (_dollViewport is UiViewport doll)
-            doll.ClickedAt = clickDoll;
+            doll.ClickedAt = HandleDollClick;
 
-        switch (layout.FindElement(DollDragMaskId))
+        // The mask over the rendered figure is authored as a hit region with no
+        // face of its own, and which widget class it imports as is an authoring
+        // detail that has changed under us before. Bind the behaviour to the
+        // element, not to a class: the region carries the whole pointer surface.
+        _dollDragMask = layout.FindElement(DollDragMaskId);
+        if (_dollDragMask is not null)
         {
-            case UiButton dragMaskButton:
-                _dollDragMask = dragMaskButton;
-                dragMaskButton.OnClickAt = clickDoll;
-                break;
-            case UiDatElement dragMaskElement:
-                _dollDragMask = dragMaskElement;
-                dragMaskElement.ClickThrough = false;
-                dragMaskElement.OnClickAt = clickDoll;
-                dragMaskElement.OnRightClickAt = HandleDollRightClick;
-                dragMaskElement.DragPayloadAt = BuildDollDragPayload;
-                dragMaskElement.DragGhostAt = BuildDollDragGhost;
-                dragMaskElement.OnDragOverAt = HandleDollDragOver;
-                dragMaskElement.OnDragLeave = ClearDollDragAcceptance;
-                dragMaskElement.OnDropReleasedAt = HandleDollDrop;
-                break;
+            _dollDragMask.ClickThrough = false;
+            _dollDragMask.PointerRegion = new UiPointerRegion
+            {
+                Clicked = HandleDollClick,
+                RightClicked = HandleDollRightClick,
+                DragPayloadAt = BuildDollDragPayload,
+                DragGhostAt = BuildDollDragGhost,
+                DragOverAt = HandleDollDragOver,
+                DragLeft = ClearDollDragAcceptance,
+                DropReleasedAt = HandleDollDrop,
+            };
         }
+        Console.WriteLine(
+            $"[UI] paperdoll doll mask 0x{DollDragMaskId:X8} built as "
+            + $"{_dollDragMask?.GetType().Name ?? "nothing"} "
+            + $"{(int?)_dollDragMask?.Width ?? 0}x{(int?)_dollDragMask?.Height ?? 0}, click map "
+            + (_clickMap is null ? "missing." : $"{_clickMap.Width}x{_clickMap.Height}."));
 
         var slotsBtnEl = layout.FindElement(0x100005BEu);
         if (slotsBtnEl is UiButton slotsBtn)
@@ -418,21 +423,8 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
         }
         if (_dollViewport is UiViewport doll)
             doll.ClickedAt = null;
-        switch (_dollDragMask)
-        {
-            case UiButton button:
-                button.OnClickAt = null;
-                break;
-            case UiDatElement element:
-                element.OnClickAt = null;
-                element.OnRightClickAt = null;
-                element.DragPayloadAt = null;
-                element.DragGhostAt = null;
-                element.OnDragOverAt = null;
-                element.OnDragLeave = null;
-                element.OnDropReleasedAt = null;
-                break;
-        }
+        if (_dollDragMask is not null)
+            _dollDragMask.PointerRegion = null;
         if (_ownsItemInteraction)
             _itemInteraction.Dispose();
     }
