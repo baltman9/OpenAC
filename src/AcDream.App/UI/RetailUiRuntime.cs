@@ -282,6 +282,12 @@ public sealed record ConnectionRuntimeBindings(
     Action RequestExit,
     bool ShowProgress = true);
 
+public sealed record BookRuntimeBindings(
+    AcDream.Runtime.Gameplay.IRuntimeBookView Book,
+    AcDream.Runtime.Gameplay.RuntimeBookState Commands,
+    Action<uint /*bookGuid*/, int /*page*/> SendBookPageData,
+    Action<uint /*bookGuid*/> SendBookAddPage);
+
 public sealed record RetailUiRuntimeBindings(
     UiHost Host,
     RetailUiAssets Assets,
@@ -319,7 +325,8 @@ public sealed record RetailUiRuntimeBindings(
         ProjectileDebugSamples = null,
     ConnectionRuntimeBindings? Connection = null,
     Func<bool>? IsGameplayDisplay = null,
-    Action? SynchronizeDisplayPhase = null);
+    Action? SynchronizeDisplayPhase = null,
+    BookRuntimeBindings? Book = null);
 
 public sealed class RetailUiRuntime : IDisposable
 {
@@ -431,6 +438,7 @@ public sealed class RetailUiRuntime : IDisposable
         MountSocialPanel();
         MountMapHousePanel();
         MountJournalPanel();
+        MountBookPanel();
         MountCharacter();
         MountPlugins();
         MountInventory();
@@ -537,6 +545,8 @@ public sealed class RetailUiRuntime : IDisposable
     private CharacterStatController.Binding? _characterStatBinding;
 
     public Layout.JournalPanelController? JournalPanelController { get; private set; }
+
+    public Layout.BookPanelController? BookPanelController { get; private set; }
 
     private JournalPersistence? _journalFile;
 
@@ -678,6 +688,7 @@ public sealed class RetailUiRuntime : IDisposable
         ExternalContainerController?.Tick();
         SocialPanelController?.Tick();
         JournalPanelController?.Tick();
+        BookPanelController?.Tick();
         MapHousePanelController?.Tick(deltaSeconds);
         _itemCooldownController?.Tick();
         _connectionMount?.Tick();
@@ -3464,6 +3475,87 @@ public sealed class RetailUiRuntime : IDisposable
                 out bool restorePrevious)
                 && restorePrevious);
         Console.WriteLine("[UI] retail Map/House panel from LayoutDesc importer (0x2100006E slot 0x1000018C).");
+    }
+
+    private void MountBookPanel()
+    {
+        if (_bindings.Book is not { } book)
+            return;
+
+        ElementInfo? rootInfo;
+        ImportedLayout? layout;
+        lock (_bindings.Assets.DatLock)
+        {
+            rootInfo = LayoutImporter.ImportInfos(
+                _bindings.Assets.Dats,
+                Layout.BookPanelController.HostLayoutId,
+                Layout.BookPanelController.SlotElementId);
+            var resolver = new DatStringResolver(_bindings.Assets.Dats);
+            layout = rootInfo is null
+                ? null
+                : LayoutImporter.Build(
+                    rootInfo,
+                    _bindings.Assets.ResolveSprite,
+                    _bindings.Assets.DefaultFont,
+                    _bindings.Assets.ResolveFont,
+                    resolver.Resolve);
+        }
+        if (rootInfo is null || layout is null)
+        {
+            Console.WriteLine(
+                "[UI] book panel: LayoutDesc 0x2100006E slot 0x10000182 not found.");
+            return;
+        }
+
+        var callbacks = new Layout.BookPanelController.Bindings(
+            Book: book.Book,
+            Commands: book.Commands,
+            ResolveBookName: guid => ResolveSelectedObjectName(guid) ?? string.Empty,
+            RequestPageText: book.SendBookPageData,
+            RequestAddPage: book.SendBookAddPage,
+            SetVisible: visible =>
+                _panelUi.SetPanelVisibility(RetailPanelCatalog.Book, visible));
+
+        Layout.BookPanelController? controller;
+        lock (_bindings.Assets.DatLock)
+            controller = Layout.BookPanelController.Bind(layout, callbacks);
+        if (controller is null)
+        {
+            Console.WriteLine(
+                "[UI] book panel: the authored slot carried no page text.");
+            return;
+        }
+
+        BookPanelController = controller;
+
+        RetailWindowHandle handle = RetailWindowFrame.Mount(
+            Host.Root,
+            controller.Root,
+            _bindings.Assets.ResolveSprite,
+            new RetailWindowFrame.Options
+            {
+                WindowName = WindowNames.Book,
+                Chrome = RetailWindowChrome.NineSlice,
+                Left = 250f,
+                Top = 150f,
+                Visible = false,
+                ResizeX = false,
+                ResizeY = false,
+                ContentAnchors = AnchorEdges.Left | AnchorEdges.Top,
+                ContentClickThrough = false,
+                DrawChromeCenter = !AuthorsFullPanelCenter(rootInfo),
+                Controller = controller,
+            });
+        _panelUi.RegisterMainPanel(
+            RetailPanelCatalog.Book,
+            WindowNames.Book,
+            handle,
+            rootInfo.TryGetEffectiveBool(
+                RetailPanelUiController.RestorePreviousPropertyId,
+                out bool restorePrevious)
+                && restorePrevious);
+        Console.WriteLine(
+            "[UI] retail book panel from LayoutDesc importer (0x2100006E slot 0x10000182).");
     }
 
     private void MountDialogFactory()
