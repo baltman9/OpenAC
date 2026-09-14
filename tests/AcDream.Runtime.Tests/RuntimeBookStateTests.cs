@@ -238,6 +238,34 @@ public sealed class RuntimeBookStateTests
     }
 
     [Fact]
+    public void ApplyPageData_ForAnotherPageMovesTheReaderAndKeepsTheGate()
+    {
+        // A late answer for a page the reader has already left: the text is
+        // not stored, the reader lands on that page, and the outstanding
+        // request stays outstanding until its own page answers.
+        RuntimeBookState state = NewState();
+        state.ApplyOpenBook(Open(
+            Page(Player, "one"),
+            Page(Player, string.Empty, textIncluded: 0u),
+            Page(Player, string.Empty, textIncluded: 0u)));
+        state.SetCurrentPage(2);
+        Assert.True(state.Snapshot.RequestPending);
+
+        bool handled = state.ApplyPageData(
+            new BookEvents.PageDataResponse(BookGuid, 1, Page(Other, "late")));
+
+        Assert.True(handled);
+        Assert.Equal(1, state.Snapshot.CurrentPage);
+        Assert.True(state.Snapshot.RequestPending);
+        Assert.Equal(string.Empty, state.View.GetPage(1)!.Value.PageText);
+
+        state.ApplyPageData(
+            new BookEvents.PageDataResponse(BookGuid, 1, Page(Other, "fetched")));
+        Assert.False(state.Snapshot.RequestPending);
+        Assert.Equal("fetched", state.View.GetPage(1)!.Value.PageText);
+    }
+
+    [Fact]
     public void ApplyPageData_ForAnotherBookIsDropped()
     {
         RuntimeBookState state = NewState();

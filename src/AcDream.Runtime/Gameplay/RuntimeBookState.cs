@@ -155,9 +155,11 @@ public sealed class RuntimeBookState
     }
 
     /// <summary>
-    /// Fold in a single page's text. A stale answer -- a different book,
-    /// or one that arrived after the book closed -- is dropped, exactly
-    /// as retail drops it.
+    /// Fold in a single page's text. A different book, or an answer that
+    /// arrived after the book closed, is dropped. An answer for the page the
+    /// reader is on is stored and lifts the request gate; an answer for any
+    /// other page moves the reader to that page instead and leaves the gate
+    /// as it is, so only the page that was asked for can settle a request.
     /// </summary>
     public bool ApplyPageData(BookEvents.PageDataResponse response)
     {
@@ -166,8 +168,16 @@ public sealed class RuntimeBookState
             if (_bookGuid == 0u || response.BookGuid != _bookGuid)
                 return false;
 
-            SetPageLocked(response.PageNumber, response.Page);
-            _requestPending = false;
+            if (response.PageNumber == _currentPage)
+            {
+                SetPageLocked(response.PageNumber, response.Page);
+                _requestPending = false;
+            }
+            else
+            {
+                _currentPage = response.PageNumber;
+            }
+
             Bump();
             return true;
         }
