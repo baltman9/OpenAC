@@ -314,7 +314,7 @@ public class ToolbarControllerTests
     }
 
     [Fact]
-    public void Click_emitsUseForBoundItem()
+    public void SingleClick_selectsWithoutUse()
     {
         var (layout, slots, _) = FakeToolbar();
         var repo = new ClientObjectTable();
@@ -330,12 +330,38 @@ public class ToolbarControllerTests
             selection: selection);
         UiItemSlot cell = slots[Row1[0]].Cell;
         cell.OnEvent(new UiEvent(0u, cell, UiEventType.MouseDown));
+        cell.OnEvent(new UiEvent(0u, cell, UiEventType.Click));
 
         Assert.Equal(0x5001u, selection.SelectedObjectId);
         Assert.Equal(0u, used);
-        cell.OnEvent(new UiEvent(0u, cell, UiEventType.Click));
+    }
 
-        Assert.Equal(0x5001u, used);
+    [Fact]
+    public void DoubleClick_usesBoundItemOnce()
+    {
+        var root = new UiRoot { Width = 800, Height = 600 };
+        var list = new UiItemList(_ => (0u, 0, 0)) { Left = 5, Top = 5, Width = 32, Height = 32 };
+        list.LayoutCells();                          // size the single cell to the resized list
+        root.AddChild(list);
+        var layout = new ImportedLayout(root, new Dictionary<uint, UiElement> { [Row1[0]] = list });
+        var repo = new ClientObjectTable();
+        repo.AddOrUpdate(new ClientObject { ObjectId = 0x5001u, WeenieClassId = 1u, IconId = 0x06001234u });
+        var shortcuts = new List<ShortcutEntry>
+        { new(Index: 0, ObjectId: 0x5001u, SpellId: 0) };
+        var used = new List<uint>();
+
+        ToolbarController.Bind(layout, repo, Store(shortcuts),
+            iconIds: (_,_,_,_,_) => 0x77u,
+            useItem: used.Add);
+
+        root.Tick(0, nowMs: 1_000);
+        root.OnMouseDown(UiMouseButton.Left, 20, 20);
+        root.OnMouseUp(UiMouseButton.Left, 20, 20);
+        root.Tick(0, nowMs: 1_300);
+        root.OnMouseDown(UiMouseButton.Left, 20, 20);
+        root.OnMouseUp(UiMouseButton.Left, 20, 20);
+
+        Assert.Equal(new[] { 0x5001u }, used);
     }
 
     [Fact]
@@ -410,6 +436,58 @@ public class ToolbarControllerTests
 
         Assert.Equal(0, inventoryClicks);
         Assert.Equal(new[] { (kit, player) }, useWithTarget);
+        Assert.False(interaction.IsTargetModeActive);
+    }
+
+    [Fact]
+    public void TargetMode_singlePressOnHotbarItem_targetsIt()
+    {
+        const uint player = 0x50000001u;
+        const uint pack = 0x50000002u;
+        const uint source = 0x50000003u;
+        const uint target = 0x50000004u;
+        var (layout, slots, _) = FakeToolbar();
+        var repo = new ClientObjectTable();
+        repo.AddOrUpdate(new ClientObject { ObjectId = player, Type = ItemType.Creature });
+        repo.AddOrUpdate(new ClientObject { ObjectId = pack, Type = ItemType.Container });
+        repo.MoveItem(pack, player, 0);
+        repo.AddOrUpdate(new ClientObject
+        {
+            ObjectId = source, Type = ItemType.Misc,
+            Useability = 0x00220008u,
+            TargetType = (uint)ItemType.Creature,
+        });
+        repo.MoveItem(source, pack, 0);
+        repo.AddOrUpdate(new ClientObject { ObjectId = target, Type = ItemType.Creature });
+        var useWithTarget = new List<(uint Source, uint Target)>();
+        var interaction = new ItemInteractionController(
+            repo,
+            new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(repo)),
+            new InteractionState(),
+            playerGuid: () => player,
+            sendUse: null,
+            sendUseWithTarget: (s, t) => useWithTarget.Add((s, t)),
+            sendWield: null,
+            sendDrop: null,
+            nowMs: () => 1_000);
+        var shortcuts = new List<ShortcutEntry> { new(0, target, 0) };
+        var used = new List<uint>();
+
+        ToolbarController.Bind(layout, repo, Store(shortcuts),
+            iconIds: (_,_,_,_,_) => 1u,
+            useItem: used.Add,
+            itemInteraction: interaction);
+        interaction.ActivateItem(source);
+
+        UiItemSlot cell = slots[Row1[0]].Cell;
+        cell.OnEvent(new UiEvent(0u, cell, UiEventType.MouseDown));
+        cell.OnEvent(new UiEvent(0u, cell, UiEventType.Click));
+        cell.OnEvent(new UiEvent(0u, cell, UiEventType.MouseDown));
+        cell.OnEvent(new UiEvent(0u, cell, UiEventType.Click));
+        cell.OnEvent(new UiEvent(0u, cell, UiEventType.DoubleClick));
+
+        Assert.Equal(new[] { (source, target) }, useWithTarget);
+        Assert.Empty(used);
         Assert.False(interaction.IsTargetModeActive);
     }
 

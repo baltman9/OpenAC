@@ -721,7 +721,10 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                     () => d.Character.Options.GetOptionBit(
                         CharacterOptionId.VividTargetingIndicator),
                     late.Selection.ResolveVividTargetInfo,
-                    late.SelectionCamera.UiSnapshot),
+                    late.SelectionCamera.UiSnapshot,
+                    RelationshipFor: guid => new AcDream.Core.Ui.RadarRelationshipTraits(
+                        IsFellowshipMember: d.Runtime.Fellowship.TryGetMember(guid, out _),
+                        IsFellowshipLeader: d.Runtime.Fellowship.Snapshot.LeaderGuid == guid)),
                 Indicators: new IndicatorRuntimeBindings(
                     d.Character.Spellbook,
                     d.Inventory.Objects,
