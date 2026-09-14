@@ -82,14 +82,41 @@ public sealed class RuntimeBookStateTests
     }
 
     [Fact]
-    public void ApplyOpenBook_OfAnEmptyBookOpensPageZero()
+    public void ApplyOpenBook_OfAnEmptyParchmentAsksForItsFirstPage()
     {
         RuntimeBookState state = NewState();
 
-        state.ApplyOpenBook(Open());
+        RuntimeBookPageTurn turn = state.ApplyOpenBook(Open());
 
+        Assert.Equal(RuntimeBookPageAction.AddPage, turn.Action);
+        Assert.Equal(0, turn.Page);
+        Assert.True(state.Snapshot.RequestPending);
         Assert.Equal(0, state.Snapshot.CurrentPage);
         Assert.Equal(0, state.Snapshot.PageCount);
+    }
+
+    [Fact]
+    public void ApplyOpenBook_WhoseFirstPageCarriedNoTextAsksForIt()
+    {
+        RuntimeBookState state = NewState();
+
+        RuntimeBookPageTurn turn = state.ApplyOpenBook(
+            Open(Page(Other, string.Empty, textIncluded: 0u)));
+
+        Assert.Equal(RuntimeBookPageAction.RequestPageText, turn.Action);
+        Assert.Equal(0, turn.Page);
+        Assert.True(state.Snapshot.RequestPending);
+    }
+
+    [Fact]
+    public void ApplyOpenBook_WithAReadablePageAsksForNothing()
+    {
+        RuntimeBookState state = NewState();
+
+        RuntimeBookPageTurn turn = state.ApplyOpenBook(Open(Page(Other, "readable")));
+
+        Assert.Equal(RuntimeBookPageAction.Display, turn.Action);
+        Assert.False(state.Snapshot.RequestPending);
     }
 
     [Fact]
@@ -178,6 +205,23 @@ public sealed class RuntimeBookStateTests
     }
 
     [Fact]
+    public void ApplyOpenBook_ClearsTheCarriedPageBeforeTurning()
+    {
+        // A different book must not inherit the old page as the current
+        // one, or the turn onto its own first page is refused as a
+        // no-op and nothing is ever fetched.
+        RuntimeBookState state = NewState();
+        state.ApplyOpenBook(Open(Page(Player, "one"), Page(Player, "two")));
+        state.SetCurrentPage(1);
+
+        RuntimeBookPageTurn turn = state.ApplyOpenBook(Open(
+            0x80009999u, 8, 500, Page(Other, string.Empty, textIncluded: 0u)));
+
+        Assert.Equal(RuntimeBookPageAction.RequestPageText, turn.Action);
+        Assert.Equal(0, state.Snapshot.CurrentPage);
+    }
+
+    [Fact]
     public void ApplyPageData_FillsThePageAndLiftsTheGate()
     {
         RuntimeBookState state = NewState();
@@ -254,30 +298,22 @@ public sealed class RuntimeBookStateTests
     }
 
     [Fact]
-    public void ApplyDeletePageResponse_RemovesThePageAndPullsTheReaderBack()
+    public void DeletingAPageLocallyIsNotRepeatedWhenTheAnswerArrives()
     {
+        // The page went when the request was sent. Folding the answer in
+        // as well would take a second page with it -- the one that moved
+        // up into the gap.
         RuntimeBookState state = NewState();
-        state.ApplyOpenBook(Open(Page(Player, "one"), Page(Player, "two")));
+        state.ApplyOpenBook(
+            Open(Page(Player, "one"), Page(Player, "two"), Page(Player, "three")));
         state.SetCurrentPage(1);
 
-        state.ApplyDeletePageResponse(new BookEvents.PageResponse(BookGuid, 1, true));
+        RuntimeBookPageTurn turn = state.TurnPage(2, "  ");
 
-        Assert.Equal(1, state.Snapshot.PageCount);
-        Assert.Equal(0, state.Snapshot.CurrentPage);
-        Assert.False(state.Snapshot.RequestPending);
-    }
-
-    [Fact]
-    public void ApplyModifyPageResponse_OnlyLiftsTheGate()
-    {
-        RuntimeBookState state = NewState();
-        state.ApplyOpenBook(Open(Page(Player, "one")));
-        state.MarkRequestPending();
-
-        state.ApplyModifyPageResponse(new BookEvents.PageResponse(BookGuid, 0, true));
-
-        Assert.False(state.Snapshot.RequestPending);
+        Assert.Equal(RuntimeBookFlushAction.DeletePage, turn.Flush);
+        Assert.Equal(2, state.Snapshot.PageCount);
         Assert.Equal("one", state.View.GetPage(0)!.Value.PageText);
+        Assert.Equal("three", state.View.GetPage(1)!.Value.PageText);
     }
 
     [Fact]
@@ -371,13 +407,13 @@ public sealed class RuntimeBookStateTests
     [InlineData("")]
     [InlineData("   ")]
     [InlineData("\n\n")]
-    [InlineData(" \r\n ")]
     public void IsBlank_AcceptsWhitespaceOnlyPages(string text) =>
         Assert.True(RuntimeBookState.IsBlank(text));
 
     [Theory]
     [InlineData("a")]
     [InlineData("  .  ")]
+    [InlineData(" \r ")]
     public void IsBlank_RejectsAnythingElse(string text) =>
         Assert.False(RuntimeBookState.IsBlank(text));
 
@@ -564,6 +600,62 @@ public sealed class RuntimeBookStateTests
     {
         Assert.False(NewState().ApplyInscription(new BookEvents.Inscription(
             BookGuid, "text", Player, "Acdream", "acct")));
+    }
+
+    [Fact]
+    public void TurnPage_PastABlankLastPageYouWroteIsRefusedOutright()
+    {
+        RuntimeBookState state = NewState();
+        state.ApplyOpenBook(Open(Page(Player, "one"), Page(Player, "two")));
+        state.SetCurrentPage(1);
+
+        RuntimeBookPageTurn turn = state.TurnPage(2, "   ");
+
+        Assert.Equal(RuntimeBookPageAction.RefusedLastPageBlank, turn.Action);
+        Assert.Equal(RuntimeBookFlushAction.None, turn.Flush);
+        Assert.Equal(1, state.Snapshot.CurrentPage);
+        Assert.Equal(2, state.Snapshot.PageCount);
+        Assert.False(state.Snapshot.RequestPending);
+    }
+
+    [Fact]
+    public void TurnPage_BackOffABlankLastPageStillDeletesIt()
+    {
+        RuntimeBookState state = NewState();
+        state.ApplyOpenBook(Open(Page(Player, "one"), Page(Player, "two")));
+        state.SetCurrentPage(1);
+
+        RuntimeBookPageTurn turn = state.TurnPage(0, "   ");
+
+        Assert.Equal(RuntimeBookFlushAction.DeletePage, turn.Flush);
+        Assert.Equal(1, state.Snapshot.PageCount);
+    }
+
+    [Fact]
+    public void TurnPage_PastABlankLastPageSomeoneElseWroteIsAllowed()
+    {
+        RuntimeBookState state = NewState();
+        state.ApplyOpenBook(
+            Open(Page(Player, "one"), Page(Other, string.Empty, ignoreAuthor: 1u)));
+        state.SetCurrentPage(1);
+
+        RuntimeBookPageTurn turn = state.TurnPage(2, string.Empty);
+
+        Assert.Equal(RuntimeBookPageAction.AddPage, turn.Action);
+    }
+
+    [Fact]
+    public void ApplyAddPageResponse_ForAnotherPageMovesTheRevision()
+    {
+        RuntimeBookState state = NewState();
+        state.ApplyOpenBook(Open(Page(Player, "one")));
+        state.SetCurrentPage(1);
+        long before = state.Snapshot.Revision;
+
+        state.ApplyAddPageResponse(
+            new BookEvents.PageResponse(BookGuid, 5, true), "Acdream");
+
+        Assert.True(state.Snapshot.Revision > before);
     }
 
     [Fact]

@@ -76,18 +76,6 @@ public sealed class GameEventDispatcher
         {
             _unhandledCounts.TryGetValue(envelope.EventType, out int n);
             _unhandledCounts[envelope.EventType] = n + 1;
-
-            // Say so the first time each kind is dropped. A whole feature
-            // can be missing with no other symptom than a server answer
-            // nobody reads -- books were exactly that -- and a silent
-            // counter nobody prints is no better than no counter.
-            if (n == 0)
-            {
-                Console.Error.WriteLine(
-                    $"[GameEvent] no handler for 0x{(uint)envelope.EventType:X4} "
-                    + $"({envelope.Payload.Length} payload bytes); "
-                    + "further ones of this kind are counted, not reported.");
-            }
         }
     }
 
@@ -97,8 +85,6 @@ public sealed class GameEventDispatcher
 
     public IReadOnlyDictionary<GameEventType, int> UnhandledCounts => _unhandledCounts;
 
-    /// <summary>Clears the counters, and with them the once-per-kind
-    /// report.</summary>
     public void ResetUnhandledCounts() => _unhandledCounts.Clear();
 
     /// <summary>How many distinct sub-opcodes have a handler registered.</summary>

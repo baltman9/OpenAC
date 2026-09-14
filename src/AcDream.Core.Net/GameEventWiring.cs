@@ -68,8 +68,6 @@ public static class GameEventWiring
         Action<BookEvents.OpenBook>? onBookOpen = null,
         Action<BookEvents.PageDataResponse>? onBookPageData = null,
         Action<BookEvents.PageResponse>? onBookAddPageResponse = null,
-        Action<BookEvents.PageResponse>? onBookDeletePageResponse = null,
-        Action<BookEvents.PageResponse>? onBookModifyPageResponse = null,
         Action<BookEvents.Inscription>? onBookInscription = null)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
@@ -660,26 +658,6 @@ public static class GameEventWiring
                 var p = BookEvents.ParsePageResponse(e.Payload.Span);
                 if (p is null) return;
                 onBookAddPageResponse(p.Value);
-            });
-        }
-
-        if (onBookDeletePageResponse is not null)
-        {
-            registrar.Register(GameEventType.BookDeletePageResponse, e =>
-            {
-                var p = BookEvents.ParsePageResponse(e.Payload.Span);
-                if (p is null) return;
-                onBookDeletePageResponse(p.Value);
-            });
-        }
-
-        if (onBookModifyPageResponse is not null)
-        {
-            registrar.Register(GameEventType.BookModifyPageResponse, e =>
-            {
-                var p = BookEvents.ParsePageResponse(e.Payload.Span);
-                if (p is null) return;
-                onBookModifyPageResponse(p.Value);
             });
         }
 

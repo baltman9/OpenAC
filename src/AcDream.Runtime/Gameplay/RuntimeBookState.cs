@@ -20,6 +20,13 @@ public enum RuntimeBookPageAction
     /// <summary>There is no page there yet. Ask the server to add one.
     /// </summary>
     AddPage = 3,
+
+    /// <summary>
+    /// The reader is on the last page that exists, it is blank, and they
+    /// wrote it -- so there is nothing to append after. The turn does
+    /// not happen and the book is left where it is.
+    /// </summary>
+    RefusedLastPageBlank = 4,
 }
 
 /// <summary>What closing the open page asks the caller to send.</summary>
@@ -111,8 +118,14 @@ public sealed class RuntimeBookState
     /// Fold in an open-book answer. Re-opening the same book keeps the
     /// page the reader was on when it still exists; anything else starts
     /// at the last page that does.
+    ///
+    /// Opening a book ends in a page turn, so the answer may itself ask
+    /// for something: an empty parchment has no first page to show and
+    /// asks for one to be added, and a page whose text did not come with
+    /// the book asks for its text. Without that, a fresh parchment opens
+    /// with nothing in it and can never be written in.
     /// </summary>
-    public void ApplyOpenBook(BookEvents.OpenBook book)
+    public RuntimeBookPageTurn ApplyOpenBook(BookEvents.OpenBook book)
     {
         lock (_gate)
         {
@@ -130,9 +143,14 @@ public sealed class RuntimeBookState
 
             int page = _pages.Count - 1 >= carriedPage ? carriedPage : _pages.Count - 1;
             if (page < 0) page = 0;
-            _currentPage = page;
 
+            // The book that was open is closed before the new one opens,
+            // which leaves no page current -- so the turn below always
+            // has somewhere to go, the first page included.
+            _currentPage = -1;
             Bump();
+
+            return TurnPageLocked(page, pageText: null);
         }
     }
 
@@ -175,6 +193,7 @@ public sealed class RuntimeBookState
             if (response.PageNumber != _currentPage)
             {
                 _currentPage = response.PageNumber;
+                Bump();
                 return false;
             }
 
@@ -190,28 +209,6 @@ public sealed class RuntimeBookState
             _requestPending = false;
             Bump();
             return true;
-        }
-    }
-
-    /// <summary>Fold in a delete-page answer.</summary>
-    public void ApplyDeletePageResponse(BookEvents.PageResponse response)
-    {
-        lock (_gate)
-        {
-            if (_bookGuid == 0u || response.BookGuid != _bookGuid)
-                return;
-
-            if (response.Success
-                && response.PageNumber >= 0
-                && response.PageNumber < _pages.Count)
-            {
-                _pages.RemoveAt(response.PageNumber);
-                if (_currentPage >= _pages.Count)
-                    _currentPage = Math.Max(0, _pages.Count - 1);
-            }
-
-            _requestPending = false;
-            Bump();
         }
     }
 
@@ -234,20 +231,11 @@ public sealed class RuntimeBookState
         }
     }
 
-    /// <summary>Fold in a modify-page answer. The text was already stored
-    /// locally when it was sent, so this only lifts the in-flight gate.
-    /// </summary>
-    public void ApplyModifyPageResponse(BookEvents.PageResponse response)
-    {
-        lock (_gate)
-        {
-            if (_bookGuid == 0u || response.BookGuid != _bookGuid)
-                return;
-
-            _requestPending = false;
-            Bump();
-        }
-    }
+    // The delete-page and modify-page answers are deliberately not
+    // handled. The page was already removed or rewritten locally when
+    // the request went out, so folding the answer in as well would
+    // delete a second page -- the one that moved up into the gap. They
+    // also carry no gate to lift, because neither request raises one.
 
     /// <summary>
     /// Turn to a page. Returns what the caller has to send, if anything;
@@ -269,6 +257,11 @@ public sealed class RuntimeBookState
     public RuntimeBookPageTurn TurnPage(int requested, string? pageText)
     {
         lock (_gate)
+            return TurnPageLocked(requested, pageText);
+    }
+
+    private RuntimeBookPageTurn TurnPageLocked(int requested, string? pageText)
+    {
         {
             if (_bookGuid == 0u || _requestPending)
                 return default;
@@ -278,6 +271,22 @@ public sealed class RuntimeBookState
                 return default;
             if (requested > _pages.Count)
                 return default;
+
+            // Appending after a blank page you wrote is refused outright:
+            // the empty page at the end is already the new page, so the
+            // book neither deletes it nor asks for another.
+            if (_currentPage >= 0
+                && _currentPage == _pages.Count - 1
+                && requested > _currentPage
+                && IsBlank(pageText ?? _pages[_currentPage].PageText)
+                && _pages[_currentPage].AuthorId == (_playerGuid?.Invoke() ?? 0u))
+            {
+                return new RuntimeBookPageTurn(
+                    RuntimeBookFlushAction.None,
+                    _currentPage,
+                    RuntimeBookPageAction.RefusedLastPageBlank,
+                    _currentPage);
+            }
 
             RuntimeBookFlushAction flush = RuntimeBookFlushAction.None;
             int flushPage = _currentPage;
@@ -358,7 +367,7 @@ public sealed class RuntimeBookState
         if (string.IsNullOrEmpty(text)) return true;
         foreach (char c in text)
         {
-            if (c != ' ' && c != '\n' && c != '\r' && c != '\0')
+            if (c != ' ' && c != '\n' && c != '\0')
                 return false;
         }
 

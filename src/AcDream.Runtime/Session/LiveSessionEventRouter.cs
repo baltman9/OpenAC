@@ -101,6 +101,28 @@ public sealed class LiveSessionEventRouter : ILiveSessionEventRouting
         _constructionCheckpoint = constructionCheckpoint;
     }
 
+    /// <summary>
+    /// Sends whatever a page turn asked for. Opening a book and turning
+    /// a page take the same two answers, so they send the same way.
+    /// </summary>
+    private static void SendBookPageRequest(
+        WorldSession session, uint bookGuid, RuntimeBookPageTurn turn)
+    {
+        switch (turn.Action)
+        {
+            case RuntimeBookPageAction.RequestPageText:
+                session.SendGameAction(BookRequests.BuildBookPageData(
+                    session.NextGameActionSequence(), bookGuid, turn.Page));
+                break;
+            case RuntimeBookPageAction.AddPage:
+                session.SendGameAction(BookRequests.BuildBookAddPage(
+                    session.NextGameActionSequence(), bookGuid));
+                break;
+            default:
+                break;
+        }
+    }
+
     public void Attach()
     {
         if (Interlocked.CompareExchange(ref _lifecycleState, 1, 0) != 0)
@@ -197,7 +219,14 @@ public sealed class LiveSessionEventRouter : ILiveSessionEventRouting
                 onInterfaceText: social.AddText,
                 accepting: IsAccepting,
                 onBookOpen: inventory.Book is { } bookOpen
-                    ? bookOpen.ApplyOpenBook
+                    ? book =>
+                    {
+                        // Opening a book ends in a page turn, which may
+                        // need a page fetched or added before there is
+                        // anything to read.
+                        RuntimeBookPageTurn turn = bookOpen.ApplyOpenBook(book);
+                        SendBookPageRequest(session, book.BookGuid, turn);
+                    }
                     : null,
                 onBookPageData: inventory.Book is { } bookPageData
                     ? response => bookPageData.ApplyPageData(response)
@@ -218,12 +247,6 @@ public sealed class LiveSessionEventRouter : ILiveSessionEventRouting
                             bookAddPage.MarkRequestPending();
                         }
                     }
-                    : null,
-                onBookDeletePageResponse: inventory.Book is { } bookDeletePage
-                    ? bookDeletePage.ApplyDeletePageResponse
-                    : null,
-                onBookModifyPageResponse: inventory.Book is { } bookModifyPage
-                    ? bookModifyPage.ApplyModifyPageResponse
                     : null,
                 onBookInscription: inventory.Book is { } bookInscription
                     ? inscription => bookInscription.ApplyInscription(inscription)
