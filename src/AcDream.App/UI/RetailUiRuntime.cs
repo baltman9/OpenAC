@@ -74,7 +74,7 @@ public sealed record MagicRuntimeBindings(
     Func<uint, IReadOnlyList<SpellExamineComponent>> SpellComponents,
     Func<MagicSchool, uint> MagicSkill,
     Action<uint> SelectObject,
-    Action<uint> UseItem,
+    Action<uint> ActivateEndowment,
     Action<int, int, uint> AddFavorite,
     Action<int, uint> RemoveFavorite,
     Action<uint> SendSpellbookFilter,
@@ -282,6 +282,17 @@ public sealed record ConnectionRuntimeBindings(
     Action RequestExit,
     bool ShowProgress = true);
 
+public sealed record BookRuntimeBindings(
+    AcDream.Runtime.Gameplay.IRuntimeBookView Book,
+    AcDream.Runtime.Gameplay.RuntimeBookState Commands,
+    Action<uint /*bookGuid*/, int /*page*/> SendBookPageData,
+    Action<uint /*bookGuid*/> SendBookAddPage,
+    Action<uint /*bookGuid*/, int /*page*/, string /*text*/> SendBookModifyPage,
+    Action<uint /*bookGuid*/, int /*page*/> SendBookDeletePage,
+    /// <summary>Whether the server tells this player the truth about
+    /// author accounts. Everyone else is handed a stand-in.</summary>
+    Func<bool>? ShowsAuthorAccount = null);
+
 public sealed record RetailUiRuntimeBindings(
     UiHost Host,
     RetailUiAssets Assets,
@@ -319,7 +330,8 @@ public sealed record RetailUiRuntimeBindings(
         ProjectileDebugSamples = null,
     ConnectionRuntimeBindings? Connection = null,
     Func<bool>? IsGameplayDisplay = null,
-    Action? SynchronizeDisplayPhase = null);
+    Action? SynchronizeDisplayPhase = null,
+    BookRuntimeBindings? Book = null);
 
 public sealed class RetailUiRuntime : IDisposable
 {
@@ -344,8 +356,14 @@ public sealed class RetailUiRuntime : IDisposable
 
     private string? ResolveSelectedObjectName(uint guid) =>
         _bindings.Toolbar.Objects.Get(guid) is { } obj
-            ? ItemNames.ResolveAppropriateName(obj)
+            ? ResolveAppropriateItemName(obj)
             : _bindings.Toolbar.ResolveName(guid);
+
+    /// <summary>The composed name for one object - material prefix included.
+    /// Item captions and the selection caption share it, so a hover and a
+    /// selection never disagree about what an item is called.</summary>
+    private string ResolveAppropriateItemName(ClientObject obj)
+        => ItemNames.ResolveAppropriateName(obj);
 
     private StackSplitQuantityState StackSplitQuantity => _bindings.StackSplitQuantity;
     private RetailWindowLayoutPersistence? _persistence;
@@ -431,6 +449,7 @@ public sealed class RetailUiRuntime : IDisposable
         MountSocialPanel();
         MountMapHousePanel();
         MountJournalPanel();
+        MountBookPanel();
         MountCharacter();
         MountPlugins();
         MountInventory();
@@ -526,6 +545,10 @@ public sealed class RetailUiRuntime : IDisposable
     public RetailFpsController? FpsController { get; private set; }
     public SelectedObjectController? SelectedObjectController { get; private set; }
     public UiViewport? PaperdollViewportWidget { get; private set; }
+
+    /// <summary>Set by the composition once the doll viewport exists; the panel
+    /// already holds it, so the flash starts working the moment it is filled in.</summary>
+    public PaperdollFigureLightingRelay PaperdollFigureLighting { get; } = new();
     public UiNineSlicePanel? InventoryFrame { get; private set; }
     public InventoryController? InventoryPanelController { get; private set; }
     public RetailDialogFactory? DialogFactory { get; private set; }
@@ -537,6 +560,8 @@ public sealed class RetailUiRuntime : IDisposable
     private CharacterStatController.Binding? _characterStatBinding;
 
     public Layout.JournalPanelController? JournalPanelController { get; private set; }
+
+    public Layout.BookPanelController? BookPanelController { get; private set; }
 
     private JournalPersistence? _journalFile;
 
@@ -678,6 +703,7 @@ public sealed class RetailUiRuntime : IDisposable
         ExternalContainerController?.Tick();
         SocialPanelController?.Tick();
         JournalPanelController?.Tick();
+        BookPanelController?.Tick();
         MapHousePanelController?.Tick(deltaSeconds);
         _itemCooldownController?.Tick();
         _connectionMount?.Tick();
@@ -1588,7 +1614,8 @@ public sealed class RetailUiRuntime : IDisposable
         UiShortcutDigitGraphics shortcutDigits = LoadShortcutDigitGraphics();
         ToolbarRuntimeBindings b = _bindings.Toolbar;
         ToolbarController = Layout.ToolbarController.Bind(
-            layout, b.Objects, b.Shortcuts, b.ResolveIcon, b.UseItem, b.Combat,
+            layout, b.Objects, b.Shortcuts, b.ResolveIcon, b.UseItem,
+            ResolveAppropriateItemName, b.Combat,
             shortcutDigits.RegularDigits, shortcutDigits.GhostedDigits,
             shortcutDigits.EmptyDigits, b.ItemInteraction,
             b.SendAddShortcut, b.SendRemoveShortcut,
@@ -1712,7 +1739,7 @@ public sealed class RetailUiRuntime : IDisposable
             item => _bindings.Magic.ResolveDragIcon(
                 item.Type, item.IconId, item.IconUnderlayId,
                 item.IconOverlayId, item.Effects),
-            _bindings.Magic.UseItem,
+            _bindings.Magic.ActivateEndowment,
             _bindings.Magic.Selection,
             _bindings.Magic.AddFavorite,
             _bindings.Magic.RemoveFavorite,
@@ -3466,6 +3493,93 @@ public sealed class RetailUiRuntime : IDisposable
         Console.WriteLine("[UI] retail Map/House panel from LayoutDesc importer (0x2100006E slot 0x1000018C).");
     }
 
+    private void MountBookPanel()
+    {
+        if (_bindings.Book is not { } book)
+            return;
+
+        ElementInfo? rootInfo;
+        ImportedLayout? layout;
+        lock (_bindings.Assets.DatLock)
+        {
+            rootInfo = LayoutImporter.ImportInfos(
+                _bindings.Assets.Dats,
+                Layout.BookPanelController.HostLayoutId,
+                Layout.BookPanelController.SlotElementId);
+            var resolver = new DatStringResolver(_bindings.Assets.Dats);
+            if (rootInfo is not null)
+                Layout.BookPanelController.MarkPageTextTypeable(rootInfo);
+            layout = rootInfo is null
+                ? null
+                : LayoutImporter.Build(
+                    rootInfo,
+                    _bindings.Assets.ResolveSprite,
+                    _bindings.Assets.DefaultFont,
+                    _bindings.Assets.ResolveFont,
+                    resolver.Resolve);
+        }
+        if (rootInfo is null || layout is null)
+        {
+            Console.WriteLine(
+                "[UI] book panel: LayoutDesc 0x2100006E slot 0x10000182 not found.");
+            return;
+        }
+
+        var callbacks = new Layout.BookPanelController.Bindings(
+            Book: book.Book,
+            Commands: book.Commands,
+            ResolveBookName: guid => ResolveSelectedObjectName(guid) ?? string.Empty,
+            RequestPageText: book.SendBookPageData,
+            RequestAddPage: book.SendBookAddPage,
+            SetVisible: visible =>
+                _panelUi.SetPanelVisibility(RetailPanelCatalog.Book, visible),
+            SavePage: book.SendBookModifyPage,
+            DeletePage: book.SendBookDeletePage,
+            ShowsAuthorAccount: book.ShowsAuthorAccount);
+
+        Layout.BookPanelController? controller;
+        lock (_bindings.Assets.DatLock)
+            controller = Layout.BookPanelController.Bind(layout, callbacks);
+        if (controller is null)
+        {
+            Console.WriteLine(
+                "[UI] book panel: the authored slot carried no page text.");
+            return;
+        }
+
+        BookPanelController = controller;
+
+        RetailWindowHandle handle = RetailWindowFrame.Mount(
+            Host.Root,
+            controller.Root,
+            _bindings.Assets.ResolveSprite,
+            new RetailWindowFrame.Options
+            {
+                WindowName = WindowNames.Book,
+                Chrome = RetailWindowChrome.NineSlice,
+                Left = 250f,
+                Top = 150f,
+                Visible = false,
+                ResizeX = false,
+                ResizeY = false,
+                ContentAnchors = AnchorEdges.Left | AnchorEdges.Top,
+                ContentClickThrough = false,
+                DrawChromeCenter = !AuthorsFullPanelCenter(rootInfo),
+                Controller = controller,
+            });
+        _panelUi.RegisterMainPanel(
+            RetailPanelCatalog.Book,
+            WindowNames.Book,
+            handle,
+            rootInfo.TryGetEffectiveBool(
+                RetailPanelUiController.RestorePreviousPropertyId,
+                out bool restorePrevious)
+                && restorePrevious);
+        Console.WriteLine(
+            "[UI] retail book panel from LayoutDesc importer (0x2100006E slot 0x10000182); "
+            + $"page text 0x10000111 built as {controller.PageTextElementKind}.");
+    }
+
     private void MountDialogFactory()
     {
         if (DialogFactory is not null)
@@ -3921,7 +4035,8 @@ public sealed class RetailUiRuntime : IDisposable
             : ToolbarController.ReplaceFullyMergedShortcut;
         InventoryController inventory = InventoryController.Bind(
             layout, b.Objects, b.PlayerGuid, b.ResolveIcon, b.Strength, b.Selection,
-            _bindings.Assets.DefaultFont, _bindings.Character.Provider.CharacterName,
+            _bindings.Assets.DefaultFont, ResolveAppropriateItemName,
+            _bindings.Character.Provider.CharacterName,
             contents, sideBag, mainPack, b.SendUse,
             b.SendPutItemInContainer, b.SendStackableSplitToContainer, b.SendStackableMerge,
             notifyMergeAttempt, b.ItemInteraction,
@@ -3935,8 +4050,10 @@ public sealed class RetailUiRuntime : IDisposable
         InventoryPanelController = inventory;
         PaperdollController paperdoll = PaperdollController.Bind(
             layout, b.Objects, b.PlayerGuid, b.ResolveIcon, b.Selection, b.ItemInteraction,
+            ResolveAppropriateItemName,
             contents, _bindings.Assets.DefaultFont, paperdollClickMap,
-            b.ResolveDragIcon, paperdollEmptySprites);
+            b.ResolveDragIcon, paperdollEmptySprites,
+            figureLighting: PaperdollFigureLighting);
         Host.WindowManager.AttachController(
             WindowNames.Inventory,
             new RetainedPanelControllerGroup(inventory, paperdoll));
@@ -4001,6 +4118,7 @@ public sealed class RetailUiRuntime : IDisposable
             b.SendStackableSplitToContainer,
             b.IsWithinUseRange,
             handle,
+            ResolveAppropriateItemName,
             contentsEmpty,
             containerEmpty);
         Host.WindowManager.AttachController(
@@ -4080,6 +4198,7 @@ public sealed class RetailUiRuntime : IDisposable
             _bindings.Assets.DefaultFont,
             _bindings.Assets.DebugFont,
             _bindings.Assets.ResolveSprite,
+            ResolveAppropriateItemName,
             emptySlotSprite,
             buyingEmptySlotSprite,
             sellingEmptySlotSprite,
@@ -4130,6 +4249,7 @@ public sealed class RetailUiRuntime : IDisposable
                     else Host.HideWindow(WindowNames.Salvage);
                 },
                 _bindings.Options.DisplaySystemMessage,
+                ResolveAppropriateItemName,
                 emptySlot));
         if (controller is null)
         {
@@ -4238,7 +4358,8 @@ public sealed class RetailUiRuntime : IDisposable
                                         count.ToString(),
                                 }) ?? count.ToString();
                         }
-                    }));
+                    },
+                    ResolveAppropriateName: ResolveAppropriateItemName));
         if (controller is null)
         {
             Console.WriteLine("[UI] secure trade: required authored grids are missing.");

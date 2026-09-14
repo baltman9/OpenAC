@@ -698,7 +698,7 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                     guid => d.Actions.Selection.Select(
                         guid,
                         SelectionChangeSource.Inventory),
-                    guid => late.Session.TryUseItem(guid, d.Log),
+                    guid => itemInteraction.UseWithCurrentSelection(guid),
                     (tab, position, spellId) =>
                         late.GameRuntime.AddFavorite(tab, position, spellId),
                     (tab, spellId) =>
@@ -1059,6 +1059,30 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                 Connection: new ConnectionRuntimeBindings(
                     () => late.GameRuntime.Connection, d.Window.Close,
                     ShowProgress: d.Options.LiveCharacterSelector is null),
+                Book: new BookRuntimeBindings(
+                    Book: d.Runtime.BookOwner.View,
+                    Commands: d.Runtime.BookOwner,
+                    SendBookPageData: (bookGuid, page) =>
+                        late.Session.CurrentSession?.SendBookPageData(bookGuid, page),
+                    SendBookAddPage: bookGuid =>
+                        late.Session.CurrentSession?.SendBookAddPage(bookGuid),
+                    SendBookModifyPage: (bookGuid, page, text) =>
+                        late.Session.CurrentSession?.SendBookModifyPage(
+                            bookGuid, page, text),
+                    SendBookDeletePage: (bookGuid, page) =>
+                        late.Session.CurrentSession?.SendBookDeletePage(
+                            bookGuid, page),
+                    ShowsAuthorAccount: () =>
+                        d.Character.LocalPlayer.Properties.GetBool(
+                            (uint)AcDream.Core.Properties.PropertyBool.IsAdmin)
+                        || d.Character.LocalPlayer.Properties.GetBool(
+                            (uint)AcDream.Core.Properties.PropertyBool.IsArch)
+                        || d.Character.LocalPlayer.Properties.GetBool(
+                            (uint)AcDream.Core.Properties.PropertyBool.IsSentinel)
+                        || d.Character.LocalPlayer.Properties.GetBool(
+                            (uint)AcDream.Core.Properties.PropertyBool.IsAdvocate)
+                        || d.Character.LocalPlayer.Properties.GetBool(
+                            (uint)AcDream.Core.Properties.PropertyBool.IsPsr)),
                 IsGameplayDisplay: () => d.Settings.IsGameplayDisplay,
                 SynchronizeDisplayPhase: () =>
                 {

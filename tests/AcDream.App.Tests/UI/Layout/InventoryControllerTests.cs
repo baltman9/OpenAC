@@ -89,7 +89,8 @@ public class InventoryControllerTests
             burdenSpellbook: burdenSpellbook,
             shortcuts: shortcuts,
             shortcutDigits: shortcutDigits,
-            combat: combat);
+            combat: combat,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
     // ── #35: a rend or imbue re-sends the whole item description; the cell has
     //        to pick up the new underlay without a relog.
@@ -161,6 +162,27 @@ public class InventoryControllerTests
     {
         t.AddOrUpdate(new ClientObject { ObjectId = bag, Type = ItemType.Container, ItemsCapacity = itemsCapacity });
         t.MoveItem(bag, Player, slot);
+    }
+
+
+    // #87: the hover caption is the same name flavour the selection caption
+    // shows - the composed name, material prefix included.
+    [Fact]
+    public void HoverCaption_carriesTheMaterialPrefix_andStaysPlainWithoutOne()
+    {
+        var (layout, grid, _, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        ClientObject material = ItemTooltipCaptionNames.Material(0xA);
+        ClientObject plain = ItemTooltipCaptionNames.Plain(0xB);
+        objects.AddOrUpdate(material);
+        objects.MoveItem(material.ObjectId, Player, 0);
+        objects.AddOrUpdate(plain);
+        objects.MoveItem(plain.ObjectId, Player, 1);
+
+        Bind(layout, objects);
+
+        Assert.Equal("Pyreal Scarab", grid.GetItem(0)!.GetTooltipText());
+        Assert.Equal("Bread Loaf", grid.GetItem(1)!.GetTooltipText());
     }
 
     private static void SeedContained(ClientObjectTable t, uint guid, uint container, int slot,
@@ -502,7 +524,8 @@ public class InventoryControllerTests
         InventoryController.Bind(layout, new ClientObjectTable(), () => Player,
             iconIds: (_, _, _, _, _) => 0u, strength: () => 100,
             selection: new SelectionState(), datFont: null,
-            contentsEmptySprite: 0x06004D20u, sideBagEmptySprite: 0x06005D9Cu, mainPackEmptySprite: 0x06005D9Cu);
+            contentsEmptySprite: 0x06004D20u, sideBagEmptySprite: 0x06005D9Cu, mainPackEmptySprite: 0x06005D9Cu,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         Assert.Equal(0x06004D20u, grid.GetItem(0)!.EmptySprite);
         Assert.Equal(0x06005D9Cu, containers.GetItem(0)!.EmptySprite);
@@ -831,7 +854,8 @@ public class InventoryControllerTests
             strength: () => 100,
             selection: new SelectionState(),
             datFont: null,
-            itemInteraction: interaction);
+            itemInteraction: interaction,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         UiItemSlot item = grid.GetItem(0)!;
         item.OnEvent(new UiEvent(0u, item, UiEventType.MouseDown));
         Assert.True(grid.GetItem(0)!.Selected);
@@ -860,7 +884,8 @@ public class InventoryControllerTests
         (ItemType type, uint icon)? mainPackCall = null;
         InventoryController.Bind(layout, objects, () => Player,
             iconIds: (t, icon, _, _, _) => { if (icon == 0x0600127Eu) mainPackCall = (t, icon); return 0u; },
-            strength: () => 100, selection: new SelectionState(), datFont: null);
+            strength: () => 100, selection: new SelectionState(), datFont: null,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         Assert.NotNull(mainPackCall);
         Assert.Equal(ItemType.Container, mainPackCall!.Value.type);
@@ -1027,7 +1052,8 @@ public class InventoryControllerTests
             strength: () => 100,
             selection: new SelectionState(),
             datFont: null,
-            itemInteraction: interaction);
+            itemInteraction: interaction,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         Assert.True(interaction.ActivateItem(loot));
 
@@ -1076,7 +1102,8 @@ public class InventoryControllerTests
             strength: () => 100,
             selection: new SelectionState(),
             datFont: null,
-            itemInteraction: interaction);
+            itemInteraction: interaction,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         Assert.True(interaction.ActivateItem(firstLoot));
         now += 200;
@@ -1131,7 +1158,8 @@ public class InventoryControllerTests
             datFont: null,
             sendPutItemInContainer: (item, container, placement) =>
                 puts.Add((item, container, placement)),
-            itemInteraction: interaction);
+            itemInteraction: interaction,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         var source = new UiItemSlot { SourceKind = ItemDragSource.Ground };
         source.SetItem(draggedLoot, 0u);
 
@@ -1191,7 +1219,8 @@ public class InventoryControllerTests
             datFont: null,
             sendPutItemInContainer: (item, container, placement) =>
                 puts.Add((item, container, placement)),
-            itemInteraction: interaction);
+            itemInteraction: interaction,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         var source = new UiItemSlot { SourceKind = ItemDragSource.Ground };
         source.SetItem(draggedLoot, 0u);
 
@@ -1256,7 +1285,8 @@ public class InventoryControllerTests
             datFont: null,
             sendPutItemInContainer: (item, container, placement) =>
                 puts.Add((item, container, placement)),
-            itemInteraction: interaction);
+            itemInteraction: interaction,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         Assert.True(interaction.PlaceWorldItemInBackpack(pendingLoot));
         inventory.HandleDropRelease(
@@ -1319,7 +1349,8 @@ public class InventoryControllerTests
             datFont: null,
             sendStackableMerge: (source, target, amount) =>
                 merges.Add((source, target, amount)),
-            itemInteraction: interaction);
+            itemInteraction: interaction,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         var sourceCell = new UiItemSlot { SourceKind = ItemDragSource.Ground };
         sourceCell.SetItem(sourceStack, 0u);
 
@@ -1381,7 +1412,8 @@ public class InventoryControllerTests
             sendStackableSplitToContainer: (item, container, placement, amount) =>
                 splits.Add((item, container, placement, amount)),
             itemInteraction: interaction,
-            stackSplitQuantity: splitQuantity);
+            stackSplitQuantity: splitQuantity,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         var sourceCell = new UiItemSlot { SourceKind = ItemDragSource.Ground };
         sourceCell.SetItem(sourceStack, 0u);
 
@@ -1428,7 +1460,8 @@ public class InventoryControllerTests
             datFont: null,
             sendPutItemInContainer: (item, container, placement) =>
                 puts.Add((item, container, placement)),
-            itemInteraction: interaction);
+            itemInteraction: interaction,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         Assert.True(interaction.PlaceWorldItemInBackpack(pendingLoot));
         inventory.HandleDropRelease(grid, grid.GetItem(5)!, Payload(ownedItem));
@@ -1467,7 +1500,8 @@ public class InventoryControllerTests
             strength: () => 100,
             selection: new SelectionState(),
             datFont: null,
-            itemInteraction: interaction);
+            itemInteraction: interaction,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         Assert.True(interaction.PlaceWorldItemInBackpack(loot));
         Assert.Equal(loot, grid.GetItem(0)!.ItemId);
@@ -1507,7 +1541,8 @@ public class InventoryControllerTests
             strength: () => 100,
             selection: new SelectionState(),
             datFont: null,
-            itemInteraction: interaction);
+            itemInteraction: interaction,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         Assert.True(interaction.PlaceWorldItemInBackpack(loot));
         Assert.Equal(loot, grid.GetItem(0)!.ItemId);
@@ -1818,7 +1853,8 @@ public class InventoryControllerTests
             datFont: null,
             sendPutItemInContainer: (item, container, placement) =>
                 puts.Add((item, container, placement)),
-            itemInteraction: interaction);
+            itemInteraction: interaction,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         var source = new UiItemSlot { SourceKind = ItemDragSource.Ground };
         source.SetItem(droppedPack, 0u);
         var payload = new ItemDragPayload(
@@ -1886,7 +1922,8 @@ public class InventoryControllerTests
             datFont: null,
             sendPutItemInContainer: (item, container, placement) =>
                 puts.Add((item, container, placement)),
-            itemInteraction: interaction);
+            itemInteraction: interaction,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         var source = new UiItemSlot { SourceKind = ItemDragSource.Ground };
         source.SetItem(droppedPack, 0u);
         var payload = new ItemDragPayload(
@@ -2053,7 +2090,8 @@ public class InventoryControllerTests
                 strength: () => 100,
                 selection: Selection,
                 datFont: null,
-                itemInteraction: Interaction);
+                itemInteraction: Interaction,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
             Root.AddChild(layout.Root);
         }
 
@@ -2251,7 +2289,8 @@ public class InventoryControllerTests
             strength: () => 100,
             selection: new SelectionState(),
             datFont: null,
-            itemInteraction: interaction);
+            itemInteraction: interaction,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         Assert.True(interaction.ActivateItem(loot));
 
@@ -2296,7 +2335,8 @@ public class InventoryControllerTests
             strength: () => 100,
             selection: new SelectionState(),
             datFont: null,
-            itemInteraction: interaction);
+            itemInteraction: interaction,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         Assert.True(interaction.ActivateItem(loot));
 
