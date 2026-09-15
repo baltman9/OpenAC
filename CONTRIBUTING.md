@@ -71,5 +71,6 @@ one. A screenshot of the original client doing it right is gold.
 ## Plugins
 
 Plugins target `AcDream.Plugin.Abstractions` only and never import `AcDream.App`.
-`docs/plugin-ui-markup.md` documents the panel markup. `AcDream.Plugins.MossTank`
+`docs/plugin-ui-markup.md` documents the panel markup and `docs/plugin-api.md`
+the chat, lifecycle, spell, storage and clipboard surfaces. `AcDream.Plugins.MossTank`
 in `src/` is a complete working example.
