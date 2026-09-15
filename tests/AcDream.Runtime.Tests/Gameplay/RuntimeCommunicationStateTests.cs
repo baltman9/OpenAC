@@ -309,6 +309,20 @@ public sealed class RuntimeCommunicationStateTests
     }
 
     [Fact]
+    public void AddText_FilterLanguageOn_TabooTableMissing_CensorsEveryWord()
+    {
+        using var state = new RuntimeCommunicationState
+        {
+            FilterLanguageSource = () => true,
+            FilterLanguagePatterns = null,
+        };
+
+        state.AddText("a zork b", RetailLogTextType.Default);
+
+        Assert.Equal("**** **** ****", state.Chat.Snapshot()[0].Text);
+    }
+
+    [Fact]
     public void AddText_FilterLanguageOn_NeverAppliedToClientLocalSpewBox()
     {
         using var state = new RuntimeCommunicationState

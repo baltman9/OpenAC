@@ -51,6 +51,7 @@ public sealed class ItemInteractionControllerTests
         public bool NonCombatMode;
         public bool DragOnPlayerOpensSecureTrade = true;
         public bool MainPackPreferred;
+        public bool ConfirmVolatileRareUses = true;
         public uint OpenBackpackContainerId = Player;
         public uint GroundObject;
         public long Now = 1_000;
@@ -100,6 +101,7 @@ public sealed class ItemInteractionControllerTests
                 sendGive: (target, item, amount) => Gives.Add((target, item, amount)),
                 dragOnPlayerOpensSecureTrade: () => DragOnPlayerOpensSecureTrade,
                 mainPackPreferred: () => MainPackPreferred,
+                confirmVolatileRareUses: () => ConfirmVolatileRareUses,
                 backpackContainerId: () => OpenBackpackContainerId,
                 systemMessage: SystemMessages.Add,
                 sendSplitToContainer: (item, container, placement, amount) =>
@@ -749,6 +751,25 @@ public sealed class ItemInteractionControllerTests
         Assert.True(h.Controller.ActivateItem(0x50000A03u));
 
         Assert.Equal(new[] { 0x50000A03u }, h.Uses);
+    }
+
+    [Fact]
+    public void VolatileRareUse_SendsDirectlyWhenConfirmOptionIsOff()
+    {
+        var h = new Harness { ConfirmVolatileRareUses = false };
+        const uint gem = 0x50000A32u;
+        var actions = new List<ItemPolicyAction>();
+        h.Controller.PolicyActionRequested += actions.Add;
+        h.AddContained(gem, item =>
+        {
+            item.Useability = ItemUseability.Contained;
+            item.PublicWeenieBitfield = (uint)PublicWeenieFlags.VolatileRare;
+        });
+
+        Assert.True(h.Controller.ActivateItem(gem));
+
+        Assert.Equal(new[] { gem }, h.Uses);
+        Assert.Empty(actions);
     }
 
     [Fact]

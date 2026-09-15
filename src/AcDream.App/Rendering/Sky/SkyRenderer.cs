@@ -72,6 +72,7 @@ public sealed partial class SkyRenderer : IDisposable
         bool environOverrideActive)
     {
         if (group is null || group.SkyObjects.Count == 0) return;
+        if (postScenePass && (DisableMostWeatherEffects?.Invoke() ?? false)) return;
 
         var skyProj = SkyProjection.WithDepthRange(camera.Projection, Near, Far);
 

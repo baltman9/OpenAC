@@ -55,6 +55,7 @@ public sealed class ItemInteractionController : IDisposable
     private readonly StackSplitQuantityState? _stackSplitQuantity;
     private readonly Func<bool> _dragOnPlayerOpensSecureTrade;
     private readonly Func<bool> _mainPackPreferred;
+    private readonly Func<bool> _confirmVolatileRareUses;
     private readonly Action<string>? _systemMessage;
     private readonly Action<string, RetailLogTextType>? _interfaceText;
     private readonly AutoWieldController _autoWield;
@@ -99,6 +100,7 @@ public sealed class ItemInteractionController : IDisposable
         Action<uint, uint, uint>? sendGive = null,
         Func<bool>? dragOnPlayerOpensSecureTrade = null,
         Func<bool>? mainPackPreferred = null,
+        Func<bool>? confirmVolatileRareUses = null,
         Action<string>? systemMessage = null,
         Action<uint, uint, uint, uint>? sendSplitToContainer = null,
         Action<uint>? requestExternalContainer = null,
@@ -140,6 +142,7 @@ public sealed class ItemInteractionController : IDisposable
         _stackSplitQuantity = stackSplitQuantity;
         _dragOnPlayerOpensSecureTrade = dragOnPlayerOpensSecureTrade ?? (() => true);
         _mainPackPreferred = mainPackPreferred ?? (() => false);
+        _confirmVolatileRareUses = confirmVolatileRareUses ?? (() => true);
         _systemMessage = systemMessage;
         _interfaceText = interfaceText;
         _requestUse = requestUse;
@@ -756,7 +759,7 @@ public sealed class ItemInteractionController : IDisposable
             BypassClassification: false,
             UseCurrentSelection: false,
             SelectedTarget: null,
-            ConfirmVolatileRareUses: true,
+            ConfirmVolatileRareUses: _confirmVolatileRareUses(),
             InNonCombatMode: _inNonCombatMode());
         var decision = ItemInteractionPolicy.DecideUse(input);
         return ExecuteUseActions(decision.Actions);
@@ -782,7 +785,7 @@ public sealed class ItemInteractionController : IDisposable
             BypassClassification: true,
             UseCurrentSelection: false,
             SelectedTarget: null,
-            ConfirmVolatileRareUses: true,
+            ConfirmVolatileRareUses: _confirmVolatileRareUses(),
             InNonCombatMode: _inNonCombatMode());
         ItemUsePolicyDecision decision = ItemInteractionPolicy.DecideUse(input);
         bool sends = decision.Actions.Any(static action =>
@@ -813,7 +816,7 @@ public sealed class ItemInteractionController : IDisposable
             BypassClassification: true,
             UseCurrentSelection: true,
             SelectedTarget: Snapshot(target),
-            ConfirmVolatileRareUses: true,
+            ConfirmVolatileRareUses: _confirmVolatileRareUses(),
             InNonCombatMode: _inNonCombatMode());
         ItemUsePolicyDecision decision = ItemInteractionPolicy.DecideUse(input);
         bool sends = decision.Actions.Any(static action =>
@@ -856,7 +859,7 @@ public sealed class ItemInteractionController : IDisposable
             BypassClassification: true,
             UseCurrentSelection: true,
             SelectedTarget: selected,
-            ConfirmVolatileRareUses: true,
+            ConfirmVolatileRareUses: _confirmVolatileRareUses(),
             InNonCombatMode: _inNonCombatMode());
         return ExecuteUseActions(ItemInteractionPolicy.DecideUse(input).Actions);
     }

@@ -40,20 +40,20 @@ public sealed class ChatLanguageFilterTests
     }
 
     [Theory]
-    [InlineData("a\tzork\tb", "a\t****\tb")]
-    [InlineData("a\nzork\r\nb", "a\n****\r\nb")]
-    [InlineData("a\u00A0zork b", "a\u00A0**** b")]
-    public void Censor_AnyWhitespaceSeparatesWords(string line, string expected)
+    [InlineData("a\tzork\tb", "a\tzork\tb")]
+    [InlineData("a\nzork\r\nb", "a\nzork\r\nb")]
+    [InlineData("a\u00A0zork b", "a\u00A0zork b")]
+    public void Censor_OnlyAsciiSpaceIsAWordBoundary(string line, string expected)
     {
         Assert.Equal(expected, ChatLanguageFilter.Censor(line, new[] { "zork" }));
     }
 
     [Fact]
-    public void Censor_WildcardPatternDoesNotSwallowTabs()
+    public void Censor_WildcardPatternSwallowsATabWhenNoSpaceSeparatesIt()
     {
         string result = ChatLanguageFilter.Censor("zork\tb", new[] { "zork*" });
 
-        Assert.Equal("****\tb", result);
+        Assert.Equal("****", result);
     }
 
     [Fact]
@@ -86,6 +86,14 @@ public sealed class ChatLanguageFilterTests
         string result = ChatLanguageFilter.Censor("hello world", Array.Empty<string>());
 
         Assert.Equal("hello world", result);
+    }
+
+    [Fact]
+    public void Censor_PatternsMissing_CensorsEveryWord()
+    {
+        string result = ChatLanguageFilter.Censor("hello world", null);
+
+        Assert.Equal("**** ****", result);
     }
 
     [Fact]

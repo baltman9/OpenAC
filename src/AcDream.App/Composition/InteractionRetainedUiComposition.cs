@@ -352,6 +352,8 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                 d.Character.Options.DragItemOnPlayerOpensSecureTrade,
             mainPackPreferred: () =>
                 d.Character.Options.GetOptionBit(CharacterOptionId.MainPackPreferred),
+            confirmVolatileRareUses: () =>
+                d.Character.Options.GetOptionBit(CharacterOptionId.ConfirmVolatileRareUse),
             toast: d.Toast,
             readyForInventoryRequest: () => session.IsInWorld,
             playerOnGround: () =>
@@ -464,8 +466,10 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                 d.Communication.AddText(text, RetailLogTextType.ClientLocal),
         };
 
-    /// <summary>The chat-audience banned-word patterns; empty when the table is unavailable.</summary>
-    private static IReadOnlyList<string> LoadFilterLanguagePatterns(
+    /// <summary>The chat-audience banned-word patterns; null when the taboo
+    /// table itself failed to load (the filter then fails closed), empty when
+    /// it loaded but has no patterns for this audience.</summary>
+    private static IReadOnlyList<string>? LoadFilterLanguagePatterns(
         IDatReaderWriter dats,
         object datLock)
     {
@@ -475,8 +479,9 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
         {
             DatReaderWriter.DBObjs.TabooTable? table =
                 dats.Get<DatReaderWriter.DBObjs.TabooTable>(TabooTableId);
-            if (table is null
-                || !table.AudienceToBannedPatterns.TryGetValue(
+            if (table is null)
+                return null;
+            if (!table.AudienceToBannedPatterns.TryGetValue(
                     ChatAudienceId,
                     out DatReaderWriter.Types.TabooTableEntry? entry))
                 return Array.Empty<string>();

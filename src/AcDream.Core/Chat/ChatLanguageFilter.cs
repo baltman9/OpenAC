@@ -9,21 +9,21 @@ public static class ChatLanguageFilter
 {
     private const string Replacement = "****";
 
-    /// <summary>Replaces every whitespace-delimited word that matches a pattern
-    /// with <c>****</c>, leaving punctuation attached to a word and all whitespace
-    /// untouched.</summary>
-    public static string Censor(string line, IReadOnlyList<string> patterns)
+    /// <summary>Replaces every space-delimited word that matches a pattern with
+    /// <c>****</c>, leaving punctuation attached to a word and every separator
+    /// untouched. A missing (null) pattern list fails closed and censors every
+    /// word; a loaded-but-empty list leaves the line untouched.</summary>
+    public static string Censor(string line, IReadOnlyList<string>? patterns)
     {
         ArgumentNullException.ThrowIfNull(line);
-        ArgumentNullException.ThrowIfNull(patterns);
-        if (patterns.Count == 0 || line.Length == 0)
+        if (patterns is { Count: 0 } || line.Length == 0)
             return line;
 
         StringBuilder? result = null;
         int wordStart = -1;
         for (int i = 0; i <= line.Length; i++)
         {
-            bool boundary = i == line.Length || char.IsWhiteSpace(line[i]);
+            bool boundary = i == line.Length || line[i] == ' ';
             if (!boundary)
             {
                 if (wordStart < 0) wordStart = i;
@@ -33,7 +33,7 @@ public static class ChatLanguageFilter
             if (wordStart >= 0)
             {
                 ReadOnlySpan<char> word = line.AsSpan(wordStart, i - wordStart);
-                if (MatchesAnyPattern(word, patterns))
+                if (patterns is null || MatchesAnyPattern(word, patterns))
                 {
                     result ??= new StringBuilder(line, 0, wordStart, line.Length);
                     result.Append(Replacement);

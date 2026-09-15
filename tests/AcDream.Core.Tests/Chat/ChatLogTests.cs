@@ -379,6 +379,19 @@ public sealed class ChatLogTests
     }
 
     [Fact]
+    public void OnLocalSpeech_FilterLanguageOn_TabooTableMissing_CensorsEveryWord()
+    {
+        var log = new ChatLog
+        {
+            FilterLanguageSource = () => true,
+            FilterLanguagePatterns = null,
+        };
+        log.OnLocalSpeech("Alice", "a zork b", 0xAAu, isRanged: false, logTextType: 0x02u);
+
+        Assert.Equal("**** **** ****", log.Snapshot()[0].Text);
+    }
+
+    [Fact]
     public void OnTellReceived_FilterLanguageOn_CensorsMatchingWords()
     {
         var log = new ChatLog
