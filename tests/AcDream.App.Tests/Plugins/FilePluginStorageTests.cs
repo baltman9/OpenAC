@@ -32,4 +32,26 @@ public sealed class FilePluginStorageTests
                 Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    public void TheReportedRootIsTheAbsoluteDirectoryKeysResolveAgainst()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-plugin-storage-{Guid.NewGuid():N}");
+        try
+        {
+            var storage = new FilePluginStorage(root);
+            storage.WriteText("profile.json", "one");
+
+            Assert.Equal(Path.GetFullPath(root), storage.RootPath);
+            Assert.True(File.Exists(
+                Path.Combine(storage.RootPath!, "profile.json")));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
 }

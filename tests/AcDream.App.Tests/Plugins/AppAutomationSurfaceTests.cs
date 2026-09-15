@@ -140,7 +140,11 @@ public sealed class AppAutomationSurfaceTests
             surface.CaptureMessages(one.Sequence));
         Assert.True(two.Sequence > one.Sequence);
         Assert.Equal("You cast Fester Other VII on Olthoi.", two.Text);
-        Assert.Equal(1, second.CommunicationOwner.SubscriberCount);
+        // Rebinding leaves nothing behind on the session it left, while the
+        // new one carries the surface plus the runtime event bridge the
+        // surface's lifecycle subscription brings with it.
+        Assert.Equal(0, first.CommunicationOwner.SubscriberCount);
+        Assert.Equal(2, second.CommunicationOwner.SubscriberCount);
 
         surface.Dispose();
         Assert.Equal(0, second.CommunicationOwner.SubscriberCount);
