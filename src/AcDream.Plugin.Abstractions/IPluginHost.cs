@@ -23,6 +23,9 @@ public interface IPluginHost
 
     IPluginStorage VtankProfiles => NoOpPluginStorage.Instance;
 
+    /// <summary>The host's text clipboard; inert without a window.</summary>
+    IPluginClipboard Clipboard => NoOpPluginClipboard.Instance;
+
     IReadOnlyDictionary<string, string> SessionSettings =>
         EmptySessionSettings;
 

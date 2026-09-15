@@ -131,6 +131,11 @@ public interface ICharacterInfo
     /// <summary>Server-advertised world name used to scope global variables.</summary>
     string WorldName => string.Empty;
 
+    /// <summary>
+    /// Players the server reports as connected, or -1 before it has said.
+    /// </summary>
+    int ServerPopulation => -1;
+
     /// <summary>Authenticated account name; expression surfaces expose only its hash.</summary>
     string AccountName => string.Empty;
 
@@ -180,6 +185,51 @@ public interface ISpellCatalog
 
     bool TryGet(uint spellId, out PluginSpellInfo info);
 
+    /// <summary>
+    /// Every spell the loaded content table describes, not only the ones the
+    /// character knows. Built on first use and cached by the host.
+    /// </summary>
+    IReadOnlyList<PluginSpellInfo> All => Array.Empty<PluginSpellInfo>();
+
+    /// <summary>
+    /// Finds a spell in <see cref="All"/> by name, ignoring case. An exact
+    /// match wins; <paramref name="partialMatch"/> falls back to the first
+    /// name that contains the text.
+    /// </summary>
+    bool TryFindByName(string name, bool partialMatch, out PluginSpellInfo spell)
+    {
+        spell = default;
+        if (string.IsNullOrWhiteSpace(name))
+            return false;
+
+        IReadOnlyList<PluginSpellInfo> all = All;
+        for (int index = 0; index < all.Count; index++)
+        {
+            if (string.Equals(
+                    all[index].Name,
+                    name,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                spell = all[index];
+                return true;
+            }
+        }
+
+        if (!partialMatch)
+            return false;
+
+        for (int index = 0; index < all.Count; index++)
+        {
+            if (all[index].Name is { } candidate
+                && candidate.Contains(name, StringComparison.OrdinalIgnoreCase))
+            {
+                spell = all[index];
+                return true;
+            }
+        }
+        return false;
+    }
+
     bool TryGetComponent(uint componentId, out PluginSpellComponentInfo info)
     {
         info = default;
@@ -195,16 +245,78 @@ public readonly record struct PluginChatMessage(
     int Kind,
     string Sender,
     string Text,
-    string ChannelName);
+    string ChannelName)
+{
+    /// <summary>
+    /// The <see cref="Kind"/> carried by a short status notice shown over the
+    /// world instead of being written into the transcript. It sits above every
+    /// transcript kind so the two can never collide.
+    /// </summary>
+    public const int StatusTextKind = 100;
+
+    /// <summary>
+    /// The text class the client colours the line by. A plugin printing its
+    /// own line passes the same value to <see cref="IPluginChat.PostMessage"/>.
+    /// </summary>
+    public int LogTextType { get; init; }
+
+    /// <summary>Sub-kind of a combat line; 0 when the line is not one.</summary>
+    public int CombatKind { get; init; }
+
+    /// <summary>When the client took delivery of the line.</summary>
+    public DateTimeOffset Received { get; init; }
+}
 
 public interface IPluginChat
 {
     IReadOnlyList<PluginChatMessage> CaptureMessages(ulong afterSequence) =>
         Array.Empty<PluginChatMessage>();
 
+    /// <summary>
+    /// Raised for every line the client takes delivery of, in order, on the
+    /// thread that raises <see cref="IEvents.Tick"/>. Unlike
+    /// <see cref="CaptureMessages"/>, nothing is dropped between polls.
+    /// </summary>
+    event Action<PluginChatMessage> Received
+    {
+        add { }
+        remove { }
+    }
+
+    /// <summary>
+    /// Installs a filter consulted before a line is shown. Returning true
+    /// drops the line: it never reaches the transcript, the chat windows,
+    /// <see cref="CaptureMessages"/>, <see cref="Received"/>, or the log file.
+    /// Filters run in registration order, and one that throws suppresses
+    /// nothing. Dispose the result to remove it; the host also removes every
+    /// filter a plugin installed when that plugin unloads.
+    /// </summary>
+    IDisposable RegisterFilter(Func<PluginChatMessage, bool> suppress) =>
+        NoOpPluginRegistration.Instance;
+
     void PostSystemMessage(string text);
 
+    /// <summary>
+    /// Writes a line in one of the client's own text classes, so a plugin can
+    /// print in the colour that class carries.
+    /// </summary>
+    void PostMessage(string text, int logTextType) => PostSystemMessage(text);
+
     bool Submit(string text) => false;
+}
+
+/// <summary>A registration handle from a host that has nothing to revoke.</summary>
+public sealed class NoOpPluginRegistration : IDisposable
+{
+    public static NoOpPluginRegistration Instance { get; } = new();
+
+    private NoOpPluginRegistration()
+    {
+    }
+
+    public void Dispose()
+    {
+    }
 }
 
 public interface IMagicCommands
