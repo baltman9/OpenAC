@@ -22,7 +22,8 @@ public sealed class PaperdollFramePresenterTests
         var renderer = new RecordingRenderer();
         var view = new RecordingView { Visible = false };
         var factory = new RecordingFactory { Doll = CreateDoll() };
-        var presenter = new PaperdollFramePresenter(renderer, view, factory);
+        var heritage = new RecordingHeritageSource();
+        var presenter = new PaperdollFramePresenter(renderer, view, factory, heritage);
 
         Frame(presenter);
 
@@ -40,7 +41,8 @@ public sealed class PaperdollFramePresenterTests
         var renderer = new RecordingRenderer { TextureHandle = 91u };
         var view = new RecordingView { Width = 240, Height = 320 };
         var factory = new RecordingFactory { Doll = doll };
-        var presenter = new PaperdollFramePresenter(renderer, view, factory);
+        var heritage = new RecordingHeritageSource();
+        var presenter = new PaperdollFramePresenter(renderer, view, factory, heritage);
 
         Frame(presenter);
 
@@ -60,7 +62,8 @@ public sealed class PaperdollFramePresenterTests
         {
             Doll = CreateDoll(),
         };
-        var presenter = new PaperdollFramePresenter(renderer, view, factory);
+        var heritage = new RecordingHeritageSource();
+        var presenter = new PaperdollFramePresenter(renderer, view, factory, heritage);
 
         Frame(presenter);
         Frame(presenter);
@@ -81,7 +84,8 @@ public sealed class PaperdollFramePresenterTests
         var renderer = new RecordingRenderer();
         var view = new RecordingView();
         var factory = new RecordingFactory { Doll = first };
-        var presenter = new PaperdollFramePresenter(renderer, view, factory);
+        var heritage = new RecordingHeritageSource();
+        var presenter = new PaperdollFramePresenter(renderer, view, factory, heritage);
 
         Frame(presenter);
         factory.Doll = repeated;
@@ -102,7 +106,8 @@ public sealed class PaperdollFramePresenterTests
         var renderer = new RecordingRenderer();
         var view = new RecordingView();
         var factory = new RecordingFactory { Doll = first };
-        var presenter = new PaperdollFramePresenter(renderer, view, factory);
+        var heritage = new RecordingHeritageSource();
+        var presenter = new PaperdollFramePresenter(renderer, view, factory, heritage);
 
         Frame(presenter);
         factory.Doll = changed;
@@ -118,7 +123,8 @@ public sealed class PaperdollFramePresenterTests
         var renderer = new RecordingRenderer { TextureHandle = 91u };
         var view = new RecordingView();
         var factory = new RecordingFactory { Doll = CreateDoll() };
-        var presenter = new PaperdollFramePresenter(renderer, view, factory);
+        var heritage = new RecordingHeritageSource();
+        var presenter = new PaperdollFramePresenter(renderer, view, factory, heritage);
 
         Frame(presenter);
         renderer.TextureHandle = 0u;
@@ -147,7 +153,8 @@ public sealed class PaperdollFramePresenterTests
         var renderer = new RecordingRenderer { TextureHandle = 81u };
         var view = new RecordingView();
         var factory = new RecordingFactory { Doll = firstDoll };
-        var presenter = new PaperdollFramePresenter(renderer, view, factory);
+        var heritage = new RecordingHeritageSource();
+        var presenter = new PaperdollFramePresenter(renderer, view, factory, heritage);
 
         Frame(presenter);
         factory.CanBuild = false;
@@ -170,7 +177,8 @@ public sealed class PaperdollFramePresenterTests
         var renderer = new RecordingRenderer();
         var view = new RecordingView();
         var factory = new RecordingFactory { Doll = firstDoll };
-        var presenter = new PaperdollFramePresenter(renderer, view, factory);
+        var heritage = new RecordingHeritageSource();
+        var presenter = new PaperdollFramePresenter(renderer, view, factory, heritage);
 
         Frame(presenter);
         presenter.ResetSession();
@@ -181,6 +189,68 @@ public sealed class PaperdollFramePresenterTests
         Assert.Equal(2, factory.BuildCount);
         Assert.Equal([firstDoll, null, secondDoll], renderer.Dolls);
         Assert.Equal(1, view.ClearCount);
+    }
+
+    /// <summary>
+    /// The doll is posed and framed by heritage, and the heritage arrives with
+    /// the character description, which can land after the first build. A doll
+    /// built before it must be redressed once it is known, or an Olthoi keeps
+    /// the humanoid pose and the humanoid camera it was first built with.
+    /// </summary>
+    [Fact]
+    public void LateHeritage_RedressesTheDollAndReframesTheView()
+    {
+        var renderer = new RecordingRenderer();
+        var view = new RecordingView();
+        var factory = new RecordingFactory { Doll = CreateDoll() };
+        var heritage = new RecordingHeritageSource();
+        var presenter = new PaperdollFramePresenter(renderer, view, factory, heritage);
+
+        Frame(presenter);
+        Assert.Equal([0u], factory.Heritages);
+
+        heritage.HeritageGroup = 12u;
+        Frame(presenter);
+        Frame(presenter);
+
+        Assert.Equal([0u, 12u], factory.Heritages);
+        Assert.Equal([12u], renderer.Heritages);
+        Assert.False(presenter.IsDirty);
+    }
+
+    [Fact]
+    public void SteadyHeritage_DoesNotRebuildTheDollEveryFrame()
+    {
+        var renderer = new RecordingRenderer();
+        var view = new RecordingView();
+        var factory = new RecordingFactory { Doll = CreateDoll() };
+        var heritage = new RecordingHeritageSource { HeritageGroup = 13u };
+        var presenter = new PaperdollFramePresenter(renderer, view, factory, heritage);
+
+        Frame(presenter);
+        Frame(presenter);
+        Frame(presenter);
+
+        Assert.Equal(1, factory.BuildCount);
+        Assert.Equal([13u], factory.Heritages);
+        Assert.Equal([13u], renderer.Heritages);
+    }
+
+    [Fact]
+    public void ResetSession_ReturnsTheViewToTheUnknownHeritageFraming()
+    {
+        var renderer = new RecordingRenderer();
+        var view = new RecordingView();
+        var factory = new RecordingFactory { Doll = CreateDoll() };
+        var heritage = new RecordingHeritageSource { HeritageGroup = 12u };
+        var presenter = new PaperdollFramePresenter(renderer, view, factory, heritage);
+
+        Frame(presenter);
+        presenter.ResetSession();
+        heritage.HeritageGroup = 1u;
+        Frame(presenter);
+
+        Assert.Equal([12u, 0u, 1u], renderer.Heritages);
     }
 
     [Fact]
@@ -218,11 +288,11 @@ public sealed class PaperdollFramePresenterTests
         var pose = new RecordingPoseApplicator();
         var factory = new RetailPaperdollDollFactory(entities, identity, pose);
 
-        Assert.False(factory.TryBuild(out WorldEntity? missing));
+        Assert.False(factory.TryBuild(0u, out WorldEntity? missing));
         Assert.Null(missing);
 
         entities.Entities[7u] = CreateDoll();
-        Assert.False(factory.TryBuild(out WorldEntity? empty));
+        Assert.False(factory.TryBuild(0u, out WorldEntity? empty));
         Assert.Null(empty);
         Assert.Empty(pose.Applications);
     }
@@ -251,9 +321,9 @@ public sealed class PaperdollFramePresenterTests
         var pose = new RecordingPoseApplicator();
         var factory = new RetailPaperdollDollFactory(entities, identity, pose);
 
-        Assert.True(factory.TryBuild(out WorldEntity? firstDoll));
+        Assert.True(factory.TryBuild(1u, out WorldEntity? firstDoll));
         identity.ServerGuid = 20u;
-        Assert.True(factory.TryBuild(out WorldEntity? secondDoll));
+        Assert.True(factory.TryBuild(12u, out WorldEntity? secondDoll));
 
         Assert.NotNull(firstDoll);
         Assert.NotNull(secondDoll);
@@ -263,7 +333,7 @@ public sealed class PaperdollFramePresenterTests
         Assert.Equal(firstMesh.GfxObjId, firstDoll.MeshRefs[0].GfxObjId);
         Assert.Same(firstMesh.SurfaceOverrides, firstDoll.MeshRefs[0].SurfaceOverrides);
         Assert.Equal(
-            [(firstDoll, 0x02000001u), (secondDoll, 0x02000002u)],
+            [(firstDoll, 0x02000001u, 1u), (secondDoll, 0x02000002u, 12u)],
             pose.Applications);
         Assert.Equal([10u, 20u], entities.RequestedGuids);
     }
@@ -284,6 +354,10 @@ public sealed class PaperdollFramePresenterTests
         public List<(int Width, int Height)> RenderSizes { get; } = [];
         public int RenderCount => RenderSizes.Count;
         public int PrepareCount { get; private set; }
+
+        public List<uint> Heritages { get; } = [];
+
+        public void SetHeritage(uint heritageId) => Heritages.Add(heritageId);
 
         public void SetDoll(WorldEntity? doll) => Dolls.Add(doll);
 
@@ -324,9 +398,12 @@ public sealed class PaperdollFramePresenterTests
         public WorldEntity? Doll { get; set; }
         public int BuildCount { get; private set; }
 
-        public bool TryBuild(out WorldEntity? doll)
+        public List<uint> Heritages { get; } = [];
+
+        public bool TryBuild(uint heritageId, out WorldEntity? doll)
         {
             BuildCount++;
+            Heritages.Add(heritageId);
             doll = Doll;
             return CanBuild;
         }
@@ -346,9 +423,14 @@ public sealed class PaperdollFramePresenterTests
 
     private sealed class RecordingPoseApplicator : IPaperdollPoseApplicator
     {
-        public List<(WorldEntity Doll, uint SetupId)> Applications { get; } = [];
+        public List<(WorldEntity Doll, uint SetupId, uint HeritageId)> Applications { get; } = [];
 
-        public void Apply(WorldEntity doll, uint setupId) =>
-            Applications.Add((doll, setupId));
+        public void Apply(WorldEntity doll, uint setupId, uint heritageId) =>
+            Applications.Add((doll, setupId, heritageId));
+    }
+
+    private sealed class RecordingHeritageSource : IPaperdollHeritageSource
+    {
+        public uint HeritageGroup { get; set; }
     }
 }
