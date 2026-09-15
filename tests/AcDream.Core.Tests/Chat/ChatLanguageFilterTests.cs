@@ -39,6 +39,23 @@ public sealed class ChatLanguageFilterTests
         Assert.Equal("a  ****  b", result);
     }
 
+    [Theory]
+    [InlineData("a\tzork\tb", "a\t****\tb")]
+    [InlineData("a\nzork\r\nb", "a\n****\r\nb")]
+    [InlineData("a\u00A0zork b", "a\u00A0**** b")]
+    public void Censor_AnyWhitespaceSeparatesWords(string line, string expected)
+    {
+        Assert.Equal(expected, ChatLanguageFilter.Censor(line, new[] { "zork" }));
+    }
+
+    [Fact]
+    public void Censor_WildcardPatternDoesNotSwallowTabs()
+    {
+        string result = ChatLanguageFilter.Censor("zork\tb", new[] { "zork*" });
+
+        Assert.Equal("****\tb", result);
+    }
+
     [Fact]
     public void Censor_PunctuationStaysPartOfTheWord()
     {

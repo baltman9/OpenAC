@@ -9,8 +9,8 @@ public static class ChatLanguageFilter
 {
     private const string Replacement = "****";
 
-    /// <summary>Replaces every space-delimited word that matches a pattern with
-    /// <c>****</c>, leaving punctuation attached to a word and all whitespace
+    /// <summary>Replaces every whitespace-delimited word that matches a pattern
+    /// with <c>****</c>, leaving punctuation attached to a word and all whitespace
     /// untouched.</summary>
     public static string Censor(string line, IReadOnlyList<string> patterns)
     {
@@ -23,7 +23,7 @@ public static class ChatLanguageFilter
         int wordStart = -1;
         for (int i = 0; i <= line.Length; i++)
         {
-            bool boundary = i == line.Length || line[i] == ' ';
+            bool boundary = i == line.Length || char.IsWhiteSpace(line[i]);
             if (!boundary)
             {
                 if (wordStart < 0) wordStart = i;
@@ -46,7 +46,7 @@ public static class ChatLanguageFilter
             }
 
             if (i < line.Length)
-                result?.Append(' ');
+                result?.Append(line[i]);
         }
 
         return result?.ToString() ?? line;
