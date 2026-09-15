@@ -26,7 +26,7 @@ public sealed class HeadlessPluginApiSurfaceTests
         Assert.Equal(["first", "second"], seen.Select(static m => m.Text));
         Assert.Equal(0x0D, seen[0].LogTextType);
         Assert.Equal(0, seen[0].CombatKind);
-        Assert.Equal((int)CombatLineKind.Error + 1, seen[1].CombatKind);
+        Assert.Equal(3, seen[1].CombatKind);
     }
 
     [Fact]
@@ -94,6 +94,48 @@ public sealed class HeadlessPluginApiSurfaceTests
         ChatEntry entry = Assert.Single(runtime.CommunicationOwner.Chat.Snapshot());
         Assert.Equal("tinted", entry.Text);
         Assert.Equal((uint)RetailLogTextType.Magic, entry.LogTextType);
+    }
+
+    [Fact]
+    public void PostMessageRejectsTheStatusOnlyClientLocalClassAndFallsBackToDefault()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+
+        host.Automation.Chat.PostMessage(
+            "should not become a status notice",
+            (int)RetailLogTextType.ClientLocal);
+
+        // ClientLocal routes to the status overlay, not the transcript.
+        // A plugin has no legitimate reason to post there, so the surface
+        // must fall back to the default transcript class instead.
+        ChatEntry entry = Assert.Single(runtime.CommunicationOwner.Chat.Snapshot());
+        Assert.Equal("should not become a status notice", entry.Text);
+        Assert.Equal((uint)RetailLogTextType.Default, entry.LogTextType);
+        runtime.CommunicationOwner.SpewBox.Tick(0);
+        Assert.Equal(0, runtime.CommunicationOwner.SpewBox.Count);
+    }
+
+    [Fact]
+    public void PostMessageRejectsAnOutOfRangeTextClassAndFallsBackToDefault()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+
+        host.Automation.Chat.PostMessage("out of range", 9999);
+
+        ChatEntry entry = Assert.Single(runtime.CommunicationOwner.Chat.Snapshot());
+        Assert.Equal((uint)RetailLogTextType.Default, entry.LogTextType);
+    }
+
+    [Fact]
+    public void PostSystemMessageThrowsOnNullText()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+
+        Assert.Throws<ArgumentNullException>(
+            () => host.Automation.Chat.PostSystemMessage(null!));
     }
 
     [Fact]

@@ -31,7 +31,7 @@ public sealed class AppAutomationSurfacePluginApiTests
         Assert.Equal(0x0D, seen[0].LogTextType);
         Assert.Equal(0x0E, seen[1].LogTextType);
         Assert.Equal(0, seen[0].CombatKind);
-        Assert.Equal((int)CombatLineKind.Warning + 1, seen[1].CombatKind);
+        Assert.Equal(2, seen[1].CombatKind);
         Assert.True(seen[0].Received >= before);
     }
 
@@ -97,6 +97,60 @@ public sealed class AppAutomationSurfacePluginApiTests
         ChatEntry entry = Assert.Single(runtime.CommunicationOwner.Chat.Snapshot());
         Assert.Equal("A tinted line.", entry.Text);
         Assert.Equal((uint)RetailLogTextType.Magic, entry.LogTextType);
+    }
+
+    [Fact]
+    public void PostMessageRejectsTheStatusOnlyClientLocalClassAndFallsBackToDefault()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new AppAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+
+        surface.Chat.PostMessage(
+            "should not become a status notice",
+            (int)RetailLogTextType.ClientLocal);
+
+        // ClientLocal routes to the status overlay, not the transcript, and
+        // is re-offered to status filters. A plugin has no legitimate reason
+        // to post there, so the surface falls back to the default class.
+        ChatEntry entry = Assert.Single(runtime.CommunicationOwner.Chat.Snapshot());
+        Assert.Equal("should not become a status notice", entry.Text);
+        Assert.Equal((uint)RetailLogTextType.Default, entry.LogTextType);
+        runtime.CommunicationOwner.SpewBox.Tick(0);
+        Assert.Equal(0, runtime.CommunicationOwner.SpewBox.Count);
+    }
+
+    [Fact]
+    public void PostMessageRejectsAnOutOfRangeTextClassAndFallsBackToDefault()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new AppAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+
+        surface.Chat.PostMessage("out of range", -1);
+
+        ChatEntry entry = Assert.Single(runtime.CommunicationOwner.Chat.Snapshot());
+        Assert.Equal((uint)RetailLogTextType.Default, entry.LogTextType);
+    }
+
+    [Fact]
+    public void PostSystemMessageThrowsOnNullText()
+    {
+        using var surface = new AppAutomationSurface();
+
+        Assert.Throws<ArgumentNullException>(() => surface.Chat.PostSystemMessage(null!));
+    }
+
+    [Fact]
+    public void PostMessageIgnoresAnEmptyString()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new AppAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+
+        surface.Chat.PostSystemMessage(string.Empty);
+
+        Assert.Empty(runtime.CommunicationOwner.Chat.Snapshot());
     }
 
     [Fact]
@@ -220,6 +274,20 @@ public sealed class AppAutomationSurfacePluginApiTests
     {
         using var surface = new AppAutomationSurface();
         Assert.Equal(-1, surface.Character.ServerPopulation);
+    }
+
+    [Fact]
+    public void ServerPopulationReachesTheSurfaceFromTheLoginTimeWorldNameMessage()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new AppAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+
+        runtime.Session.CharacterSelectionState.ApplyWorldName(
+            "Thistledown",
+            serverPopulation: 274);
+
+        Assert.Equal(274, surface.Character.ServerPopulation);
     }
 
     private static void Enter(GameRuntime runtime) =>

@@ -786,6 +786,12 @@ internal sealed class AppAutomationSurface
         }
     }
 
+    /// <summary>
+    /// The population the server reported in its login-time world-name
+    /// message, or -1 before that message has arrived. The server never
+    /// sends an update after login, so this value is fixed for the rest of
+    /// the session even as players come and go.
+    /// </summary>
     public int ServerPopulation
     {
         get
@@ -1252,12 +1258,15 @@ internal sealed class AppAutomationSurface
 
     public void PostMessage(string text, int logTextType)
     {
-        if (string.IsNullOrEmpty(text))
+        ArgumentNullException.ThrowIfNull(text);
+        if (text.Length == 0)
             return;
         RuntimeCommunicationState? communication;
         lock (_gate)
             communication = _communication;
-        communication?.AddText(text, (RetailLogTextType)logTextType);
+        communication?.AddText(
+            text,
+            RetailLogTextTypeCodec.FromPluginValue(logTextType));
     }
 
     public bool Submit(string text)

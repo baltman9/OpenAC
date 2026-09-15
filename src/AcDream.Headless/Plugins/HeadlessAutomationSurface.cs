@@ -84,11 +84,12 @@ internal sealed class HeadlessAutomationSurface : IAutomationSurface, IPluginCha
 
     public void PostMessage(string text, int logTextType)
     {
-        if (string.IsNullOrEmpty(text))
+        ArgumentNullException.ThrowIfNull(text);
+        if (text.Length == 0)
             return;
         _runtime.CommunicationOwner.AddText(
             text,
-            (RetailLogTextType)logTextType);
+            RetailLogTextTypeCodec.FromPluginValue(logTextType));
     }
 
     public bool Submit(string text) =>
