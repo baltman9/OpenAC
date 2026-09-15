@@ -864,6 +864,15 @@ public sealed class ItemInteractionController : IDisposable
         return ExecuteUseActions(ItemInteractionPolicy.DecideUse(input).Actions);
     }
 
+    /// <summary>The pack a request without a named destination should name: the
+    /// main pack when asked or preferred, the open side pack otherwise.</summary>
+    public uint PreferredBackpackContainer(bool mainPack = false)
+    {
+        uint root = _playerGuid();
+        uint target = mainPack || _mainPackPreferred() ? root : _backpackContainerId();
+        return target == 0u ? root : target;
+    }
+
     /// <summary>
     /// Picks up a world item into the inventory. The pack the request names
     /// is the one the player has open (or the main pack when asked); when it
@@ -878,9 +887,7 @@ public sealed class ItemInteractionController : IDisposable
             return false;
 
         uint root = _playerGuid();
-        uint target = mainPack || _mainPackPreferred() ? root : _backpackContainerId();
-        if (target == 0u)
-            target = root;
+        uint target = PreferredBackpackContainer(mainPack);
         const int placement = 0;
 
         uint containerId = InventoryPlacementSearch.ChooseContainer(
@@ -1442,6 +1449,9 @@ public sealed class ItemInteractionController : IDisposable
         {
             switch (action.Kind)
             {
+                case ItemPolicyActionKind.PlaceInBackpack:
+                    PlaceWorldItemInBackpack(action.ObjectId);
+                    break;
                 case ItemPolicyActionKind.StartSecureTrade:
                     SecureTradeRequested?.Invoke(action.TargetId, action.ObjectId);
                     break;

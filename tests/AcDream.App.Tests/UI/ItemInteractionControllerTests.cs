@@ -1995,6 +1995,63 @@ public sealed class ItemInteractionControllerTests
     }
 
     [Fact]
+    public void ActivateItemOnAGroundItemHonorsMainPackPreferredLikePickupDoes()
+    {
+        var h = new Harness { MainPackPreferred = true };
+        const uint sidePack = 0x50000A21u;
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = sidePack,
+            Name = "Side Pack",
+            Type = ItemType.Container,
+            ItemsCapacity = 6,
+        });
+        h.Objects.MoveItem(sidePack, Player, 1);
+        h.OpenBackpackContainerId = sidePack;
+
+        const uint groundItem = 0x70000A21u;
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = groundItem,
+            Name = "Loot",
+            Type = ItemType.Misc,
+        });
+        h.GroundObject = groundItem;
+        h.Objects.MoveItem(groundItem, groundItem, 0);
+
+        Assert.True(h.Controller.ActivateItem(groundItem));
+        Assert.Equal(new[] { (groundItem, Player, 0) }, h.BackpackPlacements);
+    }
+
+    [Fact]
+    public void DropOnSelfRoutesThroughMainPackPreferenceLikePickupDoes()
+    {
+        var h = new Harness();
+        const uint sidePack = 0x50000A22u;
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = sidePack,
+            Name = "Side Pack",
+            Type = ItemType.Container,
+            ItemsCapacity = 6,
+        });
+        h.Objects.MoveItem(sidePack, Player, 1);
+        h.OpenBackpackContainerId = sidePack;
+
+        const uint groundItem = 0x70000A22u;
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = groundItem,
+            Name = "Loot",
+            Type = ItemType.Misc,
+        });
+        var payload = new ItemDragPayload(groundItem, ItemDragSource.Ground, 0, SourceCell: null);
+
+        Assert.True(h.Controller.PlaceIn3D(payload, Player));
+        Assert.Equal(new[] { (groundItem, sidePack, 0) }, h.BackpackPlacements);
+    }
+
+    [Fact]
     public void KeyboardPickup_PublishesPendingDestinationBeforeRequest()
     {
         var h = new Harness();
