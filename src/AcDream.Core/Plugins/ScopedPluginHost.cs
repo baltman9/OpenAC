@@ -35,7 +35,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             inner.LootClassifiers,
             pluginId,
             pluginDisplayName);
-        _automation = new ScopedAutomationSurface(inner.Automation);
+        _automation = new ScopedAutomationSurface(inner);
     }
 
     public bool HasUi => _inner.HasUi;
@@ -115,36 +115,77 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     }
 
     /// <summary>
-    /// Forwards the host's automation surface, but keeps the chat filters and
-    /// chat subscriptions this plugin installed so they can be revoked when it
-    /// unloads. Everything else is the host's own object.
+    /// Resolves the host's <see cref="IAutomationSurface"/> fresh on every
+    /// call instead of pinning the instance seen at construction, so a host
+    /// that swaps its automation surface mid-session (a reconnect that
+    /// rebuilds it, for example) is observed here too. Only <see cref="Chat"/>
+    /// is actually wrapped, and it re-wraps lazily when the live chat
+    /// instance changes.
     /// </summary>
-    private sealed class ScopedAutomationSurface(IAutomationSurface inner)
+    private sealed class ScopedAutomationSurface(IPluginHost host)
         : IAutomationSurface, IDisposable
     {
-        private readonly ScopedPluginChat _chat = new(inner.Chat);
+        private readonly object _gate = new();
+        private IPluginChat? _chatSource;
+        private ScopedPluginChat? _chatWrapper;
+        private bool _disposed;
 
-        public bool IsAvailable => inner.IsAvailable;
-        public ICharacterInfo Character => inner.Character;
-        public ISpellCatalog Spells => inner.Spells;
-        public IMagicCommands Magic => inner.Magic;
-        public IPluginChat Chat => _chat;
-        public ICombatAutomation Combat => inner.Combat;
-        public IEquipmentAutomation Equipment => inner.Equipment;
-        public IItemAutomation Items => inner.Items;
-        public ILootAutomation Loot => inner.Loot;
-        public IFellowshipAutomation Fellowship => inner.Fellowship;
-        public IEnchantmentAutomation Enchantments => inner.Enchantments;
-        public INavigationAutomation Navigation => inner.Navigation;
-        public IWorldObjectAutomation Objects => inner.Objects;
-        public IWorldTimeAutomation WorldTime => inner.WorldTime;
-        public ILoginAutomation Login => inner.Login;
-        public INetworkAutomation Network => inner.Network;
-        public IRecoveryAutomation Recovery => inner.Recovery;
-        public IProjectileAutomation Projectiles => inner.Projectiles;
-        public ISelectionAutomation Selection => inner.Selection;
+        private IAutomationSurface Inner => host.Automation;
 
-        public void Dispose() => _chat.Dispose();
+        public bool IsAvailable => Inner.IsAvailable;
+        public ICharacterInfo Character => Inner.Character;
+        public ISpellCatalog Spells => Inner.Spells;
+        public IMagicCommands Magic => Inner.Magic;
+
+        public IPluginChat Chat
+        {
+            get
+            {
+                IPluginChat currentSource = Inner.Chat;
+                lock (_gate)
+                {
+                    if (_chatWrapper is null
+                        || !ReferenceEquals(_chatSource, currentSource))
+                    {
+                        _chatWrapper?.Dispose();
+                        _chatSource = currentSource;
+                        _chatWrapper = new ScopedPluginChat(currentSource);
+                        // The surface itself may already have been disposed
+                        // (this host is being asked for a fresh chat after
+                        // its plugin unloaded); hand back a wrapper that is
+                        // immediately, correctly disposed rather than a live
+                        // one nothing will ever clean up.
+                        if (_disposed)
+                            _chatWrapper.Dispose();
+                    }
+                    return _chatWrapper;
+                }
+            }
+        }
+
+        public ICombatAutomation Combat => Inner.Combat;
+        public IEquipmentAutomation Equipment => Inner.Equipment;
+        public IItemAutomation Items => Inner.Items;
+        public ILootAutomation Loot => Inner.Loot;
+        public IFellowshipAutomation Fellowship => Inner.Fellowship;
+        public IEnchantmentAutomation Enchantments => Inner.Enchantments;
+        public INavigationAutomation Navigation => Inner.Navigation;
+        public IWorldObjectAutomation Objects => Inner.Objects;
+        public IWorldTimeAutomation WorldTime => Inner.WorldTime;
+        public ILoginAutomation Login => Inner.Login;
+        public INetworkAutomation Network => Inner.Network;
+        public IRecoveryAutomation Recovery => Inner.Recovery;
+        public IProjectileAutomation Projectiles => Inner.Projectiles;
+        public ISelectionAutomation Selection => Inner.Selection;
+
+        public void Dispose()
+        {
+            lock (_gate)
+            {
+                _disposed = true;
+                _chatWrapper?.Dispose();
+            }
+        }
     }
 
     private sealed class ScopedPluginChat(IPluginChat inner)
@@ -172,6 +213,14 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             add
             {
                 ArgumentNullException.ThrowIfNull(value);
+
+                // Check before subscribing to the host's chat: otherwise an
+                // already-unloaded plugin would still briefly ride the live
+                // subscription and could receive a line before the
+                // subscribe-then-unwind below catches up.
+                lock (_gate)
+                    ObjectDisposedException.ThrowIf(_disposed, this);
+
                 try
                 {
                     inner.Received += value;

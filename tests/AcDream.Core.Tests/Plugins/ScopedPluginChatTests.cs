@@ -25,6 +25,22 @@ public sealed class ScopedPluginChatTests
     }
 
     [Fact]
+    public void SubscribingAfterUnloadThrowsWithoutEverTouchingTheHostsChat()
+    {
+        var chat = new RecordingChat();
+        var scoped = new ScopedPluginHost(new StubHost(chat), "example.plugin", "Example");
+        scoped.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() =>
+            scoped.Automation.Chat.Received += static _ => { });
+
+        // The check must fire before subscribing, not after: subscribing
+        // first and unwinding second leaves a window where a line can
+        // still reach an unloaded plugin's handler.
+        Assert.Equal(0, chat.SubscriberCount);
+    }
+
+    [Fact]
     public void DisposingOneFilterRegistrationLeavesTheOthers()
     {
         var chat = new RecordingChat();
