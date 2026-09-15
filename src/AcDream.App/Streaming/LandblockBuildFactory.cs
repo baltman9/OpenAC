@@ -411,6 +411,7 @@ public sealed class LandblockBuildFactory
                 var meshRefs = new List<AcDream.Core.World.MeshRef>();
                 var interiorBounds = new AcDream.Core.Meshing.LocalBoundsAccumulator();
                 int stabLightCount = 0;
+                bool stabHasDefaultScript = false;
                 if ((stab.Id & 0xFF000000u) == 0x01000000u)
                 {
                     var gfx = _dats.Get<DatReaderWriter.DBObjs.GfxObj>(stab.Id);
@@ -427,6 +428,8 @@ public sealed class LandblockBuildFactory
                     if (setup is not null)
                     {
                         stabLightCount = setup.Lights.Count;
+                        stabHasDefaultScript = setup.DefaultScript.DataId != 0
+                            || (uint)setup.DefaultScriptTable != 0;
                         var flat = AcDream.Core.Meshing.SetupMesh.Flatten(setup);
                         foreach (var mr in flat)
                         {
@@ -444,7 +447,10 @@ public sealed class LandblockBuildFactory
                     }
                 }
 
-                if (!AcDream.Core.Meshing.EntityHydrationRules.ShouldKeepEntity(meshRefs.Count, stabLightCount))
+                if (!AcDream.Core.Meshing.EntityHydrationRules.ShouldKeepEntity(
+                        meshRefs.Count,
+                        stabLightCount,
+                        stabHasDefaultScript))
                 {
                     continue;
                 }
