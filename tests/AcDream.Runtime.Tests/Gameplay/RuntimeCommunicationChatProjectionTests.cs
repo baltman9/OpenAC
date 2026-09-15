@@ -22,7 +22,7 @@ public sealed class RuntimeCommunicationChatProjectionTests
 
         RuntimeChatEntry entry = Assert.Single(observer.Entries);
         Assert.Equal(0x0E, entry.LogTextType);
-        Assert.Equal((int)CombatLineKind.Info + 1, entry.CombatKind);
+        Assert.Equal(1, entry.CombatKind);
         Assert.True(entry.Received >= before);
     }
 

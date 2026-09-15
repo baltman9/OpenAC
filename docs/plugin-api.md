@@ -54,6 +54,15 @@ outright: it reaches neither the transcript, the chat windows,
   plugin installed when that plugin unloads, so a plugin cannot leave the
   client permanently muted.
 - A filter registered before login still applies to the next session.
+- A dropped incoming tell never becomes the client's reply/retell target:
+  the same append point that filters gate is where that target is recorded,
+  so a suppressed tell leaves no trace to `/r` back to.
+- Filters are client-wide, not per-plugin. A line one plugin drops is
+  invisible to the client and to every other plugin, including one polling
+  `CaptureMessages`. Match narrowly — a filter written for one plugin's own
+  noise can silently blind every other plugin and the transcript itself.
+- Do not post a message from inside a filter callback. The filter runs
+  during line delivery, and posting there re-enters the same delivery path.
 
 Short status notices — the ones shown over the world rather than written
 into the transcript, such as "You're too busy!" — pass through the same
@@ -85,7 +94,10 @@ host.Events.LocalPlayerDied += deathMessage => { /* the server's message */ };
   death notification itself, so a plugin does not have to match chat text.
 
 `host.Automation.Character.ServerPopulation` reports the players the server
-says are connected, or `-1` before it has said.
+reported connected in its login-time world-name message, or `-1` before that
+message has arrived. The server sends this once, at login: it is a snapshot,
+not a live count, and it does not change again for the rest of the session
+even as players come and go.
 
 ## Spells
 
@@ -123,3 +135,13 @@ The graphical client copies through the same device its own text controls
 use. A host without a window has no clipboard and returns false, as does a
 failed attempt, so always handle false rather than assuming the copy
 happened.
+
+## Headless
+
+A headless host implements this same contract, with a few members left as
+placeholders rather than wired to real state:
+
+- `ServerPopulation` is always `-1`.
+- `Spells.All` and `Spells.TryFindByName` are always empty / always miss.
+- `CaptureMessages` is unimplemented; use `Received` instead, which does
+  work.

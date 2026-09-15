@@ -1244,8 +1244,8 @@ public sealed class LiveSessionController
             }
             if (_operations.GetServerInfo(session) is { } serverInfo)
                 CharacterSelectionState.ApplyWorldName(
-                serverInfo.WorldName,
-                serverInfo.CurrentConnections);
+                    serverInfo.WorldName,
+                    serverInfo.CurrentConnections);
 
             uint nextLogin = _nextLoginCharacterId;
             if (nextLogin != 0u

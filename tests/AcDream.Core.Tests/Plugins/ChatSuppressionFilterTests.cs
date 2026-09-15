@@ -101,7 +101,7 @@ public sealed class ChatSuppressionFilterTests
         Assert.NotNull(seen);
         Assert.Equal((int)ChatKind.Combat, seen!.Value.Kind);
         Assert.Equal(0x11, seen.Value.LogTextType);
-        Assert.Equal((int)CombatLineKind.Warning + 1, seen.Value.CombatKind);
+        Assert.Equal(2, seen.Value.CombatKind);
         Assert.True(seen.Value.Received >= before);
     }
 

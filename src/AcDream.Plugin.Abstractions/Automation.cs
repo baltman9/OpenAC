@@ -132,7 +132,9 @@ public interface ICharacterInfo
     string WorldName => string.Empty;
 
     /// <summary>
-    /// Players the server reports as connected, or -1 before it has said.
+    /// Players the server reported as connected in its login-time world-name
+    /// message, or -1 before it has said. This is a one-time snapshot: it
+    /// does not update again for the rest of the session.
     /// </summary>
     int ServerPopulation => -1;
 
