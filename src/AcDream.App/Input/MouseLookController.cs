@@ -179,8 +179,9 @@ internal sealed class MouseLookController : IMouseLookInputFrameController
             CameraDiagnostics.UseRetailChaseCamera && _chase.Retail is { } retail
                 ? retail.FilterMouseDelta(rawX, rawY, weight: 0.5f, nowSec: nowSeconds)
                 : (rawX, rawY);
-        _state.ApplyDelta(filteredX, _chase.Sensitivity);
-        float pitchDelta = _chase.InvertMouseLookYAxis ? -filteredY : filteredY;
+        float invertSign = _chase.InvertMouseLookYAxis ? -1f : 1f;
+        _state.ApplyDelta(filteredX * invertSign, _chase.Sensitivity);
+        float pitchDelta = filteredY * invertSign;
         if (_chase.Retail is { } retailCamera)
             retailCamera.AdjustPitch(pitchDelta * 0.0666666701f * _chase.Sensitivity);
         else

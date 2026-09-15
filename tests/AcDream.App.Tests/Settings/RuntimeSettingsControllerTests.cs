@@ -587,7 +587,7 @@ public sealed partial class RuntimeSettingsControllerTests
             Assert.Equal(0.8f, CameraDiagnostics.TranslationStiffness);
             Assert.Equal(0.8f, CameraDiagnostics.RotationStiffness);
             Assert.Equal(60f, CameraDiagnostics.CameraAdjustmentSpeed);
-            Assert.Equal(0.7f * RuntimeSettingsTargets.ChaseSensitivityPerSliderUnit, chase.Sensitivity, precision: 5);
+            Assert.Equal(0.7f, chase.Sensitivity, precision: 5);
             Assert.True(chase.InvertMouseLookYAxis);
 
             target.ApplyCameraTurning(new CameraTurningSettings(

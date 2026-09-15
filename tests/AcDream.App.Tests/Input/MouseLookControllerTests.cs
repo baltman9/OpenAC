@@ -207,6 +207,17 @@ public sealed class MouseLookControllerTests
         }
     }
 
+    [Fact]
+    public void InvertMouseLookYAxisFlipsYawTurnDirection()
+    {
+        uint? normal = TurnCommandAfterMouseLook(invert: false, dx: 2f);
+        uint? inverted = TurnCommandAfterMouseLook(invert: true, dx: 2f);
+
+        Assert.NotNull(normal);
+        Assert.NotNull(inverted);
+        Assert.NotEqual(normal, inverted);
+    }
+
     private static float PitchChangeAfterMouseLook(bool retailCamera, bool invert, float dy)
     {
         Harness harness = CreateActiveHarness();
@@ -222,6 +233,23 @@ public sealed class MouseLookControllerTests
         harness.Owner.Tick();
 
         return (retailCamera ? retail.Pitch : legacy.Pitch) - before;
+    }
+
+    private static uint? TurnCommandAfterMouseLook(bool invert, float dx)
+    {
+        Harness harness = CreateActiveHarness();
+        harness.Chase.InvertMouseLookYAxis = invert;
+
+        for (int i = 0; i < 6; i++)
+        {
+            harness.Clock.NowSeconds += 0.01f;
+            harness.Owner.QueueRawDelta(dx, 0f);
+            harness.Owner.Tick();
+        }
+
+        return harness.Player.Update(
+            PhysicsBody.MinQuantum + 0.001f,
+            new MovementInput()).TurnCommand;
     }
 
     private static Harness CreateActiveHarness()

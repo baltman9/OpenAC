@@ -338,10 +338,6 @@ internal sealed class RuntimeSettingsTargets : IRuntimeSettingsTargets
     private readonly CameraController? _cameras;
     private readonly ChaseCameraInputState? _chase;
 
-    // The slider's default (0.55) keeps the chase camera's long-standing mouse-look
-    // rate (0.15); other slider positions scale it proportionally.
-    internal const float ChaseSensitivityPerSliderUnit = 0.15f / 0.55f;
-
     public RuntimeSettingsTargets(
         IRuntimeDisplayWindowTarget displayWindow,
         WbDrawDispatcher? dispatcher,
@@ -456,7 +452,7 @@ internal sealed class RuntimeSettingsTargets : IRuntimeSettingsTargets
         CameraDiagnostics.CameraAdjustmentSpeed = cameraTurning.AdjustmentSpeed;
         if (_chase is null)
             return;
-        _chase.Sensitivity = cameraTurning.MouseLookSensitivity * ChaseSensitivityPerSliderUnit;
+        _chase.Sensitivity = cameraTurning.MouseLookSensitivity;
         _chase.InvertMouseLookYAxis = cameraTurning.InvertMouseLookYAxis;
     }
 
