@@ -50,12 +50,17 @@ internal interface IPaperdollHeritageSource
 
 internal interface IPaperdollEntityLookup
 {
-    bool TryGet(uint serverGuid, out WorldEntity player);
+    /// <summary>
+    /// The character as the world has it, together with the uniform scale its
+    /// body wears. The scale is not on the projection itself, so it is read
+    /// here and carried with the character rather than guessed downstream.
+    /// </summary>
+    bool TryGet(uint serverGuid, out WorldEntity player, out float objectScale);
 }
 
 internal interface IPaperdollPoseApplicator
 {
-    void Apply(WorldEntity doll, uint setupId, uint heritageId);
+    void Apply(WorldEntity doll, uint setupId, uint heritageId, float objectScale);
 }
 
 /// <summary>
@@ -197,8 +202,20 @@ internal sealed class LivePaperdollEntityLookup : IPaperdollEntityLookup
             ?? throw new ArgumentNullException(nameof(liveEntities));
     }
 
-    public bool TryGet(uint serverGuid, out WorldEntity player) =>
-        _liveEntities.TryGetWorldEntity(serverGuid, out player);
+    public bool TryGet(uint serverGuid, out WorldEntity player, out float objectScale)
+    {
+        if (_liveEntities.TryGetRecord(serverGuid, out LiveEntityRecord record)
+            && record.WorldEntity is { } found)
+        {
+            player = found;
+            objectScale = LiveEntityObjectScale.Resolve(record, found);
+            return true;
+        }
+
+        player = null!;
+        objectScale = 1f;
+        return false;
+    }
 }
 
 /// <summary>
@@ -260,7 +277,10 @@ internal sealed class RetailPaperdollDollFactory : IPaperdollDollFactory
     public bool TryBuild(uint heritageId, out WorldEntity? doll)
     {
         doll = null;
-        if (!_entities.TryGet(_identity.ServerGuid, out WorldEntity player)
+        if (!_entities.TryGet(
+                _identity.ServerGuid,
+                out WorldEntity player,
+                out float objectScale)
             || player.MeshRefs.Count == 0)
         {
             return false;
@@ -294,8 +314,9 @@ internal sealed class RetailPaperdollDollFactory : IPaperdollDollFactory
             new List<MeshRef>(player.MeshRefs),
             basePalette,
             subPalettes,
-            partOverrides);
-        _pose.Apply(doll, player.SourceGfxObjOrSetupId, heritageId);
+            partOverrides,
+            objectScale);
+        _pose.Apply(doll, player.SourceGfxObjOrSetupId, heritageId, objectScale);
         return true;
     }
 }
@@ -316,7 +337,7 @@ internal sealed class RetailPaperdollPoseApplicator : IPaperdollPoseApplicator
         _datLock = datLock ?? throw new ArgumentNullException(nameof(datLock));
     }
 
-    public void Apply(WorldEntity doll, uint setupId, uint heritageId)
+    public void Apply(WorldEntity doll, uint setupId, uint heritageId, float objectScale)
     {
         DatReaderWriter.DBObjs.Animation? animation;
         DatReaderWriter.DBObjs.Setup? setup;
@@ -349,7 +370,14 @@ internal sealed class RetailPaperdollPoseApplicator : IPaperdollPoseApplicator
                 orientation = frame.Frames[index].Orientation;
             }
 
-            Matrix4x4 transform = RetailHeldPose.ComposePartTransform(scale, origin, orientation);
+            // The pose replaces every part transform outright, so the scale the
+            // body wears has to be re-applied here: without it the doll is
+            // drawn at the size of a default body no matter whose it is.
+            Matrix4x4 transform = RetailHeldPose.ComposePartTransform(
+                scale,
+                origin,
+                orientation,
+                objectScale);
             MeshRef source = doll.MeshRefs[index];
             reposed.Add(new MeshRef(source.GfxObjId, transform)
             {

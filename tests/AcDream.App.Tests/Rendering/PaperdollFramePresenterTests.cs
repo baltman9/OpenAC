@@ -338,6 +338,107 @@ public sealed class PaperdollFramePresenterTests
         Assert.Equal([10u, 20u], entities.RequestedGuids);
     }
 
+    /// <summary>
+    /// The doll is the character's own body, so it is drawn at the size that
+    /// body wears — and the two places that size has to reach are the entity
+    /// the view draws and the pose that rewrites every part placement. Issue
+    /// #98: neither got it, so a large body and a small one both came out the
+    /// size of a default one.
+    /// </summary>
+    [Theory]
+    [InlineData(0.6f)]
+    [InlineData(1.3f)]
+    public void RetailFactory_CarriesTheBodysOwnSizeToTheDollAndItsPose(float objectScale)
+    {
+        var mesh = new MeshRef(0x01000001u, Matrix4x4.Identity);
+        var entities = new RecordingEntityLookup
+        {
+            Entities = { [10u] = CreatePlayer(0x02000001u, mesh) },
+            Scales = { [10u] = objectScale },
+        };
+        var identity = new LocalPlayerIdentityState { ServerGuid = 10u };
+        var pose = new RecordingPoseApplicator();
+        var factory = new RetailPaperdollDollFactory(entities, identity, pose);
+
+        Assert.True(factory.TryBuild(12u, out WorldEntity? doll));
+
+        Assert.NotNull(doll);
+        Assert.Equal(objectScale, doll!.Scale);
+        Assert.Equal([objectScale], pose.Scales);
+    }
+
+    /// <summary>A body of ordinary size is left exactly as it was.</summary>
+    [Fact]
+    public void RetailFactory_ADefaultSizedBodyIsUnchanged()
+    {
+        var mesh = new MeshRef(0x01000001u, Matrix4x4.Identity);
+        var entities = new RecordingEntityLookup
+        {
+            Entities = { [10u] = CreatePlayer(0x02000001u, mesh) },
+        };
+        var identity = new LocalPlayerIdentityState { ServerGuid = 10u };
+        var pose = new RecordingPoseApplicator();
+        var factory = new RetailPaperdollDollFactory(entities, identity, pose);
+
+        Assert.True(factory.TryBuild(1u, out WorldEntity? doll));
+
+        Assert.Equal(1f, doll!.Scale);
+        Assert.Equal([1f], pose.Scales);
+    }
+
+    /// <summary>
+    /// A part on a body that wears a size of its own has to grow or shrink with
+    /// that body and stay where it belongs on it, so the same factor applies
+    /// twice: to the part's own size, and to how far from the body's centre the
+    /// part sits. Scaling only the part would leave the limbs detached.
+    /// </summary>
+    [Theory]
+    [InlineData(0.6f)]
+    [InlineData(1.3f)]
+    public void ScaledPartPlacement_ScalesBothThePartAndItsOffsetFromTheBody(
+        float objectScale)
+    {
+        Vector3 partSize = new(1.1f, 0.9f, 1.4f);
+        Vector3 origin = new(0.25f, -0.5f, 1.75f);
+        Quaternion orientation = Quaternion.CreateFromYawPitchRoll(0.3f, -0.4f, 0.2f);
+
+        Matrix4x4 plain = RetailHeldPose.ComposePartTransform(
+            partSize, origin, orientation);
+        Matrix4x4 scaled = RetailHeldPose.ComposePartTransform(
+            partSize, origin, orientation, objectScale);
+
+        AssertClose(plain.Translation * objectScale, scaled.Translation);
+        for (int row = 0; row < 3; row++)
+            AssertClose(BasisRow(plain, row) * objectScale, BasisRow(scaled, row));
+    }
+
+    /// <summary>A size of one leaves the placement untouched, bit for bit.</summary>
+    [Fact]
+    public void UnscaledPartPlacement_IsIdenticalToThePlacementWithNoSizeAtAll()
+    {
+        Vector3 partSize = new(1.1f, 0.9f, 1.4f);
+        Vector3 origin = new(0.25f, -0.5f, 1.75f);
+        Quaternion orientation = Quaternion.CreateFromYawPitchRoll(0.3f, -0.4f, 0.2f);
+
+        Assert.Equal(
+            RetailHeldPose.ComposePartTransform(partSize, origin, orientation),
+            RetailHeldPose.ComposePartTransform(partSize, origin, orientation, 1f));
+    }
+
+    internal static Vector3 BasisRow(Matrix4x4 transform, int row) => row switch
+    {
+        0 => new Vector3(transform.M11, transform.M12, transform.M13),
+        1 => new Vector3(transform.M21, transform.M22, transform.M23),
+        _ => new Vector3(transform.M31, transform.M32, transform.M33),
+    };
+
+    internal static void AssertClose(Vector3 expected, Vector3 actual)
+    {
+        Assert.True(
+            (expected - actual).Length() <= 1e-5f,
+            $"expected {expected} but got {actual}.");
+    }
+
     private static WorldEntity CreatePlayer(uint setupId, MeshRef mesh) => new()
     {
         Id = setupId,
@@ -414,9 +515,12 @@ public sealed class PaperdollFramePresenterTests
         public Dictionary<uint, WorldEntity> Entities { get; } = [];
         public List<uint> RequestedGuids { get; } = [];
 
-        public bool TryGet(uint serverGuid, out WorldEntity player)
+        public Dictionary<uint, float> Scales { get; } = [];
+
+        public bool TryGet(uint serverGuid, out WorldEntity player, out float objectScale)
         {
             RequestedGuids.Add(serverGuid);
+            objectScale = Scales.TryGetValue(serverGuid, out float found) ? found : 1f;
             return Entities.TryGetValue(serverGuid, out player!);
         }
     }
@@ -425,8 +529,13 @@ public sealed class PaperdollFramePresenterTests
     {
         public List<(WorldEntity Doll, uint SetupId, uint HeritageId)> Applications { get; } = [];
 
-        public void Apply(WorldEntity doll, uint setupId, uint heritageId) =>
+        public List<float> Scales { get; } = [];
+
+        public void Apply(WorldEntity doll, uint setupId, uint heritageId, float objectScale)
+        {
             Applications.Add((doll, setupId, heritageId));
+            Scales.Add(objectScale);
+        }
     }
 
     private sealed class RecordingHeritageSource : IPaperdollHeritageSource
