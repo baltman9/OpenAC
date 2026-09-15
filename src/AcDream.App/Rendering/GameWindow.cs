@@ -272,6 +272,12 @@ public sealed class GameWindow :
     public AcDream.Core.Selection.SelectionState Selection =>
         _runtimeActions.Selection;
     internal SessionStatusWriter StatusWriter => _statusWriter;
+
+    /// <summary>
+    /// The keyboard device the retained UI copies text with; null until the
+    /// retained UI has wired one.
+    /// </summary>
+    internal Silk.NET.Input.IKeyboard? ClipboardKeyboard => _uiHost?.Keyboard;
     public AcDream.Core.Chat.ChatLog Chat => _runtimeCommunication.Chat;
     public AcDream.Core.Chat.TurbineChatState TurbineChat =>
         _runtimeCommunication.TurbineChat;

@@ -15,6 +15,8 @@ internal sealed class FilePluginStorage : IPluginStorage
 
     public bool IsAvailable => true;
 
+    public string? RootPath => _root;
+
     public string? ReadText(string key)
     {
         string path = Resolve(key);

@@ -207,8 +207,37 @@ public sealed class ChatLog
         });
     }
 
+    /// <summary>
+    /// Predicates that can drop a line before it is appended. Because the drop
+    /// happens here, a rejected line reaches nothing downstream of the log.
+    /// </summary>
+    public ChatSuppressionFilters Filters { get; } = new();
+
+    /// <summary>
+    /// Projects an entry into the shape filters are written against. The
+    /// sequence is zero: the entry has not been appended yet, so it has none.
+    /// </summary>
+    public static Plugin.Abstractions.PluginChatMessage ToFilterCandidate(
+        in ChatEntry entry) =>
+        new(
+            0UL,
+            entry.SenderGuid,
+            (int)entry.Kind,
+            entry.Sender,
+            entry.Text,
+            entry.ChannelName)
+        {
+            LogTextType = unchecked((int)entry.LogTextType),
+            CombatKind = entry.CombatKind is { } combat ? (int)combat + 1 : 0,
+            Received = new DateTimeOffset(
+                DateTime.SpecifyKind(entry.Received, DateTimeKind.Utc)),
+        };
+
     private void Append(ChatEntry entry)
     {
+        if (Filters.ShouldSuppress(ToFilterCandidate(in entry)))
+            return;
+
         // Stamp every entry with an identity that is never reused, so anything holding on to
         // one line (a text selection, say) can still find it after older entries are dropped
         // and every remaining entry's position in the buffer has shifted.

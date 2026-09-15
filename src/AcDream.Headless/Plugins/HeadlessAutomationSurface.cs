@@ -1,6 +1,7 @@
 using AcDream.Core.Chat;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
+using AcDream.Runtime.Gameplay;
 
 namespace AcDream.Headless.Plugins;
 
@@ -8,6 +9,8 @@ internal sealed class HeadlessAutomationSurface : IAutomationSurface, IPluginCha
 {
     private readonly GameRuntime _runtime;
     private readonly Func<string, bool>? _submitChatText;
+    private readonly object _gate = new();
+    private Action<PluginChatMessage>? _chatReceived;
 
     internal HeadlessAutomationSurface(
         GameRuntime runtime,
@@ -25,8 +28,68 @@ internal sealed class HeadlessAutomationSurface : IAutomationSurface, IPluginCha
     public IMagicCommands Magic => NoOpAutomationSurface.Instance.Magic;
     public IPluginChat Chat => this;
 
+    public event Action<PluginChatMessage> Received
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_gate)
+                _chatReceived += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_gate)
+                _chatReceived -= value;
+        }
+    }
+
+    public IDisposable RegisterFilter(Func<PluginChatMessage, bool> suppress)
+    {
+        ArgumentNullException.ThrowIfNull(suppress);
+        return _runtime.CommunicationOwner.Chat.Filters.Register(suppress);
+    }
+
+    /// <summary>Projects one delivered line and raises <see cref="Received"/>.</summary>
+    internal void RaiseChatReceived(ulong sequence, in RuntimeChatEntry entry)
+    {
+        Action<PluginChatMessage>? handlers;
+        lock (_gate)
+            handlers = _chatReceived;
+        if (handlers is null)
+            return;
+
+        var message = new PluginChatMessage(
+            sequence,
+            entry.SenderGuid,
+            entry.Kind,
+            entry.Sender,
+            entry.Text,
+            entry.ChannelName)
+        {
+            LogTextType = entry.LogTextType,
+            CombatKind = entry.CombatKind,
+            Received = entry.Received,
+        };
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginChatMessage>)handler)(message); }
+            catch { /* plugin errors don't propagate out of event dispatch */ }
+        }
+    }
+
     public void PostSystemMessage(string text) =>
-        _runtime.CommunicationOwner.AddText(text, RetailLogTextType.Default);
+        PostMessage(text, (int)RetailLogTextType.Default);
+
+    public void PostMessage(string text, int logTextType)
+    {
+        if (string.IsNullOrEmpty(text))
+            return;
+        _runtime.CommunicationOwner.AddText(
+            text,
+            (RetailLogTextType)logTextType);
+    }
 
     public bool Submit(string text) =>
         IsAvailable

@@ -24,7 +24,7 @@ internal sealed class AppAutomationSurface
     : IAutomationSurface, ICharacterInfo, ISpellCatalog, IMagicCommands, IPluginChat,
       ICombatAutomation, IEquipmentAutomation, IItemAutomation,
       ILootAutomation, IFellowshipAutomation, IEnchantmentAutomation,
-      IRuntimeCommunicationObserver,
+      IRuntimeCommunicationObserver, IRuntimeEventObserver,
       INavigationAutomation, IWorldObjectAutomation, IWorldTimeAutomation,
       ILoginAutomation, INetworkAutomation, IRecoveryAutomation,
       IProjectileAutomation, ISelectionAutomation, IDisposable
@@ -34,6 +34,7 @@ internal sealed class AppAutomationSurface
     private const double PeerHeartbeatSeconds = 5d;
     private readonly object _gate = new();
     private readonly IEvents? _events;
+    private readonly WorldEvents? _pluginEvents;
     private readonly LocalPluginPeerRegistry _peers;
     private readonly string[] _peerTags;
     private double _peerHeartbeatRemaining;
@@ -72,6 +73,17 @@ internal sealed class AppAutomationSurface
     private IDisposable? _communicationSubscription;
     private readonly List<PluginChatMessage> _chatMessages = [];
     private ulong _pluginChatSequence;
+    /// <summary>
+    /// Filters installed by plugins. They live on the surface rather than on
+    /// the log so they survive a session being replaced.
+    /// </summary>
+    private readonly ChatSuppressionFilters _chatFilters = new();
+    private IDisposable? _chatFilterInstallation;
+    private IDisposable? _runtimeEventSubscription;
+    private bool _wasInWorld;
+    private Action<PluginChatMessage>? _chatReceived;
+    private SpellTable? _spellCatalogSource;
+    private IReadOnlyList<PluginSpellInfo> _allSpells = Array.Empty<PluginSpellInfo>();
     private long _inventoryCompletionRevision;
     private PluginInventoryCompletion _lastInventoryCompletion;
     private readonly Dictionary<(uint Target, uint Spell), TrackedEnchantment>
@@ -104,6 +116,7 @@ internal sealed class AppAutomationSurface
             Console.WriteLine(
                 $"[PluginCommand:{verb}] {error.GetBaseException().Message}"));
         _events = events;
+        _pluginEvents = events as WorldEvents;
         _peers = peers ?? new LocalPluginPeerRegistry(Path.Combine(
             AcDream.Platform.ApplicationPathSet.Resolve().DataDirectory,
             "plugin-peers"));
@@ -321,6 +334,12 @@ internal sealed class AppAutomationSurface
             _communication = runtime.CommunicationOwner;
             _communicationSubscription =
                 runtime.CommunicationOwner.Events.Subscribe(this);
+            _chatFilterInstallation = runtime.CommunicationOwner.Chat.Filters
+                .Register(candidate => _chatFilters.ShouldSuppress(candidate));
+            _runtimeEventSubscription = runtime.Subscribe(this);
+            _wasInWorld =
+                runtime.Lifecycle.State == RuntimeLifecycleState.InWorld;
+            runtime.CommunicationOwner.LocalPlayerDied += OnLocalPlayerDied;
             _character = character;
             _cast = cast;
             _spellbook = spellbook;
@@ -468,8 +487,15 @@ internal sealed class AppAutomationSurface
             runtime.InventoryOwner.Transactions.RequestCompleted -=
                 OnInventoryRequestCompleted;
         }
+        if (_communication is not null)
+            _communication.LocalPlayerDied -= OnLocalPlayerDied;
         _communicationSubscription?.Dispose();
         _communicationSubscription = null;
+        _chatFilterInstallation?.Dispose();
+        _chatFilterInstallation = null;
+        _runtimeEventSubscription?.Dispose();
+        _runtimeEventSubscription = null;
+        _wasInWorld = false;
         _chatMessages.Clear();
         if (_spellbook is not null)
         {
@@ -760,6 +786,17 @@ internal sealed class AppAutomationSurface
         }
     }
 
+    public int ServerPopulation
+    {
+        get
+        {
+            GameRuntime? runtime;
+            lock (_gate)
+                runtime = _runtime;
+            return runtime?.CharacterSelection.Snapshot.ServerPopulation ?? -1;
+        }
+    }
+
     public string AccountName
     {
         get
@@ -994,6 +1031,70 @@ internal sealed class AppAutomationSurface
         return spellbook?.LearnedSpells.Contains(spellId) == true;
     }
 
+    // ── Plugin lifecycle projection ───────────────────────────────────────
+    // The runtime keeps one root across reconnects, so an in-world edge is
+    // the only honest signal that a plugin has a fresh world to work with.
+    void IRuntimeEventObserver.OnLifecycle(in RuntimeLifecycleDelta delta)
+    {
+        bool isInWorld = delta.Current == RuntimeLifecycleState.InWorld;
+        lock (_gate)
+        {
+            if (_disposed || _wasInWorld == isInWorld)
+                return;
+            _wasInWorld = isInWorld;
+        }
+
+        if (isInWorld)
+            _pluginEvents?.FireLoginComplete();
+        else
+            _pluginEvents?.FireLogoff();
+    }
+
+    void IRuntimeEventObserver.OnCommand(in RuntimeCommandDelta delta) { }
+    void IRuntimeEventObserver.OnEntity(in RuntimeEntityDelta delta) { }
+    void IRuntimeEventObserver.OnInventory(in RuntimeInventoryDelta delta) { }
+    void IRuntimeEventObserver.OnChat(in RuntimeChatDelta delta) { }
+    void IRuntimeEventObserver.OnMovement(in RuntimeMovementDelta delta) { }
+    void IRuntimeEventObserver.OnPortal(in RuntimePortalDelta delta) { }
+    void IRuntimeEventObserver.OnCombat(in RuntimeCombatDelta delta) { }
+
+    private void OnLocalPlayerDied(string deathMessage) =>
+        _pluginEvents?.FireLocalPlayerDied(deathMessage);
+
+    public IReadOnlyList<PluginSpellInfo> All
+    {
+        get
+        {
+            Spellbook? spellbook;
+            lock (_gate)
+                spellbook = _spellbook;
+            SpellTable? table = spellbook?.Metadata;
+            if (table is null)
+                return Array.Empty<PluginSpellInfo>();
+
+            lock (_gate)
+            {
+                if (ReferenceEquals(_spellCatalogSource, table))
+                    return _allSpells;
+            }
+
+            var projected = new List<PluginSpellInfo>(table.Count);
+            foreach (uint spellId in table.SpellIds)
+            {
+                if (table.TryGet(spellId, out SpellMetadata meta))
+                    projected.Add(Project(meta));
+            }
+            PluginSpellInfo[] built = projected.ToArray();
+
+            lock (_gate)
+            {
+                _spellCatalogSource = table;
+                _allSpells = built;
+            }
+            return built;
+        }
+    }
+
     public bool TryGet(uint spellId, out PluginSpellInfo info)
     {
         Spellbook? spellbook;
@@ -1073,37 +1174,90 @@ internal sealed class AppAutomationSurface
                 : 0d;
     }
 
+    public event Action<PluginChatMessage> Received
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_gate)
+                _chatReceived += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_gate)
+                _chatReceived -= value;
+        }
+    }
+
+    public IDisposable RegisterFilter(Func<PluginChatMessage, bool> suppress)
+    {
+        ArgumentNullException.ThrowIfNull(suppress);
+        return _chatFilters.Register(suppress);
+    }
+
     public void OnChat(in RuntimeCommunicationEvent delta)
     {
+        PluginChatMessage message;
+        Action<PluginChatMessage>? handlers;
         lock (_gate)
         {
             if (_disposed || _communication is null)
                 return;
             RuntimeChatEntry entry = delta.Entry;
-            _chatMessages.Add(new PluginChatMessage(
+            message = new PluginChatMessage(
                 ++_pluginChatSequence,
                 entry.SenderGuid,
                 entry.Kind,
                 entry.Sender,
                 entry.Text,
-                entry.ChannelName));
+                entry.ChannelName)
+            {
+                LogTextType = entry.LogTextType,
+                CombatKind = entry.CombatKind,
+                Received = entry.Received,
+            };
+            _chatMessages.Add(message);
             if (_chatMessages.Count > MaximumPluginChatMessages)
             {
                 _chatMessages.RemoveRange(
                     0,
                     _chatMessages.Count - MaximumPluginChatMessages);
             }
+            handlers = _chatReceived;
+        }
+
+        // Raised outside the lock and in arrival order, so a handler is free
+        // to call back into the surface.
+        Raise(handlers, message);
+    }
+
+    private static void Raise(
+        Action<PluginChatMessage>? handlers,
+        in PluginChatMessage message)
+    {
+        if (handlers is null)
+            return;
+        PluginChatMessage copy = message;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginChatMessage>)handler)(copy); }
+            catch { /* plugin errors don't propagate out of event dispatch */ }
         }
     }
 
-    public void PostSystemMessage(string text)
+    public void PostSystemMessage(string text) =>
+        PostMessage(text, (int)RetailLogTextType.Default);
+
+    public void PostMessage(string text, int logTextType)
     {
         if (string.IsNullOrEmpty(text))
             return;
         RuntimeCommunicationState? communication;
         lock (_gate)
             communication = _communication;
-        communication?.AddText(text, RetailLogTextType.Default);
+        communication?.AddText(text, (RetailLogTextType)logTextType);
     }
 
     public bool Submit(string text)

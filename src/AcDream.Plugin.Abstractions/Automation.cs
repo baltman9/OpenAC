@@ -260,7 +260,10 @@ public readonly record struct PluginChatMessage(
     /// </summary>
     public int LogTextType { get; init; }
 
-    /// <summary>Sub-kind of a combat line; 0 when the line is not one.</summary>
+    /// <summary>
+    /// Sub-kind of a combat line: 0 when the line is not one, 1 for an
+    /// ordinary outgoing line, 2 for an incoming one, 3 for a failure.
+    /// </summary>
     public int CombatKind { get; init; }
 
     /// <summary>When the client took delivery of the line.</summary>

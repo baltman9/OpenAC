@@ -68,7 +68,8 @@ public static class GameEventWiring
         Action<BookEvents.OpenBook>? onBookOpen = null,
         Action<BookEvents.PageDataResponse>? onBookPageData = null,
         Action<BookEvents.PageResponse>? onBookAddPageResponse = null,
-        Action<BookEvents.Inscription>? onBookInscription = null)
+        Action<BookEvents.Inscription>? onBookInscription = null,
+        Action<string /*deathMessage*/>? onLocalPlayerDeath = null)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentNullException.ThrowIfNull(items);
@@ -472,7 +473,9 @@ public static class GameEventWiring
         registrar.Register(GameEventType.VictimNotification, e =>
         {
             var p = GameEvents.ParseVictimNotification(e.Payload.Span);
-            if (p is not null) chat.OnCombatLine(p.Value.DeathMessage, logTextType: 0x00u, kind: CombatLineKind.Error);
+            if (p is null) return;
+            chat.OnCombatLine(p.Value.DeathMessage, logTextType: 0x00u, kind: CombatLineKind.Error);
+            onLocalPlayerDeath?.Invoke(p.Value.DeathMessage);
         });
         registrar.Register(GameEventType.DefenderNotification, e =>
         {

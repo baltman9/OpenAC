@@ -24,6 +24,10 @@ internal sealed class HeadlessPluginHost
         _sessionSettingsByPlugin;
     private readonly object _tickGate = new();
     private Action<double>? _tick;
+    private Action? _loginComplete;
+    private Action? _logoff;
+    private Action<string>? _localPlayerDied;
+    private bool _wasInWorld;
     private bool _disposed;
 
     private readonly record struct ReplayEntity(
@@ -53,6 +57,8 @@ internal sealed class HeadlessPluginHost
         VtankProfiles = vtankProfiles ?? NoOpPluginStorage.Instance;
         _sessionSettingsByPlugin = CopySessionSettings(sessionSettings);
         _automation = new HeadlessAutomationSurface(runtime, submitChatText);
+        _wasInWorld = runtime.Lifecycle.State == RuntimeLifecycleState.InWorld;
+        runtime.CommunicationOwner.LocalPlayerDied += OnLocalPlayerDied;
         _eventSubscription = runtime.Subscribe(this);
     }
 
@@ -260,7 +266,13 @@ internal sealed class HeadlessPluginHost
             _liveSnapshot = [];
         }
         lock (_tickGate)
+        {
             _tick = null;
+            _loginComplete = null;
+            _logoff = null;
+            _localPlayerDied = null;
+        }
+        _runtime.CommunicationOwner.LocalPlayerDied -= OnLocalPlayerDied;
         _eventSubscription.Dispose();
     }
 
@@ -290,10 +302,110 @@ internal sealed class HeadlessPluginHost
             Invoke(subscription.Handler, pending.Snapshot);
     }
 
-    public void OnLifecycle(in RuntimeLifecycleDelta delta) { }
+    public void OnLifecycle(in RuntimeLifecycleDelta delta)
+    {
+        bool isInWorld = delta.Current == RuntimeLifecycleState.InWorld;
+        lock (_eventGate)
+        {
+            if (_disposed || _wasInWorld == isInWorld)
+                return;
+            _wasInWorld = isInWorld;
+        }
+
+        Action? handlers;
+        lock (_tickGate)
+            handlers = isInWorld ? _loginComplete : _logoff;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((Action)handler)();
+            }
+            catch (Exception error)
+            {
+                Log.Warn($"Plugin lifecycle handler threw: {error}");
+            }
+        }
+    }
+
+    public event Action LoginComplete
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_tickGate)
+                _loginComplete += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_tickGate)
+                _loginComplete -= value;
+        }
+    }
+
+    public event Action Logoff
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_tickGate)
+                _logoff += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_tickGate)
+                _logoff -= value;
+        }
+    }
+
+    public event Action<string> LocalPlayerDied
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_tickGate)
+                _localPlayerDied += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_tickGate)
+                _localPlayerDied -= value;
+        }
+    }
+
+    private void OnLocalPlayerDied(string deathMessage)
+    {
+        Action<string>? handlers;
+        lock (_tickGate)
+            handlers = _localPlayerDied;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((Action<string>)handler)(deathMessage);
+            }
+            catch (Exception error)
+            {
+                Log.Warn($"Plugin death handler threw: {error}");
+            }
+        }
+    }
+
     public void OnCommand(in RuntimeCommandDelta delta) { }
     public void OnInventory(in RuntimeInventoryDelta delta) { }
-    public void OnChat(in RuntimeChatDelta delta) { }
+
+    public void OnChat(in RuntimeChatDelta delta) =>
+        _automation.RaiseChatReceived(delta.Stamp.Sequence, delta.Entry);
     public void OnMovement(in RuntimeMovementDelta delta) { }
     public void OnPortal(in RuntimePortalDelta delta) { }
     public void OnCombat(in RuntimeCombatDelta delta) { }

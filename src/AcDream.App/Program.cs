@@ -173,7 +173,9 @@ var host = new AppPluginHost(
     lootClassifiers,
     new FilePluginStorage(
         runtimeOptions.VtankProfileDirectoryOverride
-            ?? VtankProfilesDefault.Resolve(applicationPaths.DataDirectory)));
+            ?? VtankProfilesDefault.Resolve(applicationPaths.DataDirectory)),
+    new AcDream.App.Plugins.WindowPluginClipboard(
+        () => window.ClipboardKeyboard));
 GraphicalPluginSession pluginSession = GraphicalPluginSession.Create(
     applicationPaths,
     runtimeOptions.Plugins,

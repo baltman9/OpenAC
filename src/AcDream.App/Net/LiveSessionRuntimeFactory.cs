@@ -349,7 +349,9 @@ internal sealed class LiveSessionRuntimeFactory
                 Trade: _domain.Runtime.TradeOwner,
                 House: _domain.Runtime.HouseOwner,
                 Contracts: _domain.Runtime.ContractsOwner,
-                PlayerGuid: () => _player.Identity.ServerGuid));
+                PlayerGuid: () => _player.Identity.ServerGuid,
+                OnLocalPlayerDeath:
+                    _domain.Communication.ReportLocalPlayerDeath));
         return new GraphicalSessionEventRoute(
             route,
             _domain.Runtime,

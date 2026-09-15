@@ -9,6 +9,9 @@ public sealed class WorldEvents : IEvents
     private readonly List<Subscription> _subscriptions = new();
     private Subscription[] _liveSnapshot = Array.Empty<Subscription>();
     private Action<double>? _tick;
+    private Action? _loginComplete;
+    private Action? _logoff;
+    private Action<string>? _localPlayerDied;
 
     private sealed class Subscription(Action<WorldEntitySnapshot> handler)
     {
@@ -80,6 +83,99 @@ public sealed class WorldEvents : IEvents
                 return;
             lock (_lock)
                 _tick -= value;
+        }
+    }
+
+    public event Action LoginComplete
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_lock)
+                _loginComplete += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_lock)
+                _loginComplete -= value;
+        }
+    }
+
+    public event Action Logoff
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_lock)
+                _logoff += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_lock)
+                _logoff -= value;
+        }
+    }
+
+    public event Action<string> LocalPlayerDied
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_lock)
+                _localPlayerDied += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_lock)
+                _localPlayerDied -= value;
+        }
+    }
+
+    public void FireLoginComplete()
+    {
+        Action? handlers;
+        lock (_lock)
+            handlers = _loginComplete;
+        Fire(handlers);
+    }
+
+    public void FireLogoff()
+    {
+        Action? handlers;
+        lock (_lock)
+            handlers = _logoff;
+        Fire(handlers);
+    }
+
+    public void FireLocalPlayerDied(string deathMessage)
+    {
+        ArgumentNullException.ThrowIfNull(deathMessage);
+        Action<string>? handlers;
+        lock (_lock)
+            handlers = _localPlayerDied;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<string>)handler)(deathMessage); }
+            catch { /* plugin errors don't propagate out of event dispatch */ }
+        }
+    }
+
+    private static void Fire(Action? handlers)
+    {
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action)handler)(); }
+            catch { /* plugin errors don't propagate out of event dispatch */ }
         }
     }
 

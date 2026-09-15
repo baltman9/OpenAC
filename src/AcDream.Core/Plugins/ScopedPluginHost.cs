@@ -12,6 +12,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     private readonly ScopedPluginStorage _storage;
     private readonly ScopedPluginCommandRegistry _commands;
     private readonly ScopedLootClassifierRegistry _lootClassifiers;
+    private readonly ScopedAutomationSurface _automation;
     private bool _disposed;
 
     internal ScopedPluginHost(
@@ -34,6 +35,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             inner.LootClassifiers,
             pluginId,
             pluginDisplayName);
+        _automation = new ScopedAutomationSurface(inner.Automation);
     }
 
     public bool HasUi => _inner.HasUi;
@@ -51,13 +53,17 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             ? perPlugin.SessionSettingsFor(_pluginId)
             : _inner.SessionSettings;
 
-    public IAutomationSurface Automation => _inner.Automation;
+    public IPluginClipboard Clipboard => _inner.Clipboard;
+    public IAutomationSurface Automation => _automation;
 
     private sealed class ScopedPluginStorage(
         IPluginStorage inner,
         string pluginId) : IPluginStorage
     {
         public bool IsAvailable => inner.IsAvailable;
+        public string? RootPath => inner.RootPath is { } root
+            ? Path.Combine(root, pluginId)
+            : null;
         public string? ReadText(string key) =>
             inner.ReadText(ScopedKey(key));
         public IReadOnlyList<string> List(string prefix)
@@ -105,6 +111,171 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         _ui.Dispose();
         _commands.Dispose();
         _lootClassifiers.Dispose();
+        _automation.Dispose();
+    }
+
+    /// <summary>
+    /// Forwards the host's automation surface, but keeps the chat filters and
+    /// chat subscriptions this plugin installed so they can be revoked when it
+    /// unloads. Everything else is the host's own object.
+    /// </summary>
+    private sealed class ScopedAutomationSurface(IAutomationSurface inner)
+        : IAutomationSurface, IDisposable
+    {
+        private readonly ScopedPluginChat _chat = new(inner.Chat);
+
+        public bool IsAvailable => inner.IsAvailable;
+        public ICharacterInfo Character => inner.Character;
+        public ISpellCatalog Spells => inner.Spells;
+        public IMagicCommands Magic => inner.Magic;
+        public IPluginChat Chat => _chat;
+        public ICombatAutomation Combat => inner.Combat;
+        public IEquipmentAutomation Equipment => inner.Equipment;
+        public IItemAutomation Items => inner.Items;
+        public ILootAutomation Loot => inner.Loot;
+        public IFellowshipAutomation Fellowship => inner.Fellowship;
+        public IEnchantmentAutomation Enchantments => inner.Enchantments;
+        public INavigationAutomation Navigation => inner.Navigation;
+        public IWorldObjectAutomation Objects => inner.Objects;
+        public IWorldTimeAutomation WorldTime => inner.WorldTime;
+        public ILoginAutomation Login => inner.Login;
+        public INetworkAutomation Network => inner.Network;
+        public IRecoveryAutomation Recovery => inner.Recovery;
+        public IProjectileAutomation Projectiles => inner.Projectiles;
+        public ISelectionAutomation Selection => inner.Selection;
+
+        public void Dispose() => _chat.Dispose();
+    }
+
+    private sealed class ScopedPluginChat(IPluginChat inner)
+        : IPluginChat, IDisposable
+    {
+        private readonly object _gate = new();
+        private readonly List<IDisposable> _filters = [];
+        private readonly List<Action<PluginChatMessage>> _subscriptions = [];
+        private bool _disposed;
+
+        public IReadOnlyList<PluginChatMessage> CaptureMessages(
+            ulong afterSequence) =>
+            inner.CaptureMessages(afterSequence);
+
+        public void PostSystemMessage(string text) =>
+            inner.PostSystemMessage(text);
+
+        public void PostMessage(string text, int logTextType) =>
+            inner.PostMessage(text, logTextType);
+
+        public bool Submit(string text) => inner.Submit(text);
+
+        public event Action<PluginChatMessage> Received
+        {
+            add
+            {
+                ArgumentNullException.ThrowIfNull(value);
+                try
+                {
+                    inner.Received += value;
+                }
+                catch
+                {
+                    try { inner.Received -= value; }
+                    catch { }
+                    throw;
+                }
+                lock (_gate)
+                {
+                    if (!_disposed)
+                    {
+                        _subscriptions.Add(value);
+                        return;
+                    }
+                }
+
+                try { inner.Received -= value; }
+                catch { }
+                throw new ObjectDisposedException(nameof(ScopedPluginChat));
+            }
+            remove
+            {
+                if (value is null)
+                    return;
+                inner.Received -= value;
+                lock (_gate)
+                {
+                    for (int index = _subscriptions.Count - 1; index >= 0; index--)
+                    {
+                        if (_subscriptions[index] != value)
+                            continue;
+                        _subscriptions.RemoveAt(index);
+                        break;
+                    }
+                }
+            }
+        }
+
+        public IDisposable RegisterFilter(Func<PluginChatMessage, bool> suppress)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            IDisposable registration = inner.RegisterFilter(suppress);
+            lock (_gate)
+            {
+                if (!_disposed)
+                {
+                    _filters.Add(registration);
+                    return new IndividualFilter(this, registration);
+                }
+            }
+            registration.Dispose();
+            throw new ObjectDisposedException(nameof(ScopedPluginChat));
+        }
+
+        private void RemoveFilter(IDisposable registration)
+        {
+            lock (_gate)
+            {
+                if (!_filters.Remove(registration))
+                    return;
+            }
+            registration.Dispose();
+        }
+
+        public void Dispose()
+        {
+            IDisposable[] filters;
+            Action<PluginChatMessage>[] subscriptions;
+            lock (_gate)
+            {
+                if (_disposed)
+                    return;
+                _disposed = true;
+                filters = _filters.ToArray();
+                _filters.Clear();
+                subscriptions = _subscriptions.ToArray();
+                _subscriptions.Clear();
+            }
+
+            for (int index = filters.Length - 1; index >= 0; index--)
+            {
+                try { filters[index].Dispose(); }
+                catch { }
+            }
+
+            for (int index = subscriptions.Length - 1; index >= 0; index--)
+            {
+                try { inner.Received -= subscriptions[index]; }
+                catch { }
+            }
+        }
+
+        private sealed class IndividualFilter(
+            ScopedPluginChat owner,
+            IDisposable registration) : IDisposable
+        {
+            private ScopedPluginChat? _owner = owner;
+
+            public void Dispose() => Interlocked.Exchange(ref _owner, null)?
+                .RemoveFilter(registration);
+        }
     }
 
     private sealed class ScopedLootClassifierRegistry(

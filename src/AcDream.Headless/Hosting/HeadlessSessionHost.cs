@@ -1113,7 +1113,9 @@ internal sealed class HeadlessSessionHost : IDisposable
                 Allegiance: Runtime.AllegianceOwner,
                 House: Runtime.HouseOwner,
                 Contracts: Runtime.ContractsOwner,
-                PlayerGuid: () => Runtime.PlayerIdentity.ServerGuid));
+                PlayerGuid: () => Runtime.PlayerIdentity.ServerGuid,
+                OnLocalPlayerDeath:
+                    Runtime.CommunicationOwner.ReportLocalPlayerDeath));
         var eventRoute = new HeadlessSessionEventRoute(
             route,
             Runtime,
