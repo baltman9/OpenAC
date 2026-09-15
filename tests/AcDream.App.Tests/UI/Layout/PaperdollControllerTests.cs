@@ -110,7 +110,8 @@ public class PaperdollControllerTests
         List<string>? systemMessages = null,
         List<uint>? examines = null,
         PaperdollClickMap? clickMap = null,
-        Action<RuntimeItemInteraction>? configureInteraction = null)
+        Action<RuntimeItemInteraction>? configureInteraction = null,
+        Func<ItemType, uint, uint, uint, uint, uint>? iconIds = null)
     {
         var itemInteraction = new RuntimeItemInteraction(
             objects,
@@ -128,7 +129,7 @@ public class PaperdollControllerTests
             systemMessage: systemMessages is null ? null : systemMessages.Add);
         configureInteraction?.Invoke(itemInteraction);
         return PaperdollController.Bind(layout, objects, () => Player,
-            iconIds: (_, _, _, _, _) => 0x1234u,
+            iconIds: iconIds ?? ((_, _, _, _, _) => 0x1234u),
             itemInteraction: itemInteraction,
             emptySlotSprite: emptySlot,
             selection: selection ?? new SelectionState(),
@@ -711,8 +712,11 @@ public class PaperdollControllerTests
         Assert.Null(mask.GetDragGhost());
     }
 
+    // A body region with nothing worn on it hands back the player, and the
+    // player is the object the first pack slot holds, so the figure lifts the
+    // main pack. This is how a pack shortcut is made without opening the panel.
     [Fact]
-    public void DollDrag_fromABareBodyLocation_liftsNothing()
+    public void DollDrag_fromABareBodyLocation_liftsThePlayersOwnPack()
     {
         var (layout, _) = BuildLayout();
         var objects = new ClientObjectTable();
@@ -722,8 +726,101 @@ public class PaperdollControllerTests
 
         UiElement mask = DollMask(layout);
         Press(mask, FootX);
+        var payload = Assert.IsType<ItemDragPayload>(mask.GetDragPayload());
 
-        Assert.Null(mask.GetDragPayload());                  // never the player themselves
+        Assert.Equal(Player, payload.ObjId);
+        // The same payload a lift off the first pack slot makes, so every drop
+        // target already knows what to do with it.
+        Assert.Equal(ItemDragSource.Inventory, payload.SourceKind);
+        Assert.Equal(0, payload.SourceSlot);
+        Assert.Null(payload.SourceCell);
+    }
+
+    [Fact]
+    public void DollDrag_ofThePlayersOwnPack_carriesTheMainPackIcon()
+    {
+        var (layout, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayer(objects);
+        var asked = new List<(ItemType Type, uint Icon)>();
+        Bind(
+            layout,
+            objects,
+            clickMap: DollClickMap(),
+            iconIds: (type, icon, _, _, _) =>
+            {
+                asked.Add((type, icon));
+                return 0x1234u;
+            });
+
+        UiElement mask = DollMask(layout);
+        Press(mask, FootX);
+        asked.Clear();
+
+        Assert.Equal((0x1234u, 32, 32), mask.GetDragGhost());
+        // The player has no icon of their own; the ghost has to be the picture
+        // the pack row draws for the main pack.
+        Assert.Contains(
+            (ItemType.Container, InventoryController.PlayerPackBaseIcon), asked);
+    }
+
+    // The point of the lift: the hotbar takes it and stores a shortcut to the
+    // player, which is what a healing kit or a mana stone then targets.
+    [Fact]
+    public void DollDrag_ofThePlayersOwnPack_isTakenByTheHotbar()
+    {
+        var (layout, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayer(objects);
+        Bind(layout, objects, clickMap: DollClickMap());
+
+        UiElement mask = DollMask(layout);
+        Press(mask, FootX);
+        var payload = Assert.IsType<ItemDragPayload>(mask.GetDragPayload());
+
+        var (bar, slots) = BuildHotbar();
+        var store = new ShortcutStore();
+        var added = new List<ShortcutEntry>();
+        ToolbarController toolbar = ToolbarController.Bind(
+            bar, objects, store,
+            iconIds: (_, _, _, _, _) => 0x1234u,
+            useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve,
+            sendAddShortcut: added.Add,
+            playerGuid: () => Player);
+
+        UiItemList target = slots[0];
+        Assert.Equal(
+            ItemDragAcceptance.Accept, toolbar.OnDragOver(target, target.Cell, payload));
+        toolbar.HandleDropRelease(target, target.Cell, payload);
+
+        Assert.Equal(Player, Assert.Single(added).ObjectId);
+        Assert.Equal(Player, store.Get(0));
+    }
+
+    // The hotbar's own nine-plus-nine element ids; only the cells matter here,
+    // the rest of the bar is absent and the controller tolerates that.
+    private static readonly uint[] HotbarSlotIds =
+    {
+        0x100001A7u, 0x100001A8u, 0x100001A9u, 0x100001AAu, 0x100001ABu,
+        0x100001ACu, 0x100001ADu, 0x100001AEu, 0x100001AFu,
+        0x100006B7u, 0x100006B8u, 0x100006B9u, 0x100006BAu, 0x100006BBu,
+        0x100006BCu, 0x100006BDu, 0x100006BEu, 0x100006BFu,
+    };
+
+    private static (ImportedLayout layout, List<UiItemList> slots) BuildHotbar()
+    {
+        var byId = new Dictionary<uint, UiElement>();
+        var slots = new List<UiItemList>();
+        var root = new RootElement { Width = 640, Height = 64 };
+        foreach (uint id in HotbarSlotIds)
+        {
+            var list = new UiItemList(static _ => (0u, 0, 0)) { Width = 32, Height = 32 };
+            byId[id] = list;
+            slots.Add(list);
+            root.AddChild(list);
+        }
+        return (new ImportedLayout(root, byId), slots);
     }
 
     [Fact]

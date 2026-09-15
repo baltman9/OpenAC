@@ -97,7 +97,7 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
         _sendAddShortcut    = sendAddShortcut;
         _sendRemoveShortcut = sendRemoveShortcut;
         _selectItem = selectItem;
-        _selectedObjectId = selectedObjectId ?? (() => 0u);
+        _selectedObjectId = selectedObjectId ?? (() => selection?.SelectedObjectId ?? 0u);
         _selection = selection;
         _playerGuid = playerGuid;
         _sendPutItemInContainer = sendPutItemInContainer;
@@ -206,7 +206,18 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
     }
 
     private void OnSelectionChanged(SelectionTransition _)
-        => RefreshUseButton();
+    {
+        RefreshUseButton();
+        RefreshShortcutSelection();
+    }
+
+    private void RefreshShortcutSelection()
+    {
+        uint selected = _selectedObjectId();
+        foreach (UiItemList? list in _slots)
+            if (list is not null)
+                list.Cell.Selected = selected != 0 && list.Cell.ItemId == selected;
+    }
 
     private void RefreshUseButton()
     {
@@ -347,6 +358,7 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
             list.Cell.SetStructure(item.Structure, item.MaxStructure);
         }
 
+        RefreshShortcutSelection();
         RestampShortcutNumbers();
     }
 
