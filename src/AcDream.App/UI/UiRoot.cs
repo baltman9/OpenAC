@@ -1023,6 +1023,21 @@ public sealed class UiRoot : UiElement
         _tooltipFired = false;
     }
 
+    /// <summary>Drop the tooltip <paramref name="element"/> currently owns because the text it
+    /// would show has changed, and re-arm the dwell from the last cursor movement. A cursor that
+    /// has already been still long enough gets the new text on the next tick; a cursor still on
+    /// the move waits out the normal dwell again. Without this a tooltip keeps displaying the
+    /// text captured when it first appeared, even while the thing under the cursor changes.</summary>
+    internal void ResetTooltip(UiElement element)
+    {
+        if (!ReferenceEquals(_hoverWidget, element) || !_tooltipFired)
+            return;
+
+        TooltipHide?.Invoke(element);
+        _tooltipFired = false;
+        _hoverStartedMs = _lastMouseMoveMs;
+    }
+
     private void UpdateHover(int x, int y)
     {
         UiElement? w = PopupHit(x, y);

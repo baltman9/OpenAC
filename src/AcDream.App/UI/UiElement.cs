@@ -387,6 +387,13 @@ public abstract class UiElement
         return string.IsNullOrWhiteSpace(text) ? null : text;
     }
 
+    /// <summary>Announce that <see cref="GetTooltipText"/> would now return something else.
+    /// A tooltip this element already owns is torn down and its dwell re-armed from the last
+    /// cursor movement, so the reader sees the text that is current now rather than the text
+    /// that happened to be current when the tooltip first appeared. Cheap while no tooltip is
+    /// showing, so call it from every runtime tooltip-text change.</summary>
+    protected void NotifyTooltipTextChanged() => FindRoot()?.ResetTooltip(this);
+
 
     internal void DrawSelfAndChildren(UiRenderContext ctx)
     {
