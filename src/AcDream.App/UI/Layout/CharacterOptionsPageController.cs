@@ -43,7 +43,7 @@ public static class CharacterOptionsPageController
         {
             new(CharacterOptionId.ViewCombatTarget, "ViewCombatTarget", Live), // Group C
             new(CharacterOptionId.SalvageMultiple, "SalvageMultiple", Live), // Group D
-            new(CharacterOptionId.MainPackPreferred, "MainPackPreferred", StoreOnly), // Group B, unbound
+            new(CharacterOptionId.MainPackPreferred, "MainPackPreferred", Live), // Group B, bound (ItemInteractionController.cs:878)
         }),
         new("ID_CharacterOption_UIDisplay_Section", new RowSpec[]
         {
@@ -51,15 +51,15 @@ public static class CharacterOptionsPageController
             new(CharacterOptionId.ShowTooltips, "ShowTooltips", Live), // Group B, bound
             new(CharacterOptionId.CoordinatesOnRadar, "CoordinatesOnRadar", Live), // Group C
             new(CharacterOptionId.SideBySideVitals, "SideBySideVitals", Live),
-            new(CharacterOptionId.SpellDuration, "SpellDuration", StoreOnly), // Group B, unbound
-            new(CharacterOptionId.DisableMostWeatherEffects, "DisableMostWeatherEffects", StoreOnly), // Group B, unbound
+            new(CharacterOptionId.SpellDuration, "SpellDuration", Live), // Group B, bound (EffectsUiController.cs)
+            new(CharacterOptionId.DisableMostWeatherEffects, "DisableMostWeatherEffects", Live), // Group B, bound (SkyRenderer.cs)
             new(CharacterOptionId.DisableDistanceFog, "DisableDistanceFog", Live), // Group B, bound (GameWindow.cs:657)
             new(CharacterOptionId.PersistentAtDay, "PersistentAtDay", Live), // Group B, bound
             new(CharacterOptionId.DisableHouseRestrictionEffects, "DisableHouseRestrictionEffects", StoreOnly), // Group D
             new(CharacterOptionId.UseCraftSuccessDialog, "UseCraftSuccessDialog", Live), // Group A
             new(CharacterOptionId.ConfirmVolatileRareUse, "ConfirmVolatileRareUse", Live), // Group A
             new(CharacterOptionId.DisplayTimeStamps, "DisplayTimeStamps", Live), // Group B, bound (GameWindow.cs:664)
-            new(CharacterOptionId.FilterLanguage, "FilterLanguage", StoreOnly), // Group B, unbound
+            new(CharacterOptionId.FilterLanguage, "FilterLanguage", Live), // Group B, bound (InteractionRetainedUiComposition.cs)
             new(CharacterOptionId.ShowHelm, "ShowHelm", Live), // Group A
             new(CharacterOptionId.ShowCloak, "ShowCloak", Live), // Group A
         }),

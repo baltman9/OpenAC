@@ -2057,6 +2057,7 @@ public sealed class RetailUiRuntime : IDisposable
             _bindings.Magic.ServerTime,
             _bindings.Assets.ResolveSprite,
             _bindings.Magic.ResolveSpellIcon,
+            () => _bindings.Options.CurrentCharacterOption((uint)CharacterOptionId.SpellDuration),
             rowTemplates,
             selectPrompt,
             close: () => CloseWindow(

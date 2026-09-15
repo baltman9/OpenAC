@@ -605,13 +605,8 @@ public sealed class CharacterOptionsPageControllerTests
 
     private static readonly HashSet<CharacterOptionId> ExpectedStoreOnlyIds =
     [
-        // Group 1 (UI Behavior) — MainPackPreferred (B, unbound)
-        CharacterOptionId.MainPackPreferred,
-        // Group 2 (UI Display) — 4 of 15
-        CharacterOptionId.SpellDuration,
-        CharacterOptionId.DisableMostWeatherEffects,
+        // Group 2 (UI Display) — 1 of 15
         CharacterOptionId.DisableHouseRestrictionEffects,
-        CharacterOptionId.FilterLanguage,
         // Group 3 (Grouping) — 1 of 6
         CharacterOptionId.DisplayAllegianceLogonNotifications,
         // Group 4 (Other Players) — 7 of 11
@@ -637,8 +632,8 @@ public sealed class CharacterOptionsPageControllerTests
             .ToHashSet();
 
         Assert.Equal(ExpectedStoreOnlyIds, actualStoreOnly);
-        Assert.Equal(15, actualStoreOnly.Count);
-        Assert.Equal(35, 50 - actualStoreOnly.Count); // the 35 live rows
+        Assert.Equal(11, actualStoreOnly.Count);
+        Assert.Equal(39, 50 - actualStoreOnly.Count); // the 39 live rows
     }
 
     [Fact]
