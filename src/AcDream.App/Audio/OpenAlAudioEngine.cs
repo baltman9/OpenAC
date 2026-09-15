@@ -46,32 +46,25 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         set
         {
             _muted = value;
-            ApplyListenerGain();
+            if (_available && _al is not null)
+                _al.SetListenerProperty(ListenerFloat.Gain, value ? 0f : 1f);
         }
     }
 
-    private bool _focusMuted;
+    /// <summary>
+    /// "No Sound When Window Not Focused": refuses to start a new sound while
+    /// true, the same point retail's own gate sits (SoundManager::
+    /// PlaySoundInternal), ahead of a source being told to play rather than at
+    /// the listener. A sound already playing keeps going undisturbed, so
+    /// nothing pops in when focus returns.
+    /// </summary>
+    public bool FocusMuted { get; set; }
 
-    /// <summary>Silenced by "No Sound When Window Not Focused", independent of the manual mute toggle.</summary>
-    public bool FocusMuted
-    {
-        get => _focusMuted;
-        set
-        {
-            _focusMuted = value;
-            ApplyListenerGain();
-        }
-    }
-
-    private void ApplyListenerGain()
-    {
-        if (_available && _al is not null)
-            _al.SetListenerProperty(ListenerFloat.Gain, (_muted || _focusMuted) ? 0f : 1f);
-    }
+    /// <summary>"Disable Interface Sound", gating only the genuine interface path.</summary>
+    public bool InterfaceEnabled { get; set; } = true;
 
     public float SfxVolume    { get; set; } = 1f;
     public float AmbientVolume{ get; set; } = 0.8f;
-    public float InterfaceVolume { get; set; } = 1f;
     public bool  IsAvailable => _available;
 
     /// <summary>
@@ -228,8 +221,6 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
 
     private float EffectMaster => MasterVolume * SfxVolume;
 
-    private float InterfaceMaster => MasterVolume * InterfaceVolume;
-
     public bool Play3DWave(
         uint ownerId,
         uint waveId,
@@ -238,7 +229,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         float volume,
         float priority)
     {
-        if (_worldAudioSuspended || !_available || _al is null) return false;
+        if (_worldAudioSuspended || FocusMuted || !_available || _al is null) return false;
 
         RetailVoiceMix mix = RetailSoundMixer.Mix(
             _listenerPosition,
@@ -377,13 +368,22 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
     /// <summary>
     /// Play a raw WaveData blob as an interface sound: centred, with no
     /// distance falloff, but sharing the same voices as everything else. When
-    /// they are all busy the interface sound is dropped too.
+    /// they are all busy the interface sound is dropped too. Retail attenuates
+    /// this path with the same effect_sound_volume as everything else — there
+    /// is no separate interface volume in force, only a separate on/off.
     /// </summary>
-    public bool PlayUiWave(uint waveId, WaveData wave, float volume, float priority)
+    /// <param name="isInterfaceSound">
+    /// False for a non-positional sound that merely shares this path (the
+    /// portal tunnel's own animation cues): "Disable Interface Sound" leaves
+    /// those alone.
+    /// </param>
+    public bool PlayUiWave(
+        uint waveId, WaveData wave, float volume, float priority, bool isInterfaceSound = true)
     {
-        if (!_available || _al is null) return false;
+        if (FocusMuted || !_available || _al is null) return false;
+        if (isInterfaceSound && !InterfaceEnabled) return false;
 
-        if (!RetailSoundMixer.TryGetAttenuation(0f, volume, InterfaceMaster, out int decibels))
+        if (!RetailSoundMixer.TryGetAttenuation(0f, volume, EffectMaster, out int decibels))
             return false;
 
         uint buffer = EnsureBuffer(waveId, wave);
@@ -416,7 +416,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         float volume,
         float priority)
     {
-        if (_worldAudioSuspended || !_available || _al is null) return false;
+        if (_worldAudioSuspended || FocusMuted || !_available || _al is null) return false;
 
         RetailVoiceMix mix = RetailSoundMixer.Mix(
             _listenerPosition,
@@ -450,7 +450,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         float volume,
         float priority)
     {
-        if (_worldAudioSuspended || !_available || _al is null) return false;
+        if (_worldAudioSuspended || FocusMuted || !_available || _al is null) return false;
 
         if (!RetailSoundMixer.TryGetAttenuation(0f, volume, AmbientMaster, out int decibels))
             return false;

@@ -224,7 +224,7 @@ internal sealed class RuntimeSettingsStartupTargets : IRuntimeSettingsStartupTar
         (float sfx, float ambient) = ComputeEffectiveCategoryVolumes(audio);
         engine.SfxVolume = sfx;
         engine.AmbientVolume = ambient;
-        engine.InterfaceVolume = ComputeEffectiveInterfaceVolume(audio);
+        engine.InterfaceEnabled = audio.InterfaceEnabled;
     }
 
     internal static (float Sfx, float Ambient) ComputeEffectiveCategoryVolumes(AudioSettings audio)
@@ -233,12 +233,6 @@ internal sealed class RuntimeSettingsStartupTargets : IRuntimeSettingsStartupTar
         float sfx = audio.SfxEnabled ? audio.Sfx : 0f;
         float ambient = audio.AmbientEnabled ? audio.Ambient : 0f;
         return (sfx, ambient);
-    }
-
-    internal static float ComputeEffectiveInterfaceVolume(AudioSettings audio)
-    {
-        ArgumentNullException.ThrowIfNull(audio);
-        return audio.InterfaceEnabled ? audio.InterfaceVolume : 0f;
     }
 }
 
