@@ -198,6 +198,14 @@ public abstract class UiElement
     public bool ResizeX { get; set; } = true;
     public bool ResizeY { get; set; } = true;
 
+    /// <summary>Which of the four FLAT border runs (the spans between the
+    /// corners) of the synthesized window border begin a resize; the rest of
+    /// that border is the move affordance. The four corner squares are NOT
+    /// governed by this set - a corner always offers its own two sides,
+    /// filtered only by <see cref="ResizeX"/> / <see cref="ResizeY"/>, so a
+    /// height-only window still resizes from its corners while its flat top
+    /// run stays a move handle. (An authored resize grip is a separate,
+    /// explicit region and this set still gates it.)</summary>
     public ResizeEdges ResizableEdges { get; set; } =
         ResizeEdges.Left | ResizeEdges.Right | ResizeEdges.Top | ResizeEdges.Bottom;
 

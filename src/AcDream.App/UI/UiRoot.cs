@@ -138,9 +138,8 @@ public sealed class UiRoot : UiElement
             if (UiLocked || window is not { Resizable: true })
                 return ResizeEdges.None;
 
-            var gripEdges = EffectiveGripEdges(target, window);
-            if (gripEdges != ResizeEdges.None)
-                return gripEdges;
+            if (target is UiResizeGrip)
+                return EffectiveGripEdges(target, window);
 
             if (FindDragHandleWindow(target) is not null)
                 return ResizeEdges.None;
@@ -593,9 +592,11 @@ public sealed class UiRoot : UiElement
         if (raiseWindow is not null) BringToFront(raiseWindow);
         if (btn == UiMouseButton.Left && raiseWindow is not null && !UiLocked)
         {
-            var gripEdges = EffectiveGripEdges(target, window);
-            var edges = gripEdges != ResizeEdges.None
-                ? gripEdges
+            // An authored grip owns its own rectangle: when one is under the
+            // pointer its edges decide, even if they narrowed to nothing. Only
+            // where no grip is authored does the synthesized border apply.
+            var edges = target is UiResizeGrip
+                ? EffectiveGripEdges(target, window)
                 : (handleWindow is null && window is { Resizable: true }
                     ? HitEdges(window, x, y, ResizeGrip)
                     : ResizeEdges.None);
@@ -1140,7 +1141,15 @@ public sealed class UiRoot : UiElement
 
     /// <summary>Which edges of <paramref name="w"/>'s screen rect the point
     /// (<paramref name="x"/>,<paramref name="y"/>) is within <paramref name="grip"/> px of.
-    /// None if the point is outside the grip-expanded box entirely.</summary>
+    /// None if the point is outside the grip-expanded box entirely.
+    /// <para>A window's border is read as nine regions, the way the authored
+    /// window chrome is built: four corner squares, four flat runs between
+    /// them, and the interior. A corner always offers both of its own sides;
+    /// only the flat runs consult <see cref="UiElement.ResizableEdges"/>, which
+    /// is why a window whose flat top run is a move handle still resizes from
+    /// its top corners. Both then drop whichever axis the window has locked, so
+    /// a corner on a height-only window degrades to the vertical resize
+    /// instead of disappearing.</para></summary>
     internal static ResizeEdges HitEdges(UiElement w, int x, int y, int grip)
     {
         float l = w.Left, t = w.Top, r = w.Left + w.Width, b = w.Top + w.Height;
@@ -1150,9 +1159,12 @@ public sealed class UiRoot : UiElement
         if (System.Math.Abs(x - r) <= grip) e |= ResizeEdges.Right;
         if (System.Math.Abs(y - t) <= grip) e |= ResizeEdges.Top;
         if (System.Math.Abs(y - b) <= grip) e |= ResizeEdges.Bottom;
+
+        bool corner = (e & (ResizeEdges.Left | ResizeEdges.Right)) != 0
+            && (e & (ResizeEdges.Top | ResizeEdges.Bottom)) != 0;
+        if (!corner) e &= w.ResizableEdges;
         if (!w.ResizeX) e &= ~(ResizeEdges.Left | ResizeEdges.Right);
         if (!w.ResizeY) e &= ~(ResizeEdges.Top | ResizeEdges.Bottom);
-        e &= w.ResizableEdges;
         return e;
     }
 
