@@ -1167,6 +1167,23 @@ public sealed class DirectGameRuntimeCommandAdapter
         }
     }
 
+    internal bool TrySendUseWithTarget(uint sourceGuid, uint targetGuid)
+    {
+        lock (_gate)
+        {
+            if (_route is null
+                || _session is null
+                || _routeGeneration != _runtime.Generation
+                || !_runtime.Session.IsInWorld)
+            {
+                return false;
+            }
+
+            _session.SendUseWithTarget(sourceGuid, targetGuid);
+            return true;
+        }
+    }
+
     internal bool TrySendPutItemInContainer(
         uint itemGuid,
         uint containerGuid,

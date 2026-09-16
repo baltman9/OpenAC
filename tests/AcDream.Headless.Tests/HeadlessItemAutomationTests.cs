@@ -127,6 +127,106 @@ public sealed class HeadlessItemAutomationTests
     }
 
     [Fact]
+    public void TryApply_TargetedItemAppliedToOwnedTargetSends()
+    {
+        var h = new Harness();
+        h.AddOwnedItem(Item, TargetedUseability, targetType: (uint)ItemType.Misc);
+        h.AddOwnedItem(Target, ItemUseability.Undef);
+
+        Assert.True(h.Automation.TryApply(Item, Target));
+
+        Assert.Equal(new[] { (Item, Target) }, h.UsesWithTarget);
+        Assert.Equal(1, h.Runtime.InventoryOwner.Transactions.BusyCount);
+        Assert.True(h.Runtime.ActionOwner.Transactions.CaptureOwnership().AwaitingItemUseCompletion);
+    }
+
+    [Fact]
+    public void TryApply_CompletionClearsAwaitingOnSuccessAndOnAWeenieError()
+    {
+        var h = new Harness();
+        h.AddOwnedItem(Item, TargetedUseability, targetType: (uint)ItemType.Misc);
+        h.AddOwnedItem(Target, ItemUseability.Undef);
+        Assert.True(h.Automation.TryApply(Item, Target));
+
+        h.Runtime.ActionOwner.Transactions.CompleteUse(0u);
+        Assert.False(h.Runtime.ActionOwner.Transactions.CaptureOwnership().AwaitingItemUseCompletion);
+
+        _ = h.Runtime.Clock.Advance(0.25);
+        Assert.True(h.Automation.TryApply(Item, Target));
+        h.Runtime.ActionOwner.Transactions.CompleteUse(29u);
+        Assert.False(h.Runtime.ActionOwner.Transactions.CaptureOwnership().AwaitingItemUseCompletion);
+    }
+
+    [Fact]
+    public void TryApply_CompletionReturnsBusyCountToZeroOnSuccessAndOnAWeenieError()
+    {
+        var h = new Harness();
+        h.AddOwnedItem(Item, TargetedUseability, targetType: (uint)ItemType.Misc);
+        h.AddOwnedItem(Target, ItemUseability.Undef);
+        Assert.True(h.Automation.TryApply(Item, Target));
+
+        h.Runtime.ActionOwner.Transactions.CompleteUse(0u);
+        Assert.Equal(0, h.Runtime.InventoryOwner.Transactions.BusyCount);
+
+        _ = h.Runtime.Clock.Advance(0.25);
+        Assert.True(h.Automation.TryApply(Item, Target));
+        h.Runtime.ActionOwner.Transactions.CompleteUse(29u);
+        Assert.Equal(0, h.Runtime.InventoryOwner.Transactions.BusyCount);
+    }
+
+    [Fact]
+    public void TryApply_UntargetedItemIsRejectedByPolicyBeforeAnySend()
+    {
+        var h = new Harness();
+        h.AddOwnedItem(Item, ItemUseability.Contained);
+        h.AddOwnedItem(Target, ItemUseability.Undef);
+
+        Assert.False(h.Automation.TryApply(Item, Target));
+
+        Assert.Empty(h.UsesWithTarget);
+    }
+
+    [Fact]
+    public void TryApply_RefusesWithoutDispatchingWhenTheRouteGuardFails()
+    {
+        var h = new Harness();
+        h.AddOwnedItem(Item, TargetedUseability, targetType: (uint)ItemType.Misc);
+        h.AddOwnedItem(Target, ItemUseability.Undef);
+        h.Transport.IsInWorld = false;
+
+        Assert.False(h.Automation.TryApply(Item, Target));
+
+        Assert.Empty(h.UsesWithTarget);
+        Assert.False(h.Runtime.ActionOwner.Transactions.CaptureOwnership().AwaitingItemUseCompletion);
+    }
+
+    [Fact]
+    public void TryApply_RefusesWhileBusy()
+    {
+        var h = new Harness();
+        h.AddOwnedItem(Item, TargetedUseability, targetType: (uint)ItemType.Misc);
+        h.AddOwnedItem(Target, ItemUseability.Undef);
+        h.Runtime.InventoryOwner.Transactions.IncrementBusyCount();
+
+        Assert.False(h.Automation.TryApply(Item, Target));
+
+        Assert.Empty(h.UsesWithTarget);
+    }
+
+    [Fact]
+    public void TryApply_SecondApplyInsideTheThrottleDoesNotSend()
+    {
+        var h = new Harness();
+        h.AddOwnedItem(Item, TargetedUseability, targetType: (uint)ItemType.Misc);
+        h.AddOwnedItem(Target, ItemUseability.Undef);
+
+        Assert.True(h.Automation.TryApply(Item, Target));
+        Assert.False(h.Automation.TryApply(Item, Target));
+
+        Assert.Equal(new[] { (Item, Target) }, h.UsesWithTarget);
+    }
+
+    [Fact]
     public void TryMove_FullStackSendsPutInContainer()
     {
         var h = new Harness();
@@ -276,7 +376,7 @@ public sealed class HeadlessItemAutomationTests
         internal bool ThrowOnSend { get; set; }
         internal List<uint> UseCalls { get; } = [];
 
-        public bool IsInWorld => true;
+        public bool IsInWorld { get; set; } = true;
 
         public bool TrySendUse(uint serverGuid, out uint sequence)
         {
@@ -306,9 +406,11 @@ public sealed class HeadlessItemAutomationTests
         internal readonly List<(uint Item, uint Container, int Placement)> Puts = [];
         internal readonly List<(uint Item, uint Container, uint Placement, uint Amount)> Splits = [];
         internal readonly List<(uint Source, uint Target, uint Amount)> Merges = [];
+        internal readonly List<(uint Source, uint Target)> UsesWithTarget = [];
         internal bool PutResult = true;
         internal bool SplitResult = true;
         internal bool MergeResult = true;
+        internal bool UseWithTargetResult = true;
         internal readonly HeadlessItemAutomation Automation;
         internal readonly AutoWieldController? AutoWield;
 
@@ -344,6 +446,11 @@ public sealed class HeadlessItemAutomationTests
                 {
                     Merges.Add((source, target, amount));
                     return MergeResult;
+                },
+                (source, target) =>
+                {
+                    UsesWithTarget.Add((source, target));
+                    return UseWithTargetResult;
                 },
                 isComponentPack: null,
                 autoWield: AutoWield);
@@ -385,7 +492,8 @@ public sealed class HeadlessItemAutomationTests
             int stackSizeMax = 1,
             uint weenieClassId = 0u,
             int tradeState = 0,
-            PublicWeenieFlags flags = PublicWeenieFlags.None) =>
+            PublicWeenieFlags flags = PublicWeenieFlags.None,
+            uint targetType = 0u) =>
             Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
             {
                 ObjectId = id,
@@ -393,6 +501,7 @@ public sealed class HeadlessItemAutomationTests
                 ContainerId = Player,
                 WeenieClassId = weenieClassId,
                 Useability = useability,
+                TargetType = targetType,
                 StackSize = stackSize,
                 StackSizeMax = stackSizeMax,
                 TradeState = tradeState,

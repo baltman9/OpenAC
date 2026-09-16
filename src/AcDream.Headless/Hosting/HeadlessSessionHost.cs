@@ -263,6 +263,7 @@ internal sealed class HeadlessSessionHost : IDisposable
                 commands.TrySendPutItemInContainer,
                 commands.TrySendStackableSplitToContainer,
                 commands.TrySendStackableMerge,
+                commands.TrySendUseWithTarget,
                 contentLease is { } lease ? lease.MagicCatalog.IsComponentPack : null,
                 autoWield);
             var statusWriter = new SessionStatusWriter(descriptor.StatusFile);

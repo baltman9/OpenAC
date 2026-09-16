@@ -68,7 +68,7 @@ internal sealed class HeadlessPluginHost
         {
             _automation.BindItems(
                 items.TryUse,
-                HeadlessItemAutomation.RefuseApply,
+                items.TryApply,
                 items.TryMove,
                 items.TryMerge,
                 HeadlessItemAutomation.RefuseDrop,

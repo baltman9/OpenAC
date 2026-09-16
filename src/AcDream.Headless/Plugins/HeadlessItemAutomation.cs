@@ -12,6 +12,7 @@ internal sealed class HeadlessItemAutomation
     private readonly Func<uint, uint, int, bool> _sendPutItemInContainer;
     private readonly Func<uint, uint, uint, uint, bool> _sendStackableSplitToContainer;
     private readonly Func<uint, uint, uint, bool> _sendStackableMerge;
+    private readonly Func<uint, uint, bool> _sendUseWithTarget;
     private readonly Func<uint, bool> _isComponentPack;
     private readonly AutoWieldController? _autoWield;
 
@@ -21,6 +22,7 @@ internal sealed class HeadlessItemAutomation
         Func<uint, uint, int, bool> sendPutItemInContainer,
         Func<uint, uint, uint, uint, bool> sendStackableSplitToContainer,
         Func<uint, uint, uint, bool> sendStackableMerge,
+        Func<uint, uint, bool> sendUseWithTarget,
         Func<uint, bool>? isComponentPack = null,
         AutoWieldController? autoWield = null)
     {
@@ -32,6 +34,8 @@ internal sealed class HeadlessItemAutomation
             ?? throw new ArgumentNullException(nameof(sendStackableSplitToContainer));
         _sendStackableMerge = sendStackableMerge
             ?? throw new ArgumentNullException(nameof(sendStackableMerge));
+        _sendUseWithTarget = sendUseWithTarget
+            ?? throw new ArgumentNullException(nameof(sendUseWithTarget));
         _isComponentPack = isComponentPack ?? (_ => false);
         _autoWield = autoWield;
     }
@@ -98,6 +102,55 @@ internal sealed class HeadlessItemAutomation
             throw;
         }
         return dispatched == RuntimeInteractionDispatchResult.Dispatched;
+    }
+
+    // Mirrors the GUI's TryApplyItem, guard checked first since dispatch always marks the wait.
+    internal bool TryApply(uint itemId, uint targetId)
+    {
+        if (itemId == 0u
+            || targetId == 0u
+            || _runtime.InventoryOwner.Objects.Get(itemId) is not { } item
+            || _runtime.InventoryOwner.Objects.Get(targetId) is not { } target)
+        {
+            return false;
+        }
+
+        RuntimeInteractionTransactionState transactions = _runtime.ActionOwner.Transactions;
+        long nowMs = checked((long)Math.Floor(
+            _runtime.Clock.SimulationTimeSeconds * 1000d));
+        if (!transactions.TryConsumeUseThrottle(nowMs))
+            return false;
+        if (!_runtime.InventoryOwner.Transactions.CanBeginRequest)
+            return false;
+
+        uint playerGuid = _runtime.PlayerIdentity.ServerGuid;
+        var input = new ItemUsePolicyInput(
+            Snapshot(item),
+            playerGuid,
+            _runtime.InventoryOwner.ExternalContainers.CurrentContainerId,
+            ReadyForInventoryRequest: _transport.IsInWorld
+                && _runtime.InventoryOwner.Transactions.CanBeginRequest,
+            _runtime.InventoryOwner.Vendor.VendorId,
+            BypassClassification: true,
+            UseCurrentSelection: true,
+            SelectedTarget: Snapshot(target),
+            ConfirmVolatileRareUses: true,
+            InNonCombatMode: _runtime.ActionOwner.Combat.CurrentMode == CombatMode.NonCombat);
+        ItemUsePolicyDecision decision = ItemInteractionPolicy.DecideUse(input);
+        if (!decision.Actions.Any(
+                static action => action.Kind == ItemPolicyActionKind.SendUseWithTarget))
+        {
+            return false;
+        }
+
+        if (!_transport.IsInWorld)
+            return false;
+
+        return transactions.TryDispatchTargetedUse(
+            itemId,
+            targetId,
+            (source, dest) => _sendUseWithTarget(source, dest),
+            incrementBusy: true);
     }
 
     internal bool TryMove(uint itemId, uint containerId, uint amount, int placement)
@@ -174,7 +227,6 @@ internal sealed class HeadlessItemAutomation
         || !_runtime.InventoryOwner.Transactions.CanBeginRequest;
 
     // The surface requires these bound; not supported on headless yet.
-    internal static bool RefuseApply(uint itemId, uint targetId) => false;
     internal static bool RefuseDrop(uint itemId, uint amount) => false;
     internal static bool RefuseGive(uint itemId, uint targetId, uint amount) => false;
     internal static bool RefusePickup(uint itemId, bool mainPack) => false;
