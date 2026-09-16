@@ -276,8 +276,7 @@ internal sealed class HeadlessSessionHost : IDisposable
                     or SubmitOutcome.Dropped);
             }
             bool RequestLogout() =>
-                bridge.Stop(runtime.Generation).Status
-                    == RuntimeCommandStatus.Accepted;
+                Stop("logout").Status == RuntimeCommandStatus.Accepted;
             bool AnswerConfirmation(uint contextId, bool accept)
             {
                 if (_pendingConfirmation is not { } pending
@@ -456,6 +455,23 @@ internal sealed class HeadlessSessionHost : IDisposable
             request.ContextId,
             accepted);
         _pendingConfirmation = null;
+    }
+
+    // The server can resolve or cancel a confirmation on its own (a
+    // different client answered it, the underlying request timed out, and
+    // so on) without a matching RespondToConfirmation call. Clear the
+    // pending confirmation whenever that context id completes so a stale
+    // request does not keep answering "yes" to a dialog that already
+    // closed. Guarded by context id so a newer request that arrived after
+    // this one completed is left alone.
+    internal void HandleConfirmationDone(
+        GameEvents.CharacterConfirmationDone done)
+    {
+        if (_pendingConfirmation is { } pending
+            && pending.ContextId == done.ContextId)
+        {
+            _pendingConfirmation = null;
+        }
     }
 
     internal SubmitOutcome SubmitConsoleLine(string line) =>
@@ -1117,7 +1133,7 @@ internal sealed class HeadlessSessionHost : IDisposable
                             (int)request.Type,
                             request.Message));
                 },
-                OnConfirmationDone: null,
+                OnConfirmationDone: HandleConfirmationDone,
                 ClientTime: () =>
                     Runtime.Clock.SimulationTimeSeconds,
                 OnMovementStatsUpdated: null,

@@ -116,6 +116,96 @@ public sealed class HeadlessSessionHostTests
     }
 
     [Fact]
+    public void PluginDrivenLogoutRoutesThroughTheHostsOwnStopAndClearsTheSession()
+    {
+        // A plugin's ILoginAutomation.Logout() used to call the raw command
+        // bridge directly, bypassing HeadlessSessionHost.Stop(reason): the
+        // session field never cleared, _hasConnected never reset, and no
+        // "disconnected" status line was ever written. Prove the plugin path
+        // now produces the exact same observable teardown a direct
+        // host.Stop("logout") would.
+        string statusPath = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-headless-plugin-logout-{Guid.NewGuid():N}.jsonl");
+        try
+        {
+            var operations = new FixtureSessionOperations();
+            using var diagnosticsOutput = new StringWriter();
+            using var credential = new HeadlessCredentialSecret(
+                "fixture",
+                "password");
+            using var host = new HeadlessSessionHost(
+                Descriptor(statusFile: statusPath),
+                credential,
+                new HeadlessDiagnosticWriter(diagnosticsOutput),
+                operations);
+
+            Assert.Equal(
+                RuntimeSessionStartStatus.Connected,
+                host.Start().Status);
+            Assert.True(host.Runtime.Session.IsInWorld);
+
+            bool logoutAccepted = host.Plugins.Host.Automation.Login.Logout();
+
+            Assert.True(logoutAccepted);
+            Assert.False(host.Runtime.Session.IsInWorld);
+
+            JsonElement[] events = File.ReadAllLines(statusPath)
+                .Select(static line =>
+                    JsonDocument.Parse(line).RootElement.Clone())
+                .ToArray();
+            JsonElement disconnected = Assert.Single(
+                events,
+                static item =>
+                    item.GetProperty("e").GetString() == "disconnected");
+            Assert.Equal(
+                "logout",
+                disconnected.GetProperty("reason").GetString());
+        }
+        finally
+        {
+            if (File.Exists(statusPath))
+                File.Delete(statusPath);
+        }
+    }
+
+    [Fact]
+    public void ConfirmationDoneClearsThePendingConfirmationForTheMatchingContext()
+    {
+        // The server can resolve or cancel a confirmation on its own (a
+        // different client answered it, the request timed out) without our
+        // own RespondToConfirmation call ever running. Before this fix,
+        // OnConfirmationDone was wired to null, so a completed confirmation
+        // left the stale request sitting in _pendingConfirmation forever.
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            new HeadlessCredentialSecret("fixture", "password"),
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations());
+
+        FieldInfo pendingField = typeof(HeadlessSessionHost)
+            .GetField(
+                "_pendingConfirmation",
+                BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var request = new GameEvents.CharacterConfirmationRequest(
+            5u,
+            77u,
+            "continue?");
+        pendingField.SetValue(host, request);
+        Assert.Equal(request, host.PendingConfirmation);
+
+        // A done for a different, already-superseded context id must not
+        // clear a newer pending request.
+        host.HandleConfirmationDone(
+            new GameEvents.CharacterConfirmationDone(5u, 78u));
+        Assert.Equal(request, host.PendingConfirmation);
+
+        host.HandleConfirmationDone(
+            new GameEvents.CharacterConfirmationDone(5u, 77u));
+        Assert.Null(host.PendingConfirmation);
+    }
+
+    [Fact]
     public void LoginCommandsRouteWireOnlyClientCommandsWithExactPolarityAndOrder()
     {
         var captured = new List<byte[]>();
