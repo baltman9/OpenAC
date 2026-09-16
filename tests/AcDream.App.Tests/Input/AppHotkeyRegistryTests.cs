@@ -272,6 +272,50 @@ public sealed class AppHotkeyRegistryTests
         Assert.Equal(1, fired);
     }
 
+    [Theory]
+    [InlineData(PluginKey.Numpad5, Key.Keypad5)]
+    [InlineData(PluginKey.NumpadEnter, Key.KeypadEnter)]
+    [InlineData(PluginKey.Grave, Key.GraveAccent)]
+    [InlineData(PluginKey.PrintScreen, Key.PrintScreen)]
+    [InlineData(PluginKey.Pause, Key.Pause)]
+    public void NumpadGraveAndSystemKeysMapAndFire(PluginKey pluginKey, Key silkKey)
+    {
+        var registry = new AppHotkeyRegistry(overridesFilePath: null);
+        var keyboard = new FakeKeyboard();
+        var bindings = new KeyBindings();
+        InputDispatcher dispatcher = InputDispatcher.CreateDetached(
+            keyboard, new FakeMouse(), bindings);
+        registry.Bind(keyboard, bindings, dispatcher);
+
+        int fired = 0;
+        IPluginHotkeyRegistration handle = registry.Register(
+            "test", "Test", new PluginKeyChord(pluginKey), () => fired++);
+
+        Assert.True(handle.IsBound);
+        keyboard.Fire(silkKey, ModifierMask.None);
+        Assert.Equal(1, fired);
+    }
+
+    [Fact]
+    public void AnUnmappedPluginKeyYieldsIsBoundFalse()
+    {
+        var registry = new AppHotkeyRegistry(overridesFilePath: null);
+        var keyboard = new FakeKeyboard();
+        var bindings = new KeyBindings();
+        InputDispatcher dispatcher = InputDispatcher.CreateDetached(
+            keyboard, new FakeMouse(), bindings);
+        registry.Bind(keyboard, bindings, dispatcher);
+
+        // PluginKey.Unknown has no Silk.NET equivalent and can never be
+        // mapped -- a plugin that ends up requesting it (a default() chord,
+        // a bad deserialize) must be refused, not silently bound to
+        // "no key at all".
+        IPluginHotkeyRegistration handle = registry.Register(
+            "test", "Test", new PluginKeyChord(PluginKey.Unknown), () => { });
+
+        Assert.False(handle.IsBound);
+    }
+
     private sealed class FakeKeyboard : IKeyboardSource
     {
         public event Action<Key, ModifierMask>? KeyDown;

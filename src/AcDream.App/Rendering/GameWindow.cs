@@ -721,8 +721,16 @@ public sealed class GameWindow :
         AcDream.UI.Abstractions.Input.InputDispatcher value)
     {
         PublishCompositionOwner(ref _inputDispatcher, value, "input dispatcher");
-        if (_hotkeyRegistry is not null && _kbSource is not null)
-            _hotkeyRegistry.Bind(_kbSource, _keyBindings, value);
+        if (_hotkeyRegistry is null)
+            return;
+        if (_kbSource is null)
+        {
+            throw new InvalidOperationException(
+                "The input dispatcher published before the keyboard source; "
+                + "plugin hotkeys would silently never bind. Composition must "
+                + "publish the keyboard source first.");
+        }
+        _hotkeyRegistry.Bind(_kbSource, _keyBindings, value);
     }
 
     void IGameWindowHostInputCameraPublication.PublishCameraController(

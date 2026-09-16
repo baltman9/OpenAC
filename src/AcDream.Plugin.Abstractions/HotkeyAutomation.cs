@@ -44,6 +44,14 @@ public enum PluginKey
     Comma,
     Period,
     Slash,
+
+    Numpad0, Numpad1, Numpad2, Numpad3, Numpad4,
+    Numpad5, Numpad6, Numpad7, Numpad8, Numpad9,
+    NumpadDecimal, NumpadDivide, NumpadMultiply,
+    NumpadSubtract, NumpadAdd, NumpadEnter,
+    Grave,
+    PrintScreen,
+    Pause,
 }
 
 /// <summary>
