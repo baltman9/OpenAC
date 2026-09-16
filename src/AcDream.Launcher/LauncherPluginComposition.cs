@@ -308,6 +308,18 @@ internal sealed class LauncherPluginComposition : IDisposable
             return new PluginUpdateCheck(false, "the plugin is blocked", null, null, null, false);
         }
 
+        if (manifest.CapabilitiesVersion > LauncherPluginCapabilityVocabulary.Current)
+        {
+            return new PluginUpdateCheck(false, "needs a newer launcher", null, null, null, false);
+        }
+
+        // Under a vocabulary this launcher does claim to know, an unrecognized name is a manifest
+        // the install will refuse, so offering the update would only fail later.
+        if (manifest.UnrecognizedCapabilities.Count > 0)
+        {
+            return new PluginUpdateCheck(false, "the update's manifest is not valid", null, null, null, false);
+        }
+
         string? versionReason = VersionOnlyCompatibility(manifest, clientResolution?.Version);
         if (versionReason is not null)
         {

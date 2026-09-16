@@ -18,6 +18,12 @@ public sealed class PluginInstaller
     public const string SessionLeaseRefusal =
         "Close all OpenAC sessions to install or update plugins.";
 
+    /// <summary>The refusal shown when a manifest declares a capability vocabulary newer than this
+    /// launcher knows. Says the launcher needs updating rather than that the manifest is invalid,
+    /// since the player can act on the former.</summary>
+    public const string CapabilityVocabularyRefusal =
+        "This plugin needs a newer launcher than the one installed. Update the launcher, then try again.";
+
     /// <summary>The install-time caps from the plan's shared contract (Release contract, "Caps").
     /// The one place they're set, so the zip download cap and the extraction limits it feeds can't
     /// drift apart; <see cref="DirectInstallCheck"/> reuses the same extraction limits.</summary>
@@ -86,6 +92,10 @@ public sealed class PluginInstaller
             manifest = LauncherPluginManifest.Parse(
                 Encoding.UTF8.GetString(manifestDocument.Content));
             manifest.ValidateForInstall();
+        }
+        catch (LauncherPluginCapabilityVersionException ex)
+        {
+            throw new LauncherUpdateException(CapabilityVocabularyRefusal, ex);
         }
         catch (LauncherPluginManifestException ex)
         {

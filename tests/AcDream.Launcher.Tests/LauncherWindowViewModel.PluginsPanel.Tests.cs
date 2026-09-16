@@ -265,6 +265,175 @@ public sealed partial class LauncherWindowViewModelTests
     }
 
     [Fact]
+    public async Task UpdateWithheldReasonExplainsATooNewCapabilityVocabulary()
+    {
+        using var fixture = new PluginPanelFixture();
+        fixture.WriteManifest("edwards.managed", "0.1.0", ["headless"]);
+        fixture.AddRecord("edwards.managed", "shaneedwards/openac-plugin-hello", "0.1.0");
+        byte[] remoteManifest = PluginPanelFixture.ManifestJson(
+            "edwards.managed", "0.2.0", "0.1.0", ["headless"],
+            capabilitiesVersion: LauncherPluginCapabilityVocabulary.Current + 1);
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(fixture.ListJson());
+            }
+
+            if (request.RequestUri == GitHubReleaseLocator.LatestAsset(
+                "shaneedwards/openac-plugin-hello", "plugin.json"))
+            {
+                return Ok(remoteManifest);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        PluginInstalledRowViewModel managed = Assert.Single(
+            viewModel.Plugins.Installed, row => row.Id == "edwards.managed");
+        Assert.False(managed.UpdateAvailable);
+        Assert.True(managed.HasUpdateWithheldReason);
+        Assert.Equal("needs a newer launcher", managed.UpdateWithheldReason);
+    }
+
+    [Fact]
+    public async Task UpdateIsWithheldWhenTheManifestNamesACapabilityThisLauncherDoesNotKnow()
+    {
+        using var fixture = new PluginPanelFixture();
+        fixture.WriteManifest("edwards.managed", "0.1.0", ["headless"]);
+        fixture.AddRecord("edwards.managed", "shaneedwards/openac-plugin-hello", "0.1.0");
+        byte[] remoteManifest = PluginPanelFixture.ManifestJson(
+            "edwards.managed", "0.2.0", "0.1.0", ["headless"],
+            capabilitiesVersion: LauncherPluginCapabilityVocabulary.Current,
+            capabilitiesJson: """[{ "name": "notARealCapability", "note": "Something new." }]""");
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(fixture.ListJson());
+            }
+
+            if (request.RequestUri == GitHubReleaseLocator.LatestAsset(
+                "shaneedwards/openac-plugin-hello", "plugin.json"))
+            {
+                return Ok(remoteManifest);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        PluginInstalledRowViewModel managed = Assert.Single(
+            viewModel.Plugins.Installed, row => row.Id == "edwards.managed");
+        Assert.False(managed.UpdateAvailable);
+        Assert.True(managed.HasUpdateWithheldReason);
+        Assert.Equal("the update's manifest is not valid", managed.UpdateWithheldReason);
+    }
+
+    [Fact]
+    public async Task ABlockedReleaseStaysBlockedEvenWhenItsVocabularyIsAlsoTooNew()
+    {
+        using var fixture = new PluginPanelFixture();
+        fixture.WriteManifest("edwards.managed", "0.1.0", ["headless"]);
+        fixture.AddRecord("edwards.managed", "shaneedwards/openac-plugin-hello", "0.1.0");
+        byte[] remoteManifest = PluginPanelFixture.ManifestJson(
+            "edwards.managed", "0.2.0", "0.1.0", ["headless"],
+            capabilitiesVersion: LauncherPluginCapabilityVocabulary.Current + 1);
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(System.Text.Encoding.UTF8.GetBytes("""
+                    {
+                      "schemaVersion": 1,
+                      "plugins": [
+                        { "id": "edwards.discoverable", "name": "edwards.discoverable",
+                          "author": "Shane Edwards", "description": "Test fixture.",
+                          "repo": "shaneedwards/openac-plugin-hello" }
+                      ],
+                      "blocked": [
+                        { "id": "edwards.managed", "versions": ["0.2.0"], "reason": "test" }
+                      ]
+                    }
+                    """));
+            }
+
+            if (request.RequestUri == GitHubReleaseLocator.LatestAsset(
+                "shaneedwards/openac-plugin-hello", "plugin.json"))
+            {
+                return Ok(remoteManifest);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        PluginInstalledRowViewModel managed = Assert.Single(
+            viewModel.Plugins.Installed, row => row.Id == "edwards.managed");
+        Assert.False(managed.UpdateAvailable);
+        Assert.True(managed.HasUpdateWithheldReason);
+        Assert.Equal("the plugin is blocked", managed.UpdateWithheldReason);
+    }
+
+    [Fact]
+    public async Task DiscoverStillListsAPluginWhoseLatestReleaseNeedsANewerLauncher()
+    {
+        using var fixture = new PluginPanelFixture();
+        byte[] remoteManifest = PluginPanelFixture.ManifestJson(
+            "edwards.discoverable", "0.2.0", "0.1.0", ["headless", "graphical"],
+            capabilitiesVersion: LauncherPluginCapabilityVocabulary.Current + 1);
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(fixture.ListJson());
+            }
+
+            if (request.RequestUri == GitHubReleaseLocator.LatestAsset(
+                "shaneedwards/openac-plugin-hello", "plugin.json"))
+            {
+                return Ok(remoteManifest);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        await viewModel.Plugins.RefreshDiscoverDetailsAsync();
+
+        PluginDiscoverRowViewModel row = Assert.Single(viewModel.Plugins.Discover);
+        Assert.Equal("0.2.0", row.LatestVersion);
+    }
+
+    [Fact]
     public async Task RefreshDiscoverDetailsAsyncFillsInLatestVersionAndFetchesItOnce()
     {
         using var fixture = new PluginPanelFixture();
@@ -1895,9 +2064,17 @@ public sealed partial class LauncherWindowViewModelTests
         }
 
         public static byte[] ManifestJson(
-            string id, string version, string minHostVersion, IReadOnlyList<string> hosts)
+            string id,
+            string version,
+            string minHostVersion,
+            IReadOnlyList<string> hosts,
+            int? capabilitiesVersion = null,
+            string? capabilitiesJson = null)
         {
             string hostsJson = string.Join(", ", hosts.Select(host => $"\"{host}\""));
+            string capabilitiesField = capabilitiesVersion is { } v
+                ? $",\n  \"capabilitiesVersion\": {v},\n  \"capabilities\": {capabilitiesJson ?? "[]"}"
+                : "";
             return System.Text.Encoding.UTF8.GetBytes($$"""
                 {
                   "id": "{{id}}",
@@ -1906,7 +2083,7 @@ public sealed partial class LauncherWindowViewModelTests
                   "entryDll": "{{id}}.dll",
                   "apiVersion": 1,
                   "minHostVersion": "{{minHostVersion}}",
-                  "hosts": [{{hostsJson}}]
+                  "hosts": [{{hostsJson}}]{{capabilitiesField}}
                 }
                 """);
         }
