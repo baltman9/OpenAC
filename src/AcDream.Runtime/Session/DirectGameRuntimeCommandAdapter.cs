@@ -449,6 +449,73 @@ public sealed class DirectGameRuntimeCommandAdapter
             RuntimeCommandStatus.Accepted);
     }
 
+    public RuntimeCommandResult BeginMove(
+        RuntimeGenerationToken expectedGeneration,
+        in RuntimeMoveRequest request)
+    {
+        RuntimeCommandStatus gate =
+            Validate(expectedGeneration, out _);
+        if (gate != RuntimeCommandStatus.Accepted)
+            return Result(gate);
+        RuntimeCommandStatus status = _runtime.MovementOwner.BeginMove(request)
+            ? RuntimeCommandStatus.Accepted
+            : RuntimeCommandStatus.Rejected;
+        return EmitResult(
+            RuntimeCommandDomain.Movement,
+            operation: 0x104,
+            status);
+    }
+
+    public RuntimeCommandResult StopMove(
+        RuntimeGenerationToken expectedGeneration)
+    {
+        RuntimeCommandStatus gate =
+            Validate(expectedGeneration, out _);
+        if (gate != RuntimeCommandStatus.Accepted)
+            return Result(gate);
+        _runtime.MovementOwner.StopMove();
+        return EmitResult(
+            RuntimeCommandDomain.Movement,
+            operation: 0x105,
+            RuntimeCommandStatus.Accepted);
+    }
+
+    public RuntimeCommandResult StopMove(
+        RuntimeGenerationToken expectedGeneration,
+        RuntimeMoveChannel channel)
+    {
+        RuntimeCommandStatus gate =
+            Validate(expectedGeneration, out _);
+        if (gate != RuntimeCommandStatus.Accepted)
+            return Result(gate);
+        RuntimeCommandStatus status = Enum.IsDefined(channel)
+            ? RuntimeCommandStatus.Accepted
+            : RuntimeCommandStatus.Rejected;
+        if (status == RuntimeCommandStatus.Accepted)
+            _runtime.MovementOwner.StopMove(channel);
+        return EmitResult(
+            RuntimeCommandDomain.Movement,
+            operation: 0x105,
+            status);
+    }
+
+    public RuntimeCommandResult Jump(
+        RuntimeGenerationToken expectedGeneration,
+        float power)
+    {
+        RuntimeCommandStatus gate =
+            Validate(expectedGeneration, out _);
+        if (gate != RuntimeCommandStatus.Accepted)
+            return Result(gate);
+        RuntimeCommandStatus status = _runtime.MovementOwner.BeginJump(power)
+            ? RuntimeCommandStatus.Accepted
+            : RuntimeCommandStatus.Rejected;
+        return EmitResult(
+            RuntimeCommandDomain.Movement,
+            operation: 0x106,
+            status);
+    }
+
     public RuntimeCommandResult TurnToHeading(
         RuntimeGenerationToken expectedGeneration,
         float headingDegrees,
@@ -1158,6 +1225,43 @@ public sealed class DirectGameRuntimeCommandAdapter
             _runtime.ActionOwner.Interaction.EnterUse();
             return RuntimeCommandStatus.Accepted;
         }
+        return UseObject(session, selected);
+    }
+
+    /// <summary>
+    /// Uses a world object the way using it while it is selected does, without selecting
+    /// it, as a walk opening a door on its way does. False when there is no live session
+    /// or the use was refused.
+    /// </summary>
+    internal bool TryUseObject(uint objectId)
+    {
+        if (Validate(_runtime.Generation, out WorldSession? session) != RuntimeCommandStatus.Accepted
+            || session is null)
+        {
+            return false;
+        }
+        return UseObject(session, objectId) == RuntimeCommandStatus.Accepted;
+    }
+
+    /// <summary>
+    /// Asks the server to appraise an object without its answer becoming the appraisal the
+    /// character is looking at, as a walk checking whether a door is locked does.
+    /// </summary>
+    internal bool TryAppraiseQuietly(uint objectId)
+    {
+        if (Validate(_runtime.Generation, out WorldSession? session) != RuntimeCommandStatus.Accepted
+            || session is null)
+        {
+            return false;
+        }
+        return _runtime.ActionOwner.Transactions.TryRequestAppraisal(
+            objectId,
+            session.SendAppraise,
+            quiet: true);
+    }
+
+    private RuntimeCommandStatus UseObject(WorldSession session, uint selected)
+    {
         if (_runtime.InventoryOwner.Objects.Get(selected)
             is not { } item)
         {

@@ -369,6 +369,22 @@ public sealed class ItemInteractionControllerTests
     }
 
     [Fact]
+    public void AutomationAppraisalAnswersQuietlySoNoPanelOpens()
+    {
+        var h = new Harness();
+        const uint item = 0x50000A26u;
+        h.AddContained(item);
+
+        Assert.True(h.Controller.TryAppraiseForAutomation(item));
+        ItemInteractionController.AppraisalResponseAcceptance acceptance =
+            h.Controller.AcceptAppraisalResponse(item);
+
+        Assert.True(acceptance.Accepted);
+        Assert.True(acceptance.FirstResponse);
+        Assert.True(acceptance.Quiet);
+    }
+
+    [Fact]
     public void ResetSession_RetryNotifiesEveryStateObserver()
     {
         var h = new Harness();

@@ -244,6 +244,7 @@ public sealed class GameWindow :
     private AcDream.App.Audio.DictionaryEntitySoundTable? _entitySoundTables;
     private AcDream.App.Audio.AudioHookSink? _audioSink;
     private AcDream.App.Audio.AudioMixerCommandBinding? _audioMixerCommand;
+    private AcDream.Runtime.Navigation.NavigationChatCommands? _navigationCommands;
 
     private AcDream.Core.Vfx.EmitterDescRegistry? _emitterRegistry;
     private AcDream.Core.Vfx.ParticleSystem? _particleSystem;
@@ -1112,6 +1113,25 @@ public sealed class GameWindow :
 
         _frameRootBindings = result.RuntimeBindings;
         _frameGraphPublication = result.FrameGraphPublication;
+        if (result.NavigationWalk is { } navigationWalk && _automation is { } automation)
+        {
+            automation.BindNavigationWalk(navigationWalk);
+            _navigationCommands = new AcDream.Runtime.Navigation.NavigationChatCommands(
+                    automation.Navigation,
+                    () => _runtime.ActionOwner.Selection.SelectedObjectId,
+                    // Chat rather than the on-screen notices, so walk reports and debug narration can be copied.
+                    line => _runtimeCommunication.AddText(
+                        line, AcDream.Core.Chat.RetailLogTextType.Default),
+                    toggleGrid: _worldSceneDebugState.ToggleNavMesh,
+                    previewRoute: objectId =>
+                    {
+                        _worldSceneDebugState.ShowNavMesh();
+                        _ = navigationWalk.RouteTo(objectId);
+                        return true;
+                    },
+                    narrate: listener => navigationWalk.Narration = listener)
+                .Register(automation.PluginCommands, _worldEvents);
+        }
     }
 
     private static void PublishCompositionOwner<T>(
@@ -1579,6 +1599,7 @@ public sealed class GameWindow :
         {
             PersistKeyBindingsAtShutdown();
             _audioMixerCommand?.Dispose();
+            _navigationCommands?.Dispose();
             if (_runtime.Session.IsInWorld)
                 _statusWriter.Disconnected(_options.SessionId ?? "app", "stopped");
             _lifetime.PublishShutdownRoots(CaptureShutdownRoots());

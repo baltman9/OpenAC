@@ -11,6 +11,7 @@ using AcDream.Core.Physics;
 using AcDream.Runtime;
 using AcDream.Runtime.Chat;
 using AcDream.Runtime.Gameplay;
+using AcDream.Runtime.Navigation;
 using AcDream.Runtime.Physics;
 using AcDream.Runtime.Session;
 
@@ -155,6 +156,12 @@ internal sealed class HeadlessSessionHost : IDisposable
     private readonly LiveChatCommandSurface _chatCommandSurface;
     private readonly LiveSessionHost _liveSession;
     private readonly RuntimeLocalPlayerFrameController _localPlayerFrame;
+
+    /// <summary>The session's walks, when it loaded the game data they plan over.</summary>
+    private readonly NavigationWalkController? _navigationWalk;
+
+    /// <summary>The session's /nav and /motor commands.</summary>
+    private readonly NavigationChatCommands? _navigationCommands;
     private readonly HeadlessProcessContentOwner.HeadlessProcessContentLease?
         _contentLease;
     private readonly IRuntimePlacementProjectionSink? _placementSinkOverride;
@@ -275,6 +282,31 @@ internal sealed class HeadlessSessionHost : IDisposable
                     or SubmitOutcome.UnknownCommand
                     or SubmitOutcome.Dropped);
             }
+            var navigation = new RuntimeNavigationAutomation();
+            NavigationChatCommands? navigationCommands = null;
+            navigation.Bind(runtime);
+            navigation.BindCommands(commands.Movement, () => runtime.Generation);
+            NavigationWalkController? navigationWalk = null;
+            if (contentLease is { } navigationContent)
+            {
+                PhysicsEngine physics = runtime.EntityObjects.Physics.Engine;
+                object navigationDatLock = new();
+                navigationWalk = new NavigationWalkController(
+                    physics,
+                    new RuntimeNavigationWalkBody(runtime.MovementOwner, runtime.Portal),
+                    new RuntimeNavigationGoalSource(physics, runtime, runtime.MovementOwner),
+                    message => diagnostics.Message(descriptor.Id, message),
+                    new RuntimeNavigationDoors(
+                        physics,
+                        runtime,
+                        objectId => commands.TryUseObject(objectId),
+                        commands.TryAppraiseQuietly),
+                    cellId => SealedDungeonCells.IsSealedDungeon(
+                        navigationContent.Dats,
+                        navigationDatLock,
+                        cellId));
+                navigation.BindWalk(navigationWalk);
+            }
             pluginSession = HeadlessPluginSession.Create(
                 runtime,
                 diagnostics,
@@ -285,7 +317,18 @@ internal sealed class HeadlessSessionHost : IDisposable
                 pluginCommands,
                 vtankProfiles,
                 descriptor.PluginSettings,
-                SubmitChatText);
+                SubmitChatText,
+                navigation);
+            navigationCommands = new NavigationChatCommands(
+                    navigation,
+                    () => runtime.ActionOwner.Selection.SelectedObjectId,
+                    line => runtime.CommunicationOwner.AddText(
+                        line,
+                        RetailLogTextType.Default),
+                    narrate: navigationWalk is { } narrated
+                        ? listener => narrated.Narration = listener
+                        : null)
+                .Register(pluginCommands, pluginSession.Host.Events);
             var liveSession = new LiveSessionHost(
                 runtime.Session,
                 new LiveSessionHostBindings(
@@ -367,6 +410,8 @@ internal sealed class HeadlessSessionHost : IDisposable
                     new HeadlessMovementInputSource(
                         runtime.MovementOwner));
             _contentLease = contentLease;
+            _navigationWalk = navigationWalk;
+            _navigationCommands = navigationCommands;
             bridge.Bind(this);
 
             hostLease = runtime.AcquireHostLease(
@@ -469,6 +514,7 @@ internal sealed class HeadlessSessionHost : IDisposable
         if (_reconnectPending)
             return;
         _ = Runtime.Clock.Advance(deltaSeconds);
+        _navigationWalk?.Tick(deltaSeconds);
         _localPlayerFrame.AdvanceBeforeNetwork(
             checked((float)deltaSeconds));
         _liveSession.Tick();
@@ -592,6 +638,7 @@ internal sealed class HeadlessSessionHost : IDisposable
                     _disposeStage++;
                     break;
                 case 4:
+                    _navigationCommands?.Dispose();
                     _pluginSession.Dispose();
                     _disposeStage++;
                     break;

@@ -406,6 +406,8 @@ public sealed class AppraisalUiController : IRetainedPanelController
             _interaction.AcceptAppraisalResponse(appraisal.Guid);
         if (!acceptance.Accepted)
             return false;
+        if (acceptance.Quiet)
+            return true;
 
         ClientObject? obj = _objects.Get(appraisal.Guid);
         if (obj is null)

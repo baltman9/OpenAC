@@ -41,7 +41,8 @@ public readonly record struct RuntimePendingUse(
 
 public readonly record struct RuntimeAppraisalResponseAcceptance(
     bool Accepted,
-    bool FirstResponse);
+    bool FirstResponse,
+    bool Quiet = false);
 
 public readonly record struct RuntimeItemUseCompletion(
     long Revision,
@@ -99,6 +100,7 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
     private uint _lastUseSourceId;
     private uint _lastUseTargetId;
     private uint _awaitingAppraisalId;
+    private bool _awaitingAppraisalQuiet;
     private uint _currentAppraisalId;
     private RuntimePendingPickup? _pendingPickup;
     private ulong _nextPickupToken;
@@ -260,9 +262,15 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
             IncrementRevision();
     }
 
+    /// <summary>
+    /// Asks the server to appraise an object. A quiet appraisal, such as one a walk asks
+    /// for to learn whether a door is locked, updates the object without becoming the
+    /// appraisal the character is looking at.
+    /// </summary>
     public bool TryRequestAppraisal(
         uint objectId,
-        Action<uint> sendAppraisal)
+        Action<uint> sendAppraisal,
+        bool quiet = false)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(sendAppraisal);
@@ -279,7 +287,9 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         }
 
         uint previousAwaiting = _awaitingAppraisalId;
+        bool previousQuiet = _awaitingAppraisalQuiet;
         _awaitingAppraisalId = objectId;
+        _awaitingAppraisalQuiet = quiet;
         IncrementRevision();
         try
         {
@@ -292,6 +302,7 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
                 && _awaitingAppraisalId == objectId)
             {
                 _awaitingAppraisalId = previousAwaiting;
+                _awaitingAppraisalQuiet = previousQuiet;
                 if (acquiredBusy)
                     _inventory.CompleteUse(0u);
                 IncrementRevision();
@@ -313,17 +324,21 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         }
 
         bool firstResponse = objectId == _awaitingAppraisalId;
+        bool quiet = firstResponse && _awaitingAppraisalQuiet;
         if (firstResponse)
         {
             _awaitingAppraisalId = 0u;
-            _currentAppraisalId = objectId;
+            _awaitingAppraisalQuiet = false;
+            if (!quiet)
+                _currentAppraisalId = objectId;
             _inventory.CompleteUse(0u);
             IncrementRevision();
         }
 
         return new RuntimeAppraisalResponseAcceptance(
             Accepted: true,
-            FirstResponse: firstResponse);
+            FirstResponse: firstResponse,
+            Quiet: quiet);
     }
 
     public bool RefreshCurrentAppraisal(Action<uint> sendAppraisal)

@@ -689,7 +689,7 @@ public sealed class ItemInteractionController : IDisposable
         {
             return false;
         }
-        return _runtimeTransactions.TryRequestAppraisal(objectId, _sendExamine);
+        return _runtimeTransactions.TryRequestAppraisal(objectId, _sendExamine, quiet: true);
     }
 
     public AppraisalResponseAcceptance AcceptAppraisalResponse(uint objectId)
@@ -701,7 +701,8 @@ public sealed class ItemInteractionController : IDisposable
             StateChanged?.Invoke();
         return new AppraisalResponseAcceptance(
             acceptance.Accepted,
-            acceptance.FirstResponse);
+            acceptance.FirstResponse,
+            acceptance.Quiet);
     }
 
     public bool RefreshCurrentAppraisal()
@@ -1729,7 +1730,8 @@ public sealed class ItemInteractionController : IDisposable
 
     public readonly record struct AppraisalResponseAcceptance(
         bool Accepted,
-        bool FirstResponse);
+        bool FirstResponse,
+        bool Quiet = false);
 
     private static void DispatchAll(Action? listeners, List<Exception> failures)
     {

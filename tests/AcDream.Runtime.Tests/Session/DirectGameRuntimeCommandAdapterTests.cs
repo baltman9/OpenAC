@@ -580,6 +580,86 @@ public sealed class DirectGameRuntimeCommandAdapterTests
         System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(
             gameAction.AsSpan(8));
 
+    /// <summary>
+    /// A walk opens a door by using it where it stands, without selecting it; the use it
+    /// sends is the one using the door while selected sends.
+    /// </summary>
+    [Fact]
+    public void UseObject_SendsTheSameUseAsUsingTheSelection_WithoutSelectingIt()
+    {
+        const uint door = 0x70000011u;
+        (GameRuntime selecting, DirectGameRuntimeCommandAdapter selectingAdapter, FixtureSessionOperations selectingOperations) =
+            CreateStartedHarness();
+        selecting.InventoryOwner.Objects.AddOrUpdate(new ClientObject { ObjectId = door, Type = ItemType.Misc });
+        var selectedUse = new List<byte[]>();
+        selectingOperations.Sessions[^1].GameActionCapture = body => selectedUse.Add(body);
+        Assert.True(selectingAdapter.Selection.SelectObject(selecting.Generation, door).Accepted);
+        Assert.True(selectingAdapter.Selection.Execute(selecting.Generation, RuntimeSelectionCommand.UseSelected).Accepted);
+
+        (GameRuntime runtime, DirectGameRuntimeCommandAdapter adapter, FixtureSessionOperations operations) =
+            CreateStartedHarness();
+        runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject { ObjectId = door, Type = ItemType.Misc });
+        var directUse = new List<byte[]>();
+        operations.Sessions[^1].GameActionCapture = body => directUse.Add(body);
+
+        Assert.True(adapter.TryUseObject(door));
+
+        byte[] expected = Assert.Single(selectedUse);
+        byte[] sent = Assert.Single(directUse);
+        Assert.Equal(expected, sent);
+        Assert.Null(runtime.ActionOwner.Selection.SelectedObjectId);
+        selecting.Dispose();
+        runtime.Dispose();
+    }
+
+    [Fact]
+    public void UseObject_RefusesAnObjectTheClientDoesNotKnow_WithoutSendingAnything()
+    {
+        (GameRuntime runtime, DirectGameRuntimeCommandAdapter adapter, FixtureSessionOperations operations) =
+            CreateStartedHarness();
+        var gameActions = new List<byte[]>();
+        operations.Sessions[^1].GameActionCapture = body => gameActions.Add(body);
+
+        Assert.False(adapter.TryUseObject(0x70000099u));
+
+        Assert.Empty(gameActions);
+        runtime.Dispose();
+    }
+
+    /// <summary>
+    /// A walk checks a door's lock by appraising it quietly: the server is asked the way an
+    /// examine asks, and its answer does not become the appraisal the character looks at.
+    /// </summary>
+    [Fact]
+    public void AppraiseQuietly_SendsTheSameAppraisalAsAnExamine_AndItsAnswerIsQuiet()
+    {
+        const uint door = 0x70000012u;
+        (GameRuntime examining, DirectGameRuntimeCommandAdapter examiningAdapter, FixtureSessionOperations examiningOperations) =
+            CreateStartedHarness();
+        examining.InventoryOwner.Objects.AddOrUpdate(new ClientObject { ObjectId = door, Type = ItemType.Misc });
+        var examined = new List<byte[]>();
+        examiningOperations.Sessions[^1].GameActionCapture = body => examined.Add(body);
+        Assert.True(examiningAdapter.Selection.SelectObject(examining.Generation, door).Accepted);
+        Assert.True(examiningAdapter.Selection.Execute(examining.Generation, RuntimeSelectionCommand.ExamineSelected).Accepted);
+
+        (GameRuntime runtime, DirectGameRuntimeCommandAdapter adapter, FixtureSessionOperations operations) =
+            CreateStartedHarness();
+        var appraised = new List<byte[]>();
+        operations.Sessions[^1].GameActionCapture = body => appraised.Add(body);
+
+        Assert.True(adapter.TryAppraiseQuietly(door));
+
+        Assert.Equal(Assert.Single(examined), Assert.Single(appraised));
+        RuntimeAppraisalResponseAcceptance answer =
+            runtime.ActionOwner.Transactions.AcceptAppraisalResponse(door);
+        Assert.True(answer.Accepted);
+        Assert.True(answer.Quiet);
+        Assert.False(
+            examining.ActionOwner.Transactions.AcceptAppraisalResponse(door).Quiet);
+        examining.Dispose();
+        runtime.Dispose();
+    }
+
     [Fact]
     public void Fellowship_Create_SendsTheCreateOpcodeWithNameAndShareXp()
     {

@@ -25,7 +25,7 @@ internal sealed class AppAutomationSurface
       ICombatAutomation, IEquipmentAutomation, IItemAutomation,
       ILootAutomation, IFellowshipAutomation, IEnchantmentAutomation,
       IRuntimeCommunicationObserver,
-      INavigationAutomation, IWorldObjectAutomation, IWorldTimeAutomation,
+      IWorldObjectAutomation, IWorldTimeAutomation,
       ILoginAutomation, INetworkAutomation, IRecoveryAutomation,
       IProjectileAutomation, ISelectionAutomation, IDisposable
 {
@@ -33,6 +33,7 @@ internal sealed class AppAutomationSurface
     private const int MaximumPluginChatMessages = 512;
     private const double PeerHeartbeatSeconds = 5d;
     private readonly object _gate = new();
+    private readonly AcDream.Runtime.Navigation.RuntimeNavigationAutomation _navigation;
     private readonly IEvents? _events;
     private readonly LocalPluginPeerRegistry _peers;
     private readonly string[] _peerTags;
@@ -100,6 +101,7 @@ internal sealed class AppAutomationSurface
         LocalPluginPeerRegistry? peers = null,
         IReadOnlyList<string>? peerTags = null)
     {
+        _navigation = new AcDream.Runtime.Navigation.RuntimeNavigationAutomation(() => IsAvailable);
         _pluginCommands = new PluginCommandRegistry((verb, error) =>
             Console.WriteLine(
                 $"[PluginCommand:{verb}] {error.GetBaseException().Message}"));
@@ -148,7 +150,7 @@ internal sealed class AppAutomationSurface
     public ILootAutomation Loot => this;
     public IFellowshipAutomation Fellowship => this;
     public IEnchantmentAutomation Enchantments => this;
-    public INavigationAutomation Navigation => this;
+    public INavigationAutomation Navigation => _navigation;
     public IWorldObjectAutomation Objects => this;
     public IWorldTimeAutomation WorldTime => this;
     public ILoginAutomation Login => this;
@@ -318,6 +320,7 @@ internal sealed class AppAutomationSurface
                 return;
             DetachLocked();
             _runtime = runtime;
+            _navigation.Bind(runtime);
             _communication = runtime.CommunicationOwner;
             _communicationSubscription =
                 runtime.CommunicationOwner.Events.Subscribe(this);
@@ -362,7 +365,12 @@ internal sealed class AppAutomationSurface
         ArgumentNullException.ThrowIfNull(commands);
         lock (_gate)
             _sessionCommands = commands;
+        _navigation.BindCommands(commands.MovementCommands, () => commands.Generation);
     }
+
+    /// <summary>The walks plugins ask for through the navigation API.</summary>
+    public void BindNavigationWalk(AcDream.Runtime.Navigation.NavigationWalkController walk) =>
+        _navigation.BindWalk(walk);
 
     public void BindSpeciesNameResolver(Func<int, string> resolver)
     {
@@ -480,6 +488,7 @@ internal sealed class AppAutomationSurface
         _character = null;
         _cast = null;
         _runtime = null;
+        _navigation.UnbindRuntime();
         _communication = null;
         _dismissGhost = null;
         _trackedEnchantments.Clear();
@@ -507,7 +516,7 @@ internal sealed class AppAutomationSurface
 
         ICharacterInfo character = this;
         PluginNavigationSnapshot navigation =
-            ((INavigationAutomation)this).Snapshot;
+            _navigation.Snapshot;
         if (!navigation.IsAvailable || character.ObjectId == 0u)
         {
             _peers.Withdraw();
@@ -1443,250 +1452,9 @@ internal sealed class AppAutomationSurface
             ? result
             : result with { DebugSamples = samples.ToArray() };
 
-    // ── INavigationAutomation ─────────────────────────────────────────────
-    PluginNavigationSnapshot INavigationAutomation.Snapshot
-    {
-        get
-        {
-            GameRuntime? runtime;
-            lock (_gate)
-                runtime = _runtime;
-            if (runtime is null || !IsAvailable)
-                return default;
-
-            RuntimeMovementSnapshot movement = runtime.Movement.Snapshot;
-            if (!movement.HasController)
-                return default;
-            RuntimePortalSnapshot portal = runtime.Portal.Snapshot;
-            PluginNavigationPosition livePosition =
-                ProjectNavigationPosition(movement.Position);
-            PluginNavigationPosition confirmedPosition = livePosition;
-            ulong confirmedRevision = 0UL;
-            if (runtime.EntityObjects.Entities.TryGetActive(
-                    runtime.PlayerIdentity.ServerGuid,
-                    out RuntimeEntityRecord localRecord)
-                && ConvertPosition(localRecord.Snapshot.Position) is { } accepted)
-            {
-                confirmedPosition = ProjectNavigationPosition(accepted);
-                confirmedRevision = localRecord.PositionAuthorityVersion;
-            }
-            return new PluginNavigationSnapshot(
-                IsAvailable: true,
-                IsPortalSpace: portal.Kind != RuntimePortalKind.None
-                    && !portal.Completed
-                    && !portal.Cancelled,
-                LocalObjectId: runtime.PlayerIdentity.ServerGuid,
-                Position: livePosition,
-                IsMoving: movement.Velocity.LengthSquared() > 0.0001f
-                    || movement.HasCommandInput,
-                IsAirborne: movement.IsAirborne)
-            {
-                ConfirmedPosition = confirmedPosition,
-                ConfirmedPositionRevision = confirmedRevision,
-            };
-        }
-    }
-
-    public bool TryGetObject(uint objectId, out PluginNavigationObject value)
-    {
-        GameRuntime? runtime;
-        lock (_gate)
-            runtime = _runtime;
-        if (runtime is null || !IsAvailable || objectId == 0u)
-        {
-            value = default;
-            return false;
-        }
-
-        RuntimeMovementSnapshot movement = runtime.Movement.Snapshot;
-        if (objectId == runtime.PlayerIdentity.ServerGuid)
-        {
-            value = new PluginNavigationObject(
-                objectId,
-                runtime.InventoryOwner.Objects.Get(objectId)?.Name
-                    ?? string.Empty,
-                ProjectNavigationPosition(movement.Position));
-            return movement.HasController;
-        }
-
-        if (!runtime.EntityObjects.Entities.TryGetActive(
-                objectId,
-                out RuntimeEntityRecord record))
-        {
-            value = default;
-            return false;
-        }
-
-        Position? position = record.PhysicsBody?.CellPosition
-            ?? ConvertPosition(record.Snapshot.Position);
-        if (position is not { } current)
-        {
-            value = default;
-            return false;
-        }
-        value = new PluginNavigationObject(
-            objectId,
-            runtime.InventoryOwner.Objects.Get(objectId)?.Name
-                ?? record.Snapshot.Name
-                ?? $"0x{objectId:X8}",
-            ProjectNavigationPosition(current));
-        value = EnrichNavigationObject(
-            value,
-            runtime.InventoryOwner.Objects.Get(objectId));
-        return true;
-    }
-
-    public bool TryFindObject(
-        string name,
-        in PluginNavigationPosition near,
-        double maximumDistanceMeters,
-        out PluginNavigationObject value)
-    {
-        GameRuntime? runtime;
-        lock (_gate)
-            runtime = _runtime;
-        if (runtime is null
-            || !IsAvailable
-            || string.IsNullOrWhiteSpace(name)
-            || !double.IsFinite(maximumDistanceMeters)
-            || maximumDistanceMeters < 0d)
-        {
-            value = default;
-            return false;
-        }
-
-        double nearestDistance = maximumDistanceMeters;
-        PluginNavigationObject nearest = default;
-        bool found = false;
-        foreach (RuntimeEntityRecord record in runtime.EntityObjects.Entities.ActiveRecords)
-        {
-            uint objectId = record.ServerGuid;
-            string candidateName = runtime.InventoryOwner.Objects.Get(objectId)?.Name
-                ?? record.Snapshot.Name
-                ?? string.Empty;
-            if (!candidateName.Equals(name, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            Position? source = record.PhysicsBody?.CellPosition
-                ?? ConvertPosition(record.Snapshot.Position);
-            if (source is not { } position)
-                continue;
-            PluginNavigationPosition candidate = ProjectNavigationPosition(position);
-            double distance = near.HorizontalDistanceMeters(candidate);
-            if (distance > nearestDistance)
-                continue;
-
-            nearestDistance = distance;
-            nearest = EnrichNavigationObject(
-                new PluginNavigationObject(objectId, candidateName, candidate),
-                runtime.InventoryOwner.Objects.Get(objectId));
-            found = true;
-        }
-
-        value = nearest;
-        return found;
-    }
-
-    public IReadOnlyList<PluginNavigationObject> CaptureObjects()
-    {
-        GameRuntime? runtime;
-        lock (_gate)
-            runtime = _runtime;
-        if (runtime is null || !IsAvailable)
-            return Array.Empty<PluginNavigationObject>();
-
-        var result = new List<PluginNavigationObject>();
-        foreach (RuntimeEntityRecord record in runtime.EntityObjects.Entities.ActiveRecords)
-        {
-            Position? source = record.PhysicsBody?.CellPosition
-                ?? ConvertPosition(record.Snapshot.Position);
-            if (source is not { } position)
-                continue;
-            ClientObject? item = runtime.InventoryOwner.Objects.Get(record.ServerGuid);
-            string name = item?.Name
-                ?? record.Snapshot.Name
-                ?? $"0x{record.ServerGuid:X8}";
-            result.Add(EnrichNavigationObject(
-                new PluginNavigationObject(
-                    record.ServerGuid,
-                    name,
-                    ProjectNavigationPosition(position)),
-                item));
-        }
-        result.Sort(static (left, right) => left.ObjectId.CompareTo(right.ObjectId));
-        return result;
-    }
-
-    public PluginNavigationCommandStatus SetMovementIntent(
-        in PluginMovementIntent intent)
-    {
-        CurrentGameRuntimeAdapter? commands;
-        lock (_gate)
-            commands = _sessionCommands;
-        if (commands is null || !IsAvailable)
-            return PluginNavigationCommandStatus.Unavailable;
-        RuntimeCommandResult result = commands.MovementCommands.SetIntent(
-            commands.Generation,
-            new MovementInput(
-                intent.Forward,
-                intent.Backward,
-                intent.StrafeLeft,
-                intent.StrafeRight,
-                intent.TurnLeft,
-                intent.TurnRight,
-                intent.Run,
-                MouseDeltaX: 0f,
-                intent.Jump));
-        return result.Status == RuntimeCommandStatus.Accepted
-            ? PluginNavigationCommandStatus.Accepted
-            : PluginNavigationCommandStatus.Rejected;
-    }
-
-    public PluginNavigationCommandStatus ClearMovementIntent()
-    {
-        CurrentGameRuntimeAdapter? commands;
-        lock (_gate)
-            commands = _sessionCommands;
-        if (commands is null || !IsAvailable)
-            return PluginNavigationCommandStatus.Unavailable;
-        RuntimeCommandResult result = commands.MovementCommands.ClearIntent(
-            commands.Generation);
-        return result.Status == RuntimeCommandStatus.Accepted
-            ? PluginNavigationCommandStatus.Accepted
-            : PluginNavigationCommandStatus.Rejected;
-    }
-
-    public PluginNavigationCommandStatus FaceHeading(float headingDegrees)
-    {
-        CurrentGameRuntimeAdapter? commands;
-        lock (_gate)
-            commands = _sessionCommands;
-        if (commands is null || !IsAvailable)
-            return PluginNavigationCommandStatus.Unavailable;
-        RuntimeCommandResult result =
-            commands.MovementCommands.TurnToHeading(
-                commands.Generation,
-                headingDegrees);
-        return result.Status == RuntimeCommandStatus.Accepted
-            ? PluginNavigationCommandStatus.Accepted
-            : PluginNavigationCommandStatus.Rejected;
-    }
-
     internal static PluginNavigationPosition ProjectNavigationPosition(
-        Position position)
-    {
-        uint cellId = position.ObjCellId;
-        uint blockX = (cellId >> 24) & 0xFFu;
-        uint blockY = (cellId >> 16) & 0xFFu;
-        System.Numerics.Vector3 local = position.Frame.Origin;
-        return new PluginNavigationPosition(
-            cellId,
-            (((double)blockX - 127d) * 192d + local.X - 84d) / 240d,
-            (((double)blockY - 127d) * 192d + local.Y - 84d) / 240d,
-            local.Z / 240d,
-            MoveToMath.GetHeading(position.Frame.Orientation),
-            (cellId & 0xFFFFu) is >= 1u and <= 0x40u);
-    }
+        Position position) =>
+        AcDream.Runtime.Navigation.RuntimeNavigationProjection.Position(position);
 
     // ── IWorldObjectAutomation ────────────────────────────────────────────
     bool IWorldObjectAutomation.IsAvailable => IsAvailable;
@@ -1913,43 +1681,12 @@ internal sealed class AppAutomationSurface
 
     private static PluginNavigationObject EnrichNavigationObject(
         in PluginNavigationObject value,
-        ClientObject? item)
-    {
-        if (item is null)
-            return value;
-        bool hasOpen = item.Properties.Bools.TryGetValue(
-            (uint)PropertyBool.Open,
-            out bool isOpen);
-        bool hasLocked = item.Properties.Bools.TryGetValue(
-            (uint)PropertyBool.Locked,
-            out bool isLocked);
-        return value with
-        {
-            IsDoor = ((PublicWeenieFlags)(item.PublicWeenieBitfield ?? 0u)
-                & PublicWeenieFlags.Door) != 0,
-            IsOpen = hasOpen && isOpen,
-            IsLocked = hasLocked && isLocked,
-            HasLockState = hasOpen || hasLocked,
-            LockDifficulty = item.Properties.GetInt(
-                (uint)PropertyInt.ResistLockpick),
-        };
-    }
+        ClientObject? item) =>
+        AcDream.Runtime.Navigation.RuntimeNavigationProjection.Enrich(value, item);
 
     private static Position? ConvertPosition(
         AcDream.Core.Net.Messages.CreateObject.ServerPosition? position) =>
-        position is not { } value
-            ? null
-            : new Position(
-                value.LandblockId,
-                new System.Numerics.Vector3(
-                    value.PositionX,
-                    value.PositionY,
-                    value.PositionZ),
-                new System.Numerics.Quaternion(
-                    value.RotationX,
-                    value.RotationY,
-                    value.RotationZ,
-                    value.RotationW));
+        AcDream.Runtime.Navigation.RuntimeNavigationProjection.FromServer(position);
 
     public bool IsCasting
     {

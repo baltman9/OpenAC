@@ -8,13 +8,16 @@ internal sealed class HeadlessAutomationSurface : IAutomationSurface, IPluginCha
 {
     private readonly GameRuntime _runtime;
     private readonly Func<string, bool>? _submitChatText;
+    private readonly INavigationAutomation _navigation;
 
     internal HeadlessAutomationSurface(
         GameRuntime runtime,
-        Func<string, bool>? submitChatText = null)
+        Func<string, bool>? submitChatText = null,
+        INavigationAutomation? navigation = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _submitChatText = submitChatText;
+        _navigation = navigation ?? NoOpAutomationSurface.Instance.Navigation;
     }
 
     public bool IsAvailable =>
@@ -24,6 +27,7 @@ internal sealed class HeadlessAutomationSurface : IAutomationSurface, IPluginCha
     public ISpellCatalog Spells => NoOpAutomationSurface.Instance.Spells;
     public IMagicCommands Magic => NoOpAutomationSurface.Instance.Magic;
     public IPluginChat Chat => this;
+    public INavigationAutomation Navigation => _navigation;
 
     public void PostSystemMessage(string text) =>
         _runtime.CommunicationOwner.AddText(text, RetailLogTextType.Default);
