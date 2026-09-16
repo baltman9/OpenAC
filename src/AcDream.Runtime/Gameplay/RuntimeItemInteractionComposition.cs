@@ -88,6 +88,10 @@ internal static class RuntimeItemInteractionComposition
                 Live()?.SendGiveObject(target, item, amount),
             dragOnPlayerOpensSecureTrade: () =>
                 character.Options.DragItemOnPlayerOpensSecureTrade,
+            mainPackPreferred: () => character.Options.GetOptionBit(
+                AcDream.Core.Net.Messages.CharacterOptionId.MainPackPreferred),
+            confirmVolatileRareUses: () => character.Options.GetOptionBit(
+                AcDream.Core.Net.Messages.CharacterOptionId.ConfirmVolatileRareUse),
             systemMessage: text => communication.AddText(
                 text,
                 Core.Chat.RetailLogTextType.ClientLocal),
