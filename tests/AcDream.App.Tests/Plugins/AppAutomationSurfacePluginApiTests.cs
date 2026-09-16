@@ -5,6 +5,10 @@ using AcDream.Core.Plugins;
 using AcDream.Core.Spells;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
+using AcDream.Core.Net;
+using AcDream.Core.Net.Messages;
+using AcDream.Runtime.Session;
+using System.Net;
 
 namespace AcDream.App.Tests.Plugins;
 
@@ -157,7 +161,8 @@ public sealed class AppAutomationSurfacePluginApiTests
     public void LoginCompleteFiresOnEachInWorldEdgeAndLogoffOnEachExit()
     {
         var events = new WorldEvents();
-        using var runtime = GameRuntimeTestFactory.Create();
+        var (runtime, commands) = CreateRealSession();
+        using var runtimeDisposal = runtime;
         using var surface = new AppAutomationSurface(events);
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         int logins = 0;
@@ -165,15 +170,15 @@ public sealed class AppAutomationSurfacePluginApiTests
         events.LoginComplete += () => logins++;
         events.Logoff += () => logoffs++;
 
-        Enter(runtime);
+        Enter(runtime, commands);
         Assert.Equal(1, logins);
 
-        Leave(runtime);
+        Leave(runtime, commands);
         Assert.Equal(1, logoffs);
 
         // A reconnect keeps the same plugin instance, so the edge must fire
         // again rather than only once per process.
-        Enter(runtime);
+        Enter(runtime, commands);
         Assert.Equal(2, logins);
         Assert.Equal(1, logoffs);
     }
@@ -182,14 +187,15 @@ public sealed class AppAutomationSurfacePluginApiTests
     public void RepeatedInWorldReportsDoNotFireLoginCompleteTwice()
     {
         var events = new WorldEvents();
-        using var runtime = GameRuntimeTestFactory.Create();
+        var (runtime, commands) = CreateRealSession();
+        using var runtimeDisposal = runtime;
         using var surface = new AppAutomationSurface(events);
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         int logins = 0;
         events.LoginComplete += () => logins++;
 
-        Enter(runtime);
-        Enter(runtime);
+        Enter(runtime, commands);
+        Enter(runtime, commands);
 
         Assert.Equal(1, logins);
     }
@@ -213,7 +219,8 @@ public sealed class AppAutomationSurfacePluginApiTests
     public void UnbindingStopsDeathAndLifecycleReports()
     {
         var events = new WorldEvents();
-        using var runtime = GameRuntimeTestFactory.Create();
+        var (runtime, commands) = CreateRealSession();
+        using var runtimeDisposal = runtime;
         using var surface = new AppAutomationSurface(events);
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         int logins = 0;
@@ -222,7 +229,7 @@ public sealed class AppAutomationSurfacePluginApiTests
         events.LocalPlayerDied += deaths.Add;
 
         surface.Unbind();
-        Enter(runtime);
+        Enter(runtime, commands);
         runtime.CommunicationOwner.ReportLocalPlayerDeath("You have died!");
 
         Assert.Equal(0, logins);
@@ -460,15 +467,118 @@ public sealed class AppAutomationSurfacePluginApiTests
         Assert.Equal(new PluginConfirmation(7u, 5, "Continue?"), seen);
     }
 
-    private static void Enter(GameRuntime runtime) =>
-        runtime.EventSink.EmitLifecycle(
-            RuntimeLifecycleState.Starting,
-            RuntimeLifecycleState.InWorld);
+    // Enter/Leave drive a real GameRuntime + LiveSessionController +
+    // LiveSessionHost + DirectGameRuntimeCommandAdapter through Start()/Stop()
+    // -- the exact production command boundary the headless host uses --
+    // rather than fabricating an EmitLifecycle call directly. OnLifecycle
+    // must fire off the same real path production hosts use
+    // (GameRuntime.SyncLifecycleEmission), not off a synthetic delta a real
+    // session would never produce on its own.
+    private static (GameRuntime Runtime, DirectGameRuntimeCommandAdapter Commands) CreateRealSession()
+    {
+        var operations = new RealSessionOperations();
+        GameRuntime runtime = GameRuntimeTestFactory.Create(session: operations);
+        var session = new LiveSessionHost(
+            runtime.Session,
+            new LiveSessionHostBindings(
+                new LiveSessionRoutingFactories(
+                    _ => new NoOpEventRoute(),
+                    _ => new NoOpCommandRoute()),
+                _ => { },
+                new LiveSessionSelectionBindings(
+                    id => runtime.PlayerIdentity.ServerGuid = id,
+                    _ => { },
+                    _ => { },
+                    _ => { },
+                    _ => { },
+                    () => { }),
+                new LiveSessionEnteredWorldBindings(
+                    _ => { },
+                    () => { },
+                    () => { },
+                    _ => { },
+                    () => { }),
+                (_, _, _) => { },
+                () => { },
+                _ => { },
+                _ => { }),
+            new LiveSessionConnectOptions(
+                true,
+                "127.0.0.1",
+                9000,
+                "plugin-api-user",
+                "plugin-api-password"),
+            runtime: runtime);
+        var commands = new DirectGameRuntimeCommandAdapter(runtime, session);
+        return (runtime, commands);
+    }
 
-    private static void Leave(GameRuntime runtime) =>
-        runtime.EventSink.EmitLifecycle(
-            RuntimeLifecycleState.InWorld,
-            RuntimeLifecycleState.Stopping);
+    private static void Enter(GameRuntime runtime, DirectGameRuntimeCommandAdapter commands) =>
+        commands.Start(runtime.Generation);
+
+    private static void Leave(GameRuntime runtime, DirectGameRuntimeCommandAdapter commands) =>
+        commands.Stop(runtime.Generation);
+
+    private sealed class RealSessionOperations : ILiveSessionOperations
+    {
+        public IPEndPoint ResolveEndpoint(string host, int port) =>
+            new(IPAddress.Loopback, port);
+
+        public WorldSession CreateSession(IPEndPoint endpoint) =>
+            new(endpoint, new NoOpTransport());
+
+        public void Connect(WorldSession session, string user, string password) { }
+
+        public CharacterList.Parsed GetCharacters(WorldSession session) =>
+            new(
+                0u,
+                [new CharacterList.Character(0x50000001u, "PluginApiFixture", 0u)],
+                [],
+                11,
+                "PluginApi",
+                true,
+                true);
+
+        public void EnterWorld(WorldSession session, int activeCharacterIndex) { }
+
+        public void Tick(WorldSession session) { }
+
+        public void DisposeSession(WorldSession session) => session.Dispose();
+    }
+
+    private sealed class NoOpTransport : IWorldSessionTransport
+    {
+        public void Send(ReadOnlySpan<byte> datagram) { }
+        public void Send(IPEndPoint remote, ReadOnlySpan<byte> datagram) { }
+
+        public int Receive(
+            Span<byte> destination,
+            TimeSpan timeout,
+            out IPEndPoint? from)
+        {
+            from = null;
+            return -1;
+        }
+
+        public ValueTask<NetReceiveResult> ReceiveAsync(
+            Memory<byte> destination,
+            CancellationToken cancellationToken) =>
+            throw new OperationCanceledException(cancellationToken);
+
+        public void Dispose() { }
+    }
+
+    private sealed class NoOpEventRoute : ILiveSessionEventRouting
+    {
+        public void Attach() { }
+        public void Dispose() { }
+    }
+
+    private sealed class NoOpCommandRoute : ILiveSessionCommandRouting
+    {
+        public void Activate() { }
+        public void Dispose() { }
+    }
 
     private static SpellMetadata Spell(uint spellId, string name) =>
         new(
