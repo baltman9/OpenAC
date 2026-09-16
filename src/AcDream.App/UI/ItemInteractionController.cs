@@ -786,11 +786,20 @@ public sealed class ItemInteractionController : IDisposable
         if (objectId == 0u || _objects.Get(objectId) is not { } item)
             return;
 
+        // ReadyForInventoryRequest is hardcoded true here rather than
+        // read live: this is called at the point Use is already being
+        // dispatched, after the caller's own busy/reservation gate has
+        // already been satisfied (and usually while that reservation is
+        // itself held) -- re-reading the live busy state here would see
+        // that same reservation and refuse to produce any actions at
+        // all, including the one this method exists to run. This method
+        // only re-derives "is this the kind of use that opens a
+        // landscape container", not "is a request allowed right now".
         var input = new ItemUsePolicyInput(
             Snapshot(item),
             _playerGuid(),
             _groundObjectId(),
-            CanMakeInventoryRequest,
+            ReadyForInventoryRequest: true,
             _activeVendorId(),
             BypassClassification: false,
             UseCurrentSelection: false,

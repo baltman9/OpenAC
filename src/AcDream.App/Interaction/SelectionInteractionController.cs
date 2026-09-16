@@ -44,10 +44,13 @@ internal sealed class SelectionInteractionController
     /// (FailProgressCount_IncrementsOnStall_ButNoGiveUpThresholdExists) --
     /// this is a recovery the automation/interaction layer owns for a
     /// termination signal the movement layer does not provide, not a
-    /// retail movement-timing value. 150 keeps a wide safety margin
-    /// against a merely slow frame rate (a sustained 10 FPS would still
-    /// take 15 seconds to reach it) while still resolving a genuinely
-    /// stuck approach well within a session.
+    /// retail movement-timing value. Each tick is at least one object
+    /// quantum (PhysicsBody.MinQuantum, 1/30 s), so 150 ticks is a floor
+    /// of about 5 seconds of genuine stall, plus the 1-second grace
+    /// CheckProgressMade gives before it starts failing at all -- about
+    /// 6 seconds minimum before this gives up, comfortably resolving a
+    /// genuinely stuck approach within a session without being trigger
+    /// happy about it.
     /// </summary>
     internal const uint StalledApproachGiveUpTicks = 150;
 
@@ -70,6 +73,9 @@ internal sealed class SelectionInteractionController
     // arm time is honoured on the way out too -- previously the expiry
     // toasted unconditionally regardless of which route armed it.
     private bool _pendingUseToastEnabled;
+
+    // Same shape as _pendingUseToastEnabled, for the pickup expiry.
+    private bool _pendingPickupToastEnabled;
 
     public SelectionInteractionController(
         SelectionState selection,
@@ -432,9 +438,11 @@ internal sealed class SelectionInteractionController
     /// walk-then-use path a click on that object takes -- an out-of-range
     /// target gets a queued approach that dispatches the use on arrival --
     /// instead of the inventory-only path the item automation surface uses
-    /// for owned items. Unlike a click, this can arrive on any thread at
-    /// any cadence a plugin chooses, so it is held to every gate a click
-    /// (or an owned item's own automation entry point) is held to: the
+    /// for owned items. Unlike a click, this can arrive at any cadence a
+    /// plugin chooses (called from IEvents.Tick as the plugin API
+    /// requires, but not necessarily once per tick or in response to any
+    /// particular game event), so it is held to every gate a click (or an
+    /// owned item's own automation entry point) is held to: the
     /// use-throttle, the one-request-at-a-time inventory gate, and "don't
     /// preempt whatever is already in flight" rather than cancelling it.
     /// </summary>
@@ -443,7 +451,8 @@ internal sealed class SelectionInteractionController
         // Every exit from this method is logged at Information level: it
         // is the plugin surface's only entry point for using a world
         // object it does not own, it can fire at any cadence a plugin
-        // chooses, and PerformUse itself never logs for this route
+        // chooses (from the Tick thread, per the plugin API's own
+        // contract), and PerformUse itself never logs for this route
         // (log: false below) -- without a line here a "Started" that
         // silently never completes (see HandleUseApproachCompletion) left
         // no trace at all in the host's own log.
@@ -467,22 +476,6 @@ internal sealed class SelectionInteractionController
             return AutomationUseOutcome.Busy;
         if (!_items.EnsureInventoryRequestReady())
             return AutomationUseOutcome.Busy;
-
-        // A click on a landscape container (a corpse, chest, vendor
-        // stock, etc.) arms ExternalContainers.RequestOpen for it as one
-        // of the SAME policy actions that decides to send Use --
-        // BuildUsingItemActions's SetGroundObject action, evaluated
-        // alongside SendUse in ItemInteractionPolicy.DecideUse. This
-        // automation route dispatches Use through a different seam
-        // (PerformUse -> RuntimeInteractionTransactionState.TryDispatchUse)
-        // that bypasses that policy entirely, so without arming it here
-        // first the server's ViewContents response for a freshly-opened
-        // container had nothing armed to receive it and was silently
-        // dropped: the plugin's Use reported Started and nothing opened.
-        // Re-running the exact same policy evaluation (rather than
-        // duplicating its not-owned/IsContainer/useable/not-targeted
-        // predicate here) means this only arms when a click would have.
-        _items.ArmLandscapeContainerRequest(serverGuid);
 
         ItemUseRequestReservation reservation = _items.BeginAutomationUseReservation();
         // The reservation holds the busy count from this point; a throw
@@ -596,6 +589,18 @@ internal sealed class SelectionInteractionController
         }
         if (result == RuntimeInteractionDispatchResult.Dispatched)
         {
+            // Arm the external-container/vendor-open side effect only
+            // now that Use has actually gone out -- not earlier, where a
+            // Busy or secure-trade refusal above (or a NotInWorld/
+            // Rejected/NotUseable result right here) would mean nothing
+            // was ever sent. Arming on a call that never dispatched
+            // would still call ExternalContainers.RequestOpen, which
+            // closes whatever container the user already has open
+            // (ExternalContainerState's ReplacementRequested transition)
+            // and repoints RequestedContainerId at a container whose Use
+            // never went anywhere -- dropping the real, in-flight
+            // response for the container that was actually open.
+            _items.ArmLandscapeContainerRequest(serverGuid);
             if (log)
                 Console.WriteLine($"[interaction] use guid=0x{serverGuid:X8} seq={sequence}");
             return AutomationUseOutcome.Started;
@@ -683,6 +688,18 @@ internal sealed class SelectionInteractionController
                             token.ControllerLifetime,
                             token.ApproachGeneration),
                         out _);
+                    // Every current SendPickup caller (a click's own
+                    // place-in-backpack, and the plugin surface's
+                    // PlaceWorldItemInBackpack alike) wants the expiry
+                    // toast; there is no silent automation pickup route
+                    // today the way TryUseForAutomation is one for Use.
+                    // Tracking the flag here rather than hardcoding the
+                    // toast in the expiry keeps the two expiries the
+                    // same shape, so a future silent pickup route (if
+                    // one is ever added) only has to set this to false
+                    // instead of re-discovering this same bug.
+                    if (armed)
+                        _pendingPickupToastEnabled = true;
                 });
             if (!started || !armed)
             {
@@ -839,6 +856,12 @@ internal sealed class SelectionInteractionController
             _toast?.Invoke("Not in world");
         if (result == RuntimeInteractionDispatchResult.Dispatched)
         {
+            // Same rule as the immediate-dispatch branch above: arm only
+            // once Use has actually gone out, not before -- a walk that
+            // arrives but then fails to dispatch (NotInWorld/Rejected/
+            // NotUseable) must not touch the user's already-open
+            // container.
+            _items.ArmLandscapeContainerRequest(pending.ServerGuid);
             Console.WriteLine(
                 $"[interaction] use guid=0x{pending.ServerGuid:X8} seq={sequence} (arrival-gated)");
         }
@@ -873,11 +896,28 @@ internal sealed class SelectionInteractionController
     /// </summary>
     private void ExpireStalledApproach()
     {
-        if (_movement.CurrentApproachFailProgressCount() is not { } failCount
-            || failCount < StalledApproachGiveUpTicks)
+        if (_movement.CurrentApproachFailProgressCount() is not { } failCount)
         {
+            // No move-to is actively in progress at all. This should be
+            // unreachable while a use/pickup is still pending: arming
+            // either always starts a move-to, and PlayerModeController
+            // wires both MoveToComplete and MoveToCancelled to publish a
+            // completion unconditionally, which clears the pending state
+            // through HandleApproachCompletion either way. If this ever
+            // logs, the real bug is upstream of this method (a pending
+            // state surviving a move-to that already ended some other
+            // way) -- log it rather than guessing at a watchdog to paper
+            // over an invariant that should never break.
+            if (_transactions.HasPendingUse || _transactions.HasPendingPickup)
+            {
+                Console.WriteLine(
+                    "[interaction] invariant violation: a pending use or pickup is armed with no active move-to in progress");
+            }
             return;
         }
+
+        if (failCount < StalledApproachGiveUpTicks)
+            return;
 
         if (_transactions.TryCancelPendingUse(out RuntimePendingUse pendingUse))
         {
@@ -898,7 +938,8 @@ internal sealed class SelectionInteractionController
                 pendingPickup.PendingPlacementToken);
             Console.WriteLine(
                 $"[interaction] pickup item=0x{pendingPickup.ServerGuid:X8} approach stalled for {failCount} tick(s) -- refused");
-            _toast?.Invoke("Your approach never completed.");
+            if (_pendingPickupToastEnabled)
+                _toast?.Invoke("Your approach never completed.");
         }
     }
 

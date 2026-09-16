@@ -14,9 +14,15 @@ internal interface IPlayerInteractionMovementSink
     /// <summary>
     /// The local player's current move-to's consecutive per-tick
     /// progress-failure count (MoveToManager.FailProgressCount), or null
-    /// when there is no active move-to to read. Resets to 0 the instant
-    /// the move makes progress again, so a caller polling this to decide
-    /// whether to give up on a stalled approach never mistakes a slow but
+    /// when there is no move-to actively in progress
+    /// (MoveToManager.IsMovingTo() is false) to read one from.
+    /// MoveToManager itself persists across moves and its
+    /// FailProgressCount field does not reset to null between them --
+    /// it reads 0 whether nothing has ever moved or the current move is
+    /// making fine progress -- so this checks IsMovingTo() rather than
+    /// returning that raw field. Resets to 0 the instant an active move
+    /// makes progress again, so a caller polling this to decide whether
+    /// to give up on a stalled approach never mistakes a slow but
     /// still-advancing walk for a stuck one.
     /// </summary>
     uint? CurrentApproachFailProgressCount();
@@ -81,7 +87,12 @@ internal sealed class PlayerInteractionMovementSink(
     }
 
     public uint? CurrentApproachFailProgressCount()
-        => _player()?.MoveTo?.FailProgressCount;
+    {
+        MoveToManager? moveTo = _player()?.MoveTo;
+        return moveTo is { } manager && manager.IsMovingTo()
+            ? manager.FailProgressCount
+            : null;
+    }
 
     public void CancelApproach()
         => _player()?.Movement.CancelMoveTo(WeenieError.ActionCancelled);

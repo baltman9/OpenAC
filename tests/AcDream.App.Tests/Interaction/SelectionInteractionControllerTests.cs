@@ -761,6 +761,41 @@ public sealed class SelectionInteractionControllerTests
     }
 
     [Fact]
+    public void ABusyRefusedAutomationUseDoesNotArmTheExternalContainerRequest()
+    {
+        // MEDIUM-1: arming must happen only where Use is actually
+        // dispatched (immediately, or on arrival), never earlier where a
+        // Busy refusal would still return without ever sending anything.
+        // A plugin Use(B) refused Busy while A's own walk-then-use is
+        // still in flight must not call ExternalContainers.RequestOpen
+        // for B -- that would close whatever container the user already
+        // has open (ExternalContainerState's ReplacementRequested
+        // transition) and repoint RequestedContainerId at a container
+        // whose Use never actually went anywhere.
+        const uint otherContainer = 0x7000_0099u;
+        var h = new Harness();
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = otherContainer,
+            Name = "OtherChest",
+            Type = ItemType.Container,
+            Useability = ItemUseability.Remote,
+            ItemsCapacity = 6,
+        });
+        h.SetApproach(closeRange: false);
+        h.Controller.SendUse(Target);
+        Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
+
+        h.SetApproach(closeRange: true, serverGuid: otherContainer);
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(otherContainer);
+
+        Assert.Equal(AutomationUseOutcome.Busy, outcome);
+        Assert.Null(h.RequestedExternalContainerId);
+        // The original approach is still the one armed.
+        Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
+    }
+
+    [Fact]
     public void AutomationUseOfANotUseableFarTargetIsRejectedWithoutApproaching()
     {
         var h = new Harness();
