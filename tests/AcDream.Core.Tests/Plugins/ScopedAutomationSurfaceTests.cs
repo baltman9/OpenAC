@@ -29,7 +29,7 @@ public sealed class ScopedAutomationSurfaceTests
         // Sanity check: if this drops below the known count, the interface
         // shrank and the loop below silently checks less than intended.
         Assert.True(
-            properties.Length >= 20,
+            properties.Length >= 22,
             "IAutomationSurface should still have every member this test knows about.");
 
         var checkedMembers = new List<string>();
@@ -59,7 +59,7 @@ public sealed class ScopedAutomationSurfaceTests
         // Every property this loop actually walked should be one of the 18
         // known forwarders, guarding against the loop silently checking
         // zero properties if reflection ever returned nothing.
-        Assert.Equal(18, checkedMembers.Count);
+        Assert.Equal(20, checkedMembers.Count);
 
         scoped.Dispose();
     }
@@ -294,6 +294,8 @@ public sealed class ScopedAutomationSurfaceTests
         public IRecoveryAutomation Recovery { get; } = new FakeRecoveryAutomation();
         public IProjectileAutomation Projectiles { get; } = new FakeProjectileAutomation();
         public ISelectionAutomation Selection { get; } = new FakeSelectionAutomation();
+        public ITradeAutomation Trade { get; } = new FakeTradeAutomation();
+        public IVendorAutomation Vendor { get; } = new FakeVendorAutomation();
     }
 
     private sealed class FakeCharacterInfo : ICharacterInfo
@@ -395,4 +397,8 @@ public sealed class ScopedAutomationSurfaceTests
     private sealed class FakeProjectileAutomation : IProjectileAutomation;
 
     private sealed class FakeSelectionAutomation : ISelectionAutomation;
+
+    private sealed class FakeTradeAutomation : ITradeAutomation;
+
+    private sealed class FakeVendorAutomation : IVendorAutomation;
 }

@@ -13,6 +13,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     private readonly ScopedPluginCommandRegistry _commands;
     private readonly ScopedLootClassifierRegistry _lootClassifiers;
     private readonly ScopedAutomationSurface _automation;
+    private readonly ScopedHotkeyRegistry _hotkeys;
     private bool _disposed;
 
     internal ScopedPluginHost(
@@ -36,6 +37,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             pluginId,
             pluginDisplayName);
         _automation = new ScopedAutomationSurface(inner);
+        _hotkeys = new ScopedHotkeyRegistry(inner.Hotkeys, pluginId);
     }
 
     public bool HasUi => _inner.HasUi;
@@ -55,6 +57,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
 
     public IPluginClipboard Clipboard => _inner.Clipboard;
     public IAutomationSurface Automation => _automation;
+    public IHotkeyRegistry Hotkeys => _hotkeys;
 
     private sealed class ScopedPluginStorage(
         IPluginStorage inner,
@@ -112,6 +115,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         _commands.Dispose();
         _lootClassifiers.Dispose();
         _automation.Dispose();
+        _hotkeys.Dispose();
     }
 
     /// <summary>
@@ -178,6 +182,8 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         public IRecoveryAutomation Recovery => Inner.Recovery;
         public IProjectileAutomation Projectiles => Inner.Projectiles;
         public ISelectionAutomation Selection => Inner.Selection;
+        public ITradeAutomation Trade => Inner.Trade;
+        public IVendorAutomation Vendor => Inner.Vendor;
 
         public void Dispose()
         {
@@ -460,6 +466,52 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         public void Dispose()
         {
             IDisposable[] registrations;
+            lock (_gate)
+            {
+                if (_disposed)
+                    return;
+                _disposed = true;
+                registrations = _registrations.ToArray();
+                _registrations.Clear();
+            }
+            for (int index = registrations.Length - 1; index >= 0; index--)
+                registrations[index].Dispose();
+        }
+    }
+
+    private sealed class ScopedHotkeyRegistry(IHotkeyRegistry inner, string pluginId)
+        : IHotkeyRegistry,
+          IDisposable
+    {
+        private readonly object _gate = new();
+        private readonly List<IPluginHotkeyRegistration> _registrations = [];
+        private bool _disposed;
+
+        public IPluginHotkeyRegistration Register(
+            string id,
+            string displayName,
+            PluginKeyChord defaultChord,
+            Action handler)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            ArgumentException.ThrowIfNullOrWhiteSpace(id);
+            IPluginHotkeyRegistration registration =
+                inner.Register(pluginId + ":" + id, displayName, defaultChord, handler);
+            lock (_gate)
+            {
+                if (!_disposed)
+                {
+                    _registrations.Add(registration);
+                    return registration;
+                }
+            }
+            registration.Dispose();
+            throw new ObjectDisposedException(nameof(ScopedHotkeyRegistry));
+        }
+
+        public void Dispose()
+        {
+            IPluginHotkeyRegistration[] registrations;
             lock (_gate)
             {
                 if (_disposed)
