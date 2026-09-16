@@ -122,9 +122,12 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
     public uint CurrentAppraisalId => _currentAppraisalId;
 
     /// <summary>
-    /// Raised when the client accepts the FIRST appraisal response for an
-    /// object -- the moment appraisal data actually lands, as opposed to a
-    /// refresh of data already held.
+    /// Raised for every accepted appraisal response for an object,
+    /// including a RefreshCurrentAppraisal re-request that lands on an
+    /// object already current -- its data can still have changed since the
+    /// first reveal. Use AcceptAppraisalResponse's FirstResponse result to
+    /// distinguish the initial reveal from a refresh if that matters to the
+    /// caller; this event by itself does not.
     /// </summary>
     public event Action<uint>? AppraisalReceived;
     public int OutboundCount => _outbound.Count;
@@ -326,9 +329,18 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
             _currentAppraisalId = objectId;
             _inventory.CompleteUse(0u);
             IncrementRevision();
-            try { AppraisalReceived?.Invoke(objectId); }
-            catch { /* observer errors do not interrupt appraisal bookkeeping */ }
         }
+
+        // Raised for every accepted response, not just the first: a
+        // RefreshCurrentAppraisal re-request lands here with
+        // firstResponse == false because the object is already current, but
+        // its payload can still have changed (durability ticked, a stack
+        // count moved) and observers need the update. Consumers that only
+        // care about the initial reveal can dedupe on FirstResponse
+        // themselves; this event alone cannot tell them which response an
+        // invocation carries, so IEvents.ObjectChanged is not affected.
+        try { AppraisalReceived?.Invoke(objectId); }
+        catch { /* observer errors do not interrupt appraisal bookkeeping */ }
 
         return new RuntimeAppraisalResponseAcceptance(
             Accepted: true,

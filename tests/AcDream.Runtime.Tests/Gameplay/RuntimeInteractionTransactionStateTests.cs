@@ -221,6 +221,34 @@ public sealed class RuntimeInteractionTransactionStateTests
     }
 
     [Fact]
+    public void AppraisalReceivedFiresOnBothTheFirstResponseAndARefresh()
+    {
+        // AcceptAppraisalResponse used to only raise AppraisalReceived on
+        // the first response (objectId == _awaitingAppraisalId). A
+        // RefreshCurrentAppraisal re-request lands on the same objectId as
+        // _currentAppraisalId, so it was silently swallowed: Accepted=true
+        // came back to the caller but no observer ever heard about it.
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+        var received = new List<uint>();
+        state.AppraisalReceived += received.Add;
+
+        Assert.True(state.TryRequestAppraisal(Item, _ => { }));
+        RuntimeAppraisalResponseAcceptance first =
+            state.AcceptAppraisalResponse(Item);
+        Assert.True(first.Accepted);
+        Assert.True(first.FirstResponse);
+        Assert.Equal(new[] { Item }, received);
+
+        Assert.True(state.RefreshCurrentAppraisal(_ => { }));
+        RuntimeAppraisalResponseAcceptance refresh =
+            state.AcceptAppraisalResponse(Item);
+        Assert.True(refresh.Accepted);
+        Assert.False(refresh.FirstResponse);
+        Assert.Equal(new[] { Item, Item }, received);
+    }
+
+    [Fact]
     public void AppraisalTransportFailureRollsBackOnlyItsBusyReference()
     {
         using var inventory = NewInventory(out _);

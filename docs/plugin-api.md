@@ -155,11 +155,19 @@ tracking, on the same thread as `Tick`, in the host's own delivery order.
 |---|---|
 | `Created` | The object entered the client's object table for the first time. |
 | `Updated` | A non-positional property or other field changed. |
-| `IdentReceived` | The client took delivery of appraisal data for the object. Fires once per fresh appraisal, not on a refresh of data already held. |
+| `IdentReceived` | The client took delivery of appraisal data for the object: the first reveal AND a later refresh of data already held (durability, stack count, and similar can change between requests). |
 | `Moved` | The object's position changed enough to move it into a different cell. An in-cell position update that does not cross a cell boundary reports as `Updated` instead. |
 | `Released` | The object left the client's object table (deleted, withdrawn, or an owned item leaving inventory). |
 
 A bulk container reset carries no single object id and is not reported.
+
+`IdentReceived` is reported from the appraisal response path; every other
+kind is reported from the entity and inventory delta observers, which are
+separate sources delivered in the same `Tick`-thread order but not
+interleaved by a single shared sequence. An item held in inventory can
+therefore raise two `ObjectChanged` calls for one underlying change (one
+from the entity side, one from the inventory side); do not assume exactly
+one call per change for such objects.
 
 `ContainerOpened` / `ContainerClosed` track the client's one open external
 container — a corpse, a chest, a housing storage crate. A vendor's shop pane
@@ -203,7 +211,21 @@ UI's logout control uses. It returns `false` when the surface is not
 `IsAvailable` (no in-world session); it does not report the outcome of the
 logout itself beyond having sent the request.
 
+On the graphical host this returns to the character-select screen with the
+process still running. On the headless host there is no character-select
+screen to return to: `Logout()` tears down the whole session (the same
+teardown a direct disconnect produces) rather than leaving it parked at a
+selection step, so a headless plugin that calls it should expect the
+session to end, not to see another character list.
+
 ## Loot
+
+A classifier is registered under `<pluginId>/<classifierId>` — the id a
+plugin passes to `Register` is scoped by its own manifest id before other
+plugins ever see it. MossTank, for example, registers `"moss-tank"` and is
+visible to the rest of the client as `"<its plugin id>/moss-tank"`; use the
+scoped id, not the bare one, when calling `TryNeedsIdentification` or
+`TryClassifyWithProfile` from a different plugin.
 
 Beyond the live-profile `Classify` a registered `IPluginLootClassifier`
 already provides, two more members exist:
