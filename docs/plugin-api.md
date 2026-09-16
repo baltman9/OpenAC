@@ -233,6 +233,33 @@ is a separate surface (not covered by this event) and does not raise it.
 Replacing one open container with another before it closes still reports a
 `ContainerClosed` for the one that was open.
 
+### Using a world object you don't own
+
+```csharp
+PluginItemCommandResult result = host.Automation.Items.Use(vendorObjectId);
+// result.Status is Started once the walk begins; the vendor/corpse/chest
+// panel (or IEvents.ContainerOpened) follows once the player arrives.
+```
+
+`Items.Use(objectId)` works for two different kinds of target, and picks
+the right path automatically:
+
+- An **owned item** (inventory, equipped, wielded) goes through the same
+  inventory-use path as before — no movement, an immediate `Started` or
+  `Refused`.
+- A **world object** the plugin doesn't own — a vendor, a corpse, a chest,
+  an NPC — walks to it first if it's out of range, the same way a
+  double-click on it does, and dispatches the actual use once the player
+  arrives. `Started` here means the walk (or the immediate use, if already
+  in range) began, not that a container is open yet; watch
+  `IEvents.ContainerOpened` or the vendor automation's own `Opened` event
+  for that. `Refused` means the object isn't useable at all (for example,
+  a target that requires being appraised first); `Busy` means an inventory
+  or approach request was already in flight.
+
+`Apply(objectId, targetObjectId)` — using one item on another — is
+unaffected by this: it still requires `objectId` to be an owned item.
+
 ### Weapon and armor profiles
 
 ```csharp

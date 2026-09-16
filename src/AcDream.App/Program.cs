@@ -178,7 +178,8 @@ var host = new AppPluginHost(
         runtimeOptions.VtankProfileDirectoryOverride
             ?? VtankProfilesDefault.Resolve(applicationPaths.DataDirectory)),
     new AcDream.App.Plugins.WindowPluginClipboard(
-        () => window.ClipboardKeyboard),
+        () => window.ClipboardKeyboard,
+        () => window.ClipboardDispatch),
     hotkeyRegistry);
 GraphicalPluginSession pluginSession = GraphicalPluginSession.Create(
     applicationPaths,

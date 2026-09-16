@@ -279,6 +279,16 @@ public sealed class GameWindow :
     /// retained UI has wired one.
     /// </summary>
     internal Silk.NET.Input.IKeyboard? ClipboardKeyboard => _uiHost?.Keyboard;
+
+    /// <summary>
+    /// Marshals a plugin-driven clipboard write onto this window's own
+    /// thread -- GLFW clipboard calls are main-thread-only and silently
+    /// do nothing when called off it. Constructed with the GameWindow
+    /// instance, so its owner thread is whatever thread built the window.
+    /// </summary>
+    internal AcDream.App.Plugins.MainThreadDispatchQueue ClipboardDispatch { get; } =
+        new();
+
     public AcDream.Core.Chat.ChatLog Chat => _runtimeCommunication.Chat;
     public AcDream.Core.Chat.TurbineChatState TurbineChat =>
         _runtimeCommunication.TurbineChat;
@@ -1058,6 +1068,22 @@ public sealed class GameWindow :
                     InputAction.SelectionNextPlayer,
                 _ => InputAction.None,
             }));
+        _automation?.BindWorldObjectUse(objectId =>
+            result.SelectionInteractions.TryUseForAutomation(objectId) switch
+            {
+                AcDream.App.Interaction.AutomationUseOutcome.Started =>
+                    new AcDream.Plugin.Abstractions.PluginItemCommandResult(
+                        AcDream.Plugin.Abstractions.PluginItemCommandStatus.Started),
+                AcDream.App.Interaction.AutomationUseOutcome.Busy =>
+                    new AcDream.Plugin.Abstractions.PluginItemCommandResult(
+                        AcDream.Plugin.Abstractions.PluginItemCommandStatus.Busy),
+                AcDream.App.Interaction.AutomationUseOutcome.NotUseable =>
+                    new AcDream.Plugin.Abstractions.PluginItemCommandResult(
+                        AcDream.Plugin.Abstractions.PluginItemCommandStatus.Refused,
+                        "That cannot be used."),
+                _ => new AcDream.Plugin.Abstractions.PluginItemCommandResult(
+                    AcDream.Plugin.Abstractions.PluginItemCommandStatus.Unavailable),
+            });
         _retainedUiGameplayBinding = result.RetainedGameplay;
         _paperdollViewportRenderer = result.PaperdollRenderer;
         _paperdollFramePresenter = result.PaperdollPresenter;
@@ -1540,6 +1566,7 @@ public sealed class GameWindow :
         _renderLoopArmed = true;
         using var _updStage = _frameProfiler.BeginStage(
             AcDream.App.Diagnostics.FrameStage.Update);
+        ClipboardDispatch.Drain();
         _frameGraphs.Tick(new AcDream.App.Update.UpdateFrameInput(dt));
         if (_options.LiveMode)
         {

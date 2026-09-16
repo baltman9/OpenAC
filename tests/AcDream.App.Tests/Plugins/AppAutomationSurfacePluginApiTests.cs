@@ -17,6 +17,76 @@ namespace AcDream.App.Tests.Plugins;
 public sealed class AppAutomationSurfacePluginApiTests
 {
     [Fact]
+    public void UsingAWorldObjectThePluginDoesNotOwnRoutesThroughTheWalkToUsePath()
+    {
+        var (runtime, commands) = CreateRealSession();
+        using var runtimeDisposal = runtime;
+        using var surface = new AppAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        commands.Start(runtime.Generation);
+        surface.BindItems(
+            useItem: _ => false,
+            applyItem: (_, _) => false,
+            moveItem: (_, _, _, _) => false,
+            mergeItems: (_, _, _) => false,
+            dropItem: (_, _) => false,
+            giveItem: (_, _, _) => false,
+            pickupItem: (_, _) => false,
+            identifyItem: _ => false);
+
+        // A landscape vendor at distance -- not in the player's
+        // inventory, wielded slots, or backpack chain.
+        const uint vendorId = 0x8000_0001u;
+        runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = vendorId,
+            ContainerId = 0u,
+        });
+
+        uint? walkedTo = null;
+        surface.BindWorldObjectUse(id =>
+        {
+            walkedTo = id;
+            return new PluginItemCommandResult(PluginItemCommandStatus.Started);
+        });
+
+        PluginItemCommandResult result = surface.Items.Use(vendorId);
+
+        Assert.Equal(vendorId, walkedTo);
+        Assert.Equal(PluginItemCommandStatus.Started, result.Status);
+    }
+
+    [Fact]
+    public void UsingAWorldObjectWithoutAWalkToUseRouteBoundIsRefusedRatherThanSilentlyIgnored()
+    {
+        var (runtime, commands) = CreateRealSession();
+        using var runtimeDisposal = runtime;
+        using var surface = new AppAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        commands.Start(runtime.Generation);
+        surface.BindItems(
+            useItem: _ => false,
+            applyItem: (_, _) => false,
+            moveItem: (_, _, _, _) => false,
+            mergeItems: (_, _, _) => false,
+            dropItem: (_, _) => false,
+            giveItem: (_, _, _) => false,
+            pickupItem: (_, _) => false,
+            identifyItem: _ => false);
+
+        const uint vendorId = 0x8000_0002u;
+        runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = vendorId,
+            ContainerId = 0u,
+        });
+
+        PluginItemCommandResult result = surface.Items.Use(vendorId);
+
+        Assert.Equal(PluginItemCommandStatus.InvalidItem, result.Status);
+    }
+
+    [Fact]
     public void ChatReceivedFiresInArrivalOrderWithTheTextClassAndTime()
     {
         using var runtime = GameRuntimeTestFactory.Create();
@@ -183,6 +253,35 @@ public sealed class AppAutomationSurfacePluginApiTests
         Enter(runtime, commands);
         Assert.Equal(2, logins);
         Assert.Equal(1, logoffs);
+    }
+
+    [Fact]
+    public void CharacterIdentityIsPopulatedTheMomentLoginCompleteFires()
+    {
+        var events = new WorldEvents();
+        var (runtime, commands) = CreateRealSession();
+        using var runtimeDisposal = runtime;
+        using var surface = new AppAutomationSurface(events);
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+
+        string nameSeenInHandler = string.Empty;
+        string accountSeenInHandler = string.Empty;
+        uint objectIdSeenInHandler = 0u;
+        int characterIndexSeenInHandler = -1;
+        events.LoginComplete += () =>
+        {
+            nameSeenInHandler = surface.Name;
+            accountSeenInHandler = surface.AccountName;
+            objectIdSeenInHandler = surface.ObjectId;
+            characterIndexSeenInHandler = surface.CharacterIndex;
+        };
+
+        Enter(runtime, commands);
+
+        Assert.Equal("PluginApiFixture", nameSeenInHandler);
+        Assert.Equal("PluginApi", accountSeenInHandler);
+        Assert.Equal(0x50000001u, objectIdSeenInHandler);
+        Assert.Equal(0, characterIndexSeenInHandler);
     }
 
     [Fact]

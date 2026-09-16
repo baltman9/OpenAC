@@ -522,6 +522,52 @@ public sealed class SelectionInteractionControllerTests
     }
 
     [Fact]
+    public void AutomationUseOfAFarWorldObjectWalksThenDispatchesOnArrival()
+    {
+        var h = new Harness();
+        h.SetApproach(closeRange: false);
+
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+
+        Assert.Equal(AutomationUseOutcome.Started, outcome);
+        PlayerInteractionMovementSinkAssertSingleApproach(h, Target);
+        // Armed, not yet sent -- the plugin surface reports Started for the
+        // walk, and the actual use dispatches once the player arrives.
+        Assert.Empty(h.Transport.Uses);
+
+        h.Controller.OnNaturalMoveToComplete();
+
+        Assert.Equal(new[] { Target }, h.Transport.Uses);
+    }
+
+    [Fact]
+    public void AutomationUseOfACloseWorldObjectDispatchesImmediately()
+    {
+        var h = new Harness();
+        h.SetApproach(closeRange: true);
+
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+
+        Assert.Equal(AutomationUseOutcome.Started, outcome);
+        Assert.Empty(h.Movement.Approaches);
+        Assert.Equal(new[] { Target }, h.Transport.Uses);
+    }
+
+    [Fact]
+    public void AutomationUseOfANotUseableFarTargetIsRejectedWithoutApproaching()
+    {
+        var h = new Harness();
+        h.Query.Useable = false;
+        h.SetApproach(closeRange: false);
+
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+
+        Assert.Equal(AutomationUseOutcome.NotUseable, outcome);
+        Assert.Empty(h.Movement.Approaches);
+        Assert.Empty(h.Transport.Uses);
+    }
+
+    [Fact]
     public void FarUseApproachesThenDispatchesOnNaturalArrival()
     {
         var h = new Harness();

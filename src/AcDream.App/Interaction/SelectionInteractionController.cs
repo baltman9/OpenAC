@@ -9,6 +9,17 @@ using AcDream.UI.Abstractions.Input;
 
 namespace AcDream.App.Interaction;
 
+/// <summary>
+/// The plugin-facing outcome of a walk-then-use attempt on a world object.
+/// </summary>
+internal enum AutomationUseOutcome
+{
+    Started,
+    Busy,
+    NotUseable,
+    NotInWorld,
+}
+
 internal sealed class SelectionInteractionController
 {
     private readonly SelectionState _selection;
@@ -378,16 +389,38 @@ internal sealed class SelectionInteractionController
     public void SendUse(uint serverGuid)
         => RequestUse(serverGuid, reservation: null);
 
+    /// <summary>
+    /// The plugin surface's entry point for using a world object it does
+    /// not own (a vendor, a corpse, a chest, an NPC). Runs through the same
+    /// walk-then-use path a click on that object takes -- an out-of-range
+    /// target gets a queued approach that dispatches the use on arrival --
+    /// instead of the inventory-only path the item automation surface uses
+    /// for owned items.
+    /// </summary>
+    public AutomationUseOutcome TryUseForAutomation(uint serverGuid)
+    {
+        if (serverGuid == 0u)
+            return AutomationUseOutcome.NotUseable;
+        return PerformUse(serverGuid, reservation: null, toast: false, log: false);
+    }
+
     public void RequestUse(
         uint serverGuid,
         ItemUseRequestReservation? reservation)
+        => PerformUse(serverGuid, reservation, toast: true, log: true);
+
+    private AutomationUseOutcome PerformUse(
+        uint serverGuid,
+        ItemUseRequestReservation? reservation,
+        bool toast,
+        bool log)
     {
         CancelPendingApproach();
 
         if (_items.TryOpenSecureTradeWithPlayer(serverGuid))
         {
             reservation?.CancelBeforeDispatch();
-            return;
+            return AutomationUseOutcome.Started;
         }
 
         bool ownedByPlayer = _items.IsOwnedByPlayer(serverGuid);
@@ -423,8 +456,9 @@ internal sealed class SelectionInteractionController
                 {
                     reservation?.CancelBeforeDispatch();
                 }
+                return AutomationUseOutcome.Busy;
             }
-            return;
+            return AutomationUseOutcome.Started;
         }
 
         RuntimeInteractionDispatchResult result =
@@ -436,9 +470,20 @@ internal sealed class SelectionInteractionController
                 _transport,
                 out uint sequence);
         if (result == RuntimeInteractionDispatchResult.NotInWorld)
-            _toast?.Invoke("Not in world");
+        {
+            if (toast)
+                _toast?.Invoke("Not in world");
+            return AutomationUseOutcome.NotInWorld;
+        }
         if (result == RuntimeInteractionDispatchResult.Dispatched)
-            Console.WriteLine($"[interaction] use guid=0x{serverGuid:X8} seq={sequence}");
+        {
+            if (log)
+                Console.WriteLine($"[interaction] use guid=0x{serverGuid:X8} seq={sequence}");
+            return AutomationUseOutcome.Started;
+        }
+        if (result == RuntimeInteractionDispatchResult.NotUseable)
+            return AutomationUseOutcome.NotUseable;
+        return AutomationUseOutcome.Busy;
     }
 
     public void SendPickup(uint itemGuid, uint destinationContainerId, int placement)

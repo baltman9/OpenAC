@@ -56,6 +56,7 @@ internal sealed class AppAutomationSurface
     private Func<uint, uint, bool>? _equip;
     private Func<bool>? _equipmentBusy;
     private Func<uint, bool>? _useItem;
+    private Func<uint, PluginItemCommandResult>? _useWorldObject;
     private Func<uint, uint, bool>? _applyItem;
     private Func<uint, uint, uint, int, bool>? _moveItem;
     private Func<uint, uint, uint, bool>? _mergeItems;
@@ -465,6 +466,19 @@ internal sealed class AppAutomationSurface
         }
     }
 
+    /// <summary>
+    /// Wires a walk-then-use route for world objects the plugin does not
+    /// own (a vendor, a corpse, a chest, an NPC). DispatchItem falls back
+    /// to this when Use/Apply targets an object that is not player-owned,
+    /// instead of refusing it outright.
+    /// </summary>
+    public void BindWorldObjectUse(Func<uint, PluginItemCommandResult> useWorldObject)
+    {
+        ArgumentNullException.ThrowIfNull(useWorldObject);
+        lock (_gate)
+            _useWorldObject = useWorldObject;
+    }
+
     public void BindGhostDeletion(Func<uint, bool> dismissGhost)
     {
         ArgumentNullException.ThrowIfNull(dismissGhost);
@@ -811,8 +825,17 @@ internal sealed class AppAutomationSurface
             if (runtime is null)
                 return string.Empty;
             uint playerId = runtime.PlayerIdentity.ServerGuid;
-            return runtime.InventoryOwner.Objects.Get(playerId)?.Name
-                ?? string.Empty;
+            string? hydratedName = runtime.InventoryOwner.Objects.Get(playerId)?.Name;
+            if (!string.IsNullOrEmpty(hydratedName))
+                return hydratedName;
+            // The player object hasn't streamed in yet at the moment
+            // login completes, but the character roster already carried
+            // the name from the selection edge -- use it until the
+            // object arrives and takes over.
+            return runtime.CharacterSelection.TryGet(
+                playerId, out RuntimeCharacterSelectionEntry entry)
+                ? entry.Name
+                : string.Empty;
         }
     }
 
@@ -2799,22 +2822,30 @@ internal sealed class AppAutomationSurface
     {
         Func<uint, bool>? use;
         Func<uint, uint, bool>? apply;
+        Func<uint, PluginItemCommandResult>? useWorldObject;
         GameRuntime? runtime;
         lock (_gate)
         {
             use = _useItem;
             apply = _applyItem;
+            useWorldObject = _useWorldObject;
             runtime = _runtime;
         }
         if (runtime is null || use is null || apply is null || !IsAvailable)
             return new(PluginItemCommandStatus.Unavailable);
         ClientObjectTable objects = runtime.InventoryOwner.Objects;
         uint playerId = runtime.PlayerIdentity.ServerGuid;
-        if (objectId == 0u
-            || objects.Get(objectId) is not { } item
-            || !IsPlayerOwned(item, playerId, objects))
-        {
+        if (objectId == 0u || objects.Get(objectId) is not { } item)
             return new(PluginItemCommandStatus.InvalidItem);
+        if (!IsPlayerOwned(item, playerId, objects))
+        {
+            // A landscape object (a vendor, a corpse, a chest, an NPC) the
+            // plugin doesn't own can't go through the inventory-only
+            // use/apply path below -- walk to it and open it the same way
+            // a click on it does.
+            if (targetObjectId != 0u || useWorldObject is null)
+                return new(PluginItemCommandStatus.InvalidItem);
+            return useWorldObject(objectId);
         }
         if (targetObjectId != 0u && objects.Get(targetObjectId) is null)
             return new(PluginItemCommandStatus.InvalidTarget);
@@ -3919,6 +3950,7 @@ internal sealed class AppAutomationSurface
             _equip = null;
             _equipmentBusy = null;
             _useItem = null;
+            _useWorldObject = null;
             _applyItem = null;
             _moveItem = null;
             _mergeItems = null;
