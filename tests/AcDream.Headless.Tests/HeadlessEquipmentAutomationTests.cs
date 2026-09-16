@@ -135,6 +135,9 @@ public sealed class HeadlessEquipmentAutomationTests
                 (item, container, placement, amount) => true,
                 (source, target, amount) => true,
                 (source, target) => true,
+                item => true,
+                (item, amount) => true,
+                (target, item, amount) => true,
                 isComponentPack: null,
                 autoWield: AutoWield);
         }

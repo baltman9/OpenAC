@@ -1246,6 +1246,57 @@ public sealed class DirectGameRuntimeCommandAdapter
         }
     }
 
+    internal bool TrySendDropItem(uint itemGuid)
+    {
+        lock (_gate)
+        {
+            if (_route is null
+                || _session is null
+                || _routeGeneration != _runtime.Generation
+                || !_runtime.Session.IsInWorld)
+            {
+                return false;
+            }
+
+            _session.SendDropItem(itemGuid);
+            return true;
+        }
+    }
+
+    internal bool TrySendStackableSplitTo3D(uint stackGuid, uint amount)
+    {
+        lock (_gate)
+        {
+            if (_route is null
+                || _session is null
+                || _routeGeneration != _runtime.Generation
+                || !_runtime.Session.IsInWorld)
+            {
+                return false;
+            }
+
+            _session.SendStackableSplitTo3D(stackGuid, amount);
+            return true;
+        }
+    }
+
+    internal bool TrySendGiveObject(uint targetGuid, uint itemGuid, uint amount)
+    {
+        lock (_gate)
+        {
+            if (_route is null
+                || _session is null
+                || _routeGeneration != _runtime.Generation
+                || !_runtime.Session.IsInWorld)
+            {
+                return false;
+            }
+
+            _session.SendGiveObject(targetGuid, itemGuid, amount);
+            return true;
+        }
+    }
+
     private RuntimeCommandStatus UseSelected(WorldSession session)
     {
         if (_runtime.ActionOwner.Selection.SelectedObjectId

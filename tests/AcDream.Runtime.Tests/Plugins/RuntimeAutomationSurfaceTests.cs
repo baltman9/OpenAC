@@ -409,6 +409,22 @@ public sealed class RuntimeAutomationSurfaceTests
     }
 
     [Fact]
+    public void DropGiveAndApplyRefuseAsUnavailableBeforeBindItems()
+    {
+        using var surface = new RuntimeAutomationSurface();
+
+        Assert.Equal(
+            PluginItemCommandStatus.Unavailable,
+            surface.Items.Drop(0x50000001u).Status);
+        Assert.Equal(
+            PluginItemCommandStatus.Unavailable,
+            surface.Items.Give(0x50000001u, 0x50000002u).Status);
+        Assert.Equal(
+            PluginItemCommandStatus.Unavailable,
+            surface.Items.Apply(0x50000001u, 0x50000002u).Status);
+    }
+
+    [Fact]
     public void OwnedItemProjectionCarriesTheSingularNameForAStack()
     {
         using var runtime = GameRuntimeTestFactory.Create();

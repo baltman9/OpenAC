@@ -227,6 +227,150 @@ public sealed class HeadlessItemAutomationTests
     }
 
     [Fact]
+    public void TryDrop_FullStackSendsDrop()
+    {
+        var h = new Harness();
+        h.AddOwnedItem(Item, ItemUseability.Undef, stackSize: 1, stackSizeMax: 1);
+
+        Assert.True(h.Automation.TryDrop(Item, amount: 0u));
+
+        Assert.Equal(new[] { Item }, h.Drops);
+        Assert.Empty(h.SplitsToWorld);
+    }
+
+    [Fact]
+    public void TryDrop_PartialStackSendsSplitTo3DWithTheRequestedAmount()
+    {
+        var h = new Harness();
+        h.AddOwnedItem(Item, ItemUseability.Undef, stackSize: 5, stackSizeMax: 10);
+
+        Assert.True(h.Automation.TryDrop(Item, amount: 2u));
+
+        Assert.Equal((Item, 2u), Assert.Single(h.SplitsToWorld));
+        Assert.Empty(h.Drops);
+    }
+
+    [Fact]
+    public void TryDrop_AmountEqualToAStackGreaterThanOneSendsDropNotSplit()
+    {
+        var h = new Harness();
+        h.AddOwnedItem(Item, ItemUseability.Undef, stackSize: 5, stackSizeMax: 10);
+
+        Assert.True(h.Automation.TryDrop(Item, amount: 5u));
+
+        Assert.Equal(new[] { Item }, h.Drops);
+        Assert.Empty(h.SplitsToWorld);
+    }
+
+    [Fact]
+    public void TryDrop_AmountGreaterThanTheStackSendsNothing()
+    {
+        var h = new Harness();
+        h.AddOwnedItem(Item, ItemUseability.Undef, stackSize: 5, stackSizeMax: 10);
+
+        Assert.False(h.Automation.TryDrop(Item, amount: 6u));
+
+        Assert.Empty(h.Drops);
+        Assert.Empty(h.SplitsToWorld);
+    }
+
+    [Fact]
+    public void TryGive_SendsGiveObject()
+    {
+        var h = new Harness();
+        h.AddOwnedItem(Item, ItemUseability.Undef, stackSize: 5, stackSizeMax: 10);
+
+        Assert.True(h.Automation.TryGive(Item, Target, amount: 0u));
+
+        Assert.Equal((Target, Item, 5u), Assert.Single(h.Gives));
+    }
+
+    [Fact]
+    public void TryGive_AmountEqualToAStackGreaterThanOneSendsTheFullAmount()
+    {
+        var h = new Harness();
+        h.AddOwnedItem(Item, ItemUseability.Undef, stackSize: 5, stackSizeMax: 10);
+
+        Assert.True(h.Automation.TryGive(Item, Target, amount: 5u));
+
+        Assert.Equal((Target, Item, 5u), Assert.Single(h.Gives));
+    }
+
+    [Fact]
+    public void TryGive_AmountGreaterThanTheStackSendsNothing()
+    {
+        var h = new Harness();
+        h.AddOwnedItem(Item, ItemUseability.Undef, stackSize: 5, stackSizeMax: 10);
+
+        Assert.False(h.Automation.TryGive(Item, Target, amount: 6u));
+
+        Assert.Empty(h.Gives);
+    }
+
+    [Fact]
+    public void TryGive_ServerRefusalWithoutAGuidClearsThePendingRequest()
+    {
+        var h = new Harness();
+        h.AddOwnedItem(Item, ItemUseability.Undef, stackSize: 1, stackSizeMax: 1);
+        Assert.True(h.Automation.TryGive(Item, Target, amount: 0u));
+        Assert.True(h.Runtime.InventoryOwner.Transactions.HasPendingRequest);
+
+        h.Runtime.InventoryOwner.Objects.RejectMove(0u, 0x0426u);
+
+        Assert.False(h.Runtime.InventoryOwner.Transactions.HasPendingRequest);
+    }
+
+    [Fact]
+    public void TryGive_ItemLeavingTheInventoryClearsThePendingRequest()
+    {
+        var h = new Harness();
+        h.AddOwnedItem(Item, ItemUseability.Undef, stackSize: 1, stackSizeMax: 1);
+        Assert.True(h.Automation.TryGive(Item, Target, amount: 0u));
+
+        h.Runtime.InventoryOwner.Objects.Remove(Item);
+
+        Assert.False(h.Runtime.InventoryOwner.Transactions.HasPendingRequest);
+    }
+
+    [Fact]
+    public void TryDropAndTryGive_RefuseWhileBusy()
+    {
+        var h = new Harness();
+        h.AddOwnedItem(Item, ItemUseability.Undef, stackSize: 1, stackSizeMax: 1);
+        h.Runtime.InventoryOwner.Transactions.IncrementBusyCount();
+
+        Assert.False(h.Automation.TryDrop(Item, amount: 0u));
+        Assert.False(h.Automation.TryGive(Item, Target, amount: 0u));
+
+        Assert.Empty(h.Drops);
+        Assert.Empty(h.Gives);
+    }
+
+    [Fact]
+    public void TryDrop_RefusesWithoutDispatchingWhenTheSenderReturnsFalse()
+    {
+        var h = new Harness();
+        h.AddOwnedItem(Item, ItemUseability.Undef, stackSize: 1, stackSizeMax: 1);
+        h.DropResult = false;
+
+        Assert.False(h.Automation.TryDrop(Item, amount: 0u));
+
+        Assert.False(h.Runtime.InventoryOwner.Transactions.HasPendingRequest);
+    }
+
+    [Fact]
+    public void TryGive_RefusesWithoutDispatchingWhenTheSenderReturnsFalse()
+    {
+        var h = new Harness();
+        h.AddOwnedItem(Item, ItemUseability.Undef, stackSize: 1, stackSizeMax: 1);
+        h.GiveResult = false;
+
+        Assert.False(h.Automation.TryGive(Item, Target, amount: 0u));
+
+        Assert.False(h.Runtime.InventoryOwner.Transactions.HasPendingRequest);
+    }
+
+    [Fact]
     public void TryMove_FullStackSendsPutInContainer()
     {
         var h = new Harness();
@@ -407,10 +551,16 @@ public sealed class HeadlessItemAutomationTests
         internal readonly List<(uint Item, uint Container, uint Placement, uint Amount)> Splits = [];
         internal readonly List<(uint Source, uint Target, uint Amount)> Merges = [];
         internal readonly List<(uint Source, uint Target)> UsesWithTarget = [];
+        internal readonly List<uint> Drops = [];
+        internal readonly List<(uint Item, uint Amount)> SplitsToWorld = [];
+        internal readonly List<(uint Target, uint Item, uint Amount)> Gives = [];
         internal bool PutResult = true;
         internal bool SplitResult = true;
         internal bool MergeResult = true;
         internal bool UseWithTargetResult = true;
+        internal bool DropResult = true;
+        internal bool SplitToWorldResult = true;
+        internal bool GiveResult = true;
         internal readonly HeadlessItemAutomation Automation;
         internal readonly AutoWieldController? AutoWield;
 
@@ -451,6 +601,21 @@ public sealed class HeadlessItemAutomationTests
                 {
                     UsesWithTarget.Add((source, target));
                     return UseWithTargetResult;
+                },
+                item =>
+                {
+                    Drops.Add(item);
+                    return DropResult;
+                },
+                (item, amount) =>
+                {
+                    SplitsToWorld.Add((item, amount));
+                    return SplitToWorldResult;
+                },
+                (target, item, amount) =>
+                {
+                    Gives.Add((target, item, amount));
+                    return GiveResult;
                 },
                 isComponentPack: null,
                 autoWield: AutoWield);

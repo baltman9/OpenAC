@@ -71,8 +71,8 @@ internal sealed class HeadlessPluginHost
                 items.TryApply,
                 items.TryMove,
                 items.TryMerge,
-                HeadlessItemAutomation.RefuseDrop,
-                HeadlessItemAutomation.RefuseGive,
+                items.TryDrop,
+                items.TryGive,
                 HeadlessItemAutomation.RefusePickup,
                 HeadlessItemAutomation.RefuseIdentify);
             _automation.BindEquipment(items.TryEquip, () => items.EquipmentBusy);

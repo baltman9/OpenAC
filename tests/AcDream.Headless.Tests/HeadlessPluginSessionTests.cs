@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Net;
 using AcDream.Content;
 using AcDream.Core.Chat;
+using AcDream.Core.Items;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
@@ -566,6 +567,107 @@ public sealed class HeadlessPluginSessionTests
         _ = session.Start();
 
         Assert.True(session.Plugins.Host.Automation.Items.IsAvailable);
+    }
+
+    [Fact]
+    public void DropGiveAndApplyStartOnceBoundToSendersThatAcceptTheRequest()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+        _ = session.Start();
+
+        const uint item = 0x50000A01u;
+        const uint target = 0x50000A02u;
+        uint player = session.Plugins.Host.Automation.Character.ObjectId;
+        session.Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = item,
+            ContainerId = player,
+            StackSize = 1,
+            StackSizeMax = 1,
+        });
+        session.Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = target,
+            ContainerId = player,
+        });
+        var surface = (RuntimeAutomationSurface)session.Plugins.Host.Automation;
+        surface.BindItems(
+            useItem: static _ => true,
+            applyItem: static (_, _) => true,
+            moveItem: static (_, _, _, _) => true,
+            mergeItems: static (_, _, _) => true,
+            dropItem: static (_, _) => true,
+            giveItem: static (_, _, _) => true,
+            pickupItem: static (_, _) => true,
+            identifyItem: static _ => true);
+
+        Assert.Equal(
+            PluginItemCommandStatus.Started,
+            surface.Items.Drop(item).Status);
+        Assert.Equal(
+            PluginItemCommandStatus.Started,
+            surface.Items.Give(item, target).Status);
+        Assert.Equal(
+            PluginItemCommandStatus.Started,
+            surface.Items.Apply(item, target).Status);
+    }
+
+    [Fact]
+    public void DropAndGiveRefuseAnAmountGreaterThanTheStackBeforeTheDelegate()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+        _ = session.Start();
+
+        const uint item = 0x50000A01u;
+        const uint target = 0x50000A02u;
+        uint player = session.Plugins.Host.Automation.Character.ObjectId;
+        session.Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = item,
+            ContainerId = player,
+            StackSize = 5,
+            StackSizeMax = 10,
+        });
+        session.Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = target,
+            ContainerId = player,
+        });
+        int dropCalls = 0;
+        int giveCalls = 0;
+        var surface = (RuntimeAutomationSurface)session.Plugins.Host.Automation;
+        surface.BindItems(
+            useItem: static _ => true,
+            applyItem: static (_, _) => true,
+            moveItem: static (_, _, _, _) => true,
+            mergeItems: static (_, _, _) => true,
+            dropItem: (_, _) => { dropCalls++; return true; },
+            giveItem: (_, _, _) => { giveCalls++; return true; },
+            pickupItem: static (_, _) => true,
+            identifyItem: static _ => true);
+
+        Assert.Equal(
+            PluginItemCommandStatus.Refused,
+            surface.Items.Drop(item, amount: 6u).Status);
+        Assert.Equal(
+            PluginItemCommandStatus.Refused,
+            surface.Items.Give(item, target, amount: 6u).Status);
+        Assert.Equal(0, dropCalls);
+        Assert.Equal(0, giveCalls);
     }
 
     [Fact]

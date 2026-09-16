@@ -13,6 +13,9 @@ internal sealed class HeadlessItemAutomation
     private readonly Func<uint, uint, uint, uint, bool> _sendStackableSplitToContainer;
     private readonly Func<uint, uint, uint, bool> _sendStackableMerge;
     private readonly Func<uint, uint, bool> _sendUseWithTarget;
+    private readonly Func<uint, bool> _sendDrop;
+    private readonly Func<uint, uint, bool> _sendStackableSplitTo3D;
+    private readonly Func<uint, uint, uint, bool> _sendGive;
     private readonly Func<uint, bool> _isComponentPack;
     private readonly AutoWieldController? _autoWield;
 
@@ -23,6 +26,9 @@ internal sealed class HeadlessItemAutomation
         Func<uint, uint, uint, uint, bool> sendStackableSplitToContainer,
         Func<uint, uint, uint, bool> sendStackableMerge,
         Func<uint, uint, bool> sendUseWithTarget,
+        Func<uint, bool> sendDrop,
+        Func<uint, uint, bool> sendStackableSplitTo3D,
+        Func<uint, uint, uint, bool> sendGive,
         Func<uint, bool>? isComponentPack = null,
         AutoWieldController? autoWield = null)
     {
@@ -36,6 +42,10 @@ internal sealed class HeadlessItemAutomation
             ?? throw new ArgumentNullException(nameof(sendStackableMerge));
         _sendUseWithTarget = sendUseWithTarget
             ?? throw new ArgumentNullException(nameof(sendUseWithTarget));
+        _sendDrop = sendDrop ?? throw new ArgumentNullException(nameof(sendDrop));
+        _sendStackableSplitTo3D = sendStackableSplitTo3D
+            ?? throw new ArgumentNullException(nameof(sendStackableSplitTo3D));
+        _sendGive = sendGive ?? throw new ArgumentNullException(nameof(sendGive));
         _isComponentPack = isComponentPack ?? (_ => false);
         _autoWield = autoWield;
     }
@@ -206,6 +216,49 @@ internal sealed class HeadlessItemAutomation
                 merge.SourceObjectId, merge.TargetObjectId, merge.Amount));
     }
 
+    // Mirrors the GUI's TryDropItemForAutomation: full stack drops, a partial stack splits to world.
+    internal bool TryDrop(uint itemId, uint amount)
+    {
+        if (_runtime.InventoryOwner.Objects.Get(itemId) is not { } item)
+            return false;
+
+        InventoryTransactionState inventory = _runtime.InventoryOwner.Transactions;
+        uint fullStack = (uint)Math.Max(1, item.StackSize);
+        uint requested = amount == 0u ? fullStack : amount;
+        if (requested == 0u || requested > fullStack)
+            return false;
+
+        if (requested < fullStack)
+        {
+            return inventory.TryDispatch(
+                InventoryRequestKind.SplitToWorld,
+                itemId,
+                () => _sendStackableSplitTo3D(itemId, requested));
+        }
+
+        return inventory.TryDispatch(
+            InventoryRequestKind.DropToWorld,
+            itemId,
+            () => _sendDrop(itemId));
+    }
+
+    // Mirrors the GUI's TryGiveItemForAutomation, same full/partial stack amount as TryDrop.
+    internal bool TryGive(uint itemId, uint targetId, uint amount)
+    {
+        if (_runtime.InventoryOwner.Objects.Get(itemId) is not { } item)
+            return false;
+
+        uint fullStack = (uint)Math.Max(1, item.StackSize);
+        uint requested = amount == 0u ? fullStack : amount;
+        if (requested == 0u || requested > fullStack)
+            return false;
+
+        return _runtime.InventoryOwner.Transactions.TryDispatch(
+            InventoryRequestKind.Give,
+            itemId,
+            () => _sendGive(targetId, itemId, requested));
+    }
+
     internal bool TryEquip(uint itemId, uint mask)
     {
         if (itemId == 0u
@@ -227,8 +280,6 @@ internal sealed class HeadlessItemAutomation
         || !_runtime.InventoryOwner.Transactions.CanBeginRequest;
 
     // The surface requires these bound; not supported on headless yet.
-    internal static bool RefuseDrop(uint itemId, uint amount) => false;
-    internal static bool RefuseGive(uint itemId, uint targetId, uint amount) => false;
     internal static bool RefusePickup(uint itemId, bool mainPack) => false;
     internal static bool RefuseIdentify(uint itemId) => false;
 
