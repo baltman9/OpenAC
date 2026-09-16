@@ -51,14 +51,42 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         }
     }
 
+    private bool _focusMuted;
+
     /// <summary>
     /// "No Sound When Window Not Focused": refuses to start a new sound while
     /// true, the same point retail's own gate sits (SoundManager::
     /// PlaySoundInternal), ahead of a source being told to play rather than at
-    /// the listener. A sound already playing keeps going undisturbed, so
-    /// nothing pops in when focus returns.
+    /// the listener. Unlike retail, going true also cuts every sound already
+    /// playing, so nothing keeps sounding once the window is backgrounded.
+    /// That part is this fork's own choice, not the original client's. Going back to false starts nothing on its own;
+    /// playback only resumes as new sounds are requested.
     /// </summary>
-    public bool FocusMuted { get; set; }
+    public bool FocusMuted
+    {
+        get => _focusMuted;
+        set
+        {
+            if (value && !_focusMuted)
+                CutEveryPlayingVoice();
+            _focusMuted = value;
+        }
+    }
+
+    /// <summary>
+    /// Every voice in flight, interface cues included. Backgrounding the
+    /// window means silence, so unlike a world change there is nothing worth
+    /// letting finish.
+    /// </summary>
+    private void CutEveryPlayingVoice()
+    {
+        for (int i = 0; i < _voices.Count; i++)
+        {
+            WorldVoicePool.Voice voice = _voices[i];
+            if (voice.InUse)
+                Silence(voice);
+        }
+    }
 
     /// <summary>"Disable Interface Sound", gating only the genuine interface path.</summary>
     public bool InterfaceEnabled { get; set; } = true;
