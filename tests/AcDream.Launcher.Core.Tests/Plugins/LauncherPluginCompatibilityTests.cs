@@ -199,4 +199,14 @@ public sealed class LauncherPluginCompatibilityTests
 
         return LauncherPluginManifest.Parse("{" + string.Join(",", fields) + "}");
     }
+
+    [Theory]
+    [InlineData("requires OpenAC 0.2.0 or newer (this is 0.1.8)", "requires OpenAC 0.2.0 or newer")]
+    [InlineData("supports OpenAC up to 0.1.5 (this is 0.1.8)", "supports OpenAC up to 0.1.5")]
+    [InlineData("is marked broken on OpenAC 0.1.8", "is marked broken on OpenAC 0.1.8")]
+    [InlineData("Headless only", "Headless only")]
+    public void WithoutClientVersionDropsOnlyTheTrailingClientVersion(string reason, string expected)
+    {
+        Assert.Equal(expected, LauncherPluginCompatibility.WithoutClientVersion(reason));
+    }
 }

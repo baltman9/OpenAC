@@ -697,7 +697,7 @@ public sealed partial class LauncherWindowViewModelTests
         PluginInstalledRowViewModel row = Assert.Single(
             viewModel.Plugins.Installed, r => r.Id == "edwards.broken");
         Assert.True(row.IsRefused);
-        Assert.True(row.HasChips);
+        Assert.False(string.IsNullOrWhiteSpace(row.Refusal));
         Assert.StartsWith("Refused: ", row.RefusedText);
         Assert.True(row.CanRemove);
         Assert.NotNull(row.RemoveCommand);
@@ -1676,7 +1676,7 @@ public sealed partial class LauncherWindowViewModelTests
 
         PluginInstalledRowViewModel row = Assert.Single(viewModel.Plugins.Installed);
         Assert.True(row.HasCapabilities);
-        Assert.Equal("Uses 1 capability", row.CapabilityCountText);
+        Assert.Equal("1 capability", row.CapabilityCountText);
     }
 
     [Fact]
@@ -1706,7 +1706,7 @@ public sealed partial class LauncherWindowViewModelTests
         await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
 
         PluginInstalledRowViewModel row = Assert.Single(viewModel.Plugins.Installed);
-        Assert.Equal("Uses 2 capabilities", row.CapabilityCountText);
+        Assert.Equal("2 capabilities", row.CapabilityCountText);
     }
 
     [Fact]
@@ -1765,7 +1765,7 @@ public sealed partial class LauncherWindowViewModelTests
         await viewModel.Plugins.RefreshDiscoverDetailsAsync();
 
         Assert.True(row.HasCapabilities);
-        Assert.Equal("Uses 2 capabilities", row.CapabilityCountText);
+        Assert.Equal("2 capabilities", row.CapabilityCountText);
     }
 
     [Fact]

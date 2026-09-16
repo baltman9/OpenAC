@@ -11,6 +11,10 @@ public static class LauncherPluginCompatibility
     public const string ClientNotInstalled = "client not installed";
 
     /// <summary>A row's compatibility line and whether it should read as a warning.</summary>
+    /// <summary>How <see cref="Describe"/> opens the note for a plugin that runs everywhere, so a
+    /// card can leave that routine case unsaid.</summary>
+    public const string CompatiblePrefix = "Compatible with OpenAC ";
+
     public readonly record struct CompatibilityDescription(string Text, bool IsWarning);
 
     public static string? Evaluate(
@@ -59,10 +63,18 @@ public static class LauncherPluginCompatibility
         bool headless = hosts.Contains(LauncherPluginHostKind.Headless);
         if (graphical && headless)
         {
-            return new CompatibilityDescription($"Compatible with OpenAC {clientVersion}", IsWarning: false);
+            return new CompatibilityDescription($"{CompatiblePrefix}{clientVersion}", IsWarning: false);
         }
 
         return new CompatibilityDescription(graphical ? "Graphical only" : "Headless only", IsWarning: false);
+    }
+
+    /// <summary>A reason without its trailing "(this is x)", for a card that already shows versions.
+    /// The full reason stays in refusals and in the client's own text, which parity tests pin.</summary>
+    public static string WithoutClientVersion(string reason)
+    {
+        int cut = reason.LastIndexOf(" (this is ", StringComparison.Ordinal);
+        return cut > 0 && reason.EndsWith(')') ? reason[..cut] : reason;
     }
 
     private static string? VersionOnlyReason(LauncherPluginManifest manifest, LauncherVersion? clientVersion)

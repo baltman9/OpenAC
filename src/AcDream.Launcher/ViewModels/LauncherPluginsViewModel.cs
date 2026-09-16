@@ -7,6 +7,29 @@ using AcDream.Launcher.Core.Updates;
 
 namespace AcDream.Launcher.ViewModels;
 
+/// <summary>The letters on a plugin card's tile until plugins can ship an icon: the first letters of
+/// the first two words, or of the first two capitalised parts of a single word ("BuffBot" is BB).</summary>
+internal static class PluginMonogram
+{
+    public static string From(string name)
+    {
+        string[] words = name.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0)
+            return "?";
+        if (words.Length > 1)
+            return string.Concat(char.ToUpperInvariant(words[0][0]), char.ToUpperInvariant(words[1][0]));
+
+        string word = words[0];
+        for (int i = 1; i < word.Length; i++)
+        {
+            if (char.IsUpper(word[i]))
+                return string.Concat(char.ToUpperInvariant(word[0]), word[i]);
+        }
+
+        return char.ToUpperInvariant(word[0]).ToString();
+    }
+}
+
 /// <summary>One listed plugin not yet installed, shown on the Discover list.</summary>
 public sealed class PluginDiscoverRowViewModel(
     string id,
@@ -28,6 +51,7 @@ public sealed class PluginDiscoverRowViewModel(
     public string Description { get; } = description;
     public string Repo { get; } = repo;
     public string AuthorAndRepo { get; } = $"by {author} · {repo}";
+    public string Initials { get; } = PluginMonogram.From(name);
     public string InstallAutomationName { get; } = $"Install {name}";
     public RelayCommand InstallCommand { get; } = installCommand;
 
@@ -79,6 +103,9 @@ public sealed class PluginDiscoverRowViewModel(
 
     public bool ShowCompatibilityWarning => HasCompatibilityNote && CompatibilityIsWarning;
     public bool ShowCompatibilityMuted => HasCompatibilityNote && !CompatibilityIsWarning;
+    public string CompatibilityText => LauncherPluginCompatibility.WithoutClientVersion(Compatibility ?? string.Empty);
+    public bool ShowCompatibilityInfo => ShowCompatibilityMuted
+        && !Compatibility!.StartsWith(LauncherPluginCompatibility.CompatiblePrefix, StringComparison.Ordinal);
 
     /// <summary>Filled in alongside <see cref="Compatibility"/>: a count only, never the claims
     /// themselves, since browsing is not a consent surface.</summary>
@@ -100,8 +127,8 @@ public sealed class PluginDiscoverRowViewModel(
     public string CapabilityCountText => Capabilities.Count switch
     {
         0 => string.Empty,
-        1 => "Uses 1 capability",
-        var count => $"Uses {count} capabilities",
+        1 => "1 capability",
+        var count => $"{count} capabilities",
     };
 }
 
@@ -140,11 +167,15 @@ public sealed class PluginInstalledRowViewModel(
     public string Version { get; } = version;
     public string SourceBadge { get; } = sourceBadge;
     public string Summary { get; } = $"{id} · v{version} · {sourceBadge}";
+    public string Initials { get; } = PluginMonogram.From(displayName);
     public string Compatibility { get; } = compatibility;
     public bool HasCompatibilityNote => !string.IsNullOrWhiteSpace(Compatibility);
     public bool CompatibilityIsWarning { get; } = compatibilityIsWarning;
     public bool ShowCompatibilityWarning => HasCompatibilityNote && CompatibilityIsWarning;
     public bool ShowCompatibilityMuted => HasCompatibilityNote && !CompatibilityIsWarning;
+    public string CompatibilityText => LauncherPluginCompatibility.WithoutClientVersion(Compatibility ?? string.Empty);
+    public bool ShowCompatibilityInfo => ShowCompatibilityMuted
+        && !Compatibility!.StartsWith(LauncherPluginCompatibility.CompatiblePrefix, StringComparison.Ordinal);
     public string? Blocked { get; } = blocked;
     public bool IsBlocked => !string.IsNullOrWhiteSpace(Blocked);
     public string? BlockedText => IsBlocked ? $"Blocked: {Blocked}" : null;
@@ -154,7 +185,9 @@ public sealed class PluginInstalledRowViewModel(
     public bool IsRefused => !string.IsNullOrWhiteSpace(Refusal);
     public string? RefusedText => IsRefused ? $"Refused: {Refusal}" : null;
     public bool HasDuplicate { get; } = hasDuplicate;
-    public bool HasChips => IsRefused || HasDuplicate || IsBlocked;
+    // A refused plugin never loads, so its refusal takes the version line over a compatibility note.
+    public bool ShowSkipped => ShowCompatibilityWarning && !IsRefused;
+    public bool ShowCompatibilityInfoLine => ShowCompatibilityInfo && !IsRefused;
     public bool UpdateAvailable { get; } = updateAvailable;
     public string? UpdateVersion { get; } = updateVersion;
     public bool HasUpdateChip => UpdateAvailable && !string.IsNullOrWhiteSpace(UpdateVersion);
@@ -168,6 +201,8 @@ public sealed class PluginInstalledRowViewModel(
         && !string.Equals(UpdateCompatibilityNote, Compatibility, StringComparison.Ordinal);
     public string? UpdateWithheldReason { get; } = updateWithheldReason;
     public bool HasUpdateWithheldReason => !UpdateAvailable && !string.IsNullOrWhiteSpace(UpdateWithheldReason);
+    public bool HasNotes => ShowUpdateCompatibilityNote || Conflict || HasUpdateWithheldReason;
+    public bool HasChips => IsPrerelease || HasCapabilities || HasUpdateChip || HasDuplicate || IsBlocked;
     public string UpdateAutomationName { get; } = $"Update {displayName}";
     public string RemoveAutomationName { get; } = $"Remove {displayName}";
     public RelayCommand? UpdateCommand { get; } = updateCommand;
@@ -218,8 +253,8 @@ public sealed class PluginInstalledRowViewModel(
     public string CapabilityCountText => Capabilities.Count switch
     {
         0 => string.Empty,
-        1 => "Uses 1 capability",
-        var count => $"Uses {count} capabilities",
+        1 => "1 capability",
+        var count => $"{count} capabilities",
     };
 }
 
