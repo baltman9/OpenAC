@@ -183,6 +183,7 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
 
     public PluginVendorCommandResult RemoveFromBuyList(uint templateObjectId)
     {
+        if (!IsAvailable) return new(PluginVendorCommandStatus.Unavailable);
         lock (_gate)
             _buyList.RemoveAll(entry => entry.TemplateObjectId == templateObjectId);
         return new(PluginVendorCommandStatus.Sent);
@@ -190,6 +191,7 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
 
     public PluginVendorCommandResult RemoveFromSellList(uint itemObjectId)
     {
+        if (!IsAvailable) return new(PluginVendorCommandStatus.Unavailable);
         lock (_gate)
             _sellList.Remove(itemObjectId);
         return new(PluginVendorCommandStatus.Sent);
@@ -197,6 +199,7 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
 
     public PluginVendorCommandResult ClearBuyList()
     {
+        if (!IsAvailable) return new(PluginVendorCommandStatus.Unavailable);
         lock (_gate)
             _buyList.Clear();
         return new(PluginVendorCommandStatus.Sent);
@@ -204,6 +207,7 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
 
     public PluginVendorCommandResult ClearSellList()
     {
+        if (!IsAvailable) return new(PluginVendorCommandStatus.Unavailable);
         lock (_gate)
             _sellList.Clear();
         return new(PluginVendorCommandStatus.Sent);

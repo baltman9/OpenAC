@@ -508,4 +508,24 @@ public sealed class RuntimeVendorAutomationTests
         Assert.Empty(vendor.BuyList);
         Assert.Empty(vendor.SellList);
     }
+
+    [Fact]
+    public void RemoveAndClearReportUnavailableBeforeTheSessionReachesInWorld()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        var vendor = new RuntimeVendorAutomation(host.Runtime);
+
+        Assert.Equal(
+            PluginVendorCommandStatus.Unavailable,
+            vendor.RemoveFromBuyList(0x50002000u).Status);
+        Assert.Equal(
+            PluginVendorCommandStatus.Unavailable,
+            vendor.RemoveFromSellList(0x50002000u).Status);
+        Assert.Equal(
+            PluginVendorCommandStatus.Unavailable,
+            vendor.ClearBuyList().Status);
+        Assert.Equal(
+            PluginVendorCommandStatus.Unavailable,
+            vendor.ClearSellList().Status);
+    }
 }
