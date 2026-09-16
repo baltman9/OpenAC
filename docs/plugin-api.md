@@ -249,6 +249,121 @@ profile instead of the classifier's live one, such as VTank's "vendor" and
 "trader" list files. It returns `false` when the named profile does not
 exist; a classifier with no notion of named profiles defaults to the same.
 
+A classifier whose own vocabulary is richer than the public
+`PluginLootAction` enum still reports a match rather than "no rule fired"
+when a rule resolves to one of its private actions: it reports `NoLoot` as
+the closest public equivalent, with `Matched` true and `RuleName` left
+intact so a caller can still see which rule decided the item, even though
+the action itself does not survive translation.
+
+## Trade
+
+```csharp
+host.Automation.Trade.Opened += opened =>
+{
+    // opened.InitiatorObjectId (the local player), opened.PartnerObjectId
+};
+host.Automation.Trade.ItemAdded += added =>
+{
+    // added.ItemObjectId, added.Mine (true = staged on my side)
+};
+host.Automation.Trade.PartnerTradeAccepted += partnerId => { /* they hit accept */ };
+host.Automation.Trade.Closed += () => { /* for any reason */ };
+
+if (host.Automation.Trade.IsOpen)
+{
+    host.Automation.Trade.Add(itemObjectId);
+    host.Automation.Trade.Accept();
+}
+```
+
+`Trade` mirrors the retail-look secure-trade window one field at a time:
+`IsOpen`, `PartnerObjectId`, `PartnerName`, `MyItems`, `PartnerItems`,
+`MyAccepted`, `PartnerAccepted`. `Add`, `Accept`, `Decline`, `Reset`, and
+`End` send the exact same wire commands the window's own buttons do, gated
+the same way: each returns `PluginTradeCommandResult` with a
+`PluginTradeCommandStatus` of `Unavailable` (no in-world session),
+`NotOpen` (no trade window is open), `InvalidItem`, or `Sent`.
+
+The event named `PartnerTradeAccepted` — not `PartnerAccepted` — carries the
+partner's object id when they accept. It could not be named `PartnerAccepted`
+because that name is already the live acceptance flag; C# does not allow a
+property and an event to share a name on one interface.
+
+There is no wire bit for "who asked for this trade first": `Opened.
+InitiatorObjectId` is always the local player's own object id, and
+`PartnerObjectId` is always the other side, regardless of who actually sent
+the open request.
+
+## Vendor
+
+```csharp
+host.Automation.Vendor.Opened += vendorId => { /* the shop pane just opened */ };
+host.Automation.Vendor.TransactionCompleted += result =>
+{
+    // result.Kind (Buy/Sell), result.Success, result.Notice
+};
+
+foreach (PluginVendorItem item in host.Automation.Vendor.Items)
+{
+    // item.TemplateObjectId, item.Name, item.UnitPrice (retail buy-rate math), item.StackSize
+}
+
+host.Automation.Vendor.AddToBuyList(templateObjectId, count: 1);
+host.Automation.Vendor.BuyAll();
+
+host.Automation.Vendor.AddToSellList(ownedItemObjectId);
+host.Automation.Vendor.SellAll();
+```
+
+`Vendor.Items` lists what the shop currently has for sale, priced with the
+same retail buy-rate formula the vendor window shows (quantity 1). Staging
+is entirely local to this surface — `AddToBuyList` / `AddToSellList` and
+their `Remove*` / `Clear*` counterparts never touch the wire — until
+`BuyAll` or `SellAll` commits the staged list through the same builder the
+window's own Buy All / Sell All buttons use, and clears the list on send. A
+vendor selling a full stack sells however many of that item the character
+currently owns, matching the window's own default. `TryCaptureProperties`
+reads a listed item's full appraisal-shaped property set (the same data
+assessing it would show), by its `TemplateObjectId`.
+
+`IsBusy` reports whether a buy/sell (or any other item transaction) is
+already in flight — `BuyAll`/`SellAll` refuse with `Busy` rather than queue
+behind it.
+
+## Hotkeys
+
+```csharp
+IPluginHotkeyRegistration handle = host.Hotkeys.Register(
+    "quick-heal",
+    "Quick Heal",
+    new PluginKeyChord(PluginKey.H, Ctrl: true),
+    () => { /* Ctrl+H was pressed */ });
+
+if (!handle.IsBound)
+    host.Log.Warn("Quick Heal's default chord collided with a client binding.");
+```
+
+`Register` id is scoped by the plugin's own manifest id before the host ever
+sees it, so two plugins registering `"quick-heal"` do not collide with each
+other. A stored user override for the scoped id replaces the caller's
+default chord at registration time; `handle.EffectiveChord` reports which
+chord actually ended up bound. A chord that collides with an existing client
+key binding is refused rather than silently stealing it: `handle.IsBound` is
+`false` and the handler never fires. Disposing the handle revokes the
+binding; the host also revokes every hotkey a plugin registered when that
+plugin unloads.
+
+A hotkey does not fire while the chat bar has keyboard focus unless Ctrl or
+Alt is part of the chord — otherwise every letter typed into chat would also
+be a candidate hotkey press.
+
+The graphical host may receive a `Register` call before its keyboard and
+input dispatcher exist yet (plugin loading is not strictly ordered against
+input-dispatcher composition); the registration is queued and resolved the
+moment the input layer comes up, so `IsBound` can flip from `false` to `true`
+without the plugin doing anything further.
+
 ## Headless
 
 A headless host implements this same contract, with a few members left as
@@ -269,3 +384,9 @@ placeholders rather than wired to real state:
 - `Dialogs.Answer` is real when the headless session was configured with a
   confirmation route; otherwise it returns `false` like any host with
   nothing bound.
+- `Trade` and `Vendor` are real on both hosts: the same shared adapter binds
+  over the same `GameRuntime`, so a headless bot sees identical state and
+  sends the identical wire commands a graphical plugin would.
+- `Hotkeys` is the inert no-op registry — there is no keyboard to bind to
+  without a window. `Register` always returns a handle with `IsBound`
+  `false` and the handler never fires.
