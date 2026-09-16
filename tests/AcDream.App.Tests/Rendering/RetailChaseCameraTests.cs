@@ -49,6 +49,57 @@ public class RetailChaseCameraTests
         }
     }
 
+    [Fact]
+    public void ResetViewerToPlayer_PrefilledVelocityRing_DoesNotPitchStationaryCameraAtSlopedDestination()
+    {
+        bool savedColl = CameraDiagnostics.CollideCamera;
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.CollideCamera = false;
+            CameraDiagnostics.AlignToSlope = true;
+
+            var camera = new RetailChaseCamera();
+
+            // Fill the velocity ring with horizontal movement before teleport.
+            var runningVelocity = new Vector3(5f, 5f, 0f);
+            for (int i = 0; i < 5; i++)
+            {
+                camera.Update(
+                    Vector3.Zero, 0f, runningVelocity, inContact: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f);
+            }
+
+            // Teleport to sloped terrain facing along +X (yaw = 0).
+            var destination = new Vector3(200f, -300f, 12f);
+            float yaw = 0f;
+            camera.ResetViewerToPlayer(destination, yaw);
+
+            // First frame at destination: player is stationary on a slope pitched along X.
+            var slopedNormal = Vector3.Normalize(new Vector3(-0.5f, 0f, 0.866f));
+            camera.Update(
+                destination, yaw, Vector3.Zero, inContact: true, contactPlaneNormal: slopedNormal, dt: 1f / 60f);
+
+            // Since the player is stationary at the destination and the ring was cleared,
+            // the heading must be the flat yaw vector rather than tilted by pre-teleport velocity.
+            Vector3 pivot = destination + new Vector3(0f, 0f, camera.PivotHeight);
+            Vector3 flatHeading = new(MathF.Cos(yaw), MathF.Sin(yaw), 0f);
+            var (expectedEye, _) = RetailChaseCamera.ComputeDesiredPose(
+                pivot, flatHeading, camera.Distance, camera.Pitch, viewerYawOffset: 0f);
+
+            float tAlpha = RetailChaseCamera.ComputeDampingAlpha(CameraDiagnostics.TranslationStiffness, 1f / 60f);
+            Vector3 expectedFirstStepEye = Vector3.Lerp(destination, expectedEye, tAlpha);
+
+            Assert.Equal(expectedFirstStepEye.X, camera.Position.X, 4);
+            Assert.Equal(expectedFirstStepEye.Y, camera.Position.Y, 4);
+            Assert.Equal(expectedFirstStepEye.Z, camera.Position.Z, 4);
+        }
+        finally
+        {
+            CameraDiagnostics.CollideCamera = savedColl;
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
+
     // ── Heading source ────────────────────────────────────────────────
 
     [Fact]

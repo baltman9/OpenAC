@@ -184,6 +184,9 @@ public sealed class RetailChaseCamera : ICamera
         _dampedForward = playerForward;
         _initialised = true;
 
+        Array.Clear(_velocityRing, 0, _velocityRing.Length);
+        _velocityCount = 0;
+
         Position = playerPosition;
         ViewerCellId = 0u;
         View = Matrix4x4.CreateLookAt(
