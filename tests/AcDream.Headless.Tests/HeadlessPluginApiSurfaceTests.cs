@@ -168,6 +168,153 @@ public sealed class HeadlessPluginApiSurfaceTests
         }
     }
 
+    [Fact]
+    public void ObjectChangedMapsEntityAndInventoryDeltasToPluginKinds()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        var seen = new List<PluginObjectChange>();
+        host.Events.ObjectChanged += seen.Add;
+        var observer = (IRuntimeEventObserver)host;
+        RuntimeEventStamp stamp = default;
+
+        observer.OnEntity(new RuntimeEntityDelta(
+            stamp,
+            RuntimeEntityChange.Registered,
+            new RuntimeEntitySnapshot(
+                new RuntimeEntityIdentity(100u, 1u, 1), 0u, 0u, null)));
+        observer.OnEntity(new RuntimeEntityDelta(
+            stamp,
+            RuntimeEntityChange.Rebucketed,
+            new RuntimeEntitySnapshot(
+                new RuntimeEntityIdentity(100u, 1u, 1), 0u, 0u, null)));
+        observer.OnEntity(new RuntimeEntityDelta(
+            stamp,
+            RuntimeEntityChange.Deleted,
+            new RuntimeEntitySnapshot(
+                new RuntimeEntityIdentity(100u, 1u, 1), 0u, 0u, null)));
+        observer.OnInventory(new RuntimeInventoryDelta(
+            stamp,
+            RuntimeInventoryChange.Added,
+            new RuntimeInventoryItemSnapshot(
+                200u, 1, "Item", 0u, 0, 0u, 0u, 0, 0)));
+        observer.OnInventory(new RuntimeInventoryDelta(
+            stamp,
+            RuntimeInventoryChange.Cleared,
+            default));
+
+        Assert.Equal(
+            new (uint ObjectId, PluginObjectChangeKind Kind)[]
+            {
+                (100u, PluginObjectChangeKind.Created),
+                (100u, PluginObjectChangeKind.Moved),
+                (100u, PluginObjectChangeKind.Released),
+                (200u, PluginObjectChangeKind.Created),
+            },
+            seen.Select(static c => (c.ObjectId, c.Kind)));
+    }
+
+    [Fact]
+    public void ContainerOpenedAndClosedFollowExternalContainerTransitions()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        uint? opened = null;
+        uint? closed = null;
+        host.Events.ContainerOpened += id => opened = id;
+        host.Events.ContainerClosed += id => closed = id;
+
+        runtime.InventoryOwner.ExternalContainers.RequestOpen(500u);
+        runtime.InventoryOwner.ExternalContainers.ApplyViewContents(500u);
+        Assert.Equal(500u, opened);
+
+        runtime.InventoryOwner.ExternalContainers.ApplyClose(500u);
+        Assert.Equal(500u, closed);
+    }
+
+    [Fact]
+    public void ObjectChangedReportsIdentReceivedOnlyOnTheFirstAppraisalResponse()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        var seen = new List<PluginObjectChange>();
+        host.Events.ObjectChanged += seen.Add;
+
+        runtime.ActionOwner.Transactions.TryRequestAppraisal(
+            700u, static _ => { });
+        runtime.ActionOwner.Transactions.AcceptAppraisalResponse(700u);
+        runtime.ActionOwner.Transactions.AcceptAppraisalResponse(700u);
+
+        Assert.Single(
+            seen,
+            c => c.ObjectId == 700u
+                && c.Kind == PluginObjectChangeKind.IdentReceived);
+    }
+
+    [Fact]
+    public void ConfirmationRequestedFiresWhenTheHostRaisesIt()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        PluginConfirmation? seen = null;
+        host.Events.ConfirmationRequested += c => seen = c;
+
+        host.RaiseConfirmationRequested(new PluginConfirmation(9u, 5, "Sure?"));
+
+        Assert.Equal(new PluginConfirmation(9u, 5, "Sure?"), seen);
+    }
+
+    [Fact]
+    public void LogoutIsUnavailableWithoutAnInWorldSessionAndNeverCallsTheRoute()
+    {
+        using GameRuntime runtime = NewRuntime();
+        int calls = 0;
+        bool RequestLogout()
+        {
+            calls++;
+            return true;
+        }
+        using var host = new HeadlessPluginHost(
+            runtime,
+            new InertLogger(),
+            requestLogout: RequestLogout);
+
+        Assert.False(((ILoginAutomation)host.Automation).Logout());
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
+    public void DialogsAnswerForwardsToTheBoundRoute()
+    {
+        using GameRuntime runtime = NewRuntime();
+        uint? seenContext = null;
+        bool? seenAccept = null;
+        bool AnswerConfirmation(uint contextId, bool accept)
+        {
+            seenContext = contextId;
+            seenAccept = accept;
+            return true;
+        }
+        using var host = new HeadlessPluginHost(
+            runtime,
+            new InertLogger(),
+            answerConfirmation: AnswerConfirmation);
+
+        bool result = ((IDialogAutomation)host.Automation).Answer(3u, false);
+
+        Assert.True(result);
+        Assert.Equal(3u, seenContext);
+        Assert.False(seenAccept);
+    }
+
+    [Fact]
+    public void DialogsAnswerReturnsFalseWithoutABoundRoute()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+
+        Assert.False(((IDialogAutomation)host.Automation).Answer(1u, true));
+    }
     private static GameRuntime NewRuntime()
     {
         var operations = new InertOperations();
