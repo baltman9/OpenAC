@@ -298,6 +298,42 @@ public sealed class RuntimeInteractionTransactionStateTests
         Assert.Equal(AppraisalRequestOrigin.Automation, automation.Origin);
         Assert.False(automation.PresentInUi);
         Assert.Equal(Item, state.CurrentAppraisalId);
+
+        // The presentation target did not move -- but the plugin-facing
+        // completion signal must, regardless: this response is the one a
+        // plugin's Identify(Container) was waiting on, and it completed.
+        Assert.Equal(Container, state.LastCompletedAppraisalId);
+    }
+
+    [Fact]
+    public void AutomationResponseAdvancesCompletionSignalNotPresentationTarget()
+    {
+        // HIGH-1: CurrentAppraisalId (presentation) and
+        // LastCompletedAppraisalId (the plugin-facing completion signal
+        // mapped by AppAutomationSurface into
+        // ILootAutomation.Appraisal.CurrentObjectId) are two different
+        // things. Before this split, MossTank's corpse-identify wait
+        // polled CurrentAppraisalId and never observed it change for a
+        // corpse the window was not showing, so corpse looting stalled
+        // forever. LastCompletedAppraisalId must advance for every
+        // completed response, of either origin, independent of whatever
+        // the window is presenting.
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+
+        Assert.Equal(0u, state.LastCompletedAppraisalId);
+
+        Assert.True(state.TryRequestAppraisal(
+            Container,
+            _ => { },
+            AppraisalRequestOrigin.Automation));
+        RuntimeAppraisalResponseAcceptance automation =
+            state.AcceptAppraisalResponse(Container);
+
+        Assert.True(automation.Accepted);
+        Assert.False(automation.PresentInUi);
+        Assert.Equal(0u, state.CurrentAppraisalId);
+        Assert.Equal(Container, state.LastCompletedAppraisalId);
     }
 
     [Fact]
@@ -365,6 +401,51 @@ public sealed class RuntimeInteractionTransactionStateTests
         // the existing single-slot semantics (unchanged by this change) --
         // it is neither the awaiting id nor the current one any more.
         Assert.False(state.AcceptAppraisalResponse(Container).Accepted);
+    }
+
+    [Fact]
+    public void AutomationAppraisalRefusesToEvictAnAwaitingUserAppraisal()
+    {
+        // HIGH-2: the reverse of the test above. Before this fix, a
+        // plugin's background Identify could win the single awaiting slot
+        // away from a user's own assess that was already in flight, so the
+        // user's assess would silently produce nothing once its response
+        // arrived (it was no longer the awaiting id, so
+        // AcceptAppraisalResponse would refuse it). An Automation request
+        // must instead be refused outright while a User request awaits,
+        // leaving the user's request completely untouched.
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+        var userSent = new List<uint>();
+        var automationSent = new List<uint>();
+
+        Assert.True(state.TryRequestAppraisal(Item, userSent.Add));
+        Assert.Equal(
+            AppraisalRequestOrigin.User,
+            state.AwaitingAppraisalOrigin);
+
+        bool accepted = state.TryRequestAppraisal(
+            Container,
+            automationSent.Add,
+            AppraisalRequestOrigin.Automation);
+
+        Assert.False(accepted);
+        Assert.Empty(automationSent);
+        Assert.Equal(Item, state.AwaitingAppraisalId);
+        Assert.Equal(
+            AppraisalRequestOrigin.User,
+            state.AwaitingAppraisalOrigin);
+        Assert.Equal(1, inventory.BusyCount);
+
+        // The user's own assess still completes normally -- it was never
+        // touched by the refused Automation request.
+        RuntimeAppraisalResponseAcceptance userResponse =
+            state.AcceptAppraisalResponse(Item);
+        Assert.True(userResponse.Accepted);
+        Assert.True(userResponse.PresentInUi);
+        Assert.Equal(AppraisalRequestOrigin.User, userResponse.Origin);
+        Assert.Equal(Item, state.CurrentAppraisalId);
+        Assert.Equal(0, inventory.BusyCount);
     }
 
     [Fact]

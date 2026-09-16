@@ -1716,11 +1716,15 @@ public sealed class ItemInteractionController : IDisposable
                 failures);
     }
 
+    /// <summary>
+    /// Origin and PresentInUi are only meaningful when FirstResponse is
+    /// true -- see RuntimeAppraisalResponseAcceptance, which this mirrors.
+    /// </summary>
     public readonly record struct AppraisalResponseAcceptance(
         bool Accepted,
         bool FirstResponse,
-        AppraisalRequestOrigin Origin = AppraisalRequestOrigin.User,
-        bool PresentInUi = false);
+        AppraisalRequestOrigin Origin,
+        bool PresentInUi);
 
     private static void DispatchAll(Action? listeners, List<Exception> failures)
     {

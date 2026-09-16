@@ -200,6 +200,23 @@ rule, not around it:
   retargets) for the user's object once that response lands, exactly as
   if no plugin request had been in flight.
 
+The reverse never happens the other way: a plugin's `Identify` never
+displaces a user assess that is already awaiting its response. It is
+refused outright (`Refused`, or `Busy` if caught by the ordinary
+busy-request gate first) rather than silently stealing the single
+appraisal slot and making the user's own assess produce nothing.
+
+`host.Automation.Loot.Appraisal` (`PluginAppraisalState`) reports the
+shared appraisal slot's `Revision`/`AwaitingObjectId`/`CurrentObjectId` so
+a plugin can poll for its own `Identify` to finish without waiting on
+`IdentReceived`. `CurrentObjectId` is a completion signal, not the
+window's displayed object -- it advances to whatever object last finished
+an appraisal, of either origin, precisely because a plugin's Identify
+must complete even while the examination window is showing something
+else entirely (or nothing). Compare it against the id you passed to
+`Identify`, together with `AwaitingObjectId` no longer matching that same
+id, to know the response has landed.
+
 `ContainerOpened` / `ContainerClosed` track the client's one open external
 container — a corpse, a chest, a housing storage crate. A vendor's shop pane
 is a separate surface (not covered by this event) and does not raise it.

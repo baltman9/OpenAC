@@ -2931,7 +2931,17 @@ internal sealed class AppAutomationSurface
                     : new PluginAppraisalState(
                         transactions.Revision,
                         transactions.AwaitingAppraisalId,
-                        transactions.CurrentAppraisalId);
+                        // The plugin-facing completion signal: the object
+                        // id of the last appraisal response that actually
+                        // completed, regardless of whether the user's
+                        // examination window happens to be showing it.
+                        // CurrentAppraisalId is presentation only -- it
+                        // does not advance for a plugin-originated
+                        // response that lands on a different object than
+                        // the one the window shows, and mapping it here
+                        // stalls any plugin polling for its own Identify
+                        // to finish (loot scanners, trackers).
+                        transactions.LastCompletedAppraisalId);
             }
         }
     }
