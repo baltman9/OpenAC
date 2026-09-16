@@ -1,3 +1,4 @@
+using System;
 using System.Numerics;
 using AcDream.App.Interaction;
 using AcDream.App.UI;
@@ -89,11 +90,14 @@ public sealed class SelectionInteractionControllerTests
         private uint _sequence;
         public bool IsInWorld { get; set; } = true;
         public bool RefuseSend { get; set; }
+        public Exception? ThrowOnSend { get; set; }
         public List<uint> Uses { get; } = new();
         public List<(uint Item, uint Container, int Placement)> Pickups { get; } = new();
 
         public bool TrySendUse(uint serverGuid, out uint sequence)
         {
+            if (ThrowOnSend is not null)
+                throw ThrowOnSend;
             if (!IsInWorld || RefuseSend)
             {
                 sequence = 0u;
@@ -604,6 +608,23 @@ public sealed class SelectionInteractionControllerTests
         Assert.Empty(h.Transport.Uses);
 
         blocking.CancelBeforeDispatch();
+    }
+
+    [Fact]
+    public void AutomationUseReleasesTheReservationWhenTheSendThrows()
+    {
+        // The reservation increments the busy count the moment it is
+        // taken; a throw anywhere downstream (a transport fault, a reset
+        // mid-call) must give it back or the one-request-at-a-time gate is
+        // wedged for the rest of the session.
+        var h = new Harness();
+        h.SetApproach(closeRange: true);
+        h.Transport.ThrowOnSend = new InvalidOperationException("transport fault");
+
+        Assert.Throws<InvalidOperationException>(() => h.Controller.TryUseForAutomation(Target));
+
+        Assert.Equal(0, h.Items.BusyCount);
+        Assert.True(h.Items.EnsureInventoryRequestReady());
     }
 
     [Fact]

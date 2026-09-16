@@ -76,11 +76,18 @@ public sealed class MainThreadDispatchQueue
                 return false;
             }
             // Run() claimed this item concurrently with our timeout; it
-            // will (or already did) call _done.Set() -- wait for it so the
-            // dispose below doesn't race Run()'s finally block.
-            _done.Wait();
-            _done.Dispose();
-            return true;
+            // will (or already did) call _done.Set(). Wait for that, again
+            // bounded by the timeout, so the dispose cannot race Run()'s
+            // finally block. If the action is still running past a second
+            // timeout, report "not confirmed" and leave the event to the
+            // garbage collector rather than block the caller indefinitely
+            // or dispose under a Set() that is still to come.
+            if (_done.Wait(timeout))
+            {
+                _done.Dispose();
+                return true;
+            }
+            return false;
         }
     }
 

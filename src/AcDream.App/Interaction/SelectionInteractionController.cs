@@ -424,12 +424,24 @@ internal sealed class SelectionInteractionController
             return AutomationUseOutcome.Busy;
 
         ItemUseRequestReservation reservation = _items.BeginAutomationUseReservation();
-        return PerformUse(
-            serverGuid,
-            reservation,
-            toast: false,
-            log: false,
-            preemptPending: false);
+        // The reservation holds the busy count from this point; a throw
+        // downstream (transport fault, reset mid-call) must give it back or
+        // the one-request-at-a-time gate stays wedged for the session --
+        // the same shape the confirmed-use and vendor routes use.
+        try
+        {
+            return PerformUse(
+                serverGuid,
+                reservation,
+                toast: false,
+                log: false,
+                preemptPending: false);
+        }
+        catch
+        {
+            reservation.CancelBeforeDispatch();
+            throw;
+        }
     }
 
     public void RequestUse(
