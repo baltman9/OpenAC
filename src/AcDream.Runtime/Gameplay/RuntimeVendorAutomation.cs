@@ -1,4 +1,5 @@
 using AcDream.Core.Items;
+using AcDream.Core.Properties;
 using AcDream.Plugin.Abstractions;
 
 namespace AcDream.Runtime.Gameplay;
@@ -118,7 +119,14 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
             new Dictionary<uint, double>(source.Floats),
             new Dictionary<uint, string>(source.Strings),
             new Dictionary<uint, uint>(source.DataIds),
-            new Dictionary<uint, uint>(source.InstanceIds));
+            new Dictionary<uint, uint>(source.InstanceIds))
+        {
+            WeaponProfile = ClientAppraisalProfileMapper.ToPluginWeaponProfile(
+                item.WeaponProfile),
+            ArmorProfile = ClientAppraisalProfileMapper.ToPluginArmorProfile(
+                item.ArmorProfile,
+                source.GetInt((uint)PropertyInt.ArmorLevel)),
+        };
         return true;
     }
 

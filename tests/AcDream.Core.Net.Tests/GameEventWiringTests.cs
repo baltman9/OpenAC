@@ -153,7 +153,7 @@ public sealed class GameEventWiringTests
         AppendF64(payload, 1.1d); // DamageMod
         AppendF64(payload, 1.0d); // WeaponLength
         AppendF64(payload, 2.0d); // MaxVelocity
-        AppendF64(payload, 0.05d); // WeaponOffense
+        AppendF64(payload, 1.05d); // WeaponOffense
         AppendU32(payload, 1u);   // MaxVelocityEstimated
 
         dispatcher.Dispatch(GameEventEnvelope.TryParse(
@@ -165,7 +165,7 @@ public sealed class GameEventWiringTests
         Assert.Equal(34u, item.WeaponProfile.Value.WeaponSkill);
         Assert.Equal(12u, item.WeaponProfile.Value.Damage);
         Assert.Equal(0.2d, item.WeaponProfile.Value.DamageVariance);
-        Assert.Equal(0.05d, item.WeaponProfile.Value.WeaponOffense);
+        Assert.Equal(1.05d, item.WeaponProfile.Value.WeaponOffense);
 
         Assert.NotNull(item.ArmorProfile);
         Assert.Equal(1.5f, item.ArmorProfile!.Value.SlashingProtection);

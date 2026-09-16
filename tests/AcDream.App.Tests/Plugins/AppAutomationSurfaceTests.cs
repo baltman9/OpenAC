@@ -424,7 +424,7 @@ public sealed class AppAutomationSurfaceTests
                 DamageMod: 1.0d,
                 WeaponLength: 1.0d,
                 MaxVelocity: 2.0d,
-                WeaponOffense: 0.05d,
+                WeaponOffense: 1.05d,
                 MaxVelocityEstimated: 1u),
         };
         // The property table carries a stale/never-sent value that the

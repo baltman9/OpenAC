@@ -469,7 +469,7 @@ public sealed class AppAutomationSurfacePluginApiTests
             DamageMod: 1.1d,
             WeaponLength: 1.0d,
             MaxVelocity: 2.0d,
-            WeaponOffense: 0.05d,
+            WeaponOffense: 1.05d,
             MaxVelocityEstimated: 1u);
         runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
         {
@@ -508,6 +508,54 @@ public sealed class AppAutomationSurfacePluginApiTests
         Assert.True(ok);
         Assert.Null(properties.WeaponProfile);
         Assert.Null(properties.ArmorProfile);
+    }
+
+    [Fact]
+    public void TryCaptureProperties_returnsEveryArmorModAndTheArmorLevelSeparately()
+    {
+        // Eight DISTINCT values, one per protection field, so a transposed
+        // pair (Cold/Fire is the known trap -- they sit next to each other
+        // in both the wire blob and the constructor) shows up as a failing
+        // assertion instead of two equal numbers hiding the swap. ArmorLevel
+        // is asserted separately because it comes from PropertyInt, not the
+        // ArmorProfile blob itself.
+        var (runtime, commands) = CreateRealSession();
+        using var runtimeDisposal = runtime;
+        using var surface = new AppAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        commands.Start(runtime.Generation);
+        var armor = new ClientArmorProfile(
+            SlashingProtection: 1.1f,
+            PiercingProtection: 1.2f,
+            BludgeoningProtection: 1.3f,
+            ColdProtection: 1.4f,
+            FireProtection: 1.5f,
+            AcidProtection: 1.6f,
+            NetherProtection: 1.7f,
+            LightningProtection: 1.8f);
+        var item = new ClientObject
+        {
+            ObjectId = 903u,
+            ArmorProfile = armor,
+        };
+        item.Properties.Ints[(uint)AcDream.Core.Properties.PropertyInt.ArmorLevel] = 500;
+        runtime.InventoryOwner.Objects.AddOrUpdate(item);
+
+        bool ok = surface.Objects.TryCaptureProperties(
+            903u, out PluginItemProperties properties);
+
+        Assert.True(ok);
+        Assert.NotNull(properties.ArmorProfile);
+        PluginArmorProfile projected = properties.ArmorProfile!.Value;
+        Assert.Equal(500, projected.ArmorLevel);
+        Assert.Equal(1.1f, projected.SlashMod);
+        Assert.Equal(1.2f, projected.PierceMod);
+        Assert.Equal(1.3f, projected.BludgeonMod);
+        Assert.Equal(1.4f, projected.ColdMod);
+        Assert.Equal(1.5f, projected.FireMod);
+        Assert.Equal(1.6f, projected.AcidMod);
+        Assert.Equal(1.7f, projected.NetherMod);
+        Assert.Equal(1.8f, projected.ElectricMod);
     }
 
     [Fact]

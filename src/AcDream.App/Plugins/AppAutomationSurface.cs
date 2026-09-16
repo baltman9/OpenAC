@@ -3187,48 +3187,20 @@ internal sealed class AppAutomationSurface
             new Dictionary<uint, uint>(source.DataIds),
             new Dictionary<uint, uint>(source.InstanceIds))
         {
-            WeaponProfile = ToPluginWeaponProfile(item.WeaponProfile),
-            ArmorProfile = ToPluginArmorProfile(
+            WeaponProfile = ClientAppraisalProfileMapper.ToPluginWeaponProfile(
+                item.WeaponProfile),
+            ArmorProfile = ClientAppraisalProfileMapper.ToPluginArmorProfile(
                 item.ArmorProfile,
                 source.GetInt((uint)PropertyInt.ArmorLevel)),
         };
     }
 
-    private static PluginWeaponProfile? ToPluginWeaponProfile(
-        ClientWeaponProfile? source) =>
-        source is { } w
-            ? new PluginWeaponProfile(
-                (int)w.DamageType,
-                (int)w.WeaponTime,
-                w.WeaponSkill,
-                (int)w.Damage,
-                w.DamageVariance,
-                w.DamageMod,
-                w.WeaponLength,
-                w.MaxVelocity,
-                w.WeaponOffense,
-                (int)w.MaxVelocityEstimated)
-            : null;
-
-    private static PluginArmorProfile? ToPluginArmorProfile(
-        ClientArmorProfile? source,
-        int armorLevel) =>
-        source is { } a
-            ? new PluginArmorProfile(
-                armorLevel,
-                a.SlashingProtection,
-                a.PiercingProtection,
-                a.BludgeoningProtection,
-                a.ColdProtection,
-                a.FireProtection,
-                a.AcidProtection,
-                a.LightningProtection)
-            : null;
-
     internal PluginInventoryItem ProjectInventoryItem(
         GameRuntime runtime,
-        ClientObject item) =>
-        new(
+        ClientObject item)
+    {
+        ClientWeaponProfile? weapon = item.WeaponProfile;
+        return new(
             item.ObjectId,
             item.WeenieClassId,
             item.Name,
@@ -3254,17 +3226,17 @@ internal sealed class AppAutomationSurface
                 out uint procSpell) ? procSpell : 0u,
             item.Properties.GetBool((uint)PropertyBool.ProcSpellSelfTargeted),
             item.Properties.GetFloat((uint)PropertyFloat.ProcSpellRate),
-            item.WeaponProfile is { } wp1
-                ? (int)wp1.WeaponSkill
+            weapon is { } wp
+                ? (int)wp.WeaponSkill
                 : item.Properties.GetInt((uint)PropertyInt.WeaponSkill),
-            item.WeaponProfile is { } wp2
-                ? (int)wp2.DamageType
+            weapon is { } wt
+                ? (int)wt.DamageType
                 : item.Properties.GetInt((uint)PropertyInt.DamageType),
-            item.WeaponProfile is { } wp3
-                ? (int)wp3.Damage
+            weapon is { } wd
+                ? ClientAppraisalProfileMapper.NormalizeDamage(wd.Damage)
                 : item.Properties.GetInt((uint)PropertyInt.Damage),
-            item.WeaponProfile is { } wp4
-                ? wp4.DamageVariance
+            weapon is { } wv
+                ? wv.DamageVariance
                 : item.Properties.GetFloat((uint)PropertyFloat.DamageVariance),
             item.Properties.GetInt((uint)PropertyInt.UseRequiresSkill),
             item.Properties.GetInt((uint)PropertyInt.UseRequiresSkillLevel),
@@ -3313,6 +3285,7 @@ internal sealed class AppAutomationSurface
             Palettes = ProjectPalettes(runtime, item.ObjectId),
             IconId = item.IconId,
         };
+    }
 
     private IReadOnlyList<PluginPaletteInfo> ProjectPalettes(
         GameRuntime runtime,

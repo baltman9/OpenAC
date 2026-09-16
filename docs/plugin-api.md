@@ -224,6 +224,33 @@ as their own fields on `PluginItemProperties`:
 `PluginInventoryItem`'s own `WeaponSkill`, `DamageType`, `Damage`, and
 `DamageVariance` fields prefer the retained `WeaponProfile` when one is
 present, falling back to the property table only for an unappraised item.
+`Damage == -1` means the server's response left it unset (its own wire
+sentinel is `uint.MaxValue`), not a real zero-or-negative damage value.
+
+Units, since none of these read as plain integers or percentages:
+
+- `WeaponOffense` and `DamageMod` are MULTIPLIERS centered on 1.0 — `1.05`
+  means "+5%", `0.9` means "-10%", not an absolute offense/damage number.
+- `DamageVariance` is a FRACTION of `Damage` describing the roll's floor:
+  an actual hit rolls somewhere in
+  `[(1 − DamageVariance) × Damage, Damage]`. `0.2` on a `Damage` of `12`
+  means a real hit lands between `9.6` and `12`, never `0.2` itself.
+- `WeaponTime` is a speed rating, not a duration in milliseconds or
+  seconds — higher is slower, and it feeds the same attack-timing formula
+  the assess window's own speed line uses.
+- Every armor `*Mod` field (`SlashMod`, `PierceMod`, `BludgeonMod`,
+  `ColdMod`, `FireMod`, `AcidMod`, `NetherMod`, `ElectricMod`) is also a
+  MULTIPLIER applied to incoming damage of that type — `1.2` means that
+  damage type does 20% MORE to the wearer, `0.8` means 20% less. It is not
+  the flat armor-level number; `ArmorLevel` is the separate field for that.
+
+The headless host's `Objects`/`Items`/`Loot` automation surfaces are no-ops
+(see [Headless](#headless)), so `TryCaptureProperties` through any of
+those always returns `false` there, regardless of whether the object was
+ever appraised. `Vendor.TryCaptureProperties` is the one exception — the
+vendor automation adapter is shared verbatim between the graphical and
+headless hosts, so a headless vendor-shopping plugin gets the same
+`WeaponProfile`/`ArmorProfile` data a graphical one does.
 
 ## Confirmations
 
@@ -389,7 +416,10 @@ vendor selling a full stack sells however many of that item the character
 currently owns, matching the window's own default. `TryCaptureProperties`
 reads a listed item's already-materialized properties -- the data the
 `ApproachVendor` listing itself carried, shaped like an appraisal but not a
-live appraisal round trip -- by its `TemplateObjectId`.
+live appraisal round trip -- by its `TemplateObjectId`, including the
+`WeaponProfile`/`ArmorProfile` fields described under
+[Weapon and armor profiles](#weapon-and-armor-profiles) when the listing
+carries one.
 
 `IsBusy` reports whether this adapter's own buy/sell is in flight -- it is
 vendor-local, not the client-wide inventory-transaction busy state, which

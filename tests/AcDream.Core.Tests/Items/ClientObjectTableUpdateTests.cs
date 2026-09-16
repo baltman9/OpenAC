@@ -95,7 +95,7 @@ public sealed class ClientObjectTableUpdateTests
             DamageMod: 1.1d,
             WeaponLength: 1.0d,
             MaxVelocity: 2.0d,
-            WeaponOffense: 0.05d,
+            WeaponOffense: 1.05d,
             MaxVelocityEstimated: 1u);
         var armor = new ClientArmorProfile(
             SlashingProtection: 1.5f,

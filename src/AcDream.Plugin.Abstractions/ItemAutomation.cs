@@ -97,17 +97,19 @@ public readonly record struct PluginWeaponProfile(
 /// A piece of armor's per-damage-type protection modifiers as the server's
 /// appraisal response reported them, from the ArmorProfile blob. Null until
 /// the item has been successfully appraised, or if it never carries an
-/// ArmorProfile blob (i.e. it is not armor).
+/// ArmorProfile blob (i.e. it is not armor). Fields after ArmorLevel are in
+/// the blob's own wire order and stay float to match it exactly.
 /// </summary>
 public readonly record struct PluginArmorProfile(
     int ArmorLevel,
-    double SlashMod,
-    double PierceMod,
-    double BludgeonMod,
-    double ColdMod,
-    double FireMod,
-    double AcidMod,
-    double ElectricMod);
+    float SlashMod,
+    float PierceMod,
+    float BludgeonMod,
+    float ColdMod,
+    float FireMod,
+    float AcidMod,
+    float NetherMod,
+    float ElectricMod);
 
 public readonly record struct PluginItemProperties(
     IReadOnlyDictionary<uint, int> Ints,

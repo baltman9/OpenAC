@@ -558,7 +558,7 @@ public sealed class RuntimeVendorAutomationTests
         vendor.AddToBuyList(0x50002000u, 1);
         vendor.BuyAll();
 
-        // ACE rejects a vendor buy/sell (no pack space, over-burden,
+        // The server rejects a vendor buy/sell (no pack space, over-burden,
         // negative payout, ...) as an InventoryServerSaveFailed on the
         // LOCAL PLAYER -- the same signal ClientObjectTable.MoveRequestFailed
         // surfaces -- and still sends a UseDone with error == 0. Before the
