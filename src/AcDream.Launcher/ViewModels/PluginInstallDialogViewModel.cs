@@ -65,12 +65,17 @@ public sealed class PluginCapabilityChipViewModel(LauncherPluginCapabilityDeclar
 public sealed class PluginInstallDialogViewModel : ObservableObject
 {
     private readonly Func<bool> _canInteract;
-    private Func<CancellationToken, Task<PluginInstallResult>>? _installAsync;
+    private Func<IReadOnlyList<LauncherPluginCapabilityDeclaration>, CancellationToken,
+        Task<PluginInstallResult>>? _installAsync;
     private Action<string, IReadOnlyList<PluginCharacterOption>>? _enableForCharacters;
     private CancellationTokenSource? _cancellation;
+    private CancellationTokenSource? _capabilitiesCancellation;
+    private IReadOnlyList<LauncherPluginCapabilityDeclaration> _displayedCapabilities = [];
     private bool _isOpen;
     private bool _isBusy;
     private bool _isUpdate;
+    private bool _isLoadingCapabilities;
+    private string? _capabilitiesLoadError;
     private PluginEnableChoice _choice = PluginEnableChoice.None;
     private string? _error;
 
@@ -79,7 +84,7 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
         _canInteract = canInteract ?? (() => true);
         ConfirmCommand = new AsyncRelayCommand(
             ConfirmAsync,
-            () => IsOpen && !IsBusy && _canInteract());
+            () => IsOpen && !IsBusy && !IsLoadingCapabilities && !HasCapabilitiesLoadError && _canInteract());
         CancelCommand = new RelayCommand(Close, () => !IsBusy);
     }
 
@@ -146,6 +151,38 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
 
     /// <summary>Attributes the chips to the author, since nothing here verifies the claim.</summary>
     public string CapabilitiesHeading => "The author says this plugin:";
+
+    /// <summary>Whether the dialog is fetching a Discover row's manifest because Install was pressed
+    /// before the background fetch filled it in: shown in place of the capability list, with Install
+    /// disabled, so the dialog never opens looking like the plugin declares nothing.</summary>
+    public bool IsLoadingCapabilities
+    {
+        get => _isLoadingCapabilities;
+        private set
+        {
+            if (SetProperty(ref _isLoadingCapabilities, value))
+            {
+                NotifyCommandStates();
+            }
+        }
+    }
+
+    public string LoadingCapabilitiesText => "Checking what this plugin does…";
+
+    public string? CapabilitiesLoadError
+    {
+        get => _capabilitiesLoadError;
+        private set
+        {
+            if (SetProperty(ref _capabilitiesLoadError, value))
+            {
+                OnPropertyChanged(nameof(HasCapabilitiesLoadError));
+                NotifyCommandStates();
+            }
+        }
+    }
+
+    public bool HasCapabilitiesLoadError => !string.IsNullOrWhiteSpace(CapabilitiesLoadError);
 
     public bool IsOpen
     {
@@ -226,7 +263,9 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
 
     /// <summary>Opens the dialog for a resolved repo/manifest. The caller supplies the actual
     /// network install and the character-enable write, so this view model stays testable without
-    /// either one.</summary>
+    /// either one. <paramref name="capabilities"/> is the declared list when already known;
+    /// <see langword="null"/> means it still needs fetching, and <paramref name="loadCapabilities"/>
+    /// is the fetch to run for it. The dialog never opens showing an unknown list as an empty one.</summary>
     public void Open(
         string repo,
         string pluginId,
@@ -235,9 +274,10 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
         bool isUpdate,
         string? offeredVersion,
         IReadOnlyList<PluginCharacterOption> characters,
-        Func<CancellationToken, Task<PluginInstallResult>> installAsync,
+        Func<IReadOnlyList<LauncherPluginCapabilityDeclaration>, CancellationToken, Task<PluginInstallResult>> installAsync,
         Action<string, IReadOnlyList<PluginCharacterOption>> enableForCharacters,
-        IReadOnlyList<LauncherPluginCapabilityDeclaration>? capabilities = null)
+        IReadOnlyList<LauncherPluginCapabilityDeclaration>? capabilities = null,
+        Func<CancellationToken, Task<IReadOnlyList<LauncherPluginCapabilityDeclaration>>>? loadCapabilities = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repo);
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
@@ -258,11 +298,24 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
             Characters.Add(new PluginCharacterChoiceViewModel(option));
         }
 
-        Capabilities.Clear();
-        foreach (LauncherPluginCapabilityDeclaration declaration in (capabilities ?? [])
-                     .OrderBy(declaration => (int)declaration.Name))
+        _capabilitiesCancellation?.Cancel();
+        _capabilitiesCancellation = null;
+        CapabilitiesLoadError = null;
+        if (capabilities is not null)
         {
-            Capabilities.Add(new PluginCapabilityChipViewModel(declaration));
+            IsLoadingCapabilities = false;
+            SetCapabilities(capabilities);
+        }
+        else if (loadCapabilities is not null)
+        {
+            SetCapabilities([]);
+            IsLoadingCapabilities = true;
+            _ = LoadCapabilitiesAsync(loadCapabilities);
+        }
+        else
+        {
+            IsLoadingCapabilities = false;
+            SetCapabilities([]);
         }
 
         Choice = PluginEnableChoice.None;
@@ -275,7 +328,6 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(IsOfferedPrerelease));
         OnPropertyChanged(nameof(WarningText));
         OnPropertyChanged(nameof(HasCharacters));
-        OnPropertyChanged(nameof(HasCapabilities));
         IsOpen = true;
     }
 
@@ -287,7 +339,60 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
         }
 
         _cancellation?.Cancel();
+        _capabilitiesCancellation?.Cancel();
         IsOpen = false;
+    }
+
+    private void SetCapabilities(IReadOnlyList<LauncherPluginCapabilityDeclaration> capabilities)
+    {
+        _displayedCapabilities = capabilities;
+        Capabilities.Clear();
+        foreach (LauncherPluginCapabilityDeclaration declaration in capabilities
+                     .OrderBy(declaration => (int)declaration.Name))
+        {
+            Capabilities.Add(new PluginCapabilityChipViewModel(declaration));
+        }
+
+        OnPropertyChanged(nameof(HasCapabilities));
+    }
+
+    /// <summary>Runs a Discover row's on-demand manifest fetch (<c>Open</c>'s
+    /// <paramref name="loadCapabilities"/>) and applies its outcome, guarding against a stale run
+    /// finishing after the dialog has moved on to a different plugin.</summary>
+    private async Task LoadCapabilitiesAsync(
+        Func<CancellationToken, Task<IReadOnlyList<LauncherPluginCapabilityDeclaration>>> loadCapabilities)
+    {
+        var cancellation = new CancellationTokenSource();
+        _capabilitiesCancellation = cancellation;
+        try
+        {
+            IReadOnlyList<LauncherPluginCapabilityDeclaration> capabilities =
+                await loadCapabilities(cancellation.Token).ConfigureAwait(true);
+            if (ReferenceEquals(_capabilitiesCancellation, cancellation))
+            {
+                SetCapabilities(capabilities);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            if (ReferenceEquals(_capabilitiesCancellation, cancellation))
+            {
+                CapabilitiesLoadError = string.IsNullOrWhiteSpace(ex.Message)
+                    ? "This plugin's details could not be checked."
+                    : ex.Message;
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(_capabilitiesCancellation, cancellation))
+            {
+                _capabilitiesCancellation = null;
+                IsLoadingCapabilities = false;
+            }
+        }
     }
 
     private async Task ConfirmAsync()
@@ -306,7 +411,8 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
             // Install succeeded once this returns: close the dialog before touching character
             // profiles, so a slow or failing enable step can never leave Confirm sitting there to
             // be pressed again and run the install a second time.
-            PluginInstallResult result = await _installAsync(cancellation.Token).ConfigureAwait(true);
+            PluginInstallResult result = await _installAsync(_displayedCapabilities, cancellation.Token)
+                .ConfigureAwait(true);
             IsOpen = false;
             if (Choice != PluginEnableChoice.None)
             {

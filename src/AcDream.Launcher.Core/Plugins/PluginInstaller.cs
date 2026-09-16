@@ -24,6 +24,12 @@ public sealed class PluginInstaller
     public const string CapabilityVocabularyRefusal =
         "This plugin needs a newer launcher than the one installed. Update the launcher, then try again.";
 
+    /// <summary>The refusal shown when the caller supplies the capabilities the player reviewed and
+    /// the release manifest declares a different set: the release changed between the install
+    /// dialog opening and the install running.</summary>
+    public const string CapabilitiesChangedRefusal =
+        "This plugin changed since you reviewed it. Check it again before installing.";
+
     /// <summary>The install-time caps from the plan's shared contract (Release contract, "Caps").
     /// The one place they're set, so the zip download cap and the extraction limits it feeds can't
     /// drift apart; <see cref="DirectInstallCheck"/> reuses the same extraction limits.</summary>
@@ -68,12 +74,17 @@ public sealed class PluginInstaller
     /// exact <paramref name="tag"/> the caller already resolved (the update check, Discover's
     /// details, or Add from URL): what was offered is what installs, so this never re-resolves
     /// latest itself. The caller resolves <paramref name="repo"/> itself, from the catalog or a
-    /// typed <c>github.com/owner/name</c> URL.</summary>
+    /// typed <c>github.com/owner/name</c> URL. <paramref name="displayedCapabilities"/>, when
+    /// supplied, must match the release manifest's own capabilities (name and note,
+    /// order-insensitive) or the install is refused: it is the consent the player actually saw,
+    /// and the release can change under them between the dialog opening and this call
+    /// running.</summary>
     public async Task<PluginInstallResult> InstallOrUpdateAsync(
         string repo,
         string tag,
         PluginCatalog? catalog,
         ClientVersionResolution? clientResolution,
+        IReadOnlyList<LauncherPluginCapabilityDeclaration>? displayedCapabilities = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repo);
@@ -100,6 +111,12 @@ public sealed class PluginInstaller
         catch (LauncherPluginManifestException ex)
         {
             throw new LauncherUpdateException($"The plugin manifest is invalid: {ex.Message}", ex);
+        }
+
+        if (displayedCapabilities is not null
+            && !CapabilitiesMatch(displayedCapabilities, manifest.Capabilities))
+        {
+            throw new LauncherUpdateException(CapabilitiesChangedRefusal);
         }
 
         if (!manifest.MatchesTag(tag))
@@ -655,6 +672,24 @@ public sealed class PluginInstaller
             case PluginReleaseFetchStatus.Unavailable:
                 throw new LauncherUpdateException(unavailableMessage);
         }
+    }
+
+    /// <summary>Same declarations regardless of order: an author cannot dodge the comparison by
+    /// reordering an otherwise-unchanged list.</summary>
+    private static bool CapabilitiesMatch(
+        IReadOnlyList<LauncherPluginCapabilityDeclaration> displayed,
+        IReadOnlyList<LauncherPluginCapabilityDeclaration> actual)
+    {
+        if (displayed.Count != actual.Count)
+            return false;
+
+        return Sorted(displayed).SequenceEqual(Sorted(actual));
+
+        static IEnumerable<(LauncherPluginCapability Name, string Note)> Sorted(
+            IReadOnlyList<LauncherPluginCapabilityDeclaration> declarations) => declarations
+            .Select(declaration => (declaration.Name, declaration.Note))
+            .OrderBy(entry => entry.Name)
+            .ThenBy(entry => entry.Note, StringComparer.Ordinal);
     }
 
     private static string DescribeSource(InstalledPluginSource source) => source switch

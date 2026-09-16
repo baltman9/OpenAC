@@ -24,7 +24,7 @@ public sealed class PluginInstallDialogViewModelTests
             isUpdate: false,
             null,
             Characters,
-            _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
             (id, chosen) => enableCalls.Add((id, chosen)));
 
         Assert.True(dialog.EnableNone);
@@ -50,7 +50,7 @@ public sealed class PluginInstallDialogViewModelTests
             isUpdate: false,
             null,
             Characters,
-            _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
             (id, chosen) => enableCalls.Add((id, chosen)));
 
         dialog.EnableAll = true;
@@ -74,7 +74,7 @@ public sealed class PluginInstallDialogViewModelTests
             isUpdate: false,
             null,
             Characters,
-            _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
             (id, chosen) => enableCalls.Add((id, chosen)));
 
         dialog.EnableChoose = true;
@@ -98,7 +98,7 @@ public sealed class PluginInstallDialogViewModelTests
             isUpdate: false,
             null,
             Characters,
-            _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
             (id, chosen) => enableCalls.Add((id, chosen)));
 
         dialog.EnableChoose = true;
@@ -120,7 +120,7 @@ public sealed class PluginInstallDialogViewModelTests
             isUpdate: false,
             null,
             Characters,
-            _ =>
+            (_, _) =>
             {
                 installCount++;
                 return Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false));
@@ -151,7 +151,7 @@ public sealed class PluginInstallDialogViewModelTests
             isUpdate: false,
             null,
             Characters,
-            _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
             (_, _) => { });
 
         Assert.True(dialog.ConfirmCommand.CanExecute(null));
@@ -173,7 +173,7 @@ public sealed class PluginInstallDialogViewModelTests
             isUpdate: false,
             null,
             [],
-            _ => Task.FromResult(new PluginInstallResult("someone.plugin", "0.1.0", WasUpdate: false)),
+            (_, _) => Task.FromResult(new PluginInstallResult("someone.plugin", "0.1.0", WasUpdate: false)),
             (_, _) => { });
 
         Assert.True(dialog.ConfirmCommand.CanExecute(null));
@@ -196,7 +196,7 @@ public sealed class PluginInstallDialogViewModelTests
             isUpdate: false,
             "0.2.0-beta.1",
             Characters,
-            _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.2.0-beta.1", WasUpdate: false)),
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.2.0-beta.1", WasUpdate: false)),
             (_, _) => { });
 
         Assert.True(dialog.IsOfferedPrerelease);
@@ -219,7 +219,7 @@ public sealed class PluginInstallDialogViewModelTests
             isUpdate: false,
             "0.2.0",
             Characters,
-            _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.2.0", WasUpdate: false)),
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.2.0", WasUpdate: false)),
             (_, _) => { });
 
         Assert.False(dialog.IsOfferedPrerelease);
@@ -241,7 +241,7 @@ public sealed class PluginInstallDialogViewModelTests
             isUpdate: true,
             null,
             Characters,
-            _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.2.0", WasUpdate: true)),
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.2.0", WasUpdate: true)),
             (_, _) => { });
 
         Assert.True(dialog.IsUpdate);
@@ -262,7 +262,7 @@ public sealed class PluginInstallDialogViewModelTests
             isUpdate: true,
             null,
             Characters,
-            _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.2.0", WasUpdate: true)),
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.2.0", WasUpdate: true)),
             (id, chosen) => enableCalls.Add((id, chosen)));
 
         await dialog.ConfirmCommand.ExecuteAsync();
@@ -285,7 +285,7 @@ public sealed class PluginInstallDialogViewModelTests
             isUpdate: false,
             null,
             Characters,
-            _ =>
+            (_, _) =>
             {
                 installCalled = true;
                 return Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false));
@@ -312,7 +312,7 @@ public sealed class PluginInstallDialogViewModelTests
             isUpdate: false,
             null,
             Characters,
-            _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
             (_, _) => { });
 
         Assert.False(dialog.HasCapabilities);
@@ -331,7 +331,7 @@ public sealed class PluginInstallDialogViewModelTests
             isUpdate: false,
             null,
             Characters,
-            _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
             (_, _) => { },
             [
                 new LauncherPluginCapabilityDeclaration(
@@ -359,7 +359,7 @@ public sealed class PluginInstallDialogViewModelTests
             isUpdate: false,
             null,
             Characters,
-            _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
             (_, _) => { },
             [
                 new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Chat, "Reads chat."),
@@ -368,5 +368,121 @@ public sealed class PluginInstallDialogViewModelTests
 
         Assert.Equal("uses network", dialog.Capabilities[0].Label);
         Assert.Equal("uses chat", dialog.Capabilities[1].Label);
+    }
+
+    [Fact]
+    public void UnknownCapabilitiesShowLoadingAndDisableInstallUntilTheFetchCompletes()
+    {
+        var dialog = new PluginInstallDialogViewModel();
+        var fetch = new TaskCompletionSource<IReadOnlyList<LauncherPluginCapabilityDeclaration>>();
+        dialog.Open(
+            "shaneedwards/openac-plugin-hello",
+            "edwards.hello",
+            "Hello",
+            isListed: true,
+            isUpdate: false,
+            null,
+            Characters,
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
+            (_, _) => { },
+            capabilities: null,
+            loadCapabilities: _ => fetch.Task);
+
+        Assert.True(dialog.IsLoadingCapabilities);
+        Assert.False(dialog.HasCapabilities);
+        Assert.False(dialog.ConfirmCommand.CanExecute(null));
+
+        fetch.SetResult(
+        [
+            new LauncherPluginCapabilityDeclaration(
+                LauncherPluginCapability.Network, "Sends buff usage counts to my server."),
+            new LauncherPluginCapabilityDeclaration(
+                LauncherPluginCapability.Chat, "Reads chat to detect buff requests."),
+        ]);
+
+        Assert.False(dialog.IsLoadingCapabilities);
+        Assert.True(dialog.HasCapabilities);
+        Assert.Equal(2, dialog.Capabilities.Count);
+        Assert.True(dialog.ConfirmCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void UnknownCapabilitiesLeaveInstallDisabledWithAReasonWhenTheFetchFails()
+    {
+        var dialog = new PluginInstallDialogViewModel();
+        var fetch = new TaskCompletionSource<IReadOnlyList<LauncherPluginCapabilityDeclaration>>();
+        dialog.Open(
+            "shaneedwards/openac-plugin-hello",
+            "edwards.hello",
+            "Hello",
+            isListed: true,
+            isUpdate: false,
+            null,
+            Characters,
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
+            (_, _) => { },
+            capabilities: null,
+            loadCapabilities: _ => fetch.Task);
+
+        fetch.SetException(new InvalidOperationException("GitHub is rate limiting; try later."));
+
+        Assert.False(dialog.IsLoadingCapabilities);
+        Assert.True(dialog.HasCapabilitiesLoadError);
+        Assert.Equal("GitHub is rate limiting; try later.", dialog.CapabilitiesLoadError);
+        Assert.False(dialog.ConfirmCommand.CanExecute(null));
+        Assert.True(dialog.CancelCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void KnownCapabilitiesNeverShowLoadingEvenWhenEmpty()
+    {
+        var dialog = new PluginInstallDialogViewModel();
+        dialog.Open(
+            "shaneedwards/openac-plugin-hello",
+            "edwards.hello",
+            "Hello",
+            isListed: true,
+            isUpdate: false,
+            null,
+            Characters,
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
+            (_, _) => { },
+            capabilities: []);
+
+        Assert.False(dialog.IsLoadingCapabilities);
+        Assert.False(dialog.HasCapabilitiesLoadError);
+        Assert.True(dialog.ConfirmCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task ConfirmPassesTheDisplayedCapabilitiesFetchedOnDemandToInstall()
+    {
+        var dialog = new PluginInstallDialogViewModel();
+        var fetch = new TaskCompletionSource<IReadOnlyList<LauncherPluginCapabilityDeclaration>>();
+        IReadOnlyList<LauncherPluginCapabilityDeclaration>? passedToInstall = null;
+        dialog.Open(
+            "shaneedwards/openac-plugin-hello",
+            "edwards.hello",
+            "Hello",
+            isListed: true,
+            isUpdate: false,
+            null,
+            Characters,
+            (capabilities, _) =>
+            {
+                passedToInstall = capabilities;
+                return Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false));
+            },
+            (_, _) => { },
+            capabilities: null,
+            loadCapabilities: _ => fetch.Task);
+
+        var declared = new LauncherPluginCapabilityDeclaration(
+            LauncherPluginCapability.Network, "Sends buff usage counts to my server.");
+        fetch.SetResult([declared]);
+
+        await dialog.ConfirmCommand.ExecuteAsync();
+
+        Assert.Equal([declared], passedToInstall);
     }
 }

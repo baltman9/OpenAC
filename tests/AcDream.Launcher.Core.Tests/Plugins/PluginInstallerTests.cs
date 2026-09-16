@@ -346,6 +346,58 @@ public sealed class PluginInstallerTests
     }
 
     [Fact]
+    public async Task InstallRefusesWhenReleaseCapabilitiesDifferFromWhatWasDisplayed()
+    {
+        using var fixture = new Fixture();
+        var release = fixture.BuildReleaseWithCapabilities(
+            Id, "0.1.0", """[{ "name": "network", "note": "Sends usage counts." }]""");
+        fixture.RegisterRelease(Repo, release);
+
+        LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(() =>
+            fixture.Installer.InstallOrUpdateAsync(
+                Repo,
+                release.Tag,
+                catalog: null,
+                clientResolution: null,
+                displayedCapabilities:
+                [
+                    new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Chat, "Reads chat."),
+                ]));
+
+        Assert.Equal(PluginInstaller.CapabilitiesChangedRefusal, error.Message);
+        Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, Id)));
+    }
+
+    [Fact]
+    public async Task InstallSucceedsWhenDisplayedCapabilitiesMatchInADifferentOrder()
+    {
+        using var fixture = new Fixture();
+        var release = fixture.BuildReleaseWithCapabilities(
+            Id,
+            "0.1.0",
+            """
+            [
+              { "name": "chat", "note": "Reads chat." },
+              { "name": "network", "note": "Sends usage counts." }
+            ]
+            """);
+        fixture.RegisterRelease(Repo, release);
+
+        PluginInstallResult result = await fixture.Installer.InstallOrUpdateAsync(
+            Repo,
+            release.Tag,
+            catalog: null,
+            clientResolution: null,
+            displayedCapabilities:
+            [
+                new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Network, "Sends usage counts."),
+                new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Chat, "Reads chat."),
+            ]);
+
+        Assert.Equal(Id, result.Id);
+    }
+
+    [Fact]
     public async Task UnrecordedFolderWithSameNameIsRefused()
     {
         using var fixture = new Fixture();
@@ -988,6 +1040,24 @@ public sealed class PluginInstallerTests
             string sha256 = UpdateTestData.Sha256(zipBytes);
             return new Release(
                 id, version, manifestBytes, zipBytes, sha256, $"{id}-{version}.zip", icon);
+        }
+
+        public Release BuildReleaseWithCapabilities(string id, string version, string capabilitiesJson)
+        {
+            string entryDll = id + ".dll";
+            byte[] manifestBytes = Encoding.UTF8.GetBytes(ManifestJson(
+                id,
+                version,
+                entryDll,
+                capabilitiesVersion: LauncherPluginCapabilityVocabulary.Current,
+                capabilitiesJson: capabilitiesJson));
+            byte[] zipBytes = UpdateTestData.CreateZip(
+            [
+                ("plugin.json", manifestBytes, null),
+                (entryDll, Encoding.UTF8.GetBytes("binary-" + id), null),
+            ]);
+            string sha256 = UpdateTestData.Sha256(zipBytes);
+            return new Release(id, version, manifestBytes, zipBytes, sha256, $"{id}-{version}.zip");
         }
 
         public void RegisterRelease(

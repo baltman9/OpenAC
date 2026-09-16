@@ -789,27 +789,14 @@ public sealed class LauncherPluginsViewModel : ObservableObject
                 continue;
             }
 
-            PluginReleaseResolveResult result;
-            try
-            {
-                result = await _composition.ReleaseResolver
-                    .ResolveAsync(row.Repo, DiscoverChannel)
-                    .ConfigureAwait(true);
-            }
-            catch (LauncherUpdateException)
-            {
-                continue;
-            }
-
             // Rate-limited, unavailable, an invalid manifest and a prerelease latest are all
             // skipped the same way (L-319): the row just keeps showing no details this pass.
-            if (result.Status != PluginReleaseResolveStatus.Success)
+            ManifestFetch fetch = await FetchPluginManifestAsync(row.Repo, CancellationToken.None)
+                .ConfigureAwait(true);
+            if (fetch.Manifest is not { } manifest || fetch.Tag is not { } tag)
             {
                 continue;
             }
-
-            PluginReleaseResolution resolution = result.Resolution!;
-            LauncherPluginManifest manifest = resolution.Manifest;
 
             LauncherVersion? remoteVersion = LauncherVersion.TryParse(manifest.Version, out LauncherVersion? parsed)
                 ? parsed
@@ -823,18 +810,93 @@ public sealed class LauncherPluginsViewModel : ObservableObject
                 continue;
             }
 
-            LauncherVersion? clientVersion = _clientVersionResolver()?.Version;
-            LauncherPluginCompatibility.CompatibilityDescription compatibility =
-                LauncherPluginCompatibility.Describe(manifest, clientVersion);
-            var details = new DiscoverDetails(
-                manifest.Version, resolution.Tag, compatibility.Text, compatibility.IsWarning,
-                manifest.Capabilities);
-            _discoverDetailsCache[row.Id] = details;
-            row.LatestVersion = details.LatestVersion;
-            row.Compatibility = details.Compatibility;
-            row.CompatibilityIsWarning = details.CompatibilityIsWarning;
-            row.Capabilities = details.Capabilities;
+            ApplyDiscoverDetails(row.Id, manifest, tag);
         }
+    }
+
+    /// <summary>The capabilities Discover hadn't fetched yet when Install was pressed: the same
+    /// <c>plugin.json</c> fetch <see cref="RefreshDiscoverDetailsAsync"/> makes for every other row,
+    /// run for this one plugin on demand so the install dialog never opens without knowing what it
+    /// declares. Feeds the row and the shared cache exactly as the background pass does, so the row
+    /// reflects it too.</summary>
+    private async Task<IReadOnlyList<LauncherPluginCapabilityDeclaration>> LoadDiscoverCapabilitiesAsync(
+        string pluginId, string repo, CancellationToken cancellationToken)
+    {
+        ManifestFetch fetch = await FetchPluginManifestAsync(repo, cancellationToken).ConfigureAwait(true);
+        if (fetch.Manifest is not { } manifest || fetch.Tag is not { } tag)
+        {
+            throw new LauncherUpdateException(
+                fetch.ErrorMessage ?? "This plugin's details could not be checked.");
+        }
+
+        ApplyDiscoverDetails(pluginId, manifest, tag);
+        return manifest.Capabilities;
+    }
+
+    private readonly record struct ManifestFetch(
+        LauncherPluginManifest? Manifest, string? Tag, string? ErrorMessage);
+
+    /// <summary>Resolves through the plugin's channel (L-319), the same as the update check and
+    /// Discover's background pass, so a beta plugin's Discover details and install/update consent
+    /// always reflect the beta release rather than the last stable one.</summary>
+    private async Task<ManifestFetch> FetchPluginManifestAsync(string repo, CancellationToken cancellationToken)
+    {
+        if (_composition is null)
+        {
+            return new ManifestFetch(null, null, "This plugin's details could not be checked.");
+        }
+
+        PluginReleaseResolveResult result;
+        try
+        {
+            result = await _composition.ReleaseResolver
+                .ResolveAsync(repo, DiscoverChannel, cancellationToken)
+                .ConfigureAwait(true);
+        }
+        catch (LauncherUpdateException)
+        {
+            return new ManifestFetch(null, null, "This plugin's details could not be checked.");
+        }
+
+        switch (result.Status)
+        {
+            case PluginReleaseResolveStatus.RateLimited:
+                return new ManifestFetch(null, null, "GitHub is rate limiting; try later.");
+            case PluginReleaseResolveStatus.Success:
+                break;
+            case PluginReleaseResolveStatus.Prerelease:
+                return new ManifestFetch(
+                    null, null, result.Error ?? "This plugin's details could not be checked.");
+            default:
+                return new ManifestFetch(null, null, "This plugin's details could not be checked.");
+        }
+
+        PluginReleaseResolution resolution = result.Resolution!;
+        return new ManifestFetch(resolution.Manifest, resolution.Tag, null);
+    }
+
+    /// <summary>Writes a freshly fetched manifest's compatibility and capabilities into the shared
+    /// cache and, when the row is still on Discover, onto the row itself.</summary>
+    private void ApplyDiscoverDetails(string pluginId, LauncherPluginManifest manifest, string tag)
+    {
+        LauncherVersion? clientVersion = _clientVersionResolver()?.Version;
+        LauncherPluginCompatibility.CompatibilityDescription compatibility =
+            LauncherPluginCompatibility.Describe(manifest, clientVersion);
+        var details = new DiscoverDetails(
+            manifest.Version, tag, compatibility.Text, compatibility.IsWarning, manifest.Capabilities);
+        _discoverDetailsCache[pluginId] = details;
+
+        PluginDiscoverRowViewModel? row = _allDiscover.FirstOrDefault(
+            candidate => string.Equals(candidate.Id, pluginId, StringComparison.OrdinalIgnoreCase));
+        if (row is null)
+        {
+            return;
+        }
+
+        row.LatestVersion = details.LatestVersion;
+        row.Compatibility = details.Compatibility;
+        row.CompatibilityIsWarning = details.CompatibilityIsWarning;
+        row.Capabilities = details.Capabilities;
     }
 
     private readonly record struct DiscoverDetails(
@@ -852,14 +914,18 @@ public sealed class LauncherPluginsViewModel : ObservableObject
         _discoverDetailsCache.TryGetValue(entry.Id, out DiscoverDetails cached);
         OpenInstallDialog(
             entry.Repo, entry.Id, entry.Name, isUpdate: false, cached.Tag, cached.LatestVersion,
-            cached.Capabilities);
+            DiscoverCapabilities(entry.Id),
+            cancellationToken => LoadDiscoverCapabilitiesAsync(entry.Id, entry.Repo, cancellationToken));
     }
 
     /// <summary>Opens the install/update dialog for a repo. <paramref name="pinnedTag"/> is the
     /// release tag whichever caller already resolved (the update check, Discover's own details, or
     /// Add from URL); when Discover hasn't fetched details yet, it is null and Confirm resolves
     /// latest itself instead of the install ever doing so (L-319). <paramref name="offeredVersion"/>
-    /// travels the same way, so the dialog's notice can name a pre-release offer (L-319).</summary>
+    /// travels the same way, so the dialog's notice can name a pre-release offer (L-319).
+    /// <paramref name="capabilities"/> is the declared list when already known; <see langword="null"/>
+    /// means it still needs fetching, and <paramref name="loadCapabilities"/> is the fetch to run for
+    /// it (L-316).</summary>
     private void OpenInstallDialog(
         string repo,
         string pluginId,
@@ -867,7 +933,8 @@ public sealed class LauncherPluginsViewModel : ObservableObject
         bool isUpdate,
         string? pinnedTag,
         string? offeredVersion,
-        IReadOnlyList<LauncherPluginCapabilityDeclaration> capabilities)
+        IReadOnlyList<LauncherPluginCapabilityDeclaration>? capabilities,
+        Func<CancellationToken, Task<IReadOnlyList<LauncherPluginCapabilityDeclaration>>>? loadCapabilities = null)
     {
         if (_composition is null)
         {
@@ -884,9 +951,11 @@ public sealed class LauncherPluginsViewModel : ObservableObject
             isUpdate,
             offeredVersion,
             BuildCharacterOptions(),
-            cancellationToken => InstallAsync(repo, pinnedTag, cancellationToken),
+            (displayedCapabilities, cancellationToken) =>
+                InstallAsync(repo, pinnedTag, displayedCapabilities, cancellationToken),
             EnableForCharacters,
-            capabilities);
+            capabilities,
+            loadCapabilities);
     }
 
     private void OpenUpdateDialog(
@@ -901,8 +970,18 @@ public sealed class LauncherPluginsViewModel : ObservableObject
         }
     }
 
+    /// <summary>The capabilities Discover already fetched for this listed plugin
+    /// (<see cref="RefreshDiscoverDetailsAsync"/>), or <see langword="null"/> when Install is pressed
+    /// before that finishes: the dialog fetches them itself in that case
+    /// (<see cref="LoadDiscoverCapabilitiesAsync"/>) rather than opening on an unknown list.</summary>
+    private IReadOnlyList<LauncherPluginCapabilityDeclaration>? DiscoverCapabilities(string pluginId) =>
+        _discoverDetailsCache.TryGetValue(pluginId, out DiscoverDetails cached) ? cached.Capabilities : null;
+
     private async Task<PluginInstallResult> InstallAsync(
-        string repo, string? pinnedTag, CancellationToken cancellationToken)
+        string repo,
+        string? pinnedTag,
+        IReadOnlyList<LauncherPluginCapabilityDeclaration> displayedCapabilities,
+        CancellationToken cancellationToken)
     {
         string tag = pinnedTag ?? await ResolveLatestTagAsync(repo, cancellationToken).ConfigureAwait(true);
         PluginInstallResult result = await _composition!.Installer.InstallOrUpdateAsync(
@@ -910,6 +989,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject
                 tag,
                 _composition.CurrentCatalog,
                 _clientVersionResolver(),
+                displayedCapabilities,
                 cancellationToken)
             .ConfigureAwait(true);
         _ = CheckNowAsync();

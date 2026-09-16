@@ -666,25 +666,31 @@
           <TextBlock Text="{Binding Plugins.InstallDialog.DisplayName}" FontSize="22" FontWeight="Bold" />
           <SelectableTextBlock Grid.Row="1" Text="{Binding Plugins.InstallDialog.Repo}" Classes="muted" TextWrapping="Wrap" />
           <TextBlock Grid.Row="2" Text="{Binding Plugins.InstallDialog.WarningText}" TextWrapping="Wrap" />
-          <StackPanel Grid.Row="3" Spacing="4" IsVisible="{Binding Plugins.InstallDialog.HasCapabilities}">
-            <TextBlock Text="{Binding Plugins.InstallDialog.CapabilitiesHeading}" FontWeight="SemiBold" />
-            <ItemsControl ItemsSource="{Binding Plugins.InstallDialog.Capabilities}" Grid.IsSharedSizeScope="True">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="vm:PluginCapabilityChipViewModel">
-                  <Grid ColumnSpacing="8" Margin="0,0,0,3">
-                    <Grid.ColumnDefinitions>
-                      <ColumnDefinition Width="Auto" SharedSizeGroup="CapabilityChip" />
-                      <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Border Classes="chip capability" HorizontalAlignment="Left" VerticalAlignment="Top"
-                            AutomationProperties.Name="{Binding AutomationName}">
-                      <TextBlock Text="{Binding Label}" />
-                    </Border>
-                    <TextBlock Grid.Column="1" Text="{Binding Note}" Classes="muted" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
-                  </Grid>
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
+          <StackPanel Grid.Row="3" Spacing="4">
+            <TextBlock Text="{Binding Plugins.InstallDialog.LoadingCapabilitiesText}" Classes="muted"
+                       IsVisible="{Binding Plugins.InstallDialog.IsLoadingCapabilities}" />
+            <TextBlock Text="{Binding Plugins.InstallDialog.CapabilitiesLoadError}" Foreground="#FFB0A0"
+                       IsVisible="{Binding Plugins.InstallDialog.HasCapabilitiesLoadError}" TextWrapping="Wrap" />
+            <StackPanel Spacing="4" IsVisible="{Binding Plugins.InstallDialog.HasCapabilities}">
+              <TextBlock Text="{Binding Plugins.InstallDialog.CapabilitiesHeading}" FontWeight="SemiBold" />
+              <ItemsControl ItemsSource="{Binding Plugins.InstallDialog.Capabilities}" Grid.IsSharedSizeScope="True">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:PluginCapabilityChipViewModel">
+                    <Grid ColumnSpacing="8" Margin="0,0,0,3">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" SharedSizeGroup="CapabilityChip" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+                      <Border Classes="chip capability" HorizontalAlignment="Left" VerticalAlignment="Top"
+                              AutomationProperties.Name="{Binding AutomationName}">
+                        <TextBlock Text="{Binding Label}" />
+                      </Border>
+                      <TextBlock Grid.Column="1" Text="{Binding Note}" Classes="muted" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
           </StackPanel>
           <StackPanel Grid.Row="4" Spacing="6" IsVisible="{Binding Plugins.InstallDialog.ShowEnableChoice}">
             <TextBlock Text="Enable for" FontWeight="SemiBold" />
