@@ -169,6 +169,14 @@ public interface IWorldObjectAutomation
         return false;
     }
 
+    /// <summary>
+    /// Requests an appraisal of any object present in the object table --
+    /// owned inventory, equipped, landscape, a vendor listing, or an open
+    /// container's content -- through the same appraisal request the
+    /// client's own assess uses, gated the same way (Busy while another
+    /// inventory request is in flight). Contrast ILootAutomation.Identify,
+    /// which only accepts the currently open corpse/container's contents.
+    /// </summary>
     PluginItemCommandResult Identify(uint objectId) =>
         new(PluginItemCommandStatus.Unavailable);
 }

@@ -7,6 +7,7 @@ using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
+using AcDream.Core.Items;
 using AcDream.Runtime.Session;
 using System.Net;
 
@@ -403,6 +404,54 @@ public sealed class AppAutomationSurfacePluginApiTests
                 c.ObjectId == 700u
                     && c.Kind == PluginObjectChangeKind.IdentReceived));
     }
+
+    [Fact]
+    public void WorldObjectIdentifyAcceptsAnOwnedInventoryItemAndReportsIdentReceived()
+    {
+        var events = new WorldEvents();
+        var (runtime, commands) = CreateRealSession();
+        using var runtimeDisposal = runtime;
+        using var surface = new AppAutomationSurface(events);
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        commands.Start(runtime.Generation);
+
+        uint? sentTo = null;
+        surface.BindItems(
+            useItem: _ => false,
+            applyItem: (_, _) => false,
+            moveItem: (_, _, _, _) => false,
+            mergeItems: (_, _, _) => false,
+            dropItem: (_, _) => false,
+            giveItem: (_, _, _) => false,
+            pickupItem: (_, _) => false,
+            identifyItem: id => runtime.ActionOwner.Transactions.TryRequestAppraisal(
+                id,
+                sent => sentTo = sent));
+
+        // An owned inventory item -- not a corpse, not inside the
+        // currently open container -- which ILootAutomation.Identify's
+        // container-scoped rule would refuse as InvalidItem.
+        runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 900u,
+            ContainerId = 1u,
+        });
+
+        var seen = new List<PluginObjectChange>();
+        events.ObjectChanged += seen.Add;
+
+        PluginItemCommandResult result = surface.Objects.Identify(900u);
+
+        Assert.Equal(PluginItemCommandStatus.Started, result.Status);
+        Assert.Equal(900u, sentTo);
+
+        runtime.ActionOwner.Transactions.AcceptAppraisalResponse(900u);
+
+        Assert.Contains(
+            seen,
+            c => c.ObjectId == 900u && c.Kind == PluginObjectChangeKind.IdentReceived);
+    }
+
 
     [Fact]
     public void LogoutIsUnavailableWithoutAnInWorldSessionAndNeverCallsTheRoute()

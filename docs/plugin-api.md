@@ -161,6 +161,19 @@ tracking, on the same thread as `Tick`, in the host's own delivery order.
 
 A bulk container reset carries no single object id and is not reported.
 
+`host.Automation.Objects.Identify(objectId)` requests an appraisal of any
+object present in the object table -- owned inventory, equipped,
+landscape, a vendor listing, or an open container's content -- through
+the same appraisal request the client's own assess uses, gated the same
+way (`Busy` while another inventory request is in flight; `InvalidItem`
+only for a guid the client has never seen). This is a different, wider
+rule than `host.Automation.Loot.Identify`, which is deliberately scoped
+to the currently open corpse/container's contents for a loot-sorting
+plugin. Both report their result through the same `IdentReceived`
+`ObjectChanged` event once the appraisal response lands -- `Identify`
+itself only reports whether the request was accepted (`Started`) or
+refused, not the appraisal outcome.
+
 `IdentReceived` is reported from the appraisal response path; every other
 kind is reported from the entity and inventory delta observers, which are
 separate sources delivered in the same `Tick`-thread order but not

@@ -46,6 +46,15 @@ public interface ILootAutomation
     PluginItemCommandResult Open(uint containerObjectId) =>
         new(PluginItemCommandStatus.Unavailable);
 
+    /// <summary>
+    /// Identifies an item scoped to loot handling: only the currently open
+    /// corpse/container's contents, or the corpse itself, is a valid
+    /// target. Use IWorldObjectAutomation.Identify to assess any object
+    /// the client can currently see (owned, equipped, landscape, a vendor
+    /// listing, or open-container content) -- this member exists
+    /// separately because a loot-sorting plugin should not accidentally
+    /// identify something outside the container it is currently working.
+    /// </summary>
     PluginItemCommandResult Identify(uint objectId) =>
         new(PluginItemCommandStatus.Unavailable);
 

@@ -2093,8 +2093,29 @@ internal sealed class AppAutomationSurface
         return true;
     }
 
-    PluginItemCommandResult IWorldObjectAutomation.Identify(uint objectId) =>
-        ((ILootAutomation)this).Identify(objectId);
+    // Any object present in the object table is a valid target here --
+    // owned inventory, equipped, landscape, a vendor listing, or an open
+    // container's content -- unlike ILootAutomation.Identify, which is
+    // deliberately scoped to the currently open corpse/container.
+    PluginItemCommandResult IWorldObjectAutomation.Identify(uint objectId)
+    {
+        GameRuntime? runtime;
+        Func<uint, bool>? identify;
+        lock (_gate)
+        {
+            runtime = _runtime;
+            identify = _identifyItem;
+        }
+        if (runtime is null || identify is null || !IsAvailable)
+            return new(PluginItemCommandStatus.Unavailable);
+        if (objectId == 0u || runtime.InventoryOwner.Objects.Get(objectId) is null)
+            return new(PluginItemCommandStatus.InvalidItem);
+        if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
+            return new(PluginItemCommandStatus.Busy);
+        return identify(objectId)
+            ? new(PluginItemCommandStatus.Started)
+            : new(PluginItemCommandStatus.Refused);
+    }
 
     private PluginWorldObject ProjectWorldObject(
         GameRuntime runtime,
