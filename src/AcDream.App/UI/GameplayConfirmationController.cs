@@ -52,6 +52,15 @@ public sealed class GameplayConfirmationController : IDisposable
         return _dialogs.CloseDialog(_dialogContext);
     }
 
+    public bool TryAnswer(uint contextId, bool accept)
+    {
+        if (_dialogContext == 0u || contextId != _serverContext)
+            return false;
+        if (!_dialogs.TrySetConfirmationResult(_dialogContext, accept))
+            return false;
+        return _dialogs.CloseDialog(_dialogContext);
+    }
+
     public void ResetSession()
     {
         _dialogContext = 0u;

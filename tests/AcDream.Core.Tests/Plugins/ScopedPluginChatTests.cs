@@ -60,6 +60,23 @@ public sealed class ScopedPluginChatTests
     }
 
     [Fact]
+    public void CallingChatMethodsAfterUnloadThrows()
+    {
+        var chat = new RecordingChat();
+        var scoped = new ScopedPluginHost(new StubHost(chat), "example.plugin", "Example");
+        IPluginChat scopedChat = scoped.Automation.Chat;
+
+        scoped.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(
+            () => scopedChat.PostSystemMessage("hello"));
+        Assert.Throws<ObjectDisposedException>(
+            () => scopedChat.PostMessage("hello", 0));
+        Assert.Throws<ObjectDisposedException>(
+            () => scopedChat.Submit("hello"));
+    }
+
+    [Fact]
     public void ScopedStorageReportsThePluginsOwnDirectory()
     {
         var scoped = new ScopedPluginHost(

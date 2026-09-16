@@ -36,4 +36,49 @@ public interface IEvents
         add { }
         remove { }
     }
+
+    /// <summary>
+    /// Raised for every change to a world object the client is tracking:
+    /// created, updated, appraisal data received, moved between cells, or
+    /// released from the object table. Raised on the same thread as
+    /// <see cref="Tick"/>, in the host's own delivery order. Handler
+    /// exceptions are swallowed per handler, like every other event here.
+    /// </summary>
+    event Action<PluginObjectChange> ObjectChanged
+    {
+        add { }
+        remove { }
+    }
+
+    /// <summary>
+    /// Raised when an external container (a corpse, a chest, a housing
+    /// storage crate) becomes the client's open container. A vendor's shop
+    /// pane is a separate surface and does not raise this.
+    /// </summary>
+    event Action<uint> ContainerOpened
+    {
+        add { }
+        remove { }
+    }
+
+    /// <summary>
+    /// Raised when the client's open external container closes. The payload
+    /// is the container that was open, matching the id most recently raised
+    /// by <see cref="ContainerOpened"/>.
+    /// </summary>
+    event Action<uint> ContainerClosed
+    {
+        add { }
+        remove { }
+    }
+
+    /// <summary>
+    /// Raised when the server asks the client to show a yes/no confirmation
+    /// dialog. Answer it with <see cref="IAutomationSurface.Dialogs"/>.
+    /// </summary>
+    event Action<PluginConfirmation> ConfirmationRequested
+    {
+        add { }
+        remove { }
+    }
 }

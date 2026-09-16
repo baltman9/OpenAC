@@ -29,7 +29,7 @@ public sealed class ScopedAutomationSurfaceTests
         // Sanity check: if this drops below the known count, the interface
         // shrank and the loop below silently checks less than intended.
         Assert.True(
-            properties.Length >= 19,
+            properties.Length >= 20,
             "IAutomationSurface should still have every member this test knows about.");
 
         var checkedMembers = new List<string>();
@@ -56,10 +56,10 @@ public sealed class ScopedAutomationSurfaceTests
             checkedMembers.Add(property.Name);
         }
 
-        // Every property this loop actually walked should be one of the 17
+        // Every property this loop actually walked should be one of the 18
         // known forwarders, guarding against the loop silently checking
         // zero properties if reflection ever returned nothing.
-        Assert.Equal(17, checkedMembers.Count);
+        Assert.Equal(18, checkedMembers.Count);
 
         scoped.Dispose();
     }
@@ -91,6 +91,103 @@ public sealed class ScopedAutomationSurfaceTests
         Assert.NotSame(firstChatWrapper, secondChatWrapper);
 
         scoped.Dispose();
+    }
+
+    [Fact]
+    public void EveryPluginChatMemberIsForwardedByScopedPluginChat()
+    {
+        var recording = new RecordingIPluginChat();
+        var host = new MutableStubHost
+        {
+            Automation = new SoloChatAutomationSurface(recording),
+        };
+        var scoped = new ScopedPluginHost(host, "example.plugin", "Example");
+        IPluginChat chat = scoped.Automation.Chat;
+
+        MethodInfo[] methods = typeof(IPluginChat)
+            .GetMethods(BindingFlags.Public | BindingFlags.Instance);
+        EventInfo[] events = typeof(IPluginChat)
+            .GetEvents(BindingFlags.Public | BindingFlags.Instance);
+        Assert.True(
+            methods.Length >= 4 && events.Length >= 1,
+            "IPluginChat should still have every member this test knows about.");
+
+        chat.CaptureMessages(0);
+        Assert.Equal(1, recording.CaptureMessagesCalls);
+
+        chat.PostSystemMessage("a");
+        Assert.Equal(1, recording.PostSystemMessageCalls);
+
+        chat.PostMessage("a", 5);
+        Assert.Equal(1, recording.PostMessageCalls);
+
+        chat.Submit("a");
+        Assert.Equal(1, recording.SubmitCalls);
+
+        chat.RegisterFilter(static _ => true);
+        Assert.Equal(1, recording.FilterCount);
+
+        chat.Received += static _ => { };
+        Assert.Equal(1, recording.SubscriberCount);
+
+        scoped.Dispose();
+    }
+
+    private sealed class SoloChatAutomationSurface(IPluginChat chat) : IAutomationSurface
+    {
+        public bool IsAvailable => true;
+        public ICharacterInfo Character { get; } = new FakeCharacterInfo();
+        public ISpellCatalog Spells { get; } = new FakeSpellCatalog();
+        public IMagicCommands Magic { get; } = new FakeMagicCommands();
+        public IPluginChat Chat { get; } = chat;
+    }
+
+    private sealed class RecordingIPluginChat : IPluginChat
+    {
+        private readonly List<Func<PluginChatMessage, bool>> _filters = [];
+        private Action<PluginChatMessage>? _received;
+
+        internal int CaptureMessagesCalls { get; private set; }
+        internal int PostSystemMessageCalls { get; private set; }
+        internal int PostMessageCalls { get; private set; }
+        internal int SubmitCalls { get; private set; }
+        internal int FilterCount => _filters.Count;
+        internal int SubscriberCount => _received?.GetInvocationList().Length ?? 0;
+
+        public IReadOnlyList<PluginChatMessage> CaptureMessages(ulong afterSequence)
+        {
+            CaptureMessagesCalls++;
+            return Array.Empty<PluginChatMessage>();
+        }
+
+        public void PostSystemMessage(string text) => PostSystemMessageCalls++;
+
+        public void PostMessage(string text, int logTextType) => PostMessageCalls++;
+
+        public bool Submit(string text)
+        {
+            SubmitCalls++;
+            return true;
+        }
+
+        public IDisposable RegisterFilter(Func<PluginChatMessage, bool> suppress)
+        {
+            _filters.Add(suppress);
+            return new Removal(this, suppress);
+        }
+
+        public event Action<PluginChatMessage> Received
+        {
+            add => _received += value;
+            remove => _received -= value;
+        }
+
+        private sealed class Removal(
+            RecordingIPluginChat owner,
+            Func<PluginChatMessage, bool> suppress) : IDisposable
+        {
+            public void Dispose() => owner._filters.Remove(suppress);
+        }
     }
 
     private sealed class StubHost : IPluginHost
@@ -180,6 +277,7 @@ public sealed class ScopedAutomationSurfaceTests
         public ISpellCatalog Spells { get; } = new FakeSpellCatalog();
         public IMagicCommands Magic { get; } = new FakeMagicCommands();
         public IPluginChat Chat { get; } = new FakeChat();
+        public IDialogAutomation Dialogs { get; } = new FakeDialogAutomation();
         public ICombatAutomation Combat { get; } = new FakeCombatAutomation();
         public IEquipmentAutomation Equipment { get; } = new FakeEquipmentAutomation();
         public IItemAutomation Items { get; } = new FakeItemAutomation();
@@ -237,6 +335,8 @@ public sealed class ScopedAutomationSurfaceTests
     {
         public void PostSystemMessage(string text) { }
     }
+
+    private sealed class FakeDialogAutomation : IDialogAutomation;
 
     private sealed class FakeCombatAutomation : ICombatAutomation
     {

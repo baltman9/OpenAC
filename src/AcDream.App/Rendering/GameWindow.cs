@@ -483,6 +483,7 @@ public sealed class GameWindow :
             "graphical GameWindow");
         _automation?.Bind(_runtime, _runtime.CharacterOwner, _runtime.ActionOwner.SpellCast);
         _automation?.BindProjectileCollision(_physicsEngine);
+        _automation?.BindLogout(() => _localPlayerTeleportSink.TryRequestLogout());
         _localPlayerIdentity = new AcDream.App.Input.LocalPlayerIdentityState(
             _runtime.PlayerIdentity);
         _updateFrameClock = new AcDream.App.Update.UpdateFrameClock(
@@ -962,6 +963,12 @@ public sealed class GameWindow :
             _characterSheetProvider = retained.CharacterSheet;
             _frameScreenshots = retained.Screenshots;
             retained.Runtime.AttachNativeCursorWindow(_window?.Native?.Glfw ?? 0);
+            if (_automation is { } automation)
+            {
+                automation.BindDialogs(retained.Runtime.TryAnswerConfirmation);
+                retained.Runtime.ConfirmationRequested +=
+                    automation.RaiseConfirmationRequested;
+            }
         }
     }
 

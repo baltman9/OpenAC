@@ -16,4 +16,11 @@ public interface ILoginAutomation
 
     bool SetNextLogin(uint characterObjectId) => false;
     bool ClearNextLogin() => false;
+
+    /// <summary>
+    /// The client's own graceful logout: the same route the UI's logout
+    /// control uses. Returns false when there is no in-world session to log
+    /// out of.
+    /// </summary>
+    bool Logout() => false;
 }

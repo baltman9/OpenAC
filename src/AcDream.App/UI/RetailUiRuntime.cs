@@ -1030,8 +1030,27 @@ public sealed class RetailUiRuntime : IDisposable
         }
     }
 
+    /// <summary>
+    /// Raised whenever a confirmation dialog is shown to the local player,
+    /// regardless of whether a plugin is listening.
+    /// </summary>
+    public event Action<PluginConfirmation>? ConfirmationRequested;
+
     public bool HandleConfirmationRequest(GameEvents.CharacterConfirmationRequest request)
-        => _gameplayConfirmationController?.HandleRequest(request) == true;
+    {
+        bool shown = _gameplayConfirmationController?.HandleRequest(request) == true;
+        if (shown)
+        {
+            ConfirmationRequested?.Invoke(new PluginConfirmation(
+                request.ContextId,
+                (int)request.Type,
+                request.Message));
+        }
+        return shown;
+    }
+
+    public bool TryAnswerConfirmation(uint contextId, bool accept) =>
+        _gameplayConfirmationController?.TryAnswer(contextId, accept) == true;
 
     public bool HandleConfirmationDone(GameEvents.CharacterConfirmationDone done)
         => _gameplayConfirmationController?.HandleDone(done) == true;

@@ -163,6 +163,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             }
         }
 
+        public IDialogAutomation Dialogs => Inner.Dialogs;
         public ICombatAutomation Combat => Inner.Combat;
         public IEquipmentAutomation Equipment => Inner.Equipment;
         public IItemAutomation Items => Inner.Items;
@@ -200,13 +201,23 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             ulong afterSequence) =>
             inner.CaptureMessages(afterSequence);
 
-        public void PostSystemMessage(string text) =>
+        public void PostSystemMessage(string text)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             inner.PostSystemMessage(text);
+        }
 
-        public void PostMessage(string text, int logTextType) =>
+        public void PostMessage(string text, int logTextType)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             inner.PostMessage(text, logTextType);
+        }
 
-        public bool Submit(string text) => inner.Submit(text);
+        public bool Submit(string text)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return inner.Submit(text);
+        }
 
         public event Action<PluginChatMessage> Received
         {
@@ -390,6 +401,22 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             uint objectId) =>
             inner.TryNotifyItemRemoved(classifierId, objectId);
 
+        public bool TryNeedsIdentification(
+            string classifierId,
+            in PluginLootClassificationContext context) =>
+            inner.TryNeedsIdentification(classifierId, context);
+
+        public bool TryClassifyWithProfile(
+            string classifierId,
+            string profileName,
+            in PluginLootClassificationContext context,
+            out PluginLootClassification classification) =>
+            inner.TryClassifyWithProfile(
+                classifierId,
+                profileName,
+                context,
+                out classification);
+
         public void Dispose()
         {
             IDisposable[] registrations;
@@ -549,6 +576,13 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         private readonly object _gate = new();
         private readonly List<Action<WorldEntitySnapshot>> _registrations = [];
         private readonly List<Action<double>> _tickRegistrations = [];
+        private readonly List<Action> _loginCompleteRegistrations = [];
+        private readonly List<Action> _logoffRegistrations = [];
+        private readonly List<Action<string>> _localPlayerDiedRegistrations = [];
+        private readonly List<Action<PluginObjectChange>> _objectChangedRegistrations = [];
+        private readonly List<Action<uint>> _containerOpenedRegistrations = [];
+        private readonly List<Action<uint>> _containerClosedRegistrations = [];
+        private readonly List<Action<PluginConfirmation>> _confirmationRequestedRegistrations = [];
         private bool _disposed;
 
         public event Action<double> Tick
@@ -635,10 +669,283 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             }
         }
 
+        public event Action LoginComplete
+        {
+            add
+            {
+                ArgumentNullException.ThrowIfNull(value);
+                try
+                {
+                    inner.LoginComplete += value;
+                }
+                catch
+                {
+                    try { inner.LoginComplete -= value; }
+                    catch { }
+                    throw;
+                }
+                lock (_gate)
+                {
+                    if (!_disposed)
+                    {
+                        _loginCompleteRegistrations.Add(value);
+                        return;
+                    }
+                }
+
+                try { inner.LoginComplete -= value; }
+                catch { }
+                throw new ObjectDisposedException(nameof(ScopedEvents));
+            }
+            remove
+            {
+                if (value is null)
+                    return;
+                inner.LoginComplete -= value;
+                lock (_gate)
+                    _loginCompleteRegistrations.Remove(value);
+            }
+        }
+
+        public event Action Logoff
+        {
+            add
+            {
+                ArgumentNullException.ThrowIfNull(value);
+                try
+                {
+                    inner.Logoff += value;
+                }
+                catch
+                {
+                    try { inner.Logoff -= value; }
+                    catch { }
+                    throw;
+                }
+                lock (_gate)
+                {
+                    if (!_disposed)
+                    {
+                        _logoffRegistrations.Add(value);
+                        return;
+                    }
+                }
+
+                try { inner.Logoff -= value; }
+                catch { }
+                throw new ObjectDisposedException(nameof(ScopedEvents));
+            }
+            remove
+            {
+                if (value is null)
+                    return;
+                inner.Logoff -= value;
+                lock (_gate)
+                    _logoffRegistrations.Remove(value);
+            }
+        }
+
+        public event Action<string> LocalPlayerDied
+        {
+            add
+            {
+                ArgumentNullException.ThrowIfNull(value);
+                try
+                {
+                    inner.LocalPlayerDied += value;
+                }
+                catch
+                {
+                    try { inner.LocalPlayerDied -= value; }
+                    catch { }
+                    throw;
+                }
+                lock (_gate)
+                {
+                    if (!_disposed)
+                    {
+                        _localPlayerDiedRegistrations.Add(value);
+                        return;
+                    }
+                }
+
+                try { inner.LocalPlayerDied -= value; }
+                catch { }
+                throw new ObjectDisposedException(nameof(ScopedEvents));
+            }
+            remove
+            {
+                if (value is null)
+                    return;
+                inner.LocalPlayerDied -= value;
+                lock (_gate)
+                    _localPlayerDiedRegistrations.Remove(value);
+            }
+        }
+
+        public event Action<PluginObjectChange> ObjectChanged
+        {
+            add
+            {
+                ArgumentNullException.ThrowIfNull(value);
+                try
+                {
+                    inner.ObjectChanged += value;
+                }
+                catch
+                {
+                    try { inner.ObjectChanged -= value; }
+                    catch { }
+                    throw;
+                }
+                lock (_gate)
+                {
+                    if (!_disposed)
+                    {
+                        _objectChangedRegistrations.Add(value);
+                        return;
+                    }
+                }
+
+                try { inner.ObjectChanged -= value; }
+                catch { }
+                throw new ObjectDisposedException(nameof(ScopedEvents));
+            }
+            remove
+            {
+                if (value is null)
+                    return;
+                inner.ObjectChanged -= value;
+                lock (_gate)
+                    _objectChangedRegistrations.Remove(value);
+            }
+        }
+
+        public event Action<uint> ContainerOpened
+        {
+            add
+            {
+                ArgumentNullException.ThrowIfNull(value);
+                try
+                {
+                    inner.ContainerOpened += value;
+                }
+                catch
+                {
+                    try { inner.ContainerOpened -= value; }
+                    catch { }
+                    throw;
+                }
+                lock (_gate)
+                {
+                    if (!_disposed)
+                    {
+                        _containerOpenedRegistrations.Add(value);
+                        return;
+                    }
+                }
+
+                try { inner.ContainerOpened -= value; }
+                catch { }
+                throw new ObjectDisposedException(nameof(ScopedEvents));
+            }
+            remove
+            {
+                if (value is null)
+                    return;
+                inner.ContainerOpened -= value;
+                lock (_gate)
+                    _containerOpenedRegistrations.Remove(value);
+            }
+        }
+
+        public event Action<uint> ContainerClosed
+        {
+            add
+            {
+                ArgumentNullException.ThrowIfNull(value);
+                try
+                {
+                    inner.ContainerClosed += value;
+                }
+                catch
+                {
+                    try { inner.ContainerClosed -= value; }
+                    catch { }
+                    throw;
+                }
+                lock (_gate)
+                {
+                    if (!_disposed)
+                    {
+                        _containerClosedRegistrations.Add(value);
+                        return;
+                    }
+                }
+
+                try { inner.ContainerClosed -= value; }
+                catch { }
+                throw new ObjectDisposedException(nameof(ScopedEvents));
+            }
+            remove
+            {
+                if (value is null)
+                    return;
+                inner.ContainerClosed -= value;
+                lock (_gate)
+                    _containerClosedRegistrations.Remove(value);
+            }
+        }
+
+        public event Action<PluginConfirmation> ConfirmationRequested
+        {
+            add
+            {
+                ArgumentNullException.ThrowIfNull(value);
+                try
+                {
+                    inner.ConfirmationRequested += value;
+                }
+                catch
+                {
+                    try { inner.ConfirmationRequested -= value; }
+                    catch { }
+                    throw;
+                }
+                lock (_gate)
+                {
+                    if (!_disposed)
+                    {
+                        _confirmationRequestedRegistrations.Add(value);
+                        return;
+                    }
+                }
+
+                try { inner.ConfirmationRequested -= value; }
+                catch { }
+                throw new ObjectDisposedException(nameof(ScopedEvents));
+            }
+            remove
+            {
+                if (value is null)
+                    return;
+                inner.ConfirmationRequested -= value;
+                lock (_gate)
+                    _confirmationRequestedRegistrations.Remove(value);
+            }
+        }
+
         public void Dispose()
         {
             Action<WorldEntitySnapshot>[] registrations;
             Action<double>[] tickRegistrations;
+            Action[] loginCompleteRegistrations;
+            Action[] logoffRegistrations;
+            Action<string>[] localPlayerDiedRegistrations;
+            Action<PluginObjectChange>[] objectChangedRegistrations;
+            Action<uint>[] containerOpenedRegistrations;
+            Action<uint>[] containerClosedRegistrations;
+            Action<PluginConfirmation>[] confirmationRequestedRegistrations;
             lock (_gate)
             {
                 if (_disposed)
@@ -648,6 +955,21 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
                 _registrations.Clear();
                 tickRegistrations = _tickRegistrations.ToArray();
                 _tickRegistrations.Clear();
+                loginCompleteRegistrations = _loginCompleteRegistrations.ToArray();
+                _loginCompleteRegistrations.Clear();
+                logoffRegistrations = _logoffRegistrations.ToArray();
+                _logoffRegistrations.Clear();
+                localPlayerDiedRegistrations = _localPlayerDiedRegistrations.ToArray();
+                _localPlayerDiedRegistrations.Clear();
+                objectChangedRegistrations = _objectChangedRegistrations.ToArray();
+                _objectChangedRegistrations.Clear();
+                containerOpenedRegistrations = _containerOpenedRegistrations.ToArray();
+                _containerOpenedRegistrations.Clear();
+                containerClosedRegistrations = _containerClosedRegistrations.ToArray();
+                _containerClosedRegistrations.Clear();
+                confirmationRequestedRegistrations =
+                    _confirmationRequestedRegistrations.ToArray();
+                _confirmationRequestedRegistrations.Clear();
             }
 
             for (int index = registrations.Length - 1; index >= 0; index--)
@@ -659,6 +981,51 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             for (int index = tickRegistrations.Length - 1; index >= 0; index--)
             {
                 try { inner.Tick -= tickRegistrations[index]; }
+                catch { }
+            }
+
+            for (int index = loginCompleteRegistrations.Length - 1; index >= 0; index--)
+            {
+                try { inner.LoginComplete -= loginCompleteRegistrations[index]; }
+                catch { }
+            }
+
+            for (int index = logoffRegistrations.Length - 1; index >= 0; index--)
+            {
+                try { inner.Logoff -= logoffRegistrations[index]; }
+                catch { }
+            }
+
+            for (int index = localPlayerDiedRegistrations.Length - 1; index >= 0; index--)
+            {
+                try { inner.LocalPlayerDied -= localPlayerDiedRegistrations[index]; }
+                catch { }
+            }
+
+            for (int index = objectChangedRegistrations.Length - 1; index >= 0; index--)
+            {
+                try { inner.ObjectChanged -= objectChangedRegistrations[index]; }
+                catch { }
+            }
+
+            for (int index = containerOpenedRegistrations.Length - 1; index >= 0; index--)
+            {
+                try { inner.ContainerOpened -= containerOpenedRegistrations[index]; }
+                catch { }
+            }
+
+            for (int index = containerClosedRegistrations.Length - 1; index >= 0; index--)
+            {
+                try { inner.ContainerClosed -= containerClosedRegistrations[index]; }
+                catch { }
+            }
+
+            for (int index = confirmationRequestedRegistrations.Length - 1; index >= 0; index--)
+            {
+                try
+                {
+                    inner.ConfirmationRequested -= confirmationRequestedRegistrations[index];
+                }
                 catch { }
             }
         }

@@ -40,6 +40,29 @@ public interface IPluginLootClassifier
     void OnLooted(in PluginLootedItem item) { }
 
     void OnItemRemoved(uint objectId) { }
+
+    /// <summary>
+    /// True when the item cannot yet be classified with confidence because
+    /// it lacks appraisal data and at least one active rule needs an
+    /// appraised property to evaluate.
+    /// </summary>
+    bool NeedsIdentification(in PluginLootClassificationContext context) =>
+        false;
+
+    /// <summary>
+    /// Classifies <paramref name="context"/> against a named, stored profile
+    /// rather than the classifier's live one (VTank's "vendor" and "trader"
+    /// list files, for example). Returns false when the named profile does
+    /// not exist.
+    /// </summary>
+    bool TryClassifyWithProfile(
+        string profileName,
+        in PluginLootClassificationContext context,
+        out PluginLootClassification classification)
+    {
+        classification = default;
+        return false;
+    }
 }
 
 public readonly record struct PluginLootClassifierInfo(
@@ -73,6 +96,22 @@ public interface IPluginLootClassifierRegistry
     bool TryNotifyItemRemoved(
         string classifierId,
         uint objectId) => false;
+
+    /// <summary>Forwards to the registered classifier's <see cref="IPluginLootClassifier.NeedsIdentification"/>.</summary>
+    bool TryNeedsIdentification(
+        string classifierId,
+        in PluginLootClassificationContext context) => false;
+
+    /// <summary>Forwards to the registered classifier's <see cref="IPluginLootClassifier.TryClassifyWithProfile"/>.</summary>
+    bool TryClassifyWithProfile(
+        string classifierId,
+        string profileName,
+        in PluginLootClassificationContext context,
+        out PluginLootClassification classification)
+    {
+        classification = default;
+        return false;
+    }
 }
 
 public sealed class NoOpPluginLootClassifierRegistry

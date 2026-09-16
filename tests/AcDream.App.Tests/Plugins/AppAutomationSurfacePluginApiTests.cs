@@ -142,7 +142,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     }
 
     [Fact]
-    public void PostMessageIgnoresAnEmptyString()
+    public void PostSystemMessageIgnoresAnEmptyString()
     {
         using var runtime = GameRuntimeTestFactory.Create();
         using var surface = new AppAutomationSurface();

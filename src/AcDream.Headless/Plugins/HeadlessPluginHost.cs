@@ -1,3 +1,4 @@
+using AcDream.Core.Items;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
 
@@ -27,6 +28,10 @@ internal sealed class HeadlessPluginHost
     private Action? _loginComplete;
     private Action? _logoff;
     private Action<string>? _localPlayerDied;
+    private Action<PluginObjectChange>? _objectChanged;
+    private Action<uint>? _containerOpened;
+    private Action<uint>? _containerClosed;
+    private Action<PluginConfirmation>? _confirmationRequested;
     private bool _wasInWorld;
     private bool _disposed;
 
@@ -49,16 +54,24 @@ internal sealed class HeadlessPluginHost
         IPluginCommandRegistry? commands = null,
         IPluginStorage? vtankProfiles = null,
         IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
-        Func<string, bool>? submitChatText = null)
+        Func<string, bool>? submitChatText = null,
+        Func<bool>? requestLogout = null,
+        Func<uint, bool, bool>? answerConfirmation = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         Log = logger ?? throw new ArgumentNullException(nameof(logger));
         Commands = commands ?? NoOpPluginCommandRegistry.Instance;
         VtankProfiles = vtankProfiles ?? NoOpPluginStorage.Instance;
         _sessionSettingsByPlugin = CopySessionSettings(sessionSettings);
-        _automation = new HeadlessAutomationSurface(runtime, submitChatText);
+        _automation = new HeadlessAutomationSurface(
+            runtime,
+            submitChatText,
+            requestLogout,
+            answerConfirmation);
         _wasInWorld = runtime.Lifecycle.State == RuntimeLifecycleState.InWorld;
         runtime.CommunicationOwner.LocalPlayerDied += OnLocalPlayerDied;
+        runtime.InventoryOwner.ExternalContainers.Changed += OnExternalContainerChanged;
+        runtime.ActionOwner.Transactions.AppraisalReceived += OnAppraisalReceived;
         _eventSubscription = runtime.Subscribe(this);
     }
 
@@ -271,13 +284,29 @@ internal sealed class HeadlessPluginHost
             _loginComplete = null;
             _logoff = null;
             _localPlayerDied = null;
+            _objectChanged = null;
+            _containerOpened = null;
+            _containerClosed = null;
+            _confirmationRequested = null;
         }
         _runtime.CommunicationOwner.LocalPlayerDied -= OnLocalPlayerDied;
+        _runtime.InventoryOwner.ExternalContainers.Changed -= OnExternalContainerChanged;
+        _runtime.ActionOwner.Transactions.AppraisalReceived -= OnAppraisalReceived;
         _eventSubscription.Dispose();
     }
 
     public void OnEntity(in RuntimeEntityDelta delta)
     {
+        RaiseObjectChanged(
+            delta.Entity.Identity.ServerGuid,
+            delta.Change switch
+            {
+                RuntimeEntityChange.Registered => PluginObjectChangeKind.Created,
+                RuntimeEntityChange.Rebucketed => PluginObjectChangeKind.Moved,
+                RuntimeEntityChange.Withdrawn => PluginObjectChangeKind.Released,
+                RuntimeEntityChange.Deleted => PluginObjectChangeKind.Released,
+                _ => PluginObjectChangeKind.Updated,
+            });
         if (delta.Change != RuntimeEntityChange.Registered)
             return;
         Subscription[] toNotify;
@@ -401,8 +430,163 @@ internal sealed class HeadlessPluginHost
         }
     }
 
+    public event Action<PluginObjectChange> ObjectChanged
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_tickGate)
+                _objectChanged += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_tickGate)
+                _objectChanged -= value;
+        }
+    }
+
+    public event Action<uint> ContainerOpened
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_tickGate)
+                _containerOpened += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_tickGate)
+                _containerOpened -= value;
+        }
+    }
+
+    public event Action<uint> ContainerClosed
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_tickGate)
+                _containerClosed += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_tickGate)
+                _containerClosed -= value;
+        }
+    }
+
+    public event Action<PluginConfirmation> ConfirmationRequested
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_tickGate)
+                _confirmationRequested += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_tickGate)
+                _confirmationRequested -= value;
+        }
+    }
+
     public void OnCommand(in RuntimeCommandDelta delta) { }
-    public void OnInventory(in RuntimeInventoryDelta delta) { }
+
+    public void OnInventory(in RuntimeInventoryDelta delta)
+    {
+        if (delta.Change == RuntimeInventoryChange.Cleared)
+            return;
+        RaiseObjectChanged(
+            delta.Item.ObjectId,
+            delta.Change switch
+            {
+                RuntimeInventoryChange.Added => PluginObjectChangeKind.Created,
+                RuntimeInventoryChange.Moved => PluginObjectChangeKind.Moved,
+                RuntimeInventoryChange.Removed => PluginObjectChangeKind.Released,
+                _ => PluginObjectChangeKind.Updated,
+            });
+    }
+
+    private void RaiseObjectChanged(uint objectId, PluginObjectChangeKind kind)
+    {
+        Action<PluginObjectChange>? handlers;
+        lock (_tickGate)
+            handlers = _objectChanged;
+        if (handlers is null)
+            return;
+        var change = new PluginObjectChange(objectId, kind);
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginObjectChange>)handler)(change); }
+            catch (Exception error)
+            {
+                Log.Warn($"Plugin object-change handler threw: {error}");
+            }
+        }
+    }
+
+    private void OnExternalContainerChanged(
+        AcDream.Core.Items.ExternalContainerTransition transition)
+    {
+        switch (transition.Kind)
+        {
+            case AcDream.Core.Items.ExternalContainerTransitionKind.Opened:
+                RaiseUInt(ref _containerOpened, transition.ContainerId);
+                break;
+            case AcDream.Core.Items.ExternalContainerTransitionKind.ReplacementRequested:
+            case AcDream.Core.Items.ExternalContainerTransitionKind.Closed:
+            case AcDream.Core.Items.ExternalContainerTransitionKind.Reset:
+                if (transition.PreviousContainerId != 0u)
+                    RaiseUInt(ref _containerClosed, transition.PreviousContainerId);
+                break;
+        }
+    }
+
+    private void OnAppraisalReceived(uint objectId) =>
+        RaiseObjectChanged(objectId, PluginObjectChangeKind.IdentReceived);
+
+    private void RaiseUInt(ref Action<uint>? field, uint value)
+    {
+        Action<uint>? handlers;
+        lock (_tickGate)
+            handlers = field;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<uint>)handler)(value); }
+            catch (Exception error)
+            {
+                Log.Warn($"Plugin container handler threw: {error}");
+            }
+        }
+    }
+
+    /// <summary>Called by the session host whenever it records a confirmation request.</summary>
+    internal void RaiseConfirmationRequested(PluginConfirmation confirmation)
+    {
+        Action<PluginConfirmation>? handlers;
+        lock (_tickGate)
+            handlers = _confirmationRequested;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginConfirmation>)handler)(confirmation); }
+            catch (Exception error)
+            {
+                Log.Warn($"Plugin confirmation handler threw: {error}");
+            }
+        }
+    }
 
     public void OnChat(in RuntimeChatDelta delta) =>
         _automation.RaiseChatReceived(delta.Stamp.Sequence, delta.Entry);

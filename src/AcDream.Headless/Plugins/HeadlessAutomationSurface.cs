@@ -5,19 +5,26 @@ using AcDream.Runtime.Gameplay;
 
 namespace AcDream.Headless.Plugins;
 
-internal sealed class HeadlessAutomationSurface : IAutomationSurface, IPluginChat
+internal sealed class HeadlessAutomationSurface
+    : IAutomationSurface, IPluginChat, ILoginAutomation, IDialogAutomation
 {
     private readonly GameRuntime _runtime;
     private readonly Func<string, bool>? _submitChatText;
+    private readonly Func<bool>? _requestLogout;
+    private readonly Func<uint, bool, bool>? _answerConfirmation;
     private readonly object _gate = new();
     private Action<PluginChatMessage>? _chatReceived;
 
     internal HeadlessAutomationSurface(
         GameRuntime runtime,
-        Func<string, bool>? submitChatText = null)
+        Func<string, bool>? submitChatText = null,
+        Func<bool>? requestLogout = null,
+        Func<uint, bool, bool>? answerConfirmation = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _submitChatText = submitChatText;
+        _requestLogout = requestLogout;
+        _answerConfirmation = answerConfirmation;
     }
 
     public bool IsAvailable =>
@@ -27,6 +34,13 @@ internal sealed class HeadlessAutomationSurface : IAutomationSurface, IPluginCha
     public ISpellCatalog Spells => NoOpAutomationSurface.Instance.Spells;
     public IMagicCommands Magic => NoOpAutomationSurface.Instance.Magic;
     public IPluginChat Chat => this;
+    public ILoginAutomation Login => this;
+    public IDialogAutomation Dialogs => this;
+
+    bool ILoginAutomation.Logout() => IsAvailable && (_requestLogout?.Invoke() ?? false);
+
+    bool IDialogAutomation.Answer(uint contextId, bool accept) =>
+        _answerConfirmation?.Invoke(contextId, accept) ?? false;
 
     public event Action<PluginChatMessage> Received
     {

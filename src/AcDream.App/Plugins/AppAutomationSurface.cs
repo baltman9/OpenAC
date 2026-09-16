@@ -27,7 +27,7 @@ internal sealed class AppAutomationSurface
       IRuntimeCommunicationObserver, IRuntimeEventObserver,
       INavigationAutomation, IWorldObjectAutomation, IWorldTimeAutomation,
       ILoginAutomation, INetworkAutomation, IRecoveryAutomation,
-      IProjectileAutomation, ISelectionAutomation, IDisposable
+      IProjectileAutomation, ISelectionAutomation, IDialogAutomation, IDisposable
 {
     private readonly PluginCommandRegistry _pluginCommands;
     private const int MaximumPluginChatMessages = 512;
@@ -81,6 +81,9 @@ internal sealed class AppAutomationSurface
     private IDisposable? _chatFilterInstallation;
     private IDisposable? _runtimeEventSubscription;
     private bool _wasInWorld;
+    private Func<uint, bool, bool>? _answerConfirmation;
+    private Func<bool>? _requestLogout;
+    private Action<ExternalContainerTransition>? _externalContainerChanged;
     private Action<PluginChatMessage>? _chatReceived;
     private SpellTable? _spellCatalogSource;
     private IReadOnlyList<PluginSpellInfo> _allSpells = Array.Empty<PluginSpellInfo>();
@@ -340,6 +343,11 @@ internal sealed class AppAutomationSurface
             _wasInWorld =
                 runtime.Lifecycle.State == RuntimeLifecycleState.InWorld;
             runtime.CommunicationOwner.LocalPlayerDied += OnLocalPlayerDied;
+            _externalContainerChanged = OnExternalContainerChanged;
+            runtime.InventoryOwner.ExternalContainers.Changed +=
+                _externalContainerChanged;
+            runtime.ActionOwner.Transactions.AppraisalReceived +=
+                OnAppraisalReceived;
             _character = character;
             _cast = cast;
             _spellbook = spellbook;
@@ -486,6 +494,14 @@ internal sealed class AppAutomationSurface
                 OnInventoryRequestFailed;
             runtime.InventoryOwner.Transactions.RequestCompleted -=
                 OnInventoryRequestCompleted;
+            if (_externalContainerChanged is not null)
+            {
+                runtime.InventoryOwner.ExternalContainers.Changed -=
+                    _externalContainerChanged;
+                _externalContainerChanged = null;
+            }
+            runtime.ActionOwner.Transactions.AppraisalReceived -=
+                OnAppraisalReceived;
         }
         if (_communication is not null)
             _communication.LocalPlayerDied -= OnLocalPlayerDied;
@@ -1057,8 +1073,57 @@ internal sealed class AppAutomationSurface
     }
 
     void IRuntimeEventObserver.OnCommand(in RuntimeCommandDelta delta) { }
-    void IRuntimeEventObserver.OnEntity(in RuntimeEntityDelta delta) { }
-    void IRuntimeEventObserver.OnInventory(in RuntimeInventoryDelta delta) { }
+
+    /// <summary>
+    /// Maps the runtime's own entity-lifecycle vocabulary onto the plugin's
+    /// narrower one: a cell-crossing position update ("Rebucketed") is a
+    /// move; a first sighting ("Registered") is a create; anything that
+    /// leaves the object table ("Withdrawn"/"Deleted") is a release. A
+    /// temporarily hidden entity ("Hidden") is still tracked, so it reports
+    /// as an update rather than a release.
+    /// </summary>
+    void IRuntimeEventObserver.OnEntity(in RuntimeEntityDelta delta)
+    {
+        WorldEvents? events = _pluginEvents;
+        if (events is null)
+            return;
+        PluginObjectChangeKind kind = delta.Change switch
+        {
+            RuntimeEntityChange.Registered => PluginObjectChangeKind.Created,
+            RuntimeEntityChange.Rebucketed => PluginObjectChangeKind.Moved,
+            RuntimeEntityChange.Withdrawn => PluginObjectChangeKind.Released,
+            RuntimeEntityChange.Deleted => PluginObjectChangeKind.Released,
+            _ => PluginObjectChangeKind.Updated,
+        };
+        events.FireObjectChanged(new PluginObjectChange(
+            delta.Entity.Identity.ServerGuid,
+            kind));
+    }
+
+    /// <summary>
+    /// A bulk container-reset ("Cleared") carries no object id and is not
+    /// reported; every other inventory change maps directly onto the
+    /// plugin's vocabulary.
+    /// </summary>
+    void IRuntimeEventObserver.OnInventory(in RuntimeInventoryDelta delta)
+    {
+        if (delta.Change == RuntimeInventoryChange.Cleared)
+            return;
+        WorldEvents? events = _pluginEvents;
+        if (events is null)
+            return;
+        PluginObjectChangeKind kind = delta.Change switch
+        {
+            RuntimeInventoryChange.Added => PluginObjectChangeKind.Created,
+            RuntimeInventoryChange.Moved => PluginObjectChangeKind.Moved,
+            RuntimeInventoryChange.Removed => PluginObjectChangeKind.Released,
+            _ => PluginObjectChangeKind.Updated,
+        };
+        events.FireObjectChanged(new PluginObjectChange(
+            delta.Item.ObjectId,
+            kind));
+    }
+
     void IRuntimeEventObserver.OnChat(in RuntimeChatDelta delta) { }
     void IRuntimeEventObserver.OnMovement(in RuntimeMovementDelta delta) { }
     void IRuntimeEventObserver.OnPortal(in RuntimePortalDelta delta) { }
@@ -1066,6 +1131,69 @@ internal sealed class AppAutomationSurface
 
     private void OnLocalPlayerDied(string deathMessage) =>
         _pluginEvents?.FireLocalPlayerDied(deathMessage);
+
+    private void OnExternalContainerChanged(ExternalContainerTransition transition)
+    {
+        WorldEvents? events = _pluginEvents;
+        if (events is null)
+            return;
+        switch (transition.Kind)
+        {
+            case ExternalContainerTransitionKind.Opened:
+                events.FireContainerOpened(transition.ContainerId);
+                break;
+            case ExternalContainerTransitionKind.ReplacementRequested:
+            case ExternalContainerTransitionKind.Closed:
+            case ExternalContainerTransitionKind.Reset:
+                if (transition.PreviousContainerId != 0u)
+                    events.FireContainerClosed(transition.PreviousContainerId);
+                break;
+        }
+    }
+
+    private void OnAppraisalReceived(uint objectId) =>
+        _pluginEvents?.FireObjectChanged(new PluginObjectChange(
+            objectId,
+            PluginObjectChangeKind.IdentReceived));
+
+    // ── IDialogAutomation ────────────────────────────────────────────────
+    IDialogAutomation IAutomationSurface.Dialogs => this;
+
+    bool IDialogAutomation.Answer(uint contextId, bool accept)
+    {
+        Func<uint, bool, bool>? answer;
+        lock (_gate)
+            answer = _answerConfirmation;
+        return answer?.Invoke(contextId, accept) ?? false;
+    }
+
+    public void BindDialogs(Func<uint, bool, bool> answer)
+    {
+        ArgumentNullException.ThrowIfNull(answer);
+        lock (_gate)
+            _answerConfirmation = answer;
+    }
+
+    /// <summary>Called by the host whenever it shows a confirmation dialog.</summary>
+    public void RaiseConfirmationRequested(PluginConfirmation confirmation) =>
+        _pluginEvents?.FireConfirmationRequested(confirmation);
+
+    public void BindLogout(Func<bool> requestLogout)
+    {
+        ArgumentNullException.ThrowIfNull(requestLogout);
+        lock (_gate)
+            _requestLogout = requestLogout;
+    }
+
+    bool ILoginAutomation.Logout()
+    {
+        if (!IsAvailable)
+            return false;
+        Func<bool>? requestLogout;
+        lock (_gate)
+            requestLogout = _requestLogout;
+        return requestLogout?.Invoke() ?? false;
+    }
 
     public IReadOnlyList<PluginSpellInfo> All
     {

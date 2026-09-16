@@ -361,6 +361,8 @@ public interface IAutomationSurface
     IMagicCommands Magic { get; }
     IPluginChat Chat { get; }
 
+    IDialogAutomation Dialogs => NoOpAutomationSurface.Instance;
+
     ICombatAutomation Combat => NoOpAutomationSurface.Instance;
 
     IEquipmentAutomation Equipment => NoOpAutomationSurface.Instance;
@@ -398,7 +400,7 @@ public sealed class NoOpAutomationSurface
       IFellowshipAutomation, IEnchantmentAutomation, INavigationAutomation
       , IWorldObjectAutomation, IWorldTimeAutomation, ILoginAutomation,
       INetworkAutomation, IRecoveryAutomation, IProjectileAutomation
-      , ISelectionAutomation
+      , ISelectionAutomation, IDialogAutomation
 {
     public static NoOpAutomationSurface Instance { get; } = new();
 
@@ -411,6 +413,7 @@ public sealed class NoOpAutomationSurface
     public ISpellCatalog Spells => this;
     public IMagicCommands Magic => this;
     public IPluginChat Chat => this;
+    public IDialogAutomation Dialogs => this;
     public ICombatAutomation Combat => this;
     public IEquipmentAutomation Equipment => this;
     public IItemAutomation Items => this;

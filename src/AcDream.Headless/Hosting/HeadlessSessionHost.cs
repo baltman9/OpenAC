@@ -275,6 +275,19 @@ internal sealed class HeadlessSessionHost : IDisposable
                     or SubmitOutcome.UnknownCommand
                     or SubmitOutcome.Dropped);
             }
+            bool RequestLogout() =>
+                bridge.Stop(runtime.Generation).Status
+                    == RuntimeCommandStatus.Accepted;
+            bool AnswerConfirmation(uint contextId, bool accept)
+            {
+                if (_pendingConfirmation is not { } pending
+                    || pending.ContextId != contextId)
+                {
+                    return false;
+                }
+                RespondToConfirmation(accept);
+                return true;
+            }
             pluginSession = HeadlessPluginSession.Create(
                 runtime,
                 diagnostics,
@@ -285,7 +298,9 @@ internal sealed class HeadlessSessionHost : IDisposable
                 pluginCommands,
                 vtankProfiles,
                 descriptor.PluginSettings,
-                SubmitChatText);
+                SubmitChatText,
+                RequestLogout,
+                AnswerConfirmation);
             var liveSession = new LiveSessionHost(
                 runtime.Session,
                 new LiveSessionHostBindings(
@@ -1096,6 +1111,11 @@ internal sealed class HeadlessSessionHost : IDisposable
                         + $"{request.Type} context={request.ContextId} "
                         + $"text='{request.Message}'");
                     _pendingConfirmation = request;
+                    _pluginSession.Host.RaiseConfirmationRequested(
+                        new PluginConfirmation(
+                            request.ContextId,
+                            (int)request.Type,
+                            request.Message));
                 },
                 OnConfirmationDone: null,
                 ClientTime: () =>

@@ -120,6 +120,13 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
     public InventoryTransactionState Inventory => _inventory;
     public uint AwaitingAppraisalId => _awaitingAppraisalId;
     public uint CurrentAppraisalId => _currentAppraisalId;
+
+    /// <summary>
+    /// Raised when the client accepts the FIRST appraisal response for an
+    /// object -- the moment appraisal data actually lands, as opposed to a
+    /// refresh of data already held.
+    /// </summary>
+    public event Action<uint>? AppraisalReceived;
     public int OutboundCount => _outbound.Count;
     public bool HasPendingPickup => _pendingPickup is not null;
     public bool HasPendingUse => _pendingUse is not null;
@@ -319,6 +326,8 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
             _currentAppraisalId = objectId;
             _inventory.CompleteUse(0u);
             IncrementRevision();
+            try { AppraisalReceived?.Invoke(objectId); }
+            catch { /* observer errors do not interrupt appraisal bookkeeping */ }
         }
 
         return new RuntimeAppraisalResponseAcceptance(

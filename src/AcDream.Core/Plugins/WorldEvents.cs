@@ -12,6 +12,10 @@ public sealed class WorldEvents : IEvents
     private Action? _loginComplete;
     private Action? _logoff;
     private Action<string>? _localPlayerDied;
+    private Action<PluginObjectChange>? _objectChanged;
+    private Action<uint>? _containerOpened;
+    private Action<uint>? _containerClosed;
+    private Action<PluginConfirmation>? _confirmationRequested;
 
     private sealed class Subscription(Action<WorldEntitySnapshot> handler)
     {
@@ -39,7 +43,7 @@ public sealed class WorldEvents : IEvents
         for (int i = 0; i < toNotify.Length; i++)
         {
             try { toNotify[i].Handler(snapshot); }
-            catch { /* plugin errors don't propagate out of event dispatch */ }
+            catch { /* plugin errors do not propagate out of event dispatch */ }
         }
     }
 
@@ -137,6 +141,74 @@ public sealed class WorldEvents : IEvents
         }
     }
 
+    public event Action<PluginObjectChange> ObjectChanged
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_lock)
+                _objectChanged += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_lock)
+                _objectChanged -= value;
+        }
+    }
+
+    public event Action<uint> ContainerOpened
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_lock)
+                _containerOpened += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_lock)
+                _containerOpened -= value;
+        }
+    }
+
+    public event Action<uint> ContainerClosed
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_lock)
+                _containerClosed += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_lock)
+                _containerClosed -= value;
+        }
+    }
+
+    public event Action<PluginConfirmation> ConfirmationRequested
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_lock)
+                _confirmationRequested += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_lock)
+                _confirmationRequested -= value;
+        }
+    }
+
     public void FireLoginComplete()
     {
         Action? handlers;
@@ -164,7 +236,62 @@ public sealed class WorldEvents : IEvents
         foreach (Delegate handler in handlers.GetInvocationList())
         {
             try { ((Action<string>)handler)(deathMessage); }
-            catch { /* plugin errors don't propagate out of event dispatch */ }
+            catch { /* plugin errors do not propagate out of event dispatch */ }
+        }
+    }
+
+    public void FireObjectChanged(PluginObjectChange change)
+    {
+        Action<PluginObjectChange>? handlers;
+        lock (_lock)
+            handlers = _objectChanged;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginObjectChange>)handler)(change); }
+            catch { /* plugin errors do not propagate out of event dispatch */ }
+        }
+    }
+
+    public void FireContainerOpened(uint containerObjectId)
+    {
+        Action<uint>? handlers;
+        lock (_lock)
+            handlers = _containerOpened;
+        FireUInt(handlers, containerObjectId);
+    }
+
+    public void FireContainerClosed(uint containerObjectId)
+    {
+        Action<uint>? handlers;
+        lock (_lock)
+            handlers = _containerClosed;
+        FireUInt(handlers, containerObjectId);
+    }
+
+    public void FireConfirmationRequested(PluginConfirmation confirmation)
+    {
+        Action<PluginConfirmation>? handlers;
+        lock (_lock)
+            handlers = _confirmationRequested;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginConfirmation>)handler)(confirmation); }
+            catch { /* plugin errors do not propagate out of event dispatch */ }
+        }
+    }
+
+    private static void FireUInt(Action<uint>? handlers, uint value)
+    {
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<uint>)handler)(value); }
+            catch { /* plugin errors do not propagate out of event dispatch */ }
         }
     }
 
@@ -175,7 +302,7 @@ public sealed class WorldEvents : IEvents
         foreach (Delegate handler in handlers.GetInvocationList())
         {
             try { ((Action)handler)(); }
-            catch { /* plugin errors don't propagate out of event dispatch */ }
+            catch { /* plugin errors do not propagate out of event dispatch */ }
         }
     }
 
@@ -190,7 +317,7 @@ public sealed class WorldEvents : IEvents
         foreach (Delegate handler in handlers.GetInvocationList())
         {
             try { ((Action<double>)handler)(elapsedSeconds); }
-            catch { /* plugin errors don't propagate out of event dispatch */ }
+            catch { /* plugin errors do not propagate out of event dispatch */ }
         }
     }
 
@@ -224,7 +351,7 @@ public sealed class WorldEvents : IEvents
                 }
 
                 try { subscription.Handler(s); }
-                catch { /* plugin errors don't propagate out of += */ }
+                catch { /* plugin errors do not propagate out of += */ }
             }
 
             while (true)
@@ -243,7 +370,7 @@ public sealed class WorldEvents : IEvents
                 }
 
                 try { subscription.Handler(pending); }
-                catch { /* plugin errors don't propagate out of += */ }
+                catch { /* plugin errors do not propagate out of += */ }
             }
         }
         remove
