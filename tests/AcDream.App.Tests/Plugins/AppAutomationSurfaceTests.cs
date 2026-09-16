@@ -2,6 +2,7 @@ using AcDream.App.Plugins;
 using AcDream.Core.Chat;
 using AcDream.Core.Items;
 using AcDream.Core.Physics;
+using AcDream.Core.Properties;
 using AcDream.Core.Selection;
 using AcDream.Core.Spells;
 using AcDream.Plugin.Abstractions;
@@ -403,6 +404,65 @@ public sealed class AppAutomationSurfaceTests
         Assert.Equal(
             typeof(AppAutomationSurface),
             map.TargetMethods[index].DeclaringType);
+    }
+
+    [Fact]
+    public void ProjectInventoryItem_preferstTheRetainedWeaponProfileOverThePropertyTable()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new AppAutomationSurface();
+        var item = new ClientObject
+        {
+            ObjectId = 903u,
+            Name = "Test Sword",
+            WeaponProfile = new ClientWeaponProfile(
+                DamageType: 4u,
+                WeaponTime: 30u,
+                WeaponSkill: 34u,
+                Damage: 25u,
+                DamageVariance: 0.3d,
+                DamageMod: 1.0d,
+                WeaponLength: 1.0d,
+                MaxVelocity: 2.0d,
+                WeaponOffense: 0.05d,
+                MaxVelocityEstimated: 1u),
+        };
+        // The property table carries a stale/never-sent value that the
+        // retained profile must take priority over.
+        item.Properties.Ints[(uint)PropertyInt.Damage] = 1;
+        item.Properties.Ints[(uint)PropertyInt.WeaponSkill] = 2;
+        item.Properties.Ints[(uint)PropertyInt.DamageType] = 3;
+        item.Properties.Floats[(uint)PropertyFloat.DamageVariance] = 0.9d;
+
+        PluginInventoryItem projected = surface.ProjectInventoryItem(runtime, item);
+
+        Assert.Equal(25, projected.Damage);
+        Assert.Equal(34, projected.WeaponSkill);
+        Assert.Equal(4, projected.DamageType);
+        Assert.Equal(0.3d, projected.DamageVariance);
+    }
+
+    [Fact]
+    public void ProjectInventoryItem_fallsBackToThePropertyTableWithoutAWeaponProfile()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new AppAutomationSurface();
+        var item = new ClientObject
+        {
+            ObjectId = 904u,
+            Name = "Unappraised Sword",
+        };
+        item.Properties.Ints[(uint)PropertyInt.Damage] = 7;
+        item.Properties.Ints[(uint)PropertyInt.WeaponSkill] = 8;
+        item.Properties.Ints[(uint)PropertyInt.DamageType] = 9;
+        item.Properties.Floats[(uint)PropertyFloat.DamageVariance] = 0.1d;
+
+        PluginInventoryItem projected = surface.ProjectInventoryItem(runtime, item);
+
+        Assert.Equal(7, projected.Damage);
+        Assert.Equal(8, projected.WeaponSkill);
+        Assert.Equal(9, projected.DamageType);
+        Assert.Equal(0.1d, projected.DamageVariance);
     }
 
     [Fact]

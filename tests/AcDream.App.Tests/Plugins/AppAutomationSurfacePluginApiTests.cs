@@ -453,6 +453,64 @@ public sealed class AppAutomationSurfacePluginApiTests
     }
 
     [Fact]
+    public void TryCaptureProperties_returnsTheRetainedWeaponAndArmorProfiles()
+    {
+        var (runtime, commands) = CreateRealSession();
+        using var runtimeDisposal = runtime;
+        using var surface = new AppAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        commands.Start(runtime.Generation);
+        var weapon = new ClientWeaponProfile(
+            DamageType: 4u,
+            WeaponTime: 30u,
+            WeaponSkill: 34u,
+            Damage: 12u,
+            DamageVariance: 0.2d,
+            DamageMod: 1.1d,
+            WeaponLength: 1.0d,
+            MaxVelocity: 2.0d,
+            WeaponOffense: 0.05d,
+            MaxVelocityEstimated: 1u);
+        runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 901u,
+            WeaponProfile = weapon,
+        });
+
+        bool ok = surface.Objects.TryCaptureProperties(
+            901u, out PluginItemProperties properties);
+
+        Assert.True(ok);
+        Assert.NotNull(properties.WeaponProfile);
+        Assert.Equal(4, properties.WeaponProfile!.Value.DamageType);
+        Assert.Equal(34u, properties.WeaponProfile.Value.WeaponSkill);
+        Assert.Equal(12, properties.WeaponProfile.Value.Damage);
+        Assert.Equal(0.2d, properties.WeaponProfile.Value.DamageVariance);
+        Assert.Null(properties.ArmorProfile);
+    }
+
+    [Fact]
+    public void TryCaptureProperties_withoutAnAppraisal_leavesBothProfilesNull()
+    {
+        var (runtime, commands) = CreateRealSession();
+        using var runtimeDisposal = runtime;
+        using var surface = new AppAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        commands.Start(runtime.Generation);
+        runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 902u,
+        });
+
+        bool ok = surface.Objects.TryCaptureProperties(
+            902u, out PluginItemProperties properties);
+
+        Assert.True(ok);
+        Assert.Null(properties.WeaponProfile);
+        Assert.Null(properties.ArmorProfile);
+    }
+
+    [Fact]
     public void LogoutIsUnavailableWithoutAnInWorldSessionAndNeverCallsTheRoute()
     {
         using var runtime = GameRuntimeTestFactory.Create();

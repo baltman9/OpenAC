@@ -284,6 +284,7 @@ public sealed class RuntimeVendorAutomationTests
         Assert.Equal(PluginVendorTransactionKind.Sell, completion.Kind);
         Assert.False(completion.Success);
         Assert.NotNull(completion.Notice);
+        Assert.Contains("weenie error 2", completion.Notice, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -534,6 +535,7 @@ public sealed class RuntimeVendorAutomationTests
     {
         using var host = new NoWindowGameRuntimeHost();
         host.Start();
+        host.Runtime.PlayerIdentity.ServerGuid = 0x50000001u;
         using var vendor = new RuntimeVendorAutomation(host.Runtime);
         host.Runtime.InventoryOwner.Vendor.Apply(
             0x40001000u,
@@ -556,12 +558,13 @@ public sealed class RuntimeVendorAutomationTests
         vendor.AddToBuyList(0x50002000u, 1);
         vendor.BuyAll();
 
-        // The server rejects the buy (no pack space, over-burden, negative
-        // payout, ...) as an InventoryServerSaveFailed on the affected
-        // item -- the same signal ClientObjectTable.MoveRequestFailed
+        // ACE rejects a vendor buy/sell (no pack space, over-burden,
+        // negative payout, ...) as an InventoryServerSaveFailed on the
+        // LOCAL PLAYER -- the same signal ClientObjectTable.MoveRequestFailed
         // surfaces -- and still sends a UseDone with error == 0. Before the
         // fix, that error-less UseDone alone was treated as success.
-        host.Runtime.InventoryOwner.Objects.RejectMove(0x50002000u, 0x0002u);
+        host.Runtime.InventoryOwner.Objects.RejectMove(
+            host.Runtime.PlayerIdentity.ServerGuid, 0x0002u);
         host.Runtime.ActionOwner.Transactions.CompleteUse(0u);
         vendor.Poll();
 
@@ -569,6 +572,91 @@ public sealed class RuntimeVendorAutomationTests
         Assert.Equal(PluginVendorTransactionKind.Buy, completion.Kind);
         Assert.False(completion.Success);
         Assert.NotNull(completion.Notice);
+        Assert.Contains("weenie error 2", completion.Notice, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AMoveRequestFailureCarryingNoErrorCodeDropsTheParenthetical()
+    {
+        // A latched failure can itself carry error == 0 -- the rejection is
+        // real (RolledBack), but there is no weenie error code to report.
+        // The notice must say plainly that the transaction failed, not the
+        // misleading "(weenie error 0)".
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        host.Runtime.PlayerIdentity.ServerGuid = 0x50000001u;
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+        host.Runtime.InventoryOwner.Vendor.Apply(
+            0x40001000u,
+            Profile,
+            [
+                new VendorShopItem(
+                    ItemGuid: 0x50002000u,
+                    StackSize: 5,
+                    WeenieClassId: 1234u,
+                    Name: "Fixture Sword",
+                    ItemType: (uint)ItemType.Weapon,
+                    IconId: 0x06000001u,
+                    Value: 100),
+            ]);
+        host.Runtime.Session.CurrentSession!.GameActionCapture = _ => { };
+
+        var completions = new List<PluginVendorTransaction>();
+        vendor.TransactionCompleted += completions.Add;
+
+        vendor.AddToBuyList(0x50002000u, 1);
+        vendor.BuyAll();
+
+        host.Runtime.InventoryOwner.Objects.RejectMove(
+            host.Runtime.PlayerIdentity.ServerGuid, 0u);
+        host.Runtime.ActionOwner.Transactions.CompleteUse(0u);
+        vendor.Poll();
+
+        PluginVendorTransaction completion = Assert.Single(completions);
+        Assert.False(completion.Success);
+        Assert.NotNull(completion.Notice);
+        Assert.DoesNotContain("weenie error", completion.Notice, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AMoveRequestFailureOnTheItemRatherThanThePlayerDoesNotLatchAVendorFailure()
+    {
+        // An ORDINARY (non-vendor) move rejection carries the moved item's
+        // own guid, not the player's -- e.g. another in-flight inventory
+        // action racing the vendor buy. That must not be mistaken for the
+        // vendor's own rejection signal.
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        host.Runtime.PlayerIdentity.ServerGuid = 0x50000001u;
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+        host.Runtime.InventoryOwner.Vendor.Apply(
+            0x40001000u,
+            Profile,
+            [
+                new VendorShopItem(
+                    ItemGuid: 0x50002000u,
+                    StackSize: 5,
+                    WeenieClassId: 1234u,
+                    Name: "Fixture Sword",
+                    ItemType: (uint)ItemType.Weapon,
+                    IconId: 0x06000001u,
+                    Value: 100),
+            ]);
+        host.Runtime.Session.CurrentSession!.GameActionCapture = _ => { };
+
+        var completions = new List<PluginVendorTransaction>();
+        vendor.TransactionCompleted += completions.Add;
+
+        vendor.AddToBuyList(0x50002000u, 1);
+        vendor.BuyAll();
+
+        host.Runtime.InventoryOwner.Objects.RejectMove(0x50002000u, 0x0002u);
+        host.Runtime.ActionOwner.Transactions.CompleteUse(0u);
+        vendor.Poll();
+
+        PluginVendorTransaction completion = Assert.Single(completions);
+        Assert.Equal(PluginVendorTransactionKind.Buy, completion.Kind);
+        Assert.True(completion.Success);
     }
 
     [Fact]

@@ -188,6 +188,43 @@ is a separate surface (not covered by this event) and does not raise it.
 Replacing one open container with another before it closes still reports a
 `ContainerClosed` for the one that was open.
 
+### Weapon and armor profiles
+
+```csharp
+if (host.Automation.Objects.TryCaptureProperties(objectId, out PluginItemProperties properties))
+{
+    if (properties.WeaponProfile is { } weapon)
+        Console.WriteLine($"Damage {weapon.Damage}, offense {weapon.WeaponOffense}");
+    if (properties.ArmorProfile is { } armor)
+        Console.WriteLine($"AL {armor.ArmorLevel}, slash {armor.SlashMod}");
+}
+```
+
+An appraisal response carries two optional typed blobs alongside the
+regular property tables: a weapon's real damage/offense numbers
+(`PluginWeaponProfile`) and a piece of armor's per-damage-type protection
+modifiers (`PluginArmorProfile`). Neither travels through
+`PropertyInt`/`PropertyFloat` — the server does not populate those for
+most weapons — so `TryCaptureProperties` (on `Objects`, the loot
+surface's scoped `Identify`, and the item-automation surface) exposes them
+as their own fields on `PluginItemProperties`:
+
+- `WeaponProfile` is non-null only after the object has been successfully
+  appraised AND its appraisal carried a WeaponProfile blob (i.e. it is a
+  weapon). It stays null for a never-appraised object or a non-weapon.
+- `ArmorProfile` is the armor equivalent, non-null only for an appraised
+  piece of armor. `ArmorLevel` comes from the object's own
+  `PropertyInt.ArmorLevel`, not the ArmorProfile blob itself, which does
+  not carry it.
+- A later, unrelated property update never clears an already-retained
+  profile — only a fresh appraisal response does, and it fully replaces
+  (or clears, if the new response omits the blob) whatever was there
+  before.
+
+`PluginInventoryItem`'s own `WeaponSkill`, `DamageType`, `Damage`, and
+`DamageVariance` fields prefer the retained `WeaponProfile` when one is
+present, falling back to the property table only for an unappraised item.
+
 ## Confirmations
 
 ```csharp
