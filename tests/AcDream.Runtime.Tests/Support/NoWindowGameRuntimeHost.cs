@@ -92,6 +92,14 @@ internal sealed class NoWindowGameRuntimeHost : IDisposable
     public LiveSessionHost Session { get; }
     public RuntimeTraceRecorder Trace { get; }
     public IReadOnlyList<string> LifecycleTrace => _operations.Trace;
+
+    // Re-arms the deferred-connect poll countdown for a fresh Start/
+    // Reconnect sequence -- the fixture's PollConnect only defers the
+    // FIRST connect by default; a test proving the async in-world edge
+    // survives a reconnect needs the countdown reset before calling
+    // Reconnect() again.
+    public void RearmDeferredConnectTicks(int count) =>
+        _operations.RearmPollTicks(count);
     public IReadOnlyList<string> GameplayTrace => _gameplay.Trace;
     public int ProjectionRetirementCount =>
         _resetHost.ProjectionRetirementCount;
@@ -637,6 +645,7 @@ internal sealed class NoWindowGameRuntimeHost : IDisposable
         int deferredConnectTickCount = 0) : ILiveSessionOperations
     {
         private int _pollTicksRemaining = deferredConnectTickCount;
+        public void RearmPollTicks(int count) => _pollTicksRemaining = count;
         public List<string> Trace { get; } = [];
 
         public IPEndPoint ResolveEndpoint(string host, int port)
