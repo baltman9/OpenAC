@@ -109,8 +109,10 @@ public sealed class ScopedAutomationSurfaceTests
         EventInfo[] events = typeof(IPluginChat)
             .GetEvents(BindingFlags.Public | BindingFlags.Instance);
         Assert.True(
-            methods.Length >= 4 && events.Length >= 1,
-            "IPluginChat should still have every member this test knows about.");
+            methods.Length == 7 && events.Length == 1,
+            "IPluginChat should still have exactly the members this test "
+                + "knows about (7 methods incl. event accessors, 1 event) -- "
+                + "a member was added or removed without updating this test.");
 
         chat.CaptureMessages(0);
         Assert.Equal(1, recording.CaptureMessagesCalls);
