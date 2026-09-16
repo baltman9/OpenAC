@@ -40,6 +40,8 @@ internal sealed class AppAutomationSurface
     private double _peerHeartbeatRemaining;
 
     private GameRuntime? _runtime;
+    private AcDream.Runtime.Gameplay.RuntimeTradeAutomation? _tradeAutomation;
+    private AcDream.Runtime.Gameplay.RuntimeVendorAutomation? _vendorAutomation;
     private RuntimeCommunicationState? _communication;
     private RuntimeCharacterState? _character;
     private RuntimeSpellCastState? _cast;
@@ -172,6 +174,14 @@ internal sealed class AppAutomationSurface
     public IRecoveryAutomation Recovery => this;
     public IProjectileAutomation Projectiles => this;
     public ISelectionAutomation Selection => this;
+    public ITradeAutomation Trade
+    {
+        get { lock (_gate) return (ITradeAutomation?)_tradeAutomation ?? NoOpAutomationSurface.Instance; }
+    }
+    public IVendorAutomation Vendor
+    {
+        get { lock (_gate) return (IVendorAutomation?)_vendorAutomation ?? NoOpAutomationSurface.Instance; }
+    }
 
     PluginRecoveryResult IRecoveryAutomation.ClearOneBusyReference()
     {
@@ -334,6 +344,8 @@ internal sealed class AppAutomationSurface
                 return;
             DetachLocked();
             _runtime = runtime;
+            _tradeAutomation = new AcDream.Runtime.Gameplay.RuntimeTradeAutomation(runtime);
+            _vendorAutomation = new AcDream.Runtime.Gameplay.RuntimeVendorAutomation(runtime);
             _communication = runtime.CommunicationOwner;
             _communicationSubscription =
                 runtime.CommunicationOwner.Events.Subscribe(this);
@@ -521,6 +533,9 @@ internal sealed class AppAutomationSurface
         _spellbook = null;
         _character = null;
         _cast = null;
+        _vendorAutomation?.Dispose();
+        _vendorAutomation = null;
+        _tradeAutomation = null;
         _runtime = null;
         _communication = null;
         _dismissGhost = null;
@@ -532,6 +547,16 @@ internal sealed class AppAutomationSurface
 
     private void OnPeerTick(double elapsedSeconds)
     {
+        AcDream.Runtime.Gameplay.RuntimeTradeAutomation? trade;
+        AcDream.Runtime.Gameplay.RuntimeVendorAutomation? vendor;
+        lock (_gate)
+        {
+            trade = _tradeAutomation;
+            vendor = _vendorAutomation;
+        }
+        trade?.Poll();
+        vendor?.Poll();
+
         _peerHeartbeatRemaining -= Math.Max(0d, elapsedSeconds);
         if (_peerHeartbeatRemaining > 0d)
             return;

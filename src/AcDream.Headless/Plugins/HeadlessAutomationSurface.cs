@@ -6,9 +6,11 @@ using AcDream.Runtime.Gameplay;
 namespace AcDream.Headless.Plugins;
 
 internal sealed class HeadlessAutomationSurface
-    : IAutomationSurface, IPluginChat, ILoginAutomation, IDialogAutomation
+    : IAutomationSurface, IPluginChat, ILoginAutomation, IDialogAutomation, IDisposable
 {
     private readonly GameRuntime _runtime;
+    private readonly RuntimeTradeAutomation _trade;
+    private readonly RuntimeVendorAutomation _vendor;
     private readonly Func<string, bool>? _submitChatText;
     private readonly Func<bool>? _requestLogout;
     private readonly Func<uint, bool, bool>? _answerConfirmation;
@@ -22,6 +24,8 @@ internal sealed class HeadlessAutomationSurface
         Func<uint, bool, bool>? answerConfirmation = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
+        _trade = new RuntimeTradeAutomation(runtime);
+        _vendor = new RuntimeVendorAutomation(runtime);
         _submitChatText = submitChatText;
         _requestLogout = requestLogout;
         _answerConfirmation = answerConfirmation;
@@ -36,6 +40,17 @@ internal sealed class HeadlessAutomationSurface
     public IPluginChat Chat => this;
     public ILoginAutomation Login => this;
     public IDialogAutomation Dialogs => this;
+    public ITradeAutomation Trade => _trade;
+    public IVendorAutomation Vendor => _vendor;
+
+    /// <summary>Called once per host tick so Trade/Vendor events stay live.</summary>
+    internal void Poll()
+    {
+        _trade.Poll();
+        _vendor.Poll();
+    }
+
+    public void Dispose() => _vendor.Dispose();
 
     bool ILoginAutomation.Logout() => IsAvailable && (_requestLogout?.Invoke() ?? false);
 

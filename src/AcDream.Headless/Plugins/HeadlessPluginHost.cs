@@ -135,6 +135,7 @@ internal sealed class HeadlessPluginHost
 
     internal void FireTick(double elapsedSeconds)
     {
+        _automation.Poll();
         Action<double>? handlers;
         lock (_tickGate)
             handlers = _tick;
@@ -293,6 +294,7 @@ internal sealed class HeadlessPluginHost
         _runtime.InventoryOwner.ExternalContainers.Changed -= OnExternalContainerChanged;
         _runtime.ActionOwner.Transactions.AppraisalReceived -= OnAppraisalReceived;
         _eventSubscription.Dispose();
+        _automation.Dispose();
     }
 
     public void OnEntity(in RuntimeEntityDelta delta)
