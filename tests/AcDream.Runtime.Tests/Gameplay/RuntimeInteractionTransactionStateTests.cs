@@ -267,6 +267,142 @@ public sealed class RuntimeInteractionTransactionStateTests
     }
 
     [Fact]
+    public void AutomationAppraisalOfADifferentObjectDoesNotRetargetCurrent()
+    {
+        // Live finding: a plugin's background Identify(objectId) used to
+        // hijack the single appraisal slot and, once its response landed,
+        // silently swap the examination window's target object out from
+        // under the user (observed live: a periodic gauntlet re-identify
+        // popped the "Leather Gauntlets" assess window). A response tagged
+        // Automation must leave CurrentAppraisalId alone when it lands on
+        // an object other than the one already current.
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+
+        Assert.True(state.TryRequestAppraisal(Item, _ => { }));
+        RuntimeAppraisalResponseAcceptance userFirst =
+            state.AcceptAppraisalResponse(Item);
+        Assert.True(userFirst.Accepted);
+        Assert.True(userFirst.PresentInUi);
+        Assert.Equal(Item, state.CurrentAppraisalId);
+
+        Assert.True(state.TryRequestAppraisal(
+            Container,
+            _ => { },
+            AppraisalRequestOrigin.Automation));
+        RuntimeAppraisalResponseAcceptance automation =
+            state.AcceptAppraisalResponse(Container);
+
+        Assert.True(automation.Accepted);
+        Assert.True(automation.FirstResponse);
+        Assert.Equal(AppraisalRequestOrigin.Automation, automation.Origin);
+        Assert.False(automation.PresentInUi);
+        Assert.Equal(Item, state.CurrentAppraisalId);
+    }
+
+    [Fact]
+    public void AutomationAppraisalOfTheCurrentObjectStillPresents()
+    {
+        // The flip side: a plugin re-identifying the object the user is
+        // already looking at is a legitimate background data refresh
+        // (durability ticked, a stack count moved) and must still reach
+        // the UI so the open window's content stays accurate -- it just
+        // must not reopen or refocus the window (that is
+        // AppraisalUiController's job via the Origin field, not Runtime's).
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+
+        Assert.True(state.TryRequestAppraisal(Item, _ => { }));
+        state.AcceptAppraisalResponse(Item);
+        Assert.Equal(Item, state.CurrentAppraisalId);
+
+        Assert.True(state.TryRequestAppraisal(
+            Item,
+            _ => { },
+            AppraisalRequestOrigin.Automation));
+        RuntimeAppraisalResponseAcceptance refresh =
+            state.AcceptAppraisalResponse(Item);
+
+        Assert.True(refresh.Accepted);
+        Assert.True(refresh.FirstResponse);
+        Assert.Equal(AppraisalRequestOrigin.Automation, refresh.Origin);
+        Assert.True(refresh.PresentInUi);
+        Assert.Equal(Item, state.CurrentAppraisalId);
+    }
+
+    [Fact]
+    public void UserAppraisalDuringAnInFlightAutomationAppraisalStillRetargets()
+    {
+        // A deliberate user assess issued while a plugin's Identify is
+        // still awaiting its response must win the single appraisal slot
+        // and open the window for the user's object -- exactly like today,
+        // just now carrying an explicit User tag instead of an implicit
+        // default.
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+
+        Assert.True(state.TryRequestAppraisal(
+            Container,
+            _ => { },
+            AppraisalRequestOrigin.Automation));
+        Assert.Equal(
+            AppraisalRequestOrigin.Automation,
+            state.AwaitingAppraisalOrigin);
+
+        Assert.True(state.TryRequestAppraisal(Item, _ => { }));
+        Assert.Equal(
+            AppraisalRequestOrigin.User,
+            state.AwaitingAppraisalOrigin);
+
+        RuntimeAppraisalResponseAcceptance userResponse =
+            state.AcceptAppraisalResponse(Item);
+        Assert.True(userResponse.Accepted);
+        Assert.Equal(AppraisalRequestOrigin.User, userResponse.Origin);
+        Assert.True(userResponse.PresentInUi);
+        Assert.Equal(Item, state.CurrentAppraisalId);
+
+        // The superseded Automation request's late response is dropped by
+        // the existing single-slot semantics (unchanged by this change) --
+        // it is neither the awaiting id nor the current one any more.
+        Assert.False(state.AcceptAppraisalResponse(Container).Accepted);
+    }
+
+    [Fact]
+    public void AppraisalReceivedFiresForAnAutomationOriginResponseThatDoesNotPresent()
+    {
+        // Plugin-facing observers (IEvents.ObjectChanged(IdentReceived),
+        // ILootAutomation.Appraisal) must still see every accepted
+        // appraisal response regardless of whether the UI presents it.
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+        var received = new List<uint>();
+        state.AppraisalReceived += received.Add;
+
+        Assert.True(state.TryRequestAppraisal(Item, _ => { }));
+        state.AcceptAppraisalResponse(Item);
+
+        Assert.True(state.TryRequestAppraisal(
+            Container,
+            _ => { },
+            AppraisalRequestOrigin.Automation));
+        RuntimeAppraisalResponseAcceptance automation =
+            state.AcceptAppraisalResponse(Container);
+
+        Assert.False(automation.PresentInUi);
+        Assert.Equal(new[] { Item, Container }, received);
+    }
+
+    [Fact]
+    public void TryRequestAppraisalDefaultsToUserOrigin()
+    {
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+
+        Assert.True(state.TryRequestAppraisal(Item, _ => { }));
+        Assert.Equal(AppraisalRequestOrigin.User, state.AwaitingAppraisalOrigin);
+    }
+
+    [Fact]
     public void OutboundQueueIsTypedFifoAndReentrantWorkWaitsForNextDrain()
     {
         using var inventory = NewInventory(out ClientObjectTable objects);

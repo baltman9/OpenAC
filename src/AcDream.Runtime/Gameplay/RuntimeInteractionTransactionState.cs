@@ -39,9 +39,25 @@ public readonly record struct RuntimePendingUse(
     ItemUseRequestReservation? Reservation,
     RuntimeInteractionApproachToken ApproachToken);
 
+/// <summary>
+/// Who asked for an appraisal: a deliberate user action (the assess
+/// keybind/click, or a headless bot's equivalent "examine selected"
+/// command) versus a plugin polling object state in the background
+/// (tracker/loot-scanner style Identify calls). The examination window
+/// only opens or retargets for User-originated requests -- see
+/// AcceptAppraisalResponse and AppraisalUiController.Apply.
+/// </summary>
+public enum AppraisalRequestOrigin
+{
+    User = 0,
+    Automation = 1,
+}
+
 public readonly record struct RuntimeAppraisalResponseAcceptance(
     bool Accepted,
-    bool FirstResponse);
+    bool FirstResponse,
+    AppraisalRequestOrigin Origin = AppraisalRequestOrigin.User,
+    bool PresentInUi = false);
 
 public readonly record struct RuntimeItemUseCompletion(
     long Revision,
@@ -99,6 +115,7 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
     private uint _lastUseSourceId;
     private uint _lastUseTargetId;
     private uint _awaitingAppraisalId;
+    private AppraisalRequestOrigin _awaitingAppraisalOrigin;
     private uint _currentAppraisalId;
     private RuntimePendingPickup? _pendingPickup;
     private ulong _nextPickupToken;
@@ -119,6 +136,7 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
 
     public InventoryTransactionState Inventory => _inventory;
     public uint AwaitingAppraisalId => _awaitingAppraisalId;
+    public AppraisalRequestOrigin AwaitingAppraisalOrigin => _awaitingAppraisalOrigin;
     public uint CurrentAppraisalId => _currentAppraisalId;
 
     /// <summary>
@@ -286,7 +304,8 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
 
     public bool TryRequestAppraisal(
         uint objectId,
-        Action<uint> sendAppraisal)
+        Action<uint> sendAppraisal,
+        AppraisalRequestOrigin origin = AppraisalRequestOrigin.User)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(sendAppraisal);
@@ -303,7 +322,9 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         }
 
         uint previousAwaiting = _awaitingAppraisalId;
+        AppraisalRequestOrigin previousOrigin = _awaitingAppraisalOrigin;
         _awaitingAppraisalId = objectId;
+        _awaitingAppraisalOrigin = origin;
         IncrementRevision();
         try
         {
@@ -316,6 +337,7 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
                 && _awaitingAppraisalId == objectId)
             {
                 _awaitingAppraisalId = previousAwaiting;
+                _awaitingAppraisalOrigin = previousOrigin;
                 if (acquiredBusy)
                     _inventory.CompleteUse(0u);
                 IncrementRevision();
@@ -337,10 +359,33 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         }
 
         bool firstResponse = objectId == _awaitingAppraisalId;
+        AppraisalRequestOrigin origin = firstResponse
+            ? _awaitingAppraisalOrigin
+            : AppraisalRequestOrigin.User;
+
+        // A plugin-originated (Automation) request never retargets the
+        // examination window away from whatever object it already shows --
+        // it only ever "wins" the current slot when its response happens to
+        // land on the object that is already current (a silent background
+        // re-identify of the item the user is looking at, which should
+        // still refresh that window's content). A User-originated request
+        // always retargets, matching retail's single-appraisal-slot
+        // behavior. See AppraisalUiController.Apply for the presentation
+        // side of this rule. A non-firstResponse response only ever arrives
+        // through RefreshCurrentAppraisal, which by construction always
+        // targets the object already current, so it always presents.
+        bool retargetsCurrent =
+            firstResponse
+            && (origin == AppraisalRequestOrigin.User
+                || objectId == _currentAppraisalId);
+        bool presentInUi = !firstResponse || retargetsCurrent;
+
         if (firstResponse)
         {
             _awaitingAppraisalId = 0u;
-            _currentAppraisalId = objectId;
+            _awaitingAppraisalOrigin = default;
+            if (retargetsCurrent)
+                _currentAppraisalId = objectId;
             _inventory.CompleteUse(0u);
             IncrementRevision();
         }
@@ -352,13 +397,18 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         // count moved) and observers need the update. Consumers that only
         // care about the initial reveal can dedupe on FirstResponse
         // themselves; this event alone cannot tell them which response an
-        // invocation carries, so IEvents.ObjectChanged is not affected.
+        // invocation carries, so IEvents.ObjectChanged is not affected. It
+        // also fires for a plugin-originated appraisal that never touches
+        // the examination window -- plugin object-property observers need
+        // the data regardless of what the UI does with it.
         try { AppraisalReceived?.Invoke(objectId); }
         catch { /* observer errors do not interrupt appraisal bookkeeping */ }
 
         return new RuntimeAppraisalResponseAcceptance(
             Accepted: true,
-            FirstResponse: firstResponse);
+            FirstResponse: firstResponse,
+            Origin: origin,
+            PresentInUi: presentInUi);
     }
 
     public bool RefreshCurrentAppraisal(Action<uint> sendAppraisal)
@@ -381,6 +431,7 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         if (_awaitingAppraisalId != 0u)
             _inventory.CompleteUse(0u);
         _awaitingAppraisalId = 0u;
+        _awaitingAppraisalOrigin = default;
         _currentAppraisalId = 0u;
         IncrementRevision();
         sendAppraisal(0u);
@@ -722,6 +773,7 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         _awaitingItemUseCompletion = false;
         LastItemUseCompletion = default;
         _awaitingAppraisalId = 0u;
+        _awaitingAppraisalOrigin = default;
         _currentAppraisalId = 0u;
         _outbound.Clear();
         _pendingPickup = null;

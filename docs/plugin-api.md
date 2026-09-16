@@ -182,6 +182,24 @@ therefore raise two `ObjectChanged` calls for one underlying change (one
 from the entity side, one from the inventory side); do not assume exactly
 one call per change for such objects.
 
+A plugin-driven `Identify` never touches the client's own examination
+window. The object's properties/profiles update and `IdentReceived` fires
+exactly as above regardless of what the window is showing, but the window
+itself only opens, retargets, or comes to the front for the user's own
+assess action (the assess keybind/click, or a headless bot's equivalent
+"examine selected" command). Two exceptions follow directly from that
+rule, not around it:
+
+- If the object a plugin just identified happens to be the one already
+  open in the window, that window's displayed numbers refresh in place
+  (the user is already looking at it, so a durability tick or stack-count
+  change should show up) -- but the window is never reopened or brought
+  to the front for it.
+- If the user assesses something while a plugin's `Identify` is still
+  awaiting its response, the user's request wins the window: it opens (or
+  retargets) for the user's object once that response lands, exactly as
+  if no plugin request had been in flight.
+
 `ContainerOpened` / `ContainerClosed` track the client's one open external
 container — a corpse, a chest, a housing storage crate. A vendor's shop pane
 is a separate surface (not covered by this event) and does not raise it.
