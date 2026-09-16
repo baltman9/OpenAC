@@ -28,11 +28,11 @@ public sealed class GameplayConfirmationController : IDisposable
 
     public bool HandleRequest(GameEvents.CharacterConfirmationRequest request)
     {
-        _serverType = request.Type;
-        _serverContext = request.ContextId;
-
         if (_dialogContext != 0u)
             return false;
+
+        _serverType = request.Type;
+        _serverContext = request.ContextId;
 
         string message = request.Type is 2u or 3u or 5u or 6u
             ? request.Message + " Continue?"
