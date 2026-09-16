@@ -484,8 +484,10 @@ public sealed class LandblockBuildFactory
     private bool KeepsInteriorPart(uint gfxObjId) =>
         AcDream.Core.Meshing.EntityHydrationRules.ShouldKeepPart(
             AcDream.Core.Meshing.GfxObjDegradeResolver.IsRuntimeHiddenMarker(_dats, gfxObjId),
-            _dats.Get<DatReaderWriter.DBObjs.GfxObj>(gfxObjId) is { } gfx
-                && gfx.Flags.HasFlag(DatReaderWriter.Enums.GfxObjFlags.HasPhysics));
+_dats.Get<DatReaderWriter.DBObjs.GfxObj>(gfxObjId) is { } gfx
+                && gfx.Flags.HasFlag(DatReaderWriter.Enums.GfxObjFlags.HasPhysics)
+                && gfx.PhysicsBSP?.Root is not null
+                && gfx.VertexArray is not null);
 
     private (float MaxZ, float MinZ) ComputeWalkZSlab(byte[] heights)
     {
