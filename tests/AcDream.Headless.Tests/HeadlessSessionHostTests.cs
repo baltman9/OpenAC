@@ -745,6 +745,7 @@ public sealed class HeadlessSessionHostTests
         string statusPath = Path.Combine(
             Path.GetTempPath(),
             $"acdream-headless-probe-no-roster-{Guid.NewGuid():N}.jsonl");
+        string dataDirectory = CreateIsolatedDataDirectory();
         try
         {
             var configuration = new HeadlessConfiguration
@@ -765,7 +766,8 @@ public sealed class HeadlessSessionHostTests
             using var diagnostics = new StringWriter();
             using var host = new HeadlessProcessHost(
                 configuration,
-                HeadlessPathSet.Resolve(new HeadlessPathOverrides()),
+                HeadlessPathSet.Resolve(
+                    new HeadlessPathOverrides(DataDirectory: dataDirectory)),
                 new System.IO.StringReader(
                     "probe-password" + Environment.NewLine),
                 diagnostics,
@@ -808,6 +810,7 @@ public sealed class HeadlessSessionHostTests
         {
             if (File.Exists(statusPath))
                 File.Delete(statusPath);
+            DeleteIsolatedDataDirectory(dataDirectory);
         }
     }
 
@@ -864,6 +867,7 @@ public sealed class HeadlessSessionHostTests
         string statusPath = Path.Combine(
             Path.GetTempPath(),
             $"acdream-headless-idle-status-{Guid.NewGuid():N}.jsonl");
+        string dataDirectory = CreateIsolatedDataDirectory();
         try
         {
             var configuration = new HeadlessConfiguration
@@ -878,7 +882,7 @@ public sealed class HeadlessSessionHostTests
                 ],
             };
             HeadlessPathSet paths = HeadlessPathSet.Resolve(
-                new HeadlessPathOverrides());
+                new HeadlessPathOverrides(DataDirectory: dataDirectory));
             using var diagnostics = new StringWriter();
             var operations = new FixtureSessionOperations();
             using var host = new HeadlessProcessHost(
@@ -962,6 +966,7 @@ public sealed class HeadlessSessionHostTests
         {
             if (File.Exists(statusPath))
                 File.Delete(statusPath);
+            DeleteIsolatedDataDirectory(dataDirectory);
         }
     }
 
@@ -2730,6 +2735,27 @@ public sealed class HeadlessSessionHostTests
                 return document.RootElement.GetProperty("e").GetString()!;
             })
             .ToArray();
+
+    // A default HeadlessPathOverrides() resolves to the real machine data
+    // directory, whose plugins/ folder a developer may have populated for
+    // manual testing. A test that asserts the EXACT status-event shape must
+    // not let a real installed plugin add an event the fixture host never
+    // produces, so it resolves paths against a private, empty temp
+    // directory instead.
+    private static string CreateIsolatedDataDirectory()
+    {
+        string path = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-headless-data-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
+    private static void DeleteIsolatedDataDirectory(string path)
+    {
+        if (Directory.Exists(path))
+            Directory.Delete(path, recursive: true);
+    }
 
     private static void HydrateGroundedPlayer(GameRuntime runtime)
     {

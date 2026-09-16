@@ -153,7 +153,7 @@ public sealed class AppHotkeyRegistryTests
         Assert.Equal(1, firstFired);
         Assert.Equal(0, secondFired);
         // Freeing the first registration must let the already-refused
-        // second registration bind -- MEDIUM-2 re-resolves every live
+        // second registration bind -- the registry re-resolves every live
         // unbound entry after a chord-freeing mutation, not only a fresh
         // Register call for that same id.
         first.Dispose();

@@ -339,20 +339,27 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
             _latchedFailureError = 0u;
             string? notice = success
                 ? null
-                : $"Vendor transaction failed (weenie error {effectiveError}).";
+                : effectiveError == 0u
+                    ? "Vendor transaction failed."
+                    : $"Vendor transaction failed (weenie error {effectiveError}).";
             _completedTransaction = new PluginVendorTransaction(pendingKind, success, notice);
         }
     }
 
     // Latches a failure while a buy/sell is in flight -- the server signals
     // a rejected vendor transaction as an inventory-save failure on the
-    // affected item/container, not as a UseDone error code (UseDone often
-    // still arrives with error == 0 for these rejections).
+    // *local player*, not as a UseDone error code (UseDone often still
+    // arrives with error == 0 for these rejections). An ordinary (non-
+    // vendor) move rejection instead carries the moved item's own guid, so
+    // gate on the player guid to avoid latching an unrelated failure onto
+    // an in-flight vendor transaction.
     private void OnMoveRequestFailed(MoveRequestFailure failure)
     {
         lock (_gate)
         {
             if (_pendingKind is null)
+                return;
+            if (failure.ItemId != _runtime.PlayerIdentity.ServerGuid)
                 return;
             _hasLatchedFailure = true;
             _latchedFailureError = failure.WeenieError;

@@ -74,6 +74,41 @@ public readonly record struct PluginInventoryItem(
     public uint IconId { get; init; }
 }
 
+/// <summary>
+/// A weapon's real damage/offense numbers as the server's appraisal response
+/// reported them, straight from the WeaponProfile blob -- not the
+/// PropertyInt/PropertyFloat table, which the server does not populate for
+/// most weapons. Null until the item has been successfully appraised, or if
+/// it never carries a WeaponProfile blob (i.e. it is not a weapon).
+/// </summary>
+public readonly record struct PluginWeaponProfile(
+    int DamageType,
+    int WeaponTime,
+    uint WeaponSkill,
+    int Damage,
+    double DamageVariance,
+    double DamageMod,
+    double WeaponLength,
+    double MaxVelocity,
+    double WeaponOffense,
+    int MaxVelocityEstimated);
+
+/// <summary>
+/// A piece of armor's per-damage-type protection modifiers as the server's
+/// appraisal response reported them, from the ArmorProfile blob. Null until
+/// the item has been successfully appraised, or if it never carries an
+/// ArmorProfile blob (i.e. it is not armor).
+/// </summary>
+public readonly record struct PluginArmorProfile(
+    int ArmorLevel,
+    double SlashMod,
+    double PierceMod,
+    double BludgeonMod,
+    double ColdMod,
+    double FireMod,
+    double AcidMod,
+    double ElectricMod);
+
 public readonly record struct PluginItemProperties(
     IReadOnlyDictionary<uint, int> Ints,
     IReadOnlyDictionary<uint, long> Int64s,
@@ -81,7 +116,11 @@ public readonly record struct PluginItemProperties(
     IReadOnlyDictionary<uint, double> Floats,
     IReadOnlyDictionary<uint, string> Strings,
     IReadOnlyDictionary<uint, uint> DataIds,
-    IReadOnlyDictionary<uint, uint> InstanceIds);
+    IReadOnlyDictionary<uint, uint> InstanceIds)
+{
+    public PluginWeaponProfile? WeaponProfile { get; init; }
+    public PluginArmorProfile? ArmorProfile { get; init; }
+}
 
 /// <summary>One server <c>UseDone</c> for a plugin-issued item action.</summary>
 public readonly record struct PluginItemUseCompletion(

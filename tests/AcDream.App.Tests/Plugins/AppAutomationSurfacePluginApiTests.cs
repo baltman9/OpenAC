@@ -452,7 +452,6 @@ public sealed class AppAutomationSurfacePluginApiTests
             c => c.ObjectId == 900u && c.Kind == PluginObjectChangeKind.IdentReceived);
     }
 
-
     [Fact]
     public void LogoutIsUnavailableWithoutAnInWorldSessionAndNeverCallsTheRoute()
     {

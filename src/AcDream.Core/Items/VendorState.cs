@@ -126,6 +126,7 @@ public sealed class VendorState
         }
         return true;
     }
+
     public bool Reset()
     {
         uint previous = VendorId;

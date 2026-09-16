@@ -840,7 +840,9 @@ public static class GameEventWiring
                     p.Value.Guid,
                     p.Value.Properties,
                     p.Value.SpellBook,
-                    clientTime());
+                    clientTime(),
+                    ToClientWeaponProfile(p.Value.WeaponProfile),
+                    ToClientArmorProfile(p.Value.ArmorProfile));
             if (p.Value.CreatureProfile is { HealthMax: > 0u } creature)
                 combat.OnUpdateHealth(
                     p.Value.Guid,
@@ -1060,6 +1062,36 @@ public static class GameEventWiring
         if ((statModType & Additive) != 0) return 2u;
         return 0u;
     }
+
+    private static ClientWeaponProfile? ToClientWeaponProfile(
+        AppraiseInfoParser.WeaponProfile? source) =>
+        source is { } w
+            ? new ClientWeaponProfile(
+                w.DamageType,
+                w.WeaponTime,
+                w.WeaponSkill,
+                w.Damage,
+                w.DamageVariance,
+                w.DamageMod,
+                w.WeaponLength,
+                w.MaxVelocity,
+                w.WeaponOffense,
+                w.MaxVelocityEstimated)
+            : null;
+
+    private static ClientArmorProfile? ToClientArmorProfile(
+        AppraiseInfoParser.ArmorProfile? source) =>
+        source is { } a
+            ? new ClientArmorProfile(
+                a.SlashingProtection,
+                a.PiercingProtection,
+                a.BludgeoningProtection,
+                a.ColdProtection,
+                a.FireProtection,
+                a.AcidProtection,
+                a.NetherProtection,
+                a.LightningProtection)
+            : null;
 
     private static string FormatSalvageResults(GameEvents.SalvageOperationsResult result)
     {
