@@ -296,10 +296,10 @@ the same way: each returns `PluginTradeCommandResult` with a
 `PluginTradeCommandStatus` of `Unavailable` (no in-world session),
 `NotOpen` (no trade window is open), `InvalidItem`, or `Sent`.
 
-`Accept` is a no-op (returns `Sent` without touching the wire) once
-`MyAccepted` is already true -- the same guard the window's own Accept
-button has by disabling itself. `Decline`, `Reset`, and `End` carry no
-such guard and always resend: a partner-declined round can be declined
+`Accept` is a no-op (returns `AlreadyAccepted` without touching the wire)
+once `MyAccepted` is already true -- the same guard the window's own
+Accept button has by disabling itself. `Decline`, `Reset`, and `End` carry
+no such guard and always resend: a partner-declined round can be declined
 again, and ending an already-closing trade is harmless.
 
 The event named `PartnerTradeAccepted` — not `PartnerAccepted` — carries the
@@ -354,9 +354,10 @@ reads a listed item's already-materialized properties -- the data the
 `ApproachVendor` listing itself carried, shaped like an appraisal but not a
 live appraisal round trip -- by its `TemplateObjectId`.
 
-`IsBusy` reports whether a buy/sell (or any other item transaction) is
-already in flight — `BuyAll`/`SellAll` refuse with `Busy` rather than queue
-behind it.
+`IsBusy` reports whether this adapter's own buy/sell is in flight -- it is
+vendor-local, not the client-wide inventory-transaction busy state, which
+a vendor transaction never touches. `BuyAll`/`SellAll` refuse with `Busy`
+rather than queue behind an outstanding buy/sell of their own.
 
 ## Hotkeys
 

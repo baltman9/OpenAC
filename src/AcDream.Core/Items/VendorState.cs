@@ -126,12 +126,13 @@ public sealed class VendorState
         }
         return true;
     }
-
     public bool Reset()
     {
         uint previous = VendorId;
         bool changed = previous != 0u;
         ClearFields();
+        if (!changed)
+            return false;
 
         var transition = new VendorTransition(VendorStateTransitionKind.Reset, previous, 0u);
         Action<VendorTransition>? listeners = Changed;

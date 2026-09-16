@@ -235,7 +235,7 @@ public sealed class RuntimeTradeAutomationTests
         Assert.True(trade.MyAccepted);
 
         captured.Clear();
-        Assert.Equal(PluginTradeCommandStatus.Sent, trade.Accept().Status);
+        Assert.Equal(PluginTradeCommandStatus.AlreadyAccepted, trade.Accept().Status);
         Assert.Empty(captured);
     }
 }

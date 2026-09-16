@@ -8,6 +8,13 @@ public enum PluginTradeCommandStatus
     Busy,
     Sent,
     Refused,
+
+    /// <summary>
+    /// Accept() was called when the local side had already accepted --
+    /// nothing was sent, since the retail-look window's own Accept button
+    /// disables itself the same way once MyAccepted is true.
+    /// </summary>
+    AlreadyAccepted,
 }
 
 public readonly record struct PluginTradeCommandResult(

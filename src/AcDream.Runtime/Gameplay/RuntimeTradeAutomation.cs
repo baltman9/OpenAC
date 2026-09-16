@@ -86,7 +86,7 @@ public sealed class RuntimeTradeAutomation : ITradeAutomation
         if (!snapshot.IsOpen)
             return new(PluginTradeCommandStatus.NotOpen);
         if (snapshot.SelfAccepted)
-            return new(PluginTradeCommandStatus.Sent);
+            return new(PluginTradeCommandStatus.AlreadyAccepted);
         if (Session is not { } session)
             return new(PluginTradeCommandStatus.Unavailable);
         session.SendAcceptTrade(
