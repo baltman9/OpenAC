@@ -21,6 +21,8 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
     private readonly List<(uint TemplateObjectId, int Count)> _buyList = [];
     private readonly List<uint> _sellList = [];
     private PluginVendorTransactionKind? _pendingKind;
+    private bool _hasLatchedFailure;
+    private uint _latchedFailureError;
     private PluginVendorTransaction? _completedTransaction;
     private bool _disposed;
 
@@ -33,6 +35,7 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _runtime.InventoryOwner.Vendor.Changed += OnVendorChanged;
         _runtime.ActionOwner.Transactions.UseCompleted += OnUseCompleted;
+        _runtime.InventoryOwner.Objects.MoveRequestFailed += OnMoveRequestFailed;
     }
 
     public bool IsAvailable =>
@@ -324,11 +327,35 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
             if (_pendingKind is not { } pendingKind)
                 return;
             _pendingKind = null;
-            bool success = error == 0u;
+            // A failed buy validation, an empty/invalid sell list, a
+            // negative payout, or an over-burden/no-pack-space rejection
+            // all come back as InventoryServerSaveFailed (the same signal
+            // ClientObjectTable.MoveRequestFailed surfaces) with NO
+            // accompanying UseDone error -- error alone is not a reliable
+            // success signal for a vendor transaction.
+            uint effectiveError = _hasLatchedFailure ? _latchedFailureError : error;
+            bool success = effectiveError == 0u && !_hasLatchedFailure;
+            _hasLatchedFailure = false;
+            _latchedFailureError = 0u;
             string? notice = success
                 ? null
-                : $"Vendor transaction failed (weenie error {error}).";
+                : $"Vendor transaction failed (weenie error {effectiveError}).";
             _completedTransaction = new PluginVendorTransaction(pendingKind, success, notice);
+        }
+    }
+
+    // Latches a failure while a buy/sell is in flight -- the server signals
+    // a rejected vendor transaction as an inventory-save failure on the
+    // affected item/container, not as a UseDone error code (UseDone often
+    // still arrives with error == 0 for these rejections).
+    private void OnMoveRequestFailed(MoveRequestFailure failure)
+    {
+        lock (_gate)
+        {
+            if (_pendingKind is null)
+                return;
+            _hasLatchedFailure = true;
+            _latchedFailureError = failure.WeenieError;
         }
     }
 
@@ -355,6 +382,8 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
                     _buyList.Clear();
                     _sellList.Clear();
                     _pendingKind = null;
+                    _hasLatchedFailure = false;
+                    _latchedFailureError = 0u;
                     _completedTransaction = null;
                 }
                 break;
@@ -415,5 +444,6 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
         }
         _runtime.InventoryOwner.Vendor.Changed -= OnVendorChanged;
         _runtime.ActionOwner.Transactions.UseCompleted -= OnUseCompleted;
+        _runtime.InventoryOwner.Objects.MoveRequestFailed -= OnMoveRequestFailed;
     }
 }

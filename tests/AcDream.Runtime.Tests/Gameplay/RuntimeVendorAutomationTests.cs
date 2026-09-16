@@ -528,4 +528,80 @@ public sealed class RuntimeVendorAutomationTests
             PluginVendorCommandStatus.Unavailable,
             vendor.ClearSellList().Status);
     }
+
+    [Fact]
+    public void AnErrorLessUseDoneAfterAMoveRequestFailureIsReportedAsAFailure()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+        host.Runtime.InventoryOwner.Vendor.Apply(
+            0x40001000u,
+            Profile,
+            [
+                new VendorShopItem(
+                    ItemGuid: 0x50002000u,
+                    StackSize: 5,
+                    WeenieClassId: 1234u,
+                    Name: "Fixture Sword",
+                    ItemType: (uint)ItemType.Weapon,
+                    IconId: 0x06000001u,
+                    Value: 100),
+            ]);
+        host.Runtime.Session.CurrentSession!.GameActionCapture = _ => { };
+
+        var completions = new List<PluginVendorTransaction>();
+        vendor.TransactionCompleted += completions.Add;
+
+        vendor.AddToBuyList(0x50002000u, 1);
+        vendor.BuyAll();
+
+        // The server rejects the buy (no pack space, over-burden, negative
+        // payout, ...) as an InventoryServerSaveFailed on the affected
+        // item -- the same signal ClientObjectTable.MoveRequestFailed
+        // surfaces -- and still sends a UseDone with error == 0. Before the
+        // fix, that error-less UseDone alone was treated as success.
+        host.Runtime.InventoryOwner.Objects.RejectMove(0x50002000u, 0x0002u);
+        host.Runtime.ActionOwner.Transactions.CompleteUse(0u);
+        vendor.Poll();
+
+        PluginVendorTransaction completion = Assert.Single(completions);
+        Assert.Equal(PluginVendorTransactionKind.Buy, completion.Kind);
+        Assert.False(completion.Success);
+        Assert.NotNull(completion.Notice);
+    }
+
+    [Fact]
+    public void ASuccessfulBuyWithNoMoveRequestFailureStillReportsSuccess()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+        host.Runtime.InventoryOwner.Vendor.Apply(
+            0x40001000u,
+            Profile,
+            [
+                new VendorShopItem(
+                    ItemGuid: 0x50002000u,
+                    StackSize: 5,
+                    WeenieClassId: 1234u,
+                    Name: "Fixture Sword",
+                    ItemType: (uint)ItemType.Weapon,
+                    IconId: 0x06000001u,
+                    Value: 100),
+            ]);
+        host.Runtime.Session.CurrentSession!.GameActionCapture = _ => { };
+
+        var completions = new List<PluginVendorTransaction>();
+        vendor.TransactionCompleted += completions.Add;
+
+        vendor.AddToBuyList(0x50002000u, 1);
+        vendor.BuyAll();
+        host.Runtime.ActionOwner.Transactions.CompleteUse(0u);
+        vendor.Poll();
+
+        PluginVendorTransaction completion = Assert.Single(completions);
+        Assert.True(completion.Success);
+        Assert.Null(completion.Notice);
+    }
 }
