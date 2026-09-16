@@ -10,6 +10,26 @@ internal interface IPlayerInteractionMovementSink
     bool BeginApproach(
         InteractionApproach approach,
         Action<PlayerApproachToken>? armAfterCancel = null);
+
+    /// <summary>
+    /// The local player's current move-to's consecutive per-tick
+    /// progress-failure count (MoveToManager.FailProgressCount), or null
+    /// when there is no active move-to to read. Resets to 0 the instant
+    /// the move makes progress again, so a caller polling this to decide
+    /// whether to give up on a stalled approach never mistakes a slow but
+    /// still-advancing walk for a stuck one.
+    /// </summary>
+    uint? CurrentApproachFailProgressCount();
+
+    /// <summary>
+    /// Cancels the local player's current move-to outright (as
+    /// WeenieError.ActionCancelled), the same call a new click's
+    /// supersede-the-prior-approach path makes. Used when this host gives
+    /// up on an approach that never naturally completed or cancelled, so
+    /// the player stops walking into whatever is blocking it instead of
+    /// silently continuing to try.
+    /// </summary>
+    void CancelApproach();
 }
 
 internal sealed class PlayerInteractionMovementSink(
@@ -59,4 +79,10 @@ internal sealed class PlayerInteractionMovementSink(
         controller.SetLastMoveWasAutonomous(false);
         return controller.Movement.PerformMovement(movement) == WeenieError.None;
     }
+
+    public uint? CurrentApproachFailProgressCount()
+        => _player()?.MoveTo?.FailProgressCount;
+
+    public void CancelApproach()
+        => _player()?.Movement.CancelMoveTo(WeenieError.ActionCancelled);
 }

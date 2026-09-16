@@ -764,6 +764,47 @@ public sealed class ItemInteractionController : IDisposable
         return ExecuteUseActions(decision.Actions);
     }
 
+    /// <summary>
+    /// Arms ExternalContainers.RequestOpen for objectId if -- and only if
+    /// -- the same use policy a click evaluates would itself open it as a
+    /// landscape container (a corpse, chest, or similar not-owned,
+    /// useable, non-targeted container -- the exact predicate
+    /// ItemInteractionPolicy's SetGroundObject action already encodes).
+    /// This does not send anything and does not touch the current
+    /// selection; it exists so the automation walk-then-use path
+    /// (SelectionInteractionController.TryUseForAutomation) can arm the
+    /// same seam a click's own SetGroundObject action arms before its
+    /// approach-gated Use dispatches. Without this, the automation route
+    /// dispatched the same wire Use a click does but left
+    /// RequestedContainerId at 0, so the server's ViewContents response
+    /// arrived with nothing armed to receive it and
+    /// ExternalContainerState.ApplyViewContents silently dropped it --
+    /// the plugin's Use reported Started and the container never opened.
+    /// </summary>
+    public void ArmLandscapeContainerRequest(uint objectId)
+    {
+        if (objectId == 0u || _objects.Get(objectId) is not { } item)
+            return;
+
+        var input = new ItemUsePolicyInput(
+            Snapshot(item),
+            _playerGuid(),
+            _groundObjectId(),
+            CanMakeInventoryRequest,
+            _activeVendorId(),
+            BypassClassification: false,
+            UseCurrentSelection: false,
+            SelectedTarget: null,
+            ConfirmVolatileRareUses: true,
+            InNonCombatMode: _inNonCombatMode());
+        ItemUsePolicyDecision decision = ItemInteractionPolicy.DecideUse(input);
+        foreach (ItemPolicyAction action in decision.Actions)
+        {
+            if (action.Kind == ItemPolicyActionKind.SetGroundObject)
+                _requestExternalContainer?.Invoke(action.ObjectId);
+        }
+    }
+
     public bool TryUseItemForAutomation(uint itemGuid)
     {
         if (itemGuid == 0u || _objects.Get(itemGuid) is not { } item)

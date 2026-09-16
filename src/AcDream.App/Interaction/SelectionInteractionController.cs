@@ -30,25 +30,26 @@ internal enum AutomationUseOutcome
 internal sealed class SelectionInteractionController
 {
     /// <summary>
-    /// How long an armed walk-then-use is allowed to wait for the local
-    /// physics to report arrival before this host gives up on it.
-    /// DEVIATION (deliberate, not a guess): the ported movement layer
-    /// already tracks consecutive per-tick progress failures
-    /// (MoveToManager.FailProgressCount) for exactly this situation --
-    /// an obstruction (a closed door, a wall) blocking the straight-line
-    /// path to the target -- but that counter is write-only bookkeeping
-    /// with no give-up threshold; a stalled move never calls
-    /// MoveToComplete or MoveToCancelled on its own (confirmed by the
-    /// existing MoveToManager conformance tests, which pin this as
-    /// intentional -- see FailProgressCount_IncrementsOnStall_
-    /// ButNoGiveUpThresholdExists). Left unbounded, an armed Use waits
-    /// forever and wedges the one-request-at-a-time gate for the rest of
-    /// the session. This wall-clock bound is this host's own recovery
-    /// for a case the underlying movement layer has no signal for at
-    /// all -- it belongs in the divergence register, not read as a
-    /// retail timing value.
+    /// How many consecutive stalled ticks of the local player's active
+    /// move-to (MoveToManager.FailProgressCount -- see its own doc
+    /// comment) this host tolerates before giving up on an armed
+    /// walk-then-use or walk-then-pickup. The counter resets to 0 the
+    /// instant the move makes progress again, so this never cuts off a
+    /// walk that is merely slow -- only one that has genuinely stopped
+    /// advancing (an obstruction such as a closed door blocking the
+    /// straight-line path, for example). The give-up itself intentionally
+    /// lives here rather than inside MoveToManager: the ported move-to
+    /// state machine has no give-up threshold of its own and must keep
+    /// none, per its own pinned conformance coverage
+    /// (FailProgressCount_IncrementsOnStall_ButNoGiveUpThresholdExists) --
+    /// this is a recovery the automation/interaction layer owns for a
+    /// termination signal the movement layer does not provide, not a
+    /// retail movement-timing value. 150 keeps a wide safety margin
+    /// against a merely slow frame rate (a sustained 10 FPS would still
+    /// take 15 seconds to reach it) while still resolving a genuinely
+    /// stuck approach well within a session.
     /// </summary>
-    internal const long PendingUseArrivalTimeoutMs = 15_000;
+    internal const uint StalledApproachGiveUpTicks = 150;
 
     private readonly SelectionState _selection;
     private readonly IWorldSelectionQuery _query;
@@ -61,8 +62,14 @@ internal sealed class SelectionInteractionController
     private readonly Func<uint, bool>? _splitStack;
     private readonly Func<IEnumerable<uint>> _fellowshipMembers;
     private readonly RuntimeCombatTargetState _combatTarget;
-    private readonly Func<long> _nowMs;
-    private long? _pendingUseArmedAtMs;
+
+    // Whether the currently armed pending Use came from the click route
+    // (RequestUse, toast: true) rather than the automation route
+    // (TryUseForAutomation, toast: false). Read only when expiring a
+    // stalled approach, so the toast contract that route was given at
+    // arm time is honoured on the way out too -- previously the expiry
+    // toasted unconditionally regardless of which route armed it.
+    private bool _pendingUseToastEnabled;
 
     public SelectionInteractionController(
         SelectionState selection,
@@ -74,8 +81,7 @@ internal sealed class SelectionInteractionController
         Action<string>? toast = null,
         PlayerApproachCompletionState? approachCompletions = null,
         Func<uint, bool>? splitStack = null,
-        Func<IEnumerable<uint>>? fellowshipMembers = null,
-        Func<long>? nowMs = null)
+        Func<IEnumerable<uint>>? fellowshipMembers = null)
     {
         _selection = selection ?? throw new ArgumentNullException(nameof(selection));
         _query = query ?? throw new ArgumentNullException(nameof(query));
@@ -90,7 +96,6 @@ internal sealed class SelectionInteractionController
             ?? new PlayerApproachCompletionState();
         _splitStack = splitStack;
         _fellowshipMembers = fellowshipMembers ?? (() => Array.Empty<uint>());
-        _nowMs = nowMs ?? (() => Environment.TickCount64);
     }
 
     public bool HandleInputAction(InputAction action)
@@ -463,6 +468,22 @@ internal sealed class SelectionInteractionController
         if (!_items.EnsureInventoryRequestReady())
             return AutomationUseOutcome.Busy;
 
+        // A click on a landscape container (a corpse, chest, vendor
+        // stock, etc.) arms ExternalContainers.RequestOpen for it as one
+        // of the SAME policy actions that decides to send Use --
+        // BuildUsingItemActions's SetGroundObject action, evaluated
+        // alongside SendUse in ItemInteractionPolicy.DecideUse. This
+        // automation route dispatches Use through a different seam
+        // (PerformUse -> RuntimeInteractionTransactionState.TryDispatchUse)
+        // that bypasses that policy entirely, so without arming it here
+        // first the server's ViewContents response for a freshly-opened
+        // container had nothing armed to receive it and was silently
+        // dropped: the plugin's Use reported Started and nothing opened.
+        // Re-running the exact same policy evaluation (rather than
+        // duplicating its not-owned/IsContainer/useable/not-targeted
+        // predicate here) means this only arms when a click would have.
+        _items.ArmLandscapeContainerRequest(serverGuid);
+
         ItemUseRequestReservation reservation = _items.BeginAutomationUseReservation();
         // The reservation holds the busy count from this point; a throw
         // downstream (transport fault, reset mid-call) must give it back or
@@ -541,7 +562,7 @@ internal sealed class SelectionInteractionController
                             token.ApproachGeneration),
                         out _);
                     if (armed)
-                        _pendingUseArmedAtMs = _nowMs();
+                        _pendingUseToastEnabled = toast;
                 });
             if (!started || !armed)
             {
@@ -549,7 +570,6 @@ internal sealed class SelectionInteractionController
                         serverGuid, out RuntimePendingUse cancelled))
                 {
                     cancelled.Reservation?.CancelBeforeDispatch();
-                    _pendingUseArmedAtMs = null;
                 }
                 else
                 {
@@ -789,7 +809,6 @@ internal sealed class SelectionInteractionController
         RuntimePendingUse pending,
         bool accepted)
     {
-        _pendingUseArmedAtMs = null;
         if (!accepted)
         {
             pending.Reservation?.CancelBeforeDispatch();
@@ -835,33 +854,51 @@ internal sealed class SelectionInteractionController
                     completion.Token.ApproachGeneration),
                 completion.IsNatural);
         }
-        ExpireStalePendingUse();
+        ExpireStalledApproach();
         _transactions.DrainOutbound(DispatchQueuedInteraction);
     }
 
     /// <summary>
-    /// Forces a definite outcome on an armed walk-then-use that has waited
-    /// past <see cref="PendingUseArrivalTimeoutMs"/> for an arrival signal
-    /// that never came (see the constant's own comment for why that can
-    /// happen). Without this, an obstructed target left the reservation
-    /// held and HasPendingUse true for the rest of the session -- every
-    /// later Use, from a click or a plugin, reported Busy forever.
+    /// Forces a definite outcome on an armed walk-then-use or
+    /// walk-then-pickup whose move-to has stalled for
+    /// <see cref="StalledApproachGiveUpTicks"/> consecutive ticks with no
+    /// arrival signal (see that constant's own comment for why the
+    /// movement layer alone never resolves this). Without this, an
+    /// obstructed target left the reservation held and HasPendingUse (or
+    /// HasPendingPickup) true for the rest of the session -- every later
+    /// Use or pickup, from a click or a plugin, reported Busy forever.
+    /// Only one of the two can be pending at a time (arming either always
+    /// supersedes or is refused against the other), so one shared read of
+    /// the active move-to's stall counter is enough to judge both.
     /// </summary>
-    private void ExpireStalePendingUse()
+    private void ExpireStalledApproach()
     {
-        if (_pendingUseArmedAtMs is not { } armedAt
-            || _nowMs() - armedAt < PendingUseArrivalTimeoutMs)
+        if (_movement.CurrentApproachFailProgressCount() is not { } failCount
+            || failCount < StalledApproachGiveUpTicks)
         {
             return;
         }
 
-        _pendingUseArmedAtMs = null;
-        if (_transactions.TryCancelPendingUse(out RuntimePendingUse pending))
+        if (_transactions.TryCancelPendingUse(out RuntimePendingUse pendingUse))
         {
-            pending.Reservation?.CancelBeforeDispatch();
+            _movement.CancelApproach();
+            pendingUse.Reservation?.CancelBeforeDispatch();
             Console.WriteLine(
-                $"[interaction] use guid=0x{pending.ServerGuid:X8} arrival timed out after {PendingUseArrivalTimeoutMs}ms -- refused");
-            _toast?.Invoke("You are too far away to do that.");
+                $"[interaction] use guid=0x{pendingUse.ServerGuid:X8} approach stalled for {failCount} tick(s) -- refused");
+            if (_pendingUseToastEnabled)
+                _toast?.Invoke("Your approach never completed.");
+            return;
+        }
+
+        if (_transactions.TryCancelPendingPickup(out RuntimePendingPickup pendingPickup))
+        {
+            _movement.CancelApproach();
+            CancelPickupPresentation(
+                pendingPickup.ServerGuid,
+                pendingPickup.PendingPlacementToken);
+            Console.WriteLine(
+                $"[interaction] pickup item=0x{pendingPickup.ServerGuid:X8} approach stalled for {failCount} tick(s) -- refused");
+            _toast?.Invoke("Your approach never completed.");
         }
     }
 
@@ -880,10 +917,7 @@ internal sealed class SelectionInteractionController
                 cancelled.PendingPlacementToken);
         }
         if (_transactions.TryCancelPendingUse(serverGuid, out RuntimePendingUse cancelledUse))
-        {
             cancelledUse.Reservation?.CancelBeforeDispatch();
-            _pendingUseArmedAtMs = null;
-        }
         if (_selection.SelectedObjectId == serverGuid)
         {
             _selection.Clear(
@@ -908,10 +942,7 @@ internal sealed class SelectionInteractionController
                 cancelled.PendingPlacementToken);
         }
         if (_transactions.TryCancelPendingUse(record.ServerGuid, out RuntimePendingUse cancelledUse))
-        {
             cancelledUse.Reservation?.CancelBeforeDispatch();
-            _pendingUseArmedAtMs = null;
-        }
         if (!replacementExists && _selection.SelectedObjectId == record.ServerGuid)
         {
             _selection.Clear(
@@ -1031,10 +1062,7 @@ internal sealed class SelectionInteractionController
         // previously armed — release an in-flight Use's reservation too, not
         // just pickup's presentation token.
         if (_transactions.TryCancelPendingUse(out RuntimePendingUse pendingUse))
-        {
             pendingUse.Reservation?.CancelBeforeDispatch();
-            _pendingUseArmedAtMs = null;
-        }
     }
 
     private void DispatchQueuedInteraction(

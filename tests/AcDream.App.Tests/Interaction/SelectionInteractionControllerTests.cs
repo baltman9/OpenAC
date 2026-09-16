@@ -131,6 +131,9 @@ public sealed class SelectionInteractionControllerTests
         public List<InteractionApproach> Approaches { get; } = new();
         public bool Starts { get; set; } = true;
         public Action? AfterArm { get; set; }
+        public uint? FailProgressCount { get; set; }
+        public int CancelCount { get; private set; }
+
         public bool BeginApproach(
             InteractionApproach approach,
             Action<PlayerApproachToken>? armAfterCancel = null)
@@ -142,6 +145,10 @@ public sealed class SelectionInteractionControllerTests
             AfterArm?.Invoke();
             return true;
         }
+
+        public uint? CurrentApproachFailProgressCount() => FailProgressCount;
+
+        public void CancelApproach() => CancelCount++;
     }
 
     private sealed class CombatTargetOperations(SelectionState selection)
@@ -180,11 +187,10 @@ public sealed class SelectionInteractionControllerTests
         public readonly RuntimeCombatTargetState CombatTarget;
         public readonly SelectionInteractionController Controller;
         public uint GroundObjectId { get; set; }
-        private readonly Func<long>? _nowMs;
+        public uint? RequestedExternalContainerId { get; private set; }
 
-        public Harness(Func<long>? nowMs = null)
+        public Harness()
         {
-            _nowMs = nowMs;
             CompletionLifetime = Completions.BeginControllerLifetime();
             Movement = new Movement(Completions);
             SelectionInteractionController? controller = null;
@@ -219,7 +225,8 @@ public sealed class SelectionInteractionControllerTests
                 placeInBackpack: (item, container, placement) =>
                     controller!.SendPickup(item, container, placement),
                 requestUse: (guid, reservation) =>
-                    controller!.RequestUse(guid, reservation));
+                    controller!.RequestUse(guid, reservation),
+                requestExternalContainer: guid => RequestedExternalContainerId = guid);
             CombatTargetOperations = new CombatTargetOperations(Selection);
             CombatTarget = new RuntimeCombatTargetState(
                 Combat,
@@ -233,8 +240,7 @@ public sealed class SelectionInteractionControllerTests
                 Movement,
                 CombatTarget,
                 Toasts.Add,
-                Completions,
-                nowMs: _nowMs);
+                Completions);
             Items.PendingBackpackPlacementRequested += PendingPlacements.Add;
             Items.PendingBackpackPlacementCancelled += CancelledPlacements.Add;
         }
@@ -550,19 +556,20 @@ public sealed class SelectionInteractionControllerTests
 
 
     [Fact]
-    public void ArrivalThatNeverCompletesExpiresTheReservationAfterTheTimeout()
+    public void StalledApproachExpiresTheReservationOnceTheFailCounterCrossesTheThreshold()
     {
-        // A live-verified root cause: an obstruction
-        // (a closed door, a wall) in the straight-line approach path can
-        // stop the local physics from ever calling MoveToComplete or
-        // MoveToCancelled at all -- not just report a bad arrival. A live
-        // repro against a real ACE vendor left the character frozen at a
-        // closed door for 40+ seconds with zero HandleUseApproachCompletion
-        // calls. Without a bound, the reservation and HasPendingUse would
-        // stay held for the rest of the session; every later Use, from a
-        // click or a plugin, would report Busy forever.
-        long clock = 0;
-        var h = new Harness(nowMs: () => clock);
+        // A live-verified root cause: an obstruction (a closed door, a
+        // wall) in the straight-line approach path can stop the local
+        // physics from ever calling MoveToComplete or MoveToCancelled at
+        // all -- not just report a bad arrival. A live repro against a
+        // real ACE vendor left the character frozen at a closed door for
+        // 40+ seconds with zero HandleUseApproachCompletion calls.
+        // Without a bound, the reservation and HasPendingUse would stay
+        // held for the rest of the session; every later Use, from a
+        // click or a plugin, would report Busy forever. The give-up
+        // reads the move-to's own per-tick progress-failure counter
+        // (see StalledApproachGiveUpTicks) rather than a wall clock.
+        var h = new Harness();
         h.SetApproach(closeRange: false);
 
         AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
@@ -570,22 +577,101 @@ public sealed class SelectionInteractionControllerTests
         Assert.Equal(1, h.Items.BusyCount);
         Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
 
-        // Short of the timeout: the arrival signal simply never arrives,
-        // and nothing changes yet.
-        clock += SelectionInteractionController.PendingUseArrivalTimeoutMs - 1;
+        // Short of the threshold: the fail counter is climbing (the move
+        // is stalled) but hasn't crossed the line yet, so nothing changes.
+        h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks - 1;
         h.Controller.DrainOutbound();
 
         Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
         Assert.Equal(1, h.Items.BusyCount);
+        Assert.Equal(0, h.Movement.CancelCount);
 
-        // Past the timeout: the host gives up and frees the gate.
-        clock += 2;
+        // At the threshold: the host gives up, frees the gate, and cancels
+        // the underlying move-to so the player stops walking into it.
+        h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks;
         h.Controller.DrainOutbound();
 
         Assert.False(h.Items.RuntimeTransactions.HasPendingUse);
         Assert.Equal(0, h.Items.BusyCount);
         Assert.True(h.Items.EnsureInventoryRequestReady());
         Assert.Empty(h.Transport.Uses);
+        Assert.Equal(1, h.Movement.CancelCount);
+    }
+
+    [Fact]
+    public void AutomationRouteDoesNotToastWhenAnApproachStalls()
+    {
+        // The automation route's toast: false contract must survive to
+        // the expiry path too -- a plugin's Use should not pop a message
+        // in the user's chat window the same way a click's would.
+        var h = new Harness();
+        h.SetApproach(closeRange: false);
+
+        h.Controller.TryUseForAutomation(Target);
+        h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks;
+        h.Controller.DrainOutbound();
+
+        Assert.Empty(h.Toasts);
+    }
+
+    [Fact]
+    public void ClickRouteDoesToastWhenAnApproachStalls()
+    {
+        var h = new Harness();
+        h.SetApproach(closeRange: false);
+
+        h.Controller.SendUse(Target);
+        h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks;
+        h.Controller.DrainOutbound();
+
+        Assert.Single(h.Toasts);
+    }
+
+    [Fact]
+    public void ASlowButProgressingApproachIsNeverCutOff()
+    {
+        // The give-up must never punish a walk that is merely slow. The
+        // move-to's fail counter resets to 0 the instant it makes
+        // progress (MoveToManager.CheckProgressMade); simulate that by
+        // never letting the counter reach the threshold, no matter how
+        // many drain cycles pass.
+        var h = new Harness();
+        h.SetApproach(closeRange: false);
+
+        h.Controller.TryUseForAutomation(Target);
+
+        for (int i = 0; i < 500; i++)
+        {
+            // Climbs partway, then progress resets it, over and over --
+            // it never accumulates to the threshold.
+            h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks - 1;
+            h.Controller.DrainOutbound();
+            h.Movement.FailProgressCount = 0;
+            h.Controller.DrainOutbound();
+        }
+
+        Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
+        Assert.Equal(0, h.Movement.CancelCount);
+    }
+
+    [Fact]
+    public void StalledPickupApproachExpiresTheSameWay()
+    {
+        // MEDIUM: walk-then-pickup has the identical unbounded wedge as
+        // walk-then-use -- SendPickup arms TryArmPostArrivalPickup the
+        // same way PerformUse arms TryArmPostArrivalUse, and nothing
+        // released it if the move-to never completed or cancelled.
+        var h = new Harness();
+        h.SetApproach(closeRange: true);
+
+        Assert.True(h.Items.PlaceWorldItemInBackpack(Target));
+        Assert.True(h.Items.RuntimeTransactions.HasPendingPickup);
+
+        h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks;
+        h.Controller.DrainOutbound();
+
+        Assert.False(h.Items.RuntimeTransactions.HasPendingPickup);
+        Assert.Equal(1, h.Movement.CancelCount);
     }
 
     [Fact]
@@ -599,6 +685,79 @@ public sealed class SelectionInteractionControllerTests
         Assert.Equal(AutomationUseOutcome.Started, outcome);
         Assert.Empty(h.Movement.Approaches);
         Assert.Equal(new[] { Target }, h.Transport.Uses);
+    }
+
+    [Fact]
+    public void AutomationUseOfANonOwnedContainerArmsTheExternalContainerRequest()
+    {
+        // HIGH root-cause fix: a click on a landscape container arms
+        // ExternalContainers.RequestOpen as one of the SAME policy
+        // actions that decides to send Use (SetGroundObject, alongside
+        // SendUse, both produced by ItemInteractionPolicy.DecideUse). The
+        // automation route dispatches Use through a different seam
+        // (PerformUse -> TryDispatchUse) that bypassed that policy
+        // entirely, so RequestedContainerId stayed 0 and the server's
+        // ViewContents response for a freshly opened corpse/chest was
+        // silently dropped -- Started, and nothing opened. Live-verified
+        // on a real ACE chest.
+        var h = new Harness();
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = Target,
+            Name = "Chest",
+            Type = ItemType.Container,
+            Useability = ItemUseability.Remote,
+            ItemsCapacity = 6,
+        });
+        h.SetApproach(closeRange: true);
+
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+
+        Assert.Equal(AutomationUseOutcome.Started, outcome);
+        Assert.Equal(Target, h.RequestedExternalContainerId);
+    }
+
+    [Fact]
+    public void AutomationUseOfAnOwnedItemDoesNotArmTheExternalContainerRequest()
+    {
+        var h = new Harness();
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = Target,
+            Name = "MyBag",
+            Type = ItemType.Container,
+            ContainerId = Player,
+            Useability = ItemUseability.Remote,
+            ItemsCapacity = 6,
+        });
+        h.SetApproach(closeRange: true);
+
+        h.Controller.TryUseForAutomation(Target);
+
+        Assert.Null(h.RequestedExternalContainerId);
+    }
+
+    [Fact]
+    public void AutomationUseOfATargetedContainerDoesNotArmTheExternalContainerRequest()
+    {
+        var h = new Harness();
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = Target,
+            Name = "LockedChest",
+            Type = ItemType.Container,
+            // A target-mode bit (Contained, shifted into the target half)
+            // means this needs a key/tool used ON it, not a bare Use --
+            // the same reason ItemInteractionPolicy never emits
+            // SetGroundObject for it.
+            Useability = ItemUseability.Contained << 16,
+            ItemsCapacity = 6,
+        });
+        h.SetApproach(closeRange: true);
+
+        h.Controller.TryUseForAutomation(Target);
+
+        Assert.Null(h.RequestedExternalContainerId);
     }
 
     [Fact]
