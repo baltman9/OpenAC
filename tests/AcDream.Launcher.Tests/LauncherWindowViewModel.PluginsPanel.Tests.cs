@@ -720,6 +720,217 @@ public sealed partial class LauncherWindowViewModelTests
     }
 
     [Fact]
+    public async Task UpdateThatChangesCapabilitiesMarksTheChipAsNew()
+    {
+        using var fixture = new PluginPanelFixture();
+        fixture.WriteManifest(
+            "edwards.managed", "0.1.0", ["headless"],
+            capabilitiesVersion: LauncherPluginCapabilityVocabulary.Current,
+            capabilitiesJson: """[{ "name": "network", "note": "Sends usage counts." }]""");
+        fixture.AddRecord("edwards.managed", "shaneedwards/openac-plugin-hello", "0.1.0");
+        byte[] remoteManifest = PluginPanelFixture.ManifestJson(
+            "edwards.managed", "0.2.0", "0.1.0", ["headless"],
+            capabilitiesVersion: LauncherPluginCapabilityVocabulary.Current,
+            capabilitiesJson: """
+                [
+                  { "name": "network", "note": "Sends usage counts." },
+                  { "name": "chat", "note": "Reads chat." }
+                ]
+                """);
+        Uri manifestUri = GitHubReleaseLocator.LatestAsset(
+            "shaneedwards/openac-plugin-hello", "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
+            "shaneedwards/openac-plugin-hello", "v0.2.0", "plugin.json");
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(fixture.ListJson());
+            }
+
+            if (request.RequestUri == manifestUri)
+            {
+                return Redirect(taggedManifestUri);
+            }
+
+            if (request.RequestUri == taggedManifestUri)
+            {
+                return Ok(remoteManifest);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        PluginInstalledRowViewModel managed = Assert.Single(
+            viewModel.Plugins.Installed, row => row.Id == "edwards.managed");
+        Assert.True(managed.UpdateCapabilitiesChanged);
+        Assert.Equal("Update available: v0.2.0 · new capabilities", managed.UpdateChipText);
+    }
+
+    [Fact]
+    public async Task UpdateWithUnchangedCapabilitiesShowsAPlainChipAndNoFreshConsent()
+    {
+        using var fixture = new PluginPanelFixture();
+        fixture.WriteManifest(
+            "edwards.managed", "0.1.0", ["headless"],
+            capabilitiesVersion: LauncherPluginCapabilityVocabulary.Current,
+            capabilitiesJson: """[{ "name": "network", "note": "Sends usage counts." }]""");
+        fixture.AddRecord("edwards.managed", "shaneedwards/openac-plugin-hello", "0.1.0");
+        byte[] remoteManifest = PluginPanelFixture.ManifestJson(
+            "edwards.managed", "0.2.0", "0.1.0", ["headless"],
+            capabilitiesVersion: LauncherPluginCapabilityVocabulary.Current,
+            capabilitiesJson: """[{ "name": "network", "note": "Sends usage counts." }]""");
+        Uri manifestUri = GitHubReleaseLocator.LatestAsset(
+            "shaneedwards/openac-plugin-hello", "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
+            "shaneedwards/openac-plugin-hello", "v0.2.0", "plugin.json");
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(fixture.ListJson());
+            }
+
+            if (request.RequestUri == manifestUri)
+            {
+                return Redirect(taggedManifestUri);
+            }
+
+            if (request.RequestUri == taggedManifestUri)
+            {
+                return Ok(remoteManifest);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator
+        {
+            ServersOverride =
+            [
+                new LauncherServerSnapshot("Local ACE", "127.0.0.1", 9000,
+                [
+                    new LauncherAccountSnapshot("Local ACE", "testaccount",
+                    [
+                        new LauncherCharacterSnapshot(
+                            "Local ACE", "testaccount", "+Holder", "0x50000001",
+                            LaunchMode.Headless, ["edwards.managed"], [], false, "Ready"),
+                    ],
+                    HasRunningActivity: false,
+                    ActivityStatus: "Ready"),
+                ]),
+            ],
+        };
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        PluginInstalledRowViewModel managed = Assert.Single(
+            viewModel.Plugins.Installed, row => row.Id == "edwards.managed");
+        Assert.False(managed.UpdateCapabilitiesChanged);
+        Assert.Equal("Update available: v0.2.0", managed.UpdateChipText);
+
+        managed.UpdateCommand!.Execute(null);
+
+        PluginInstallDialogViewModel dialog = viewModel.Plugins.InstallDialog;
+        Assert.True(dialog.IsOpen);
+        Assert.False(dialog.CapabilitiesChanged);
+        Assert.False(dialog.ShowKeepEnabledChoice);
+        Assert.Equal("Install", dialog.ConfirmLabel);
+    }
+
+    [Fact]
+    public async Task UpdateDialogOffersToKeepEnabledForCharactersAlreadyHoldingTheOldConsent()
+    {
+        using var fixture = new PluginPanelFixture();
+        fixture.WriteManifest(
+            "edwards.managed", "0.1.0", ["headless"],
+            capabilitiesVersion: LauncherPluginCapabilityVocabulary.Current,
+            capabilitiesJson: """[{ "name": "network", "note": "Sends usage counts." }]""");
+        fixture.AddRecord("edwards.managed", "shaneedwards/openac-plugin-hello", "0.1.0");
+        byte[] remoteManifest = PluginPanelFixture.ManifestJson(
+            "edwards.managed", "0.2.0", "0.1.0", ["headless"],
+            capabilitiesVersion: LauncherPluginCapabilityVocabulary.Current,
+            capabilitiesJson: """
+                [
+                  { "name": "network", "note": "Sends usage counts." },
+                  { "name": "chat", "note": "Reads chat." }
+                ]
+                """);
+        Uri manifestUri = GitHubReleaseLocator.LatestAsset(
+            "shaneedwards/openac-plugin-hello", "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
+            "shaneedwards/openac-plugin-hello", "v0.2.0", "plugin.json");
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(fixture.ListJson());
+            }
+
+            if (request.RequestUri == manifestUri)
+            {
+                return Redirect(taggedManifestUri);
+            }
+
+            if (request.RequestUri == taggedManifestUri)
+            {
+                return Ok(remoteManifest);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator
+        {
+            ServersOverride =
+            [
+                new LauncherServerSnapshot("Local ACE", "127.0.0.1", 9000,
+                [
+                    new LauncherAccountSnapshot("Local ACE", "testaccount",
+                    [
+                        new LauncherCharacterSnapshot(
+                            "Local ACE", "testaccount", "+Holder", "0x50000001",
+                            LaunchMode.Headless, ["edwards.managed"], [], false, "Ready"),
+                        new LauncherCharacterSnapshot(
+                            "Local ACE", "testaccount", "+Untouched", "0x50000002",
+                            LaunchMode.Headless, [], [], false, "Ready"),
+                    ],
+                    HasRunningActivity: false,
+                    ActivityStatus: "Ready"),
+                ]),
+            ],
+        };
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        PluginInstalledRowViewModel managed = Assert.Single(
+            viewModel.Plugins.Installed, row => row.Id == "edwards.managed");
+        managed.UpdateCommand!.Execute(null);
+
+        PluginInstallDialogViewModel dialog = viewModel.Plugins.InstallDialog;
+        Assert.True(dialog.IsOpen);
+        Assert.True(dialog.CapabilitiesChanged);
+        Assert.True(dialog.ShowKeepEnabledChoice);
+        Assert.Equal(["+Holder (testaccount@Local ACE)"], dialog.AffectedCharacters);
+        Assert.Equal("Update and allow", dialog.ConfirmLabel);
+        Assert.True(dialog.Capabilities.Single(chip => chip.Label.Contains("chat")).IsNew);
+        Assert.False(dialog.Capabilities.Single(chip => chip.Label.Contains("network")).IsNew);
+    }
+
+    [Fact]
     public async Task InstalledRowSourceBadgesDescribeWhereThePluginCameFrom()
     {
         using var fixture = new PluginPanelFixture();

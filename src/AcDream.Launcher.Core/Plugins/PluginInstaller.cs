@@ -675,8 +675,9 @@ public sealed class PluginInstaller
     }
 
     /// <summary>Same declarations regardless of order: an author cannot dodge the comparison by
-    /// reordering an otherwise-unchanged list.</summary>
-    private static bool CapabilitiesMatch(
+    /// reordering an otherwise-unchanged list. Public so the launcher can use the same yardstick to
+    /// decide whether an update needs fresh consent.</summary>
+    public static bool CapabilitiesMatch(
         IReadOnlyList<LauncherPluginCapabilityDeclaration> displayed,
         IReadOnlyList<LauncherPluginCapabilityDeclaration> actual)
     {

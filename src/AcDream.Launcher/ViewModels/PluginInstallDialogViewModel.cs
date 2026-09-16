@@ -37,14 +37,22 @@ public sealed class PluginCharacterChoiceViewModel(PluginCharacterOption option)
 }
 
 /// <summary>One capability chip on the install dialog: the author's claim, attributed rather than
-/// verified (L-300).</summary>
-public sealed class PluginCapabilityChipViewModel(LauncherPluginCapabilityDeclaration declaration)
+/// verified (L-300). <paramref name="isNew"/> marks a capability an update adds beyond what the
+/// installed version already declared, so a player skimming the list sees what changed.</summary>
+public sealed class PluginCapabilityChipViewModel(
+    LauncherPluginCapabilityDeclaration declaration, bool isNew = false)
 {
-    public string Label { get; } = DescribeLabel(declaration.Name);
+    public string Label { get; } = isNew
+        ? $"{DescribeLabel(declaration.Name)} (new)"
+        : DescribeLabel(declaration.Name);
 
     public string Note { get; } = declaration.Note;
 
-    public string AutomationName { get; } = $"{DescribeLabel(declaration.Name)}: {declaration.Note}";
+    public bool IsNew { get; } = isNew;
+
+    public string AutomationName { get; } = isNew
+        ? $"{DescribeLabel(declaration.Name)} (new): {declaration.Note}"
+        : $"{DescribeLabel(declaration.Name)}: {declaration.Note}";
 
     private static string DescribeLabel(LauncherPluginCapability capability) => capability switch
     {
@@ -68,14 +76,19 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
     private Func<IReadOnlyList<LauncherPluginCapabilityDeclaration>, CancellationToken,
         Task<PluginInstallResult>>? _installAsync;
     private Action<string, IReadOnlyList<PluginCharacterOption>>? _enableForCharacters;
+    private Action<string>? _disableForAllCharacters;
     private CancellationTokenSource? _cancellation;
     private CancellationTokenSource? _capabilitiesCancellation;
     private IReadOnlyList<LauncherPluginCapabilityDeclaration> _displayedCapabilities = [];
+    private IReadOnlyList<LauncherPluginCapabilityDeclaration>? _installedCapabilities;
     private bool _isOpen;
     private bool _isBusy;
     private bool _isUpdate;
     private bool _isLoadingCapabilities;
     private string? _capabilitiesLoadError;
+    private bool _capabilitiesChanged;
+    private IReadOnlyList<string> _affectedCharacters = [];
+    private bool _keepEnabled;
     private PluginEnableChoice _choice = PluginEnableChoice.None;
     private string? _error;
 
@@ -106,6 +119,8 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
             if (SetProperty(ref _isUpdate, value))
             {
                 OnPropertyChanged(nameof(ShowEnableChoice));
+                OnPropertyChanged(nameof(ShowKeepEnabledChoice));
+                OnPropertyChanged(nameof(ConfirmLabel));
             }
         }
     }
@@ -121,6 +136,59 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
         OfferedVersion is not null
         && LauncherVersion.TryParse(OfferedVersion, out LauncherVersion? version)
         && version.IsPreRelease;
+
+    /// <summary>Whether the update's capabilities differ from the installed version's (any addition,
+    /// removal, or reworded note; <see cref="PluginInstaller.CapabilitiesMatch"/> is the
+    /// yardstick), computed once the displayed list is known. Never true for a first install, since
+    /// there is nothing installed yet to differ from.</summary>
+    public bool CapabilitiesChanged
+    {
+        get => _capabilitiesChanged;
+        private set
+        {
+            if (SetProperty(ref _capabilitiesChanged, value))
+            {
+                OnPropertyChanged(nameof(ShowKeepEnabledChoice));
+                OnPropertyChanged(nameof(ConfirmLabel));
+            }
+        }
+    }
+
+    /// <summary>The characters this plugin is already enabled for, named so the player knows who is
+    /// affected by <see cref="ShowKeepEnabledChoice"/>'s default of turning it off.</summary>
+    public IReadOnlyList<string> AffectedCharacters
+    {
+        get => _affectedCharacters;
+        private set
+        {
+            if (SetProperty(ref _affectedCharacters, value))
+            {
+                OnPropertyChanged(nameof(HasAffectedCharacters));
+                OnPropertyChanged(nameof(AffectedCharactersText));
+                OnPropertyChanged(nameof(ShowKeepEnabledChoice));
+            }
+        }
+    }
+
+    public bool HasAffectedCharacters => AffectedCharacters.Count > 0;
+
+    public string AffectedCharactersText =>
+        $"Currently enabled for: {string.Join(", ", AffectedCharacters)}.";
+
+    /// <summary>Shown only when an update changes capabilities for a plugin some character already
+    /// has enabled: the new capabilities apply to that character unless the player opts in here, so
+    /// this is the one place that choice is made.</summary>
+    public bool ShowKeepEnabledChoice => IsUpdate && CapabilitiesChanged && HasAffectedCharacters;
+
+    /// <summary>Defaults to off: an update that adds a capability does not carry the old consent
+    /// forward, so a character already enabled loses the plugin unless the player ticks this.</summary>
+    public bool KeepEnabled
+    {
+        get => _keepEnabled;
+        set => SetProperty(ref _keepEnabled, value);
+    }
+
+    public string ConfirmLabel => IsUpdate && CapabilitiesChanged ? "Update and allow" : "Install";
 
     /// <summary>The responsibility notice every install and update dialog shows, every time
     /// (L-313): no wording here says or implies OpenAC reviews plugins, listed or not.</summary>
@@ -265,7 +333,12 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
     /// network install and the character-enable write, so this view model stays testable without
     /// either one. <paramref name="capabilities"/> is the declared list when already known;
     /// <see langword="null"/> means it still needs fetching, and <paramref name="loadCapabilities"/>
-    /// is the fetch to run for it. The dialog never opens showing an unknown list as an empty one.</summary>
+    /// is the fetch to run for it. The dialog never opens showing an unknown list as an empty one.
+    /// <paramref name="installedCapabilities"/>, supplied only for an update, is what the installed
+    /// version already declared: it is what <see cref="CapabilitiesChanged"/> and each chip's "new"
+    /// mark are measured against. <paramref name="affectedCharacters"/> names who already has the
+    /// plugin enabled, for <see cref="ShowKeepEnabledChoice"/>; <paramref name="disableForAllCharacters"/>
+    /// is run on confirm when that choice is left unticked.</summary>
     public void Open(
         string repo,
         string pluginId,
@@ -277,7 +350,10 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
         Func<IReadOnlyList<LauncherPluginCapabilityDeclaration>, CancellationToken, Task<PluginInstallResult>> installAsync,
         Action<string, IReadOnlyList<PluginCharacterOption>> enableForCharacters,
         IReadOnlyList<LauncherPluginCapabilityDeclaration>? capabilities = null,
-        Func<CancellationToken, Task<IReadOnlyList<LauncherPluginCapabilityDeclaration>>>? loadCapabilities = null)
+        Func<CancellationToken, Task<IReadOnlyList<LauncherPluginCapabilityDeclaration>>>? loadCapabilities = null,
+        IReadOnlyList<LauncherPluginCapabilityDeclaration>? installedCapabilities = null,
+        IReadOnlyList<string>? affectedCharacters = null,
+        Action<string>? disableForAllCharacters = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repo);
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
@@ -291,6 +367,10 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
         _installAsync = installAsync ?? throw new ArgumentNullException(nameof(installAsync));
         _enableForCharacters = enableForCharacters
             ?? throw new ArgumentNullException(nameof(enableForCharacters));
+        _disableForAllCharacters = disableForAllCharacters;
+        _installedCapabilities = installedCapabilities;
+        KeepEnabled = false;
+        AffectedCharacters = affectedCharacters ?? [];
 
         Characters.Clear();
         foreach (PluginCharacterOption option in characters)
@@ -346,14 +426,19 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
     private void SetCapabilities(IReadOnlyList<LauncherPluginCapabilityDeclaration> capabilities)
     {
         _displayedCapabilities = capabilities;
+        HashSet<LauncherPluginCapability>? installedNames = _installedCapabilities?
+            .Select(declaration => declaration.Name).ToHashSet();
         Capabilities.Clear();
         foreach (LauncherPluginCapabilityDeclaration declaration in capabilities
                      .OrderBy(declaration => (int)declaration.Name))
         {
-            Capabilities.Add(new PluginCapabilityChipViewModel(declaration));
+            bool isNew = installedNames is not null && !installedNames.Contains(declaration.Name);
+            Capabilities.Add(new PluginCapabilityChipViewModel(declaration, isNew));
         }
 
         OnPropertyChanged(nameof(HasCapabilities));
+        CapabilitiesChanged = _installedCapabilities is not null
+            && !PluginInstaller.CapabilitiesMatch(_installedCapabilities, capabilities);
     }
 
     /// <summary>Runs a Discover row's on-demand manifest fetch (<c>Open</c>'s
@@ -424,6 +509,14 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
                 {
                     _enableForCharacters(result.Id, chosen);
                 }
+            }
+
+            // The old consent never covered a capability this update adds: leaving every character
+            // that already had it enabled would carry that consent forward silently, so it comes
+            // off everywhere unless the player ticked Keep enabled.
+            if (ShowKeepEnabledChoice && !KeepEnabled)
+            {
+                _disableForAllCharacters?.Invoke(result.Id);
             }
         }
         catch (OperationCanceledException)

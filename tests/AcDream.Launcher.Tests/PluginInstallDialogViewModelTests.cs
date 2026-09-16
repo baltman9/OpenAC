@@ -485,4 +485,220 @@ public sealed class PluginInstallDialogViewModelTests
 
         Assert.Equal([declared], passedToInstall);
     }
+
+    [Fact]
+    public void UpdateWithIdenticalReorderedCapabilitiesNeedsNoFreshConsent()
+    {
+        var dialog = new PluginInstallDialogViewModel();
+        dialog.Open(
+            "shaneedwards/openac-plugin-hello",
+            "edwards.hello",
+            "Hello",
+            isListed: true,
+            isUpdate: true,
+            null,
+            Characters,
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.2.0", WasUpdate: true)),
+            (_, _) => { },
+            capabilities:
+            [
+                new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Chat, "Reads chat."),
+                new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Network, "Sends usage counts."),
+            ],
+            installedCapabilities:
+            [
+                new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Network, "Sends usage counts."),
+                new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Chat, "Reads chat."),
+            ]);
+
+        Assert.False(dialog.CapabilitiesChanged);
+        Assert.False(dialog.ShowKeepEnabledChoice);
+        Assert.Equal("Install", dialog.ConfirmLabel);
+        Assert.All(dialog.Capabilities, chip => Assert.False(chip.IsNew));
+    }
+
+    [Fact]
+    public void UpdateAddingACapabilityMarksItNewAndUsesTheConsentLabel()
+    {
+        var dialog = new PluginInstallDialogViewModel();
+        dialog.Open(
+            "shaneedwards/openac-plugin-hello",
+            "edwards.hello",
+            "Hello",
+            isListed: true,
+            isUpdate: true,
+            null,
+            Characters,
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.2.0", WasUpdate: true)),
+            (_, _) => { },
+            capabilities:
+            [
+                new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Network, "Sends usage counts."),
+                new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Chat, "Reads chat."),
+            ],
+            installedCapabilities:
+            [
+                new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Network, "Sends usage counts."),
+            ]);
+
+        Assert.True(dialog.CapabilitiesChanged);
+        Assert.Equal("Update and allow", dialog.ConfirmLabel);
+        Assert.False(dialog.Capabilities[0].IsNew);
+        Assert.True(dialog.Capabilities[1].IsNew);
+        Assert.Equal("uses chat (new)", dialog.Capabilities[1].Label);
+    }
+
+    [Fact]
+    public void UpdateWithARewordedNoteCountsAsChangedButNotAsNew()
+    {
+        var dialog = new PluginInstallDialogViewModel();
+        dialog.Open(
+            "shaneedwards/openac-plugin-hello",
+            "edwards.hello",
+            "Hello",
+            isListed: true,
+            isUpdate: true,
+            null,
+            Characters,
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.2.0", WasUpdate: true)),
+            (_, _) => { },
+            capabilities:
+            [
+                new LauncherPluginCapabilityDeclaration(
+                    LauncherPluginCapability.Network, "Sends usage counts every hour."),
+            ],
+            installedCapabilities:
+            [
+                new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Network, "Sends usage counts."),
+            ]);
+
+        Assert.True(dialog.CapabilitiesChanged);
+        Assert.Equal("Update and allow", dialog.ConfirmLabel);
+        Assert.False(Assert.Single(dialog.Capabilities).IsNew);
+    }
+
+    [Fact]
+    public void AffectedCharactersTextNamesEveryoneCurrentlyEnabled()
+    {
+        var dialog = new PluginInstallDialogViewModel();
+        dialog.Open(
+            "shaneedwards/openac-plugin-hello",
+            "edwards.hello",
+            "Hello",
+            isListed: true,
+            isUpdate: true,
+            null,
+            Characters,
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.2.0", WasUpdate: true)),
+            (_, _) => { },
+            capabilities: [new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Chat, "Reads chat.")],
+            installedCapabilities: [],
+            affectedCharacters: ["+First (acct-a@Local ACE)", "+Second (acct-b@Local ACE)"]);
+
+        Assert.Equal(
+            "Currently enabled for: +First (acct-a@Local ACE), +Second (acct-b@Local ACE).",
+            dialog.AffectedCharactersText);
+    }
+
+    [Fact]
+    public async Task ConfirmingAnUpdateWithChangedCapabilitiesStripsEveryAffectedCharacterByDefault()
+    {
+        var dialog = new PluginInstallDialogViewModel();
+        var disabledIds = new List<string>();
+        dialog.Open(
+            "shaneedwards/openac-plugin-hello",
+            "edwards.hello",
+            "Hello",
+            isListed: true,
+            isUpdate: true,
+            null,
+            Characters,
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.2.0", WasUpdate: true)),
+            (_, _) => { },
+            capabilities:
+            [
+                new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Network, "Sends usage counts."),
+                new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Chat, "Reads chat."),
+            ],
+            installedCapabilities:
+            [
+                new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Network, "Sends usage counts."),
+            ],
+            affectedCharacters: ["+First (acct-a@Local ACE)"],
+            disableForAllCharacters: disabledIds.Add);
+
+        Assert.True(dialog.ShowKeepEnabledChoice);
+        Assert.False(dialog.KeepEnabled);
+
+        await dialog.ConfirmCommand.ExecuteAsync();
+
+        Assert.Equal(["edwards.hello"], disabledIds);
+    }
+
+    [Fact]
+    public async Task ConfirmingWithKeepEnabledLeavesEveryAffectedCharacterAlone()
+    {
+        var dialog = new PluginInstallDialogViewModel();
+        var disabledIds = new List<string>();
+        dialog.Open(
+            "shaneedwards/openac-plugin-hello",
+            "edwards.hello",
+            "Hello",
+            isListed: true,
+            isUpdate: true,
+            null,
+            Characters,
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.2.0", WasUpdate: true)),
+            (_, _) => { },
+            capabilities:
+            [
+                new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Network, "Sends usage counts."),
+                new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Chat, "Reads chat."),
+            ],
+            installedCapabilities:
+            [
+                new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Network, "Sends usage counts."),
+            ],
+            affectedCharacters: ["+First (acct-a@Local ACE)"],
+            disableForAllCharacters: disabledIds.Add);
+
+        dialog.KeepEnabled = true;
+        await dialog.ConfirmCommand.ExecuteAsync();
+
+        Assert.Empty(disabledIds);
+    }
+
+    [Fact]
+    public async Task ChangedCapabilitiesWithNoAffectedCharactersNeverCallsDisable()
+    {
+        var dialog = new PluginInstallDialogViewModel();
+        var disabledIds = new List<string>();
+        dialog.Open(
+            "shaneedwards/openac-plugin-hello",
+            "edwards.hello",
+            "Hello",
+            isListed: true,
+            isUpdate: true,
+            null,
+            Characters,
+            (_, _) => Task.FromResult(new PluginInstallResult("edwards.hello", "0.2.0", WasUpdate: true)),
+            (_, _) => { },
+            capabilities:
+            [
+                new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Network, "Sends usage counts."),
+                new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Chat, "Reads chat."),
+            ],
+            installedCapabilities:
+            [
+                new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Network, "Sends usage counts."),
+            ],
+            affectedCharacters: [],
+            disableForAllCharacters: disabledIds.Add);
+
+        Assert.False(dialog.ShowKeepEnabledChoice);
+
+        await dialog.ConfirmCommand.ExecuteAsync();
+
+        Assert.Empty(disabledIds);
+    }
 }

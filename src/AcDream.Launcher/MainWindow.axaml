@@ -692,32 +692,40 @@
               </ItemsControl>
             </StackPanel>
           </StackPanel>
-          <StackPanel Grid.Row="4" Spacing="6" IsVisible="{Binding Plugins.InstallDialog.ShowEnableChoice}">
-            <TextBlock Text="Enable for" FontWeight="SemiBold" />
-            <RadioButton Content="None (enable later)" GroupName="PluginEnableChoice"
-                         IsChecked="{Binding Plugins.InstallDialog.EnableNone, Mode=TwoWay}"
-                         AutomationProperties.Name="Enable for no characters yet" />
-            <RadioButton Content="All characters" GroupName="PluginEnableChoice"
-                         IsChecked="{Binding Plugins.InstallDialog.EnableAll, Mode=TwoWay}"
-                         AutomationProperties.Name="Enable for all characters" />
-            <RadioButton Content="Choose characters" GroupName="PluginEnableChoice"
-                         IsChecked="{Binding Plugins.InstallDialog.EnableChoose, Mode=TwoWay}"
-                         AutomationProperties.Name="Choose characters to enable for" />
-            <ItemsControl ItemsSource="{Binding Plugins.InstallDialog.Characters}"
-                          IsVisible="{Binding Plugins.InstallDialog.IsChooseListVisible}" Margin="20,0,0,0">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="vm:PluginCharacterChoiceViewModel">
-                  <CheckBox Content="{Binding DisplayName}" IsChecked="{Binding IsChecked, Mode=TwoWay}"
-                            AutomationProperties.Name="{Binding DisplayName}" />
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
+          <StackPanel Grid.Row="4" Spacing="6">
+            <StackPanel Spacing="6" IsVisible="{Binding Plugins.InstallDialog.ShowEnableChoice}">
+              <TextBlock Text="Enable for" FontWeight="SemiBold" />
+              <RadioButton Content="None (enable later)" GroupName="PluginEnableChoice"
+                           IsChecked="{Binding Plugins.InstallDialog.EnableNone, Mode=TwoWay}"
+                           AutomationProperties.Name="Enable for no characters yet" />
+              <RadioButton Content="All characters" GroupName="PluginEnableChoice"
+                           IsChecked="{Binding Plugins.InstallDialog.EnableAll, Mode=TwoWay}"
+                           AutomationProperties.Name="Enable for all characters" />
+              <RadioButton Content="Choose characters" GroupName="PluginEnableChoice"
+                           IsChecked="{Binding Plugins.InstallDialog.EnableChoose, Mode=TwoWay}"
+                           AutomationProperties.Name="Choose characters to enable for" />
+              <ItemsControl ItemsSource="{Binding Plugins.InstallDialog.Characters}"
+                            IsVisible="{Binding Plugins.InstallDialog.IsChooseListVisible}" Margin="20,0,0,0">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:PluginCharacterChoiceViewModel">
+                    <CheckBox Content="{Binding DisplayName}" IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                              AutomationProperties.Name="{Binding DisplayName}" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+            <StackPanel Spacing="6" IsVisible="{Binding Plugins.InstallDialog.ShowKeepEnabledChoice}">
+              <TextBlock Text="New capabilities" FontWeight="SemiBold" />
+              <TextBlock Text="{Binding Plugins.InstallDialog.AffectedCharactersText}" TextWrapping="Wrap" />
+              <CheckBox Content="Keep enabled" IsChecked="{Binding Plugins.InstallDialog.KeepEnabled, Mode=TwoWay}"
+                        AutomationProperties.Name="Keep the plugin enabled for the characters it is already enabled for" />
+            </StackPanel>
           </StackPanel>
           <TextBlock Grid.Row="5" Text="{Binding Plugins.InstallDialog.Error}" Foreground="#FFB0A0"
                      IsVisible="{Binding Plugins.InstallDialog.HasError}" TextWrapping="Wrap" />
           <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
             <Button x:Name="InstallCancelButton" Content="Cancel" IsCancel="True" Command="{Binding Plugins.InstallDialog.CancelCommand}" />
-            <Button x:Name="InstallConfirmButton" Content="Install" Classes="primary" IsDefault="True"
+            <Button x:Name="InstallConfirmButton" Content="{Binding Plugins.InstallDialog.ConfirmLabel}" Classes="primary" IsDefault="True"
                     Command="{Binding Plugins.InstallDialog.ConfirmCommand}"
                     AutomationProperties.Name="Confirm plugin install" />
           </StackPanel>

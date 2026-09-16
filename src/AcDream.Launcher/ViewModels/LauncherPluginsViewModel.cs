@@ -150,6 +150,7 @@ public sealed class PluginInstalledRowViewModel(
     string? updateVersion,
     string? updateCompatibilityNote,
     bool updateCompatibilityIsWarning,
+    bool updateCapabilitiesChanged,
     string? updateWithheldReason,
     RelayCommand? updateCommand,
     RelayCommand? removeCommand,
@@ -191,7 +192,15 @@ public sealed class PluginInstalledRowViewModel(
     public bool UpdateAvailable { get; } = updateAvailable;
     public string? UpdateVersion { get; } = updateVersion;
     public bool HasUpdateChip => UpdateAvailable && !string.IsNullOrWhiteSpace(UpdateVersion);
-    public string? UpdateChipText => HasUpdateChip ? $"Update available: v{UpdateVersion}" : null;
+    /// <summary>Whether the update declares a different set of capabilities than the installed
+    /// version (added, removed, or reworded): a card-level heads-up before the dialog spells it
+    /// out.</summary>
+    public bool UpdateCapabilitiesChanged { get; } = updateCapabilitiesChanged;
+    public string? UpdateChipText => HasUpdateChip
+        ? UpdateCapabilitiesChanged
+            ? $"Update available: v{UpdateVersion} · new capabilities"
+            : $"Update available: v{UpdateVersion}"
+        : null;
     public string? UpdateCompatibilityNote { get; } = updateCompatibilityNote;
     public bool UpdateCompatibilityIsWarning { get; } = updateCompatibilityIsWarning;
     // The row's own Compatibility already covers the installed release; this only adds a line
@@ -659,9 +668,14 @@ public sealed class LauncherPluginsViewModel : ObservableObject
             && _composition!.RecordStore.Find(info.Id)?.Channel == PluginReleaseChannel.Beta;
         bool isPrerelease = LauncherVersion.TryParse(info.Version, out LauncherVersion? installedVersion)
             && installedVersion.IsPreRelease;
+        IReadOnlyList<LauncherPluginCapabilityDeclaration> installedCapabilities = ReadInstalledCapabilities(info);
+        bool updateCapabilitiesChanged = updateAvailable
+            && !PluginInstaller.CapabilitiesMatch(installedCapabilities, availability!.Capabilities);
         RelayCommand? updateCommand = updateAvailable
             ? new RelayCommand(
-                () => OpenUpdateDialog(info, availability!.Tag, availability!.Version, availability!.Capabilities),
+                () => OpenUpdateDialog(
+                    info, availability!.Tag, availability!.Version, installedCapabilities,
+                    availability!.Capabilities),
                 () => _canInteract() && !IsBusy)
             : null;
         RelayCommand? removeCommand = canRemove
@@ -689,6 +703,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject
             updateAvailable ? availability!.Version : null,
             updateAvailable ? availability!.CompatibilityNote : null,
             updateAvailable && availability!.CompatibilityIsWarning,
+            updateCapabilitiesChanged,
             withheldReason,
             updateCommand,
             removeCommand,
@@ -696,7 +711,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject
             info.HasDuplicate,
             onBetaToggled: isBeta => _ = ToggleBetaAsync(self!, isBeta),
             canToggleBeta: () => _canInteract() && !IsBusy,
-            ReadInstalledCapabilities(info));
+            installedCapabilities);
         self = row;
         return row;
     }
@@ -934,7 +949,9 @@ public sealed class LauncherPluginsViewModel : ObservableObject
         string? pinnedTag,
         string? offeredVersion,
         IReadOnlyList<LauncherPluginCapabilityDeclaration>? capabilities,
-        Func<CancellationToken, Task<IReadOnlyList<LauncherPluginCapabilityDeclaration>>>? loadCapabilities = null)
+        Func<CancellationToken, Task<IReadOnlyList<LauncherPluginCapabilityDeclaration>>>? loadCapabilities = null,
+        IReadOnlyList<LauncherPluginCapabilityDeclaration>? installedCapabilities = null,
+        IReadOnlyList<string>? affectedCharacters = null)
     {
         if (_composition is null)
         {
@@ -955,20 +972,37 @@ public sealed class LauncherPluginsViewModel : ObservableObject
                 InstallAsync(repo, pinnedTag, displayedCapabilities, cancellationToken),
             EnableForCharacters,
             capabilities,
-            loadCapabilities);
+            loadCapabilities,
+            installedCapabilities,
+            affectedCharacters,
+            StripFromEveryCharacter);
     }
 
     private void OpenUpdateDialog(
         InstalledPluginInfo info,
         string tag,
         string version,
+        IReadOnlyList<LauncherPluginCapabilityDeclaration> installedCapabilities,
         IReadOnlyList<LauncherPluginCapabilityDeclaration> capabilities)
     {
         if (info.Repo is { } repo)
         {
-            OpenInstallDialog(repo, info.Id, info.DisplayName, isUpdate: true, tag, version, capabilities);
+            OpenInstallDialog(
+                repo, info.Id, info.DisplayName, isUpdate: true, tag, version, capabilities,
+                installedCapabilities: installedCapabilities,
+                affectedCharacters: CharactersWithPluginEnabled(info.Id));
         }
     }
+
+    /// <summary>Who to name in the update dialog's keep-enabled choice: every character that already
+    /// has this id in its plugin list, in the same "Name (account@server)" shape the enable-choice
+    /// list uses.</summary>
+    private IReadOnlyList<string> CharactersWithPluginEnabled(string pluginId) =>
+        [.. _orchestrator.GetSnapshot().Servers
+            .SelectMany(server => server.Accounts)
+            .SelectMany(account => account.Characters)
+            .Where(character => character.Plugins.Contains(pluginId, StringComparer.OrdinalIgnoreCase))
+            .Select(character => $"{character.Name} ({character.AccountName}@{character.ServerName})")];
 
     /// <summary>The capabilities Discover already fetched for this listed plugin
     /// (<see cref="RefreshDiscoverDetailsAsync"/>), or <see langword="null"/> when Install is pressed
