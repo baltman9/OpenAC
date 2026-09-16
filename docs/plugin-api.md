@@ -372,6 +372,22 @@ input-dispatcher composition); the registration is queued and resolved the
 moment the input layer comes up, so `IsBound` can flip from `false` to `true`
 without the plugin doing anything further.
 
+A chord that collides with another plugin's own already-bound hotkey is
+refused the same way a client-binding collision is: first registered,
+first bound. Registering the same scoped id a second time replaces the
+first registration outright (the old handle's `IsBound` flips to false
+and it stops firing) rather than adding a second live binding for that id.
+
+`IPluginHotkeyRegistration.Rebind(chord)` stores a new chord as a user
+override and re-resolves the registration immediately (headless treats it
+as a no-op, matching its inert `Register`). Overrides persist to a
+plugin-scoped `plugin-hotkeys.json`, keyed `<pluginId>:<hotkeyId>` --
+sibling to, not inside, the client's own `keybinds.json` (the original
+design sketch put overrides in `keybinds.json` itself; this was changed
+so a corrupt or hand-edited plugin override file can never touch the
+client's own binding schema). There is no in-client rebind UI yet; a
+plugin (or a future Settings panel) calls `Rebind` directly.
+
 ## Headless
 
 A headless host implements this same contract, with a few members left as

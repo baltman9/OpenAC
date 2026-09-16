@@ -61,6 +61,10 @@ public sealed class AppHotkeyRegistry : IHotkeyRegistry
             Resolve(entry);
     }
 
+    // A second Register call for an id that already has a live registration
+    // replaces it -- the old entry is revoked (disposed) first so its chord
+    // frees up before the new one resolves, exactly as if the caller had
+    // disposed the old handle themselves.
     public IPluginHotkeyRegistration Register(
         string id,
         string displayName,
@@ -75,6 +79,10 @@ public sealed class AppHotkeyRegistry : IHotkeyRegistry
         bool alreadyBound;
         lock (_gate)
         {
+            Entry? existing = _entries.Find(e => !e.Revoked && e.Id == id);
+            if (existing is not null)
+                existing.Revoked = true;
+            _entries.RemoveAll(e => e.Revoked);
             _entries.Add(entry);
             alreadyBound = _keyboard is not null;
         }
@@ -100,13 +108,38 @@ public sealed class AppHotkeyRegistry : IHotkeyRegistry
         }
 
         Key? silkKey = MapKey(effective.Key);
-        bool bound = silkKey is not null && !CollidesWithClient(clientBindings, effective, silkKey.Value);
+        bool bound;
         lock (_gate)
         {
+            bound = silkKey is not null
+                && !CollidesWithClient(clientBindings, effective, silkKey.Value)
+                && !CollidesWithAnotherPlugin(entry, silkKey.Value, effective);
             entry.EffectiveChord = effective;
             entry.SilkKey = silkKey;
             entry.Bound = bound;
         }
+    }
+
+    // A plugin chord that matches another plugin's already-bound chord is
+    // refused rather than silently stealing the earlier registration --
+    // first-come, first-bound, the same rule CollidesWithClient applies
+    // against the client's own bindings. Only entries currently marked
+    // Bound count as live occupants of a chord; a revoked or already-
+    // unbound entry does not block anything.
+    private bool CollidesWithAnotherPlugin(
+        Entry entry, Key silkKey, PluginKeyChord chord)
+    {
+        foreach (Entry other in _entries)
+        {
+            if (ReferenceEquals(other, entry) || other.Revoked || !other.Bound)
+                continue;
+            if (other.SilkKey != silkKey) continue;
+            if (other.EffectiveChord.Ctrl != chord.Ctrl) continue;
+            if (other.EffectiveChord.Alt != chord.Alt) continue;
+            if (other.EffectiveChord.Shift != chord.Shift) continue;
+            return true;
+        }
+        return false;
     }
 
     private static bool CollidesWithClient(
@@ -121,6 +154,7 @@ public sealed class AppHotkeyRegistry : IHotkeyRegistry
             || clientBindings.Find(keyChord, ActivationType.Release) is not null
             || clientBindings.Find(keyChord, ActivationType.Hold) is not null;
     }
+
 
     private void OnKeyDown(Key key, ModifierMask modifiers)
     {
@@ -173,20 +207,23 @@ public sealed class AppHotkeyRegistry : IHotkeyRegistry
     }
 
     /// <summary>
-    /// Stores a user override for a plugin-scoped hotkey id and re-resolves
-    /// every live registration for it. Exposed for a future rebind UI; not
-    /// wired to one yet.
+    /// Stores a user override for a plugin-scoped hotkey id, persists it to
+    /// disk, and re-resolves every live registration for it. Called by
+    /// Registration.Rebind -- there is no in-client rebind UI yet, but the
+    /// storage and re-resolve path is real.
     /// </summary>
     public void SetOverride(string scopedId, PluginKeyChord chord)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(scopedId);
         Entry[] matching;
+        Dictionary<string, PluginKeyChord> snapshot;
         lock (_gate)
         {
             _overrides[scopedId] = chord;
             matching = _entries.Where(e => e.Id == scopedId).ToArray();
+            snapshot = new Dictionary<string, PluginKeyChord>(_overrides, StringComparer.Ordinal);
         }
-        SaveOverrides(_overridesFilePath, _overrides);
+        SaveOverrides(_overridesFilePath, snapshot);
         foreach (Entry entry in matching)
             Resolve(entry);
     }
@@ -320,6 +357,12 @@ public sealed class AppHotkeyRegistry : IHotkeyRegistry
         public PluginKeyChord EffectiveChord
         {
             get { lock (owner._gate) return entry.EffectiveChord; }
+        }
+
+        public void Rebind(PluginKeyChord chord)
+        {
+            if (_disposed) return;
+            owner.SetOverride(entry.Id, chord);
         }
 
         public void Dispose()

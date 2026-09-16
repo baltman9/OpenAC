@@ -82,6 +82,7 @@ public sealed class ScopedHotkeyRegistryTests
             private bool _disposed;
             public bool IsBound => true;
             public PluginKeyChord EffectiveChord => default;
+            public void Rebind(PluginKeyChord chord) { }
 
             public void Dispose()
             {

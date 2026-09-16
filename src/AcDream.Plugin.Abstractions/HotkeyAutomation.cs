@@ -72,6 +72,15 @@ public interface IPluginHotkeyRegistration : IDisposable
     /// override replaced it at registration time.
     /// </summary>
     PluginKeyChord EffectiveChord { get; }
+
+    /// <summary>
+    /// Rebinds this registration to a new chord, persisting it as a user
+    /// override under this hotkey's scoped id so it survives across
+    /// sessions. Re-resolves immediately if the host's keyboard/dispatcher
+    /// are already up; a host with nothing to bind to (headless) treats
+    /// this as a no-op and IsBound stays false.
+    /// </summary>
+    void Rebind(PluginKeyChord chord);
 }
 
 /// <summary>A registration handle from a host with nothing to bind (headless).</summary>
@@ -85,6 +94,7 @@ public sealed class NoOpHotkeyRegistration : IPluginHotkeyRegistration
 
     public bool IsBound => false;
     public PluginKeyChord EffectiveChord => default;
+    public void Rebind(PluginKeyChord chord) { }
 
     public void Dispose()
     {
