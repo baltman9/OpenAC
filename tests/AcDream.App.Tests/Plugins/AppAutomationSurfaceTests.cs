@@ -81,6 +81,45 @@ public sealed class AppAutomationSurfaceTests
         Assert.Equal(expected, AppAutomationSurface.ClassifyObject(item));
     }
 
+    [Theory]
+    [InlineData((uint)ItemType.MeleeWeapon, 0u)]
+    [InlineData((uint)ItemType.Armor, 0u)]
+    [InlineData((uint)ItemType.Creature, 0x10u)]
+    [InlineData((uint)ItemType.Creature, 0u)]
+    [InlineData((uint)ItemType.Creature, 0x04000010u)]
+    [InlineData((uint)ItemType.Creature, 0x8u)]
+    [InlineData((uint)ItemType.Misc, 0x200u)]
+    [InlineData((uint)ItemType.Misc, 0x1000u)]
+    [InlineData((uint)ItemType.Writable, 0x2u)]
+    [InlineData((uint)ItemType.Writable, 0x4u)]
+    [InlineData((uint)ItemType.Writable, 0x1u)]
+    public void ClassifyObjectDelegatesToTheSharedClassifierPlusTheScrollRule(
+        uint itemType,
+        uint publicFlags)
+    {
+        var item = new ClientObject
+        {
+            ObjectId = 1u,
+            Type = (ItemType)itemType,
+            PublicWeenieBitfield = publicFlags,
+        };
+
+        PluginObjectClass expected = PluginObjectClassifier.Classify(itemType, publicFlags);
+        Assert.Equal(expected, AppAutomationSurface.ClassifyObject(item));
+
+        // The one rule the shared classifier cannot express: a written
+        // object carrying an appraised spell id is a scroll, regardless of
+        // what the shared classifier alone would have said.
+        var scroll = new ClientObject
+        {
+            ObjectId = 2u,
+            Type = ItemType.Writable,
+            PublicWeenieBitfield = 0u,
+            SpellId = 42u,
+        };
+        Assert.Equal(PluginObjectClass.Scroll, AppAutomationSurface.ClassifyObject(scroll));
+    }
+
     [Fact]
     public void NavigationProjectionUsesVtankMapCoordinatesAndCompassHeading()
     {

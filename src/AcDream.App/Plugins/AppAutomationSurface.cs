@@ -2159,71 +2159,12 @@ internal sealed class AppAutomationSurface
             return PluginObjectClass.Unknown;
         uint type = (uint)item.Type;
         uint flags = item.PublicWeenieBitfield ?? 0u;
-        PluginObjectClass result = type switch
-        {
-            _ when (type & 0x00000001u) != 0u => PluginObjectClass.MeleeWeapon,
-            _ when (type & 0x00000002u) != 0u => PluginObjectClass.Armor,
-            _ when (type & 0x00000004u) != 0u => PluginObjectClass.Clothing,
-            _ when (type & 0x00000008u) != 0u => PluginObjectClass.Jewelry,
-            _ when (type & 0x00000010u) != 0u => PluginObjectClass.Monster,
-            _ when (type & 0x00000020u) != 0u => PluginObjectClass.Food,
-            _ when (type & 0x00000040u) != 0u => PluginObjectClass.Money,
-            _ when (type & 0x00000080u) != 0u => PluginObjectClass.Misc,
-            _ when (type & 0x00000100u) != 0u => PluginObjectClass.MissileWeapon,
-            _ when (type & 0x00000200u) != 0u => PluginObjectClass.Container,
-            _ when (type & 0x00000400u) != 0u => PluginObjectClass.Bundle,
-            _ when (type & 0x00000800u) != 0u => PluginObjectClass.Gem,
-            _ when (type & 0x00001000u) != 0u => PluginObjectClass.SpellComponent,
-            _ when (type & 0x00004000u) != 0u => PluginObjectClass.Key,
-            _ when (type & 0x00008000u) != 0u => PluginObjectClass.WandStaffOrb,
-            _ when (type & 0x00010000u) != 0u => PluginObjectClass.Portal,
-            _ when (type & 0x00040000u) != 0u => PluginObjectClass.TradeNote,
-            _ when (type & 0x00080000u) != 0u => PluginObjectClass.ManaStone,
-            _ when (type & 0x00100000u) != 0u => PluginObjectClass.Services,
-            _ when (type & 0x00200000u) != 0u => PluginObjectClass.Plant,
-            _ when (type & 0x00400000u) != 0u => PluginObjectClass.BaseCooking,
-            _ when (type & 0x00800000u) != 0u => PluginObjectClass.BaseAlchemy,
-            _ when (type & 0x01000000u) != 0u => PluginObjectClass.BaseFletching,
-            _ when (type & 0x02000000u) != 0u => PluginObjectClass.CraftedCooking,
-            _ when (type & 0x04000000u) != 0u => PluginObjectClass.CraftedAlchemy,
-            _ when (type & 0x08000000u) != 0u => PluginObjectClass.CraftedFletching,
-            _ when (type & 0x20000000u) != 0u => PluginObjectClass.Ust,
-            _ when (type & 0x40000000u) != 0u => PluginObjectClass.Salvage,
-            _ => PluginObjectClass.Unknown,
-        };
-
-        result = flags switch
-        {
-            _ when (flags & 0x00000008u) != 0u => PluginObjectClass.Player,
-            _ when (flags & 0x00000200u) != 0u => PluginObjectClass.Vendor,
-            _ when (flags & 0x00001000u) != 0u => PluginObjectClass.Door,
-            _ when (flags & 0x00002000u) != 0u => PluginObjectClass.Corpse,
-            _ when (flags & 0x00004000u) != 0u => PluginObjectClass.Lifestone,
-            _ when (flags & 0x00008000u) != 0u => PluginObjectClass.Food,
-            _ when (flags & 0x00010000u) != 0u => PluginObjectClass.HealingKit,
-            _ when (flags & 0x00020000u) != 0u => PluginObjectClass.Lockpick,
-            _ when (flags & 0x00040000u) != 0u => PluginObjectClass.Portal,
-            _ when (flags & 0x00800000u) != 0u => PluginObjectClass.Foci,
-            _ when (flags & 0x00000001u) != 0u => PluginObjectClass.Container,
-            _ => result,
-        };
-
-        if ((type & 0x00002000u) != 0u && result == PluginObjectClass.Unknown)
-        {
-            result = (flags & 0x00000002u) != 0u
-                ? PluginObjectClass.Journal
-                : (flags & 0x00000004u) != 0u
-                    ? PluginObjectClass.Sign
-                    : (flags & 0x0000000Fu) != 0u
-                        ? PluginObjectClass.Book
-                        : result;
-        }
+        PluginObjectClass result = PluginObjectClassifier.Classify(type, flags);
+        // The classifier has no notion of an appraised spell id; a written
+        // (Type Writable) object that carries one is a scroll, not a book
+        // or a plain writable.
         if ((type & 0x00002000u) != 0u && item.SpellId is > 0u)
             result = PluginObjectClass.Scroll;
-        if (result == PluginObjectClass.Monster && (flags & 0x10u) == 0u)
-            result = PluginObjectClass.Npc;
-        if (result == PluginObjectClass.Monster && (flags & 0x04000000u) != 0u)
-            result = PluginObjectClass.CombatPet;
         return result;
     }
 
