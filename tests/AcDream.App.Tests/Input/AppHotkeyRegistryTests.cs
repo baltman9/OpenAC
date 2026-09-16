@@ -152,13 +152,16 @@ public sealed class AppHotkeyRegistryTests
         keyboard.Fire(Key.H, ModifierMask.Ctrl);
         Assert.Equal(1, firstFired);
         Assert.Equal(0, secondFired);
-
-        // Freeing the first registration must let a fresh request for the
-        // same chord bind -- the collision is against LIVE entries only.
+        // Freeing the first registration must let the already-refused
+        // second registration bind -- MEDIUM-2 re-resolves every live
+        // unbound entry after a chord-freeing mutation, not only a fresh
+        // Register call for that same id.
         first.Dispose();
+        Assert.True(second.IsBound);
+
         IPluginHotkeyRegistration third = registry.Register(
             "plugin-c/heal", "Heal", new PluginKeyChord(PluginKey.H, Ctrl: true), () => { });
-        Assert.True(third.IsBound);
+        Assert.False(third.IsBound);
     }
 
     [Fact]
@@ -314,6 +317,32 @@ public sealed class AppHotkeyRegistryTests
             "test", "Test", new PluginKeyChord(PluginKey.Unknown), () => { });
 
         Assert.False(handle.IsBound);
+    }
+
+    [Fact]
+    public void FreeingAChordLetsAPreviouslyRefusedRegistrationBind()
+    {
+        var registry = new AppHotkeyRegistry(overridesFilePath: null);
+        var keyboard = new FakeKeyboard();
+        var bindings = new KeyBindings();
+        InputDispatcher dispatcher = InputDispatcher.CreateDetached(
+            keyboard, new FakeMouse(), bindings);
+        registry.Bind(keyboard, bindings, dispatcher);
+
+        IPluginHotkeyRegistration a = registry.Register(
+            "plugin-a/heal", "Heal", new PluginKeyChord(PluginKey.X, Ctrl: true), () => { });
+        IPluginHotkeyRegistration b = registry.Register(
+            "plugin-b/heal", "Heal", new PluginKeyChord(PluginKey.X, Ctrl: true), () => { });
+
+        Assert.True(a.IsBound);
+        Assert.False(b.IsBound);
+
+        // A frees the chord by unregistering -- B must bind without B's
+        // owner doing anything further (there is no in-client rebind UI to
+        // prompt a re-register).
+        a.Dispose();
+
+        Assert.True(b.IsBound);
     }
 
     private sealed class FakeKeyboard : IKeyboardSource

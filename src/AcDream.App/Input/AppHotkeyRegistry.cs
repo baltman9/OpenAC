@@ -87,7 +87,10 @@ public sealed class AppHotkeyRegistry : IHotkeyRegistry
             alreadyBound = _keyboard is not null;
         }
         if (alreadyBound)
+        {
             Resolve(entry);
+            ReResolveUnboundEntries(entry);
+        }
         return new Registration(this, entry);
     }
 
@@ -218,6 +221,26 @@ public sealed class AppHotkeyRegistry : IHotkeyRegistry
             entry.Revoked = true;
             _entries.Remove(entry);
         }
+        ReResolveUnboundEntries();
+    }
+
+    // Called after any chord-freeing mutation (a revoke, a same-id replace,
+    // an override change) so a plugin previously refused for a collision
+    // binds the moment the chord it wanted is free again -- otherwise it
+    // would stay refused until its own next Register/Bind call, which may
+    // never come.
+    private void ReResolveUnboundEntries(Entry? justResolved = null)
+    {
+        Entry[] snapshot;
+        lock (_gate)
+        {
+            if (_keyboard is null) return;
+            snapshot = _entries
+                .Where(e => !e.Revoked && !e.Bound && !ReferenceEquals(e, justResolved))
+                .ToArray();
+        }
+        foreach (Entry e in snapshot)
+            Resolve(e);
     }
 
     /// <summary>
@@ -240,6 +263,7 @@ public sealed class AppHotkeyRegistry : IHotkeyRegistry
         SaveOverrides(_overridesFilePath, snapshot);
         foreach (Entry entry in matching)
             Resolve(entry);
+        ReResolveUnboundEntries();
     }
 
     private static Dictionary<string, PluginKeyChord> LoadOverrides(string? path)
