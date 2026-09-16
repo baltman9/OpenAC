@@ -529,6 +529,8 @@ public sealed partial class LauncherWindowViewModelTests
             "shaneedwards/openac-plugin-hello", "plugin.json");
         Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
             "shaneedwards/openac-plugin-hello", "v0.2.0", "plugin.json");
+        Uri iconUri = GitHubReleaseLocator.TaggedAsset(
+            "shaneedwards/openac-plugin-hello", "v0.2.0", LauncherPluginIcon.FileName);
         byte[] discoverableManifest = PluginPanelFixture.ManifestJson(
             "edwards.discoverable", "0.2.0", "0.1.0", ["headless"]);
         var handler = new RoutedHandler(request =>
@@ -546,6 +548,11 @@ public sealed partial class LauncherWindowViewModelTests
             if (request.RequestUri == taggedManifestUri)
             {
                 return Ok(discoverableManifest);
+            }
+
+            if (request.RequestUri == iconUri)
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
             }
 
             throw new InvalidOperationException(
@@ -581,6 +588,8 @@ public sealed partial class LauncherWindowViewModelTests
             "shaneedwards/openac-plugin-hello", "plugin.json");
         Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
             "shaneedwards/openac-plugin-hello", "v0.2.0", "plugin.json");
+        Uri iconUri = GitHubReleaseLocator.TaggedAsset(
+            "shaneedwards/openac-plugin-hello", "v0.2.0", LauncherPluginIcon.FileName);
         byte[] discoverableManifest = PluginPanelFixture.ManifestJson(
             "edwards.discoverable", "0.2.0", "0.1.0", ["headless"]);
         var handler = new RoutedHandler(request =>
@@ -598,6 +607,11 @@ public sealed partial class LauncherWindowViewModelTests
             if (request.RequestUri == taggedManifestUri)
             {
                 return Ok(discoverableManifest);
+            }
+
+            if (request.RequestUri == iconUri)
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
             }
 
             throw new InvalidOperationException(

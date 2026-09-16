@@ -79,6 +79,8 @@ internal sealed class LauncherPluginComposition : IDisposable
 
     public Uri ListUri { get; }
 
+    public ApplicationPathSet Paths => _paths;
+
     public PluginReleaseClient ReleaseClient { get; }
 
     public PluginReleaseResolver ReleaseResolver { get; }

@@ -4,6 +4,7 @@ using AcDream.Launcher.Core.Orchestration;
 using AcDream.Launcher.Core.Plugins;
 using AcDream.Launcher.Core.Profiles;
 using AcDream.Launcher.Core.Updates;
+using Avalonia.Media.Imaging;
 
 namespace AcDream.Launcher.ViewModels;
 
@@ -44,6 +45,7 @@ public sealed class PluginDiscoverRowViewModel(
     private string? _compatibility;
     private bool _compatibilityIsWarning;
     private IReadOnlyList<LauncherPluginCapabilityDeclaration> _capabilities = [];
+    private Bitmap? _icon;
 
     public string Id { get; } = id;
     public string Name { get; } = name;
@@ -130,6 +132,22 @@ public sealed class PluginDiscoverRowViewModel(
         1 => "1 capability",
         var count => $"{count} capabilities",
     };
+
+    /// <summary>Borrowed from <see cref="LauncherPluginsViewModel"/>'s icon cache; this row never
+    /// disposes it.</summary>
+    public Bitmap? Icon
+    {
+        get => _icon;
+        set
+        {
+            if (SetProperty(ref _icon, value))
+            {
+                OnPropertyChanged(nameof(HasIcon));
+            }
+        }
+    }
+
+    public bool HasIcon => Icon is not null;
 }
 
 /// <summary>One installed plugin, shown on the Installed list.</summary>
@@ -158,7 +176,8 @@ public sealed class PluginInstalledRowViewModel(
     bool hasDuplicate,
     Action<bool> onBetaToggled,
     Func<bool> canToggleBeta,
-    IReadOnlyList<LauncherPluginCapabilityDeclaration> capabilities)
+    IReadOnlyList<LauncherPluginCapabilityDeclaration> capabilities,
+    Bitmap? icon)
     : ObservableObject
 {
     private bool _isBetaChannel = isBetaChannel;
@@ -169,6 +188,10 @@ public sealed class PluginInstalledRowViewModel(
     public string SourceBadge { get; } = sourceBadge;
     public string Summary { get; } = $"{id} · v{version} · {sourceBadge}";
     public string Initials { get; } = PluginMonogram.From(displayName);
+    /// <summary>Borrowed from <see cref="LauncherPluginsViewModel"/>'s icon cache; this row never
+    /// disposes it.</summary>
+    public Bitmap? Icon { get; } = icon;
+    public bool HasIcon => Icon is not null;
     public string Compatibility { get; } = compatibility;
     public bool HasCompatibilityNote => !string.IsNullOrWhiteSpace(Compatibility);
     public bool CompatibilityIsWarning { get; } = compatibilityIsWarning;
@@ -270,7 +293,7 @@ public sealed class PluginInstalledRowViewModel(
 /// <summary>Discover/Installed, Refresh list, Add from URL, and the install and remove dialogs
 /// (plan, "MainWindow.axaml and view models"). Repo URLs are text only; nothing here opens a
 /// browser, loads an assembly, or starts a process (L-300).</summary>
-public sealed class LauncherPluginsViewModel : ObservableObject
+public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
 {
     private readonly ILauncherOrchestrator _orchestrator;
     private readonly Func<bool> _canInteract;
@@ -281,6 +304,15 @@ public sealed class LauncherPluginsViewModel : ObservableObject
     private DateTimeOffset? _listAgeUtc;
     private readonly Dictionary<string, DiscoverDetails> _discoverDetailsCache =
         new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Every icon decoded this session, keyed by plugin id and version: rows only ever
+    /// borrow a <see cref="Bitmap"/> from here, so one decode serves every row and refresh that
+    /// shares a key. A missing icon is also cached, as a <see langword="null"/> value, so a release
+    /// with none is never re-fetched; that half of the cache is memory-only and never touches disk.</summary>
+    private readonly Dictionary<(string Id, string Version, bool Installed), Bitmap?> _iconCache =
+        new(new IconCacheKeyComparer());
+
+    private bool _disposed;
 
     private bool _isBusy;
     private string? _error;
@@ -648,6 +680,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject
                 row.Compatibility = cached.Compatibility;
                 row.CompatibilityIsWarning = cached.CompatibilityIsWarning;
                 row.Capabilities = cached.Capabilities;
+                row.Icon = cached.Icon;
             }
 
             _allDiscover.Add(row);
@@ -711,7 +744,8 @@ public sealed class LauncherPluginsViewModel : ObservableObject
             info.HasDuplicate,
             onBetaToggled: isBeta => _ = ToggleBetaAsync(self!, isBeta),
             canToggleBeta: () => _canInteract() && !IsBusy,
-            installedCapabilities);
+            installedCapabilities,
+            ResolveInstalledIcon(info.Id, info.Version, info.Directory));
         self = row;
         return row;
     }
@@ -825,7 +859,8 @@ public sealed class LauncherPluginsViewModel : ObservableObject
                 continue;
             }
 
-            ApplyDiscoverDetails(row.Id, manifest, tag);
+            await ApplyDiscoverDetailsAsync(row.Id, row.Repo, manifest, tag, CancellationToken.None)
+                .ConfigureAwait(true);
         }
     }
 
@@ -844,7 +879,8 @@ public sealed class LauncherPluginsViewModel : ObservableObject
                 fetch.ErrorMessage ?? "This plugin's details could not be checked.");
         }
 
-        ApplyDiscoverDetails(pluginId, manifest, tag);
+        await ApplyDiscoverDetailsAsync(pluginId, repo, manifest, tag, cancellationToken)
+            .ConfigureAwait(true);
         return manifest.Capabilities;
     }
 
@@ -890,15 +926,19 @@ public sealed class LauncherPluginsViewModel : ObservableObject
         return new ManifestFetch(resolution.Manifest, resolution.Tag, null);
     }
 
-    /// <summary>Writes a freshly fetched manifest's compatibility and capabilities into the shared
-    /// cache and, when the row is still on Discover, onto the row itself.</summary>
-    private void ApplyDiscoverDetails(string pluginId, LauncherPluginManifest manifest, string tag)
+    /// <summary>Writes a freshly fetched manifest's compatibility, capabilities and icon into the
+    /// shared cache and, when the row is still on Discover, onto the row itself.</summary>
+    private async Task ApplyDiscoverDetailsAsync(
+        string pluginId, string repo, LauncherPluginManifest manifest, string tag,
+        CancellationToken cancellationToken)
     {
         LauncherVersion? clientVersion = _clientVersionResolver()?.Version;
         LauncherPluginCompatibility.CompatibilityDescription compatibility =
             LauncherPluginCompatibility.Describe(manifest, clientVersion);
+        Bitmap? icon = await ResolveDiscoverIconAsync(pluginId, repo, manifest, tag, cancellationToken)
+            .ConfigureAwait(true);
         var details = new DiscoverDetails(
-            manifest.Version, tag, compatibility.Text, compatibility.IsWarning, manifest.Capabilities);
+            manifest.Version, tag, compatibility.Text, compatibility.IsWarning, manifest.Capabilities, icon);
         _discoverDetailsCache[pluginId] = details;
 
         PluginDiscoverRowViewModel? row = _allDiscover.FirstOrDefault(
@@ -912,6 +952,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject
         row.Compatibility = details.Compatibility;
         row.CompatibilityIsWarning = details.CompatibilityIsWarning;
         row.Capabilities = details.Capabilities;
+        row.Icon = details.Icon;
     }
 
     private readonly record struct DiscoverDetails(
@@ -919,7 +960,178 @@ public sealed class LauncherPluginsViewModel : ObservableObject
         string Tag,
         string Compatibility,
         bool CompatibilityIsWarning,
-        IReadOnlyList<LauncherPluginCapabilityDeclaration> Capabilities);
+        IReadOnlyList<LauncherPluginCapabilityDeclaration> Capabilities,
+        Bitmap? Icon);
+
+    /// <summary>The Discover-side half of the icon rule (plan, L-317): the tag the manifest fetch
+    /// resolved to must name this exact version, so a plain 200 with no redirect (no tag) or a
+    /// release that moved between the manifest and asset fetch never reaches the disk cache or the
+    /// network. The disk cache is tried first, keyed the same way <see cref="_iconCache"/> is.</summary>
+    private async Task<Bitmap?> ResolveDiscoverIconAsync(
+        string pluginId,
+        string repo,
+        LauncherPluginManifest manifest,
+        string? tag,
+        CancellationToken cancellationToken)
+    {
+        if (_composition is null
+            || tag is null
+            || !manifest.MatchesTag(tag)
+            || !LauncherVersion.TryParse(manifest.Version, out _)
+            || !LauncherPluginManifest.IsWellFormedId(pluginId))
+        {
+            return null;
+        }
+
+        (string Id, string Version, bool Installed) key = (pluginId, manifest.Version, false);
+        if (_iconCache.TryGetValue(key, out Bitmap? cached))
+        {
+            return cached;
+        }
+
+        Bitmap? icon = await FetchDiscoverIconAsync(pluginId, repo, manifest.Version, tag, cancellationToken)
+            .ConfigureAwait(true);
+        StoreIcon(key, icon);
+        return icon;
+    }
+
+    private async Task<Bitmap?> FetchDiscoverIconAsync(
+        string pluginId, string repo, string version, string tag, CancellationToken cancellationToken)
+    {
+        string iconDirectory = Path.Combine(_composition!.Paths.CacheDirectory, "plugin-icons", pluginId);
+        string iconPath = Path.Combine(iconDirectory, $"v{version}.png");
+        byte[] bytes;
+        bool fromDisk = File.Exists(iconPath);
+        if (fromDisk)
+        {
+            bytes = await File.ReadAllBytesAsync(iconPath, cancellationToken).ConfigureAwait(true);
+        }
+        else
+        {
+            PluginReleaseFetchResult fetch;
+            try
+            {
+                fetch = await _composition.ReleaseClient
+                    .FetchDocumentAsync(
+                        GitHubReleaseLocator.TaggedAsset(repo, tag, LauncherPluginIcon.FileName),
+                        cancellationToken)
+                    .ConfigureAwait(true);
+            }
+            catch (LauncherUpdateException)
+            {
+                return null;
+            }
+
+            if (fetch.Status != PluginReleaseFetchStatus.Success)
+            {
+                return null;
+            }
+
+            bytes = fetch.Document!.Content;
+        }
+
+        try
+        {
+            LauncherPluginIcon.Validate(bytes);
+        }
+        catch (LauncherUpdateException)
+        {
+            return null;
+        }
+
+        if (!fromDisk)
+        {
+            WriteIconCache(iconDirectory, iconPath, bytes);
+        }
+
+        return DecodeIcon(bytes);
+    }
+
+    /// <summary>Only one file per id survives: an update's icon replaces the previous version's
+    /// rather than accumulating one PNG per release ever seen.</summary>
+    private static void WriteIconCache(string iconDirectory, string iconPath, byte[] bytes)
+    {
+        try
+        {
+            Directory.CreateDirectory(iconDirectory);
+            foreach (string existing in Directory.EnumerateFiles(iconDirectory, "v*.png"))
+            {
+                File.Delete(existing);
+            }
+
+            string tempPath = iconPath + ".tmp";
+            File.WriteAllBytes(tempPath, bytes);
+            File.Move(tempPath, iconPath, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    /// <summary>The Installed-side half of the icon rule: <see cref="PluginInstaller"/> already
+    /// validated this file at install time, so this only guards against it having changed on disk
+    /// since. Kept apart from Discover's entries in <see cref="_iconCache"/>: a plugin on disk need not
+    /// carry the icon its published release does.</summary>
+    private Bitmap? ResolveInstalledIcon(string id, string version, string directory)
+    {
+        (string Id, string Version, bool Installed) key = (id, version, true);
+        if (_iconCache.TryGetValue(key, out Bitmap? cached))
+        {
+            return cached;
+        }
+
+        Bitmap? icon = LoadInstalledIconFromDisk(directory);
+        StoreIcon(key, icon);
+        return icon;
+    }
+
+    private static Bitmap? LoadInstalledIconFromDisk(string directory)
+    {
+        string path = Path.Combine(directory, LauncherPluginIcon.FileName);
+        byte[] bytes;
+        try
+        {
+            using FileStream stream = File.OpenRead(path);
+            var buffer = new byte[LauncherPluginIcon.MaximumBytes + 1];
+            int total = 0;
+            int read;
+            while (total < buffer.Length
+                && (read = stream.Read(buffer, total, buffer.Length - total)) > 0)
+            {
+                total += read;
+            }
+
+            bytes = buffer[..total];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+
+        try
+        {
+            LauncherPluginIcon.Validate(bytes);
+        }
+        catch (LauncherUpdateException)
+        {
+            return null;
+        }
+
+        return DecodeIcon(bytes);
+    }
+
+    private static Bitmap? DecodeIcon(byte[] bytes)
+    {
+        try
+        {
+            using var stream = new MemoryStream(bytes);
+            return new Bitmap(stream);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
 
     /// <summary>Discover's Install button: the cache may not hold this plugin's details yet (its
     /// own request, "Request budget"), so both the tag and version are read live, not captured when
@@ -1392,4 +1604,46 @@ public sealed class LauncherPluginsViewModel : ObservableObject
         : age.TotalHours >= 1
             ? $"{age.TotalHours:0} hour(s)"
             : $"{Math.Max(1, age.TotalMinutes):0} minute(s)";
+
+    /// <summary>Replaces one cache entry, disposing whatever bitmap it held: the only place an icon
+    /// is ever disposed short of <see cref="Dispose"/> itself.</summary>
+    private void StoreIcon((string Id, string Version, bool Installed) key, Bitmap? icon)
+    {
+        if (_iconCache.Remove(key, out Bitmap? previous))
+        {
+            previous?.Dispose();
+        }
+
+        _iconCache[key] = icon;
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        foreach (Bitmap? icon in _iconCache.Values)
+        {
+            icon?.Dispose();
+        }
+
+        _iconCache.Clear();
+    }
+
+    private sealed class IconCacheKeyComparer : IEqualityComparer<(string Id, string Version, bool Installed)>
+    {
+        public bool Equals((string Id, string Version, bool Installed) x, (string Id, string Version, bool Installed) y) =>
+            string.Equals(x.Id, y.Id, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(x.Version, y.Version, StringComparison.Ordinal)
+            && x.Installed == y.Installed;
+
+        public int GetHashCode((string Id, string Version, bool Installed) obj) =>
+            HashCode.Combine(
+                obj.Id.GetHashCode(StringComparison.OrdinalIgnoreCase),
+                obj.Version.GetHashCode(StringComparison.Ordinal),
+                obj.Installed);
+    }
 }

@@ -54,9 +54,9 @@
     <Style Selector="Border.chip.capability"><Setter Property="Background" Value="#16262E" /><Setter Property="BorderBrush" Value="#8FB8C9" /></Style>
     <Style Selector="Border.chip.capability TextBlock"><Setter Property="Foreground" Value="#8FB8C9" /></Style>
     <Style Selector="Border.plugincard"><Setter Property="Background" Value="#141E24" /><Setter Property="BorderBrush" Value="#35434B" /><Setter Property="BorderThickness" Value="1" /><Setter Property="CornerRadius" Value="3" /><Setter Property="Margin" Value="0,0,0,6" /></Style>
-    <Style Selector="Border.plugintile"><Setter Property="Width" Value="36" /><Setter Property="Height" Value="36" /><Setter Property="CornerRadius" Value="4" /><Setter Property="Background" Value="#1F2C34" /><Setter Property="VerticalAlignment" Value="Center" /></Style>
+    <Style Selector="Border.plugintile"><Setter Property="Width" Value="32" /><Setter Property="Height" Value="32" /><Setter Property="CornerRadius" Value="4" /><Setter Property="Background" Value="#1F2C34" /><Setter Property="VerticalAlignment" Value="Center" /></Style>
     <Style Selector="Border.plugintile TextBlock"><Setter Property="Foreground" Value="#A9BBC5" /><Setter Property="FontSize" Value="13" /><Setter Property="FontWeight" Value="SemiBold" /><Setter Property="HorizontalAlignment" Value="Center" /><Setter Property="VerticalAlignment" Value="Center" /></Style>
-    <Style Selector="Border.pluginfoot"><Setter Property="BorderBrush" Value="#26343C" /><Setter Property="BorderThickness" Value="0,1,0,0" /><Setter Property="Padding" Value="58,6,8,6" /></Style>
+    <Style Selector="Border.pluginfoot"><Setter Property="BorderBrush" Value="#26343C" /><Setter Property="BorderThickness" Value="0,1,0,0" /><Setter Property="Padding" Value="54,6,8,6" /></Style>
     <Style Selector="Border.well">
       <Setter Property="Background" Value="#0B1216" />
       <Setter Property="BorderBrush" Value="#243139" />
@@ -209,14 +209,14 @@
                 <DataTemplate x:DataType="vm:PluginInstalledRowViewModel">
                   <Border Classes="plugincard">
                     <StackPanel>
-                      <Grid ColumnDefinitions="36,*" ColumnSpacing="10" Margin="12,10,12,8">
-                        <Border Classes="plugintile"><TextBlock Text="{Binding Initials}" /></Border>
+                      <Grid ColumnDefinitions="32,*" ColumnSpacing="10" Margin="12,10,12,8">
+                        <Border Classes="plugintile"><Panel><TextBlock Text="{Binding Initials}" IsVisible="{Binding !HasIcon}" /><Image Source="{Binding Icon}" IsVisible="{Binding HasIcon}" Width="32" Height="32" RenderOptions.BitmapInterpolationMode="HighQuality" /></Panel></Border>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
                           <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="15" TextTrimming="CharacterEllipsis" />
                           <SelectableTextBlock FontSize="12" Foreground="#A9BBC5"><Run Text="{Binding Id}" FontFamily="Menlo, Consolas, monospace" FontSize="11" /><Run Text=" · " /><Run Text="{Binding SourceBadge}" /></SelectableTextBlock>
                         </StackPanel>
                       </Grid>
-                      <StackPanel Margin="58,0,12,8" Spacing="2" IsVisible="{Binding HasNotes}">
+                      <StackPanel Margin="54,0,12,8" Spacing="2" IsVisible="{Binding HasNotes}">
                         <TextBlock Text="{Binding UpdateCompatibilityNote}" IsVisible="{Binding ShowUpdateCompatibilityNote}" Foreground="#DBB573" FontSize="12" TextWrapping="Wrap" />
                         <TextBlock Text="A newer client version bundles this plugin; it will replace this copy on update." IsVisible="{Binding Conflict}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
                         <TextBlock Text="{Binding UpdateWithheldReason, StringFormat='Update withheld: {0}'}" IsVisible="{Binding HasUpdateWithheldReason}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
@@ -280,14 +280,14 @@
                 <DataTemplate x:DataType="vm:PluginDiscoverRowViewModel">
                   <Border Classes="plugincard">
                     <StackPanel>
-                      <Grid ColumnDefinitions="36,*" ColumnSpacing="10" Margin="12,10,12,8">
-                        <Border Classes="plugintile"><TextBlock Text="{Binding Initials}" /></Border>
+                      <Grid ColumnDefinitions="32,*" ColumnSpacing="10" Margin="12,10,12,8">
+                        <Border Classes="plugintile"><Panel><TextBlock Text="{Binding Initials}" IsVisible="{Binding !HasIcon}" /><Image Source="{Binding Icon}" IsVisible="{Binding HasIcon}" Width="32" Height="32" RenderOptions.BitmapInterpolationMode="HighQuality" /></Panel></Border>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
                           <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="15" TextTrimming="CharacterEllipsis" />
                           <SelectableTextBlock FontSize="12" Foreground="#A9BBC5"><Run Text="{Binding Author}" /><Run Text=" · " /><Run Text="{Binding Repo}" FontFamily="Menlo, Consolas, monospace" FontSize="11" Foreground="#7C8F99" /></SelectableTextBlock>
                         </StackPanel>
                       </Grid>
-                      <TextBlock Text="{Binding Description}" Foreground="#C3D0D6" FontSize="13" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Description}" Margin="58,0,12,10" />
+                      <TextBlock Text="{Binding Description}" Foreground="#C3D0D6" FontSize="13" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Description}" Margin="54,0,12,10" />
                       <Border Classes="pluginfoot">
                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
                           <StackPanel VerticalAlignment="Center" Spacing="5">

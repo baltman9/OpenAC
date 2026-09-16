@@ -242,6 +242,11 @@ public sealed record LauncherPluginManifest(
     public bool MatchesTag(string tag) =>
         string.Equals(tag, "v" + Version, StringComparison.Ordinal);
 
+    /// <summary>Whether <paramref name="id"/> matches the namespaced id <see cref="ValidateForInstall"/>
+    /// requires, so a caller building a path from an id it did not itself parse (e.g. a catalog entry)
+    /// can check it first.</summary>
+    public static bool IsWellFormedId(string id) => IdPattern.IsMatch(id);
+
     private static IReadOnlyList<LauncherPluginKind> ParseKinds(IReadOnlyList<string>? values)
     {
         if (values is null)

@@ -373,6 +373,7 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         UpdatePrompt.StartupCheckCompleted -= OnStartupUpdateCheckCompleted;
         FirstRunWizardShell.Dispose();
         UpdatePrompt.Dispose();
+        Plugins.Dispose();
         _startupCancellation.Dispose();
     }
 
