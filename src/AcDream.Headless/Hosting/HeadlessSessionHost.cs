@@ -365,7 +365,8 @@ internal sealed class HeadlessSessionHost : IDisposable
                         descriptor.Id,
                         rejection.RawCode,
                         rejection.Reason,
-                        rejection.AttemptedName)));
+                        rejection.AttemptedName)),
+                runtime: runtime);
 
             Runtime = runtime;
             Commands = commands;

@@ -239,7 +239,8 @@ internal sealed class LiveSessionRuntimeFactory
                 rejection.RawCode,
                 rejection.Reason,
                 rejection.AttemptedName)),
-            connectOptions with { PollConnectionDuringTicks = true });
+            connectOptions with { PollConnectionDuringTicks = true },
+            _domain.Runtime);
     }
 
     private ChatLogResult SetChatLogFile(string name)
