@@ -383,6 +383,254 @@ public sealed class HeadlessSessionHostTests
     }
 
     [Fact]
+    public void LoginAutomationRefusesLogoutOutsideTheWorld()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            operations);
+
+        Assert.False(host.Plugins.Host.Automation.Login.CanRequestLogout);
+        Assert.False(host.Plugins.Host.Automation.Login.RequestLogout());
+        Assert.Equal(0, operations.RequestCharacterLogOffCount);
+    }
+
+    [Fact]
+    public void TransitGuardRefusesLogoutDuringAPendingTeleport()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            operations);
+        host.Start();
+        host.Runtime.TransitOwner.TryQueueTeleportStart(1);
+
+        Assert.False(host.Plugins.Host.Automation.Login.CanRequestLogout);
+        Assert.False(host.Plugins.Host.Automation.Login.RequestLogout());
+        Assert.Equal(0, operations.RequestCharacterLogOffCount);
+    }
+
+    [Fact]
+    public void RequestLogoutSendsOneLogoffAndCanRequestLogoutGoesFalseWhilePending()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            operations);
+        host.Start();
+
+        Assert.True(host.Plugins.Host.Automation.Login.CanRequestLogout);
+        Assert.True(host.Plugins.Host.Automation.Login.RequestLogout());
+
+        Assert.Equal(1, operations.RequestCharacterLogOffCount);
+        Assert.False(host.Plugins.Host.Automation.Login.CanRequestLogout);
+        Assert.False(host.IsPolicyComplete);
+    }
+
+    [Fact]
+    public void SecondRequestLogoutSendsNothing()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            operations);
+        host.Start();
+        Assert.True(host.Plugins.Host.Automation.Login.RequestLogout());
+
+        Assert.False(host.Plugins.Host.Automation.Login.RequestLogout());
+
+        Assert.Equal(1, operations.RequestCharacterLogOffCount);
+    }
+
+    [Fact]
+    public void RequestLogoutAfterAReconnectSendsAFreshLogoff()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            operations);
+        host.Start();
+        Assert.True(host.Plugins.Host.Automation.Login.RequestLogout());
+        Assert.Equal(1, operations.RequestCharacterLogOffCount);
+
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Reconnect().Status);
+
+        Assert.True(host.Plugins.Host.Automation.Login.RequestLogout());
+        Assert.Equal(2, operations.RequestCharacterLogOffCount);
+    }
+
+    [Fact]
+    public void ConfirmationCompletesTheLogoffOnceAndEndsTheSessionSuccessfully()
+    {
+        string statusPath = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-headless-logout-confirmed-{Guid.NewGuid():N}.jsonl");
+        try
+        {
+            var operations = new FixtureSessionOperations();
+            using var credential = new HeadlessCredentialSecret(
+                "fixture",
+                "password");
+            bool confirmed = false;
+            using var host = new HeadlessSessionHost(
+                Descriptor(statusFile: statusPath),
+                credential,
+                new HeadlessDiagnosticWriter(new StringWriter()),
+                operations,
+                logoutConfirmedOverride: () => confirmed);
+            host.Start();
+            Assert.True(host.Plugins.Host.Automation.Login.RequestLogout());
+
+            confirmed = true;
+            host.Tick(0.015d);
+
+            Assert.Equal(1, operations.ReturnToCharacterSelectCount);
+            Assert.True(host.IsPolicyComplete);
+            Assert.False(host.IsFaulted);
+
+            // CompleteCharacterLogOff fires exactly once, even if the scheduler ticks it again.
+            host.Tick(0.015d);
+            Assert.Equal(1, operations.ReturnToCharacterSelectCount);
+
+            // Nothing re-enters the world once the session's logout policy is complete.
+            int enterWorldCalls = operations.EnterWorldCallCount;
+            host.Tick(0.015d);
+            Assert.Equal(enterWorldCalls, operations.EnterWorldCallCount);
+            Assert.True(host.IsPolicyComplete);
+
+            host.Dispose();
+            string exitedLine = File.ReadAllLines(statusPath)
+                .Single(static line =>
+                    JsonDocument.Parse(line).RootElement.GetProperty("e").GetString()
+                        == "exited");
+            using JsonDocument exited = JsonDocument.Parse(exitedLine);
+            Assert.Equal(
+                (int)HeadlessExitCode.Success,
+                exited.RootElement.GetProperty("code").GetInt32());
+        }
+        finally
+        {
+            if (File.Exists(statusPath))
+                File.Delete(statusPath);
+        }
+    }
+
+    [Fact]
+    public void LogoutNeverConfirmedByTheDeadlineFaultsTheSessionWithARuntimeErrorExitCode()
+    {
+        string statusPath = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-headless-logout-timeout-{Guid.NewGuid():N}.jsonl");
+        try
+        {
+            var operations = new FixtureSessionOperations();
+            using var credential = new HeadlessCredentialSecret(
+                "fixture",
+                "password");
+            var time = new ManualTimeProvider();
+            using var host = new HeadlessSessionHost(
+                Descriptor(statusFile: statusPath),
+                credential,
+                new HeadlessDiagnosticWriter(new StringWriter()),
+                operations,
+                timeProvider: time,
+                logoutConfirmedOverride: () => false);
+            host.Start();
+            Assert.True(host.Plugins.Host.Automation.Login.RequestLogout());
+
+            host.Tick(0.015d);
+            Assert.False(host.IsPolicyComplete);
+
+            time.Advance(HeadlessLogoutAutomation.DefaultConfirmationDeadline
+                + TimeSpan.FromSeconds(1));
+            host.Tick(0.015d);
+
+            Assert.True(host.IsFaulted);
+            Assert.True(host.IsPolicyComplete);
+            Assert.IsType<TimeoutException>(host.Fault);
+            Assert.Equal(0, operations.ReturnToCharacterSelectCount);
+
+            host.Dispose();
+            string exitedLine = File.ReadAllLines(statusPath)
+                .Single(static line =>
+                    JsonDocument.Parse(line).RootElement.GetProperty("e").GetString()
+                        == "exited");
+            using JsonDocument exited = JsonDocument.Parse(exitedLine);
+            Assert.Equal(
+                (int)HeadlessExitCode.RuntimeError,
+                exited.RootElement.GetProperty("code").GetInt32());
+        }
+        finally
+        {
+            if (File.Exists(statusPath))
+                File.Delete(statusPath);
+        }
+    }
+
+    [Fact]
+    public void RequestLogoutFromANestedTickHandlerIsRetriedLaterInTheSameTick()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            operations);
+        host.Start();
+
+        bool requested = false;
+        bool? acceptedDuringNestedCall = null;
+        int? sentCountDuringNestedCall = null;
+        operations.OnTick = () =>
+        {
+            if (requested)
+                return;
+            requested = true;
+            acceptedDuringNestedCall =
+                host.Plugins.Host.Automation.Login.RequestLogout();
+            sentCountDuringNestedCall = operations.RequestCharacterLogOffCount;
+        };
+
+        host.Tick(0.015d);
+
+        Assert.True(acceptedDuringNestedCall);
+        // Refused inside the nested operations.Tick call (operation depth != 0); not sent yet.
+        Assert.Equal(0, sentCountDuringNestedCall);
+        // The sequencer's own Tick, later in the same host.Tick, retried it at depth 0.
+        Assert.Equal(1, operations.RequestCharacterLogOffCount);
+    }
+
+    [Fact]
     public void ReconnectPublishesDisconnectedBeforeTheSecondConnectedEdge()
     {
         string statusPath = Path.Combine(
@@ -3408,9 +3656,12 @@ public sealed class HeadlessSessionHostTests
             Interlocked.Increment(ref _enterWorldCallCount);
         }
 
+        public Action? OnTick { get; set; }
+
         public void Tick(WorldSession session)
         {
             Interlocked.Increment(ref _tickCallCount);
+            OnTick?.Invoke();
         }
 
         public void DisposeSession(WorldSession session)
@@ -3418,6 +3669,15 @@ public sealed class HeadlessSessionHostTests
             DisposedSessionCount++;
             session.Dispose();
         }
+
+        public int RequestCharacterLogOffCount { get; private set; }
+        public int ReturnToCharacterSelectCount { get; private set; }
+
+        public void RequestCharacterLogOff(WorldSession session) =>
+            RequestCharacterLogOffCount++;
+
+        public void ReturnToCharacterSelect(WorldSession session) =>
+            ReturnToCharacterSelectCount++;
     }
 
     private sealed class FailOnceTextWriter : StringWriter

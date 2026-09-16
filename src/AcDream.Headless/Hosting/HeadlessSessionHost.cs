@@ -152,6 +152,7 @@ internal sealed class HeadlessSessionHost : IDisposable
     private readonly IDisposable _policySubscription;
     private readonly HeadlessPluginSession _pluginSession;
     private readonly AutoWieldController _autoWield;
+    private readonly HeadlessLogoutAutomation _logout;
     private readonly AcDream.Core.Plugins.PluginCommandRegistry _pluginCommands;
     private readonly LiveChatCommandSurface _chatCommandSurface;
     private readonly LiveSessionHost _liveSession;
@@ -173,6 +174,7 @@ internal sealed class HeadlessSessionHost : IDisposable
     private string _accountName = string.Empty;
     private Exception? _fault;
     private bool _faulted;
+    private bool _loggedOut;
     private bool _disposed;
 
     internal HeadlessSessionHost(
@@ -189,7 +191,8 @@ internal sealed class HeadlessSessionHost : IDisposable
         FellowshipAllegianceGateCoordinator? gateCoordinator = null,
         IEnumerable<string>? pluginRoots = null,
         IPluginStorage? storage = null,
-        IPluginStorage? vtankProfiles = null)
+        IPluginStorage? vtankProfiles = null,
+        Func<bool>? logoutConfirmedOverride = null)
     {
         _descriptor = descriptor
             ?? throw new ArgumentNullException(nameof(descriptor));
@@ -243,6 +246,10 @@ internal sealed class HeadlessSessionHost : IDisposable
                 runtime,
                 contentLease?.MagicCatalog,
                 () => _accountName);
+            var logout = new HeadlessLogoutAutomation(
+                runtime,
+                _timeProvider,
+                isConfirmed: logoutConfirmedOverride);
 
             var bridge = new SessionCommandBridge();
             var commands = new DirectGameRuntimeCommandAdapter(
@@ -312,7 +319,8 @@ internal sealed class HeadlessSessionHost : IDisposable
                 descriptor.PluginSettings,
                 SubmitChatText,
                 items,
-                contentLease?.MagicCatalog);
+                contentLease?.MagicCatalog,
+                logout);
             var liveSession = new LiveSessionHost(
                 runtime.Session,
                 new LiveSessionHostBindings(
@@ -418,6 +426,7 @@ internal sealed class HeadlessSessionHost : IDisposable
             _policySubscription = policySubscription;
             _pluginSession = pluginSession;
             _autoWield = autoWield;
+            _logout = logout;
         }
         catch
         {
@@ -444,7 +453,7 @@ internal sealed class HeadlessSessionHost : IDisposable
     internal string ActiveCharacterName { get; private set; } =
         string.Empty;
     internal bool IsPolicyComplete =>
-        _faulted || _policy.IsComplete;
+        _faulted || _loggedOut || _policy.IsComplete;
     internal bool IsFaulted => _faulted;
     internal Exception? Fault => _fault;
     internal bool IsReconnectPending => _reconnectPending;
@@ -509,6 +518,16 @@ internal sealed class HeadlessSessionHost : IDisposable
         _policy.Tick(Runtime, Commands);
         _pluginSession.Host.FireTick(deltaSeconds);
         ConsolePump?.Invoke();
+        switch (_logout.Tick())
+        {
+            case HeadlessLogoutOutcome.Completed:
+                _loggedOut = true;
+                break;
+            case HeadlessLogoutOutcome.TimedOut:
+                Quarantine(new TimeoutException(
+                    "A plugin-requested logout was never confirmed by the server."));
+                break;
+        }
     }
 
     internal RuntimeTeardownAcknowledgement Stop(string reason = "stopped")

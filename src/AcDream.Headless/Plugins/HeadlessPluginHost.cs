@@ -1,4 +1,5 @@
 using AcDream.Content;
+using AcDream.Headless.Hosting;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
 using AcDream.Runtime.Plugins;
@@ -50,7 +51,8 @@ internal sealed class HeadlessPluginHost
         IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
         Func<string, bool>? submitChatText = null,
         HeadlessItemAutomation? items = null,
-        MagicCatalog? magicCatalog = null)
+        MagicCatalog? magicCatalog = null,
+        HeadlessLogoutAutomation? logout = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         Log = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -76,6 +78,12 @@ internal sealed class HeadlessPluginHost
                 HeadlessItemAutomation.RefusePickup,
                 HeadlessItemAutomation.RefuseIdentify);
             _automation.BindEquipment(items.TryEquip, () => items.EquipmentBusy);
+        }
+        if (logout is not null)
+        {
+            _automation.BindLogout(
+                logout.TryRequestLogout,
+                () => logout.CanRequestLogout);
         }
         _eventSubscription = runtime.Subscribe(this);
     }

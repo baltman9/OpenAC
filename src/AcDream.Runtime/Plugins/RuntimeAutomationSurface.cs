@@ -50,6 +50,8 @@ internal class RuntimeAutomationSurface
     private IChargenPaletteColorSource? _paletteColors;
     private Func<uint, uint, bool>? _equip;
     private Func<bool>? _equipmentBusy;
+    private Func<bool>? _requestLogout;
+    private Func<bool>? _canRequestLogout;
     private Func<uint, bool>? _useItem;
     private Func<uint, uint, bool>? _applyItem;
     private Func<uint, uint, uint, int, bool>? _moveItem;
@@ -256,6 +258,27 @@ internal class RuntimeAutomationSurface
         return runtime?.Session.ClearNextLogin() == true;
     }
 
+    bool ILoginAutomation.CanRequestLogout
+    {
+        get
+        {
+            Func<bool>? canRequestLogout;
+            lock (_gate)
+                canRequestLogout = _canRequestLogout;
+            return IsAvailable && canRequestLogout?.Invoke() == true;
+        }
+    }
+
+    bool ILoginAutomation.RequestLogout()
+    {
+        Func<bool>? requestLogout;
+        lock (_gate)
+            requestLogout = _requestLogout;
+        return requestLogout is not null
+            && ((ILoginAutomation)this).CanRequestLogout
+            && requestLogout();
+    }
+
     PluginWorldTimeSnapshot IWorldTimeAutomation.Snapshot
     {
         get
@@ -401,6 +424,19 @@ internal class RuntimeAutomationSurface
         {
             _equip = equip;
             _equipmentBusy = isBusy;
+        }
+    }
+
+    public void BindLogout(
+        Func<bool> tryRequestLogout,
+        Func<bool> canRequestLogout)
+    {
+        ArgumentNullException.ThrowIfNull(tryRequestLogout);
+        ArgumentNullException.ThrowIfNull(canRequestLogout);
+        lock (_gate)
+        {
+            _requestLogout = tryRequestLogout;
+            _canRequestLogout = canRequestLogout;
         }
     }
 

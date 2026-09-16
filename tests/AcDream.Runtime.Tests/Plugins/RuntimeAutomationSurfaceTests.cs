@@ -409,6 +409,59 @@ public sealed class RuntimeAutomationSurfaceTests
     }
 
     [Fact]
+    public void RequestLogout_IsUnavailableOnAnUnboundSurface()
+    {
+        using var surface = new RuntimeAutomationSurface();
+
+        Assert.False(surface.Login.CanRequestLogout);
+        Assert.False(surface.Login.RequestLogout());
+    }
+
+    /// <summary>
+    /// A plugin compiled without the new members, or a host that never calls
+    /// BindLogout, still gets a refusal from the interface defaults.
+    /// </summary>
+    [Fact]
+    public void RequestLogout_IsUnavailableOnTheNoOpSurface()
+    {
+        ILoginAutomation login = NoOpAutomationSurface.Instance.Login;
+
+        Assert.False(login.CanRequestLogout);
+        Assert.False(login.RequestLogout());
+    }
+
+    [Fact]
+    public void RequestLogout_IsImplementedByTheGraphicalSurface()
+    {
+        System.Reflection.InterfaceMapping map =
+            typeof(RuntimeAutomationSurface).GetInterfaceMap(
+                typeof(ILoginAutomation));
+        int index = Array.FindIndex(
+            map.InterfaceMethods,
+            static method => method.Name
+                == nameof(ILoginAutomation.RequestLogout));
+
+        Assert.True(index >= 0, "ILoginAutomation.RequestLogout not found.");
+        Assert.Equal(
+            typeof(RuntimeAutomationSurface),
+            map.TargetMethods[index].DeclaringType);
+    }
+
+    [Fact]
+    public void BindLogout_RequestLogoutStaysRefusedWhileTheSurfaceIsUnavailableEvenIfBound()
+    {
+        using var surface = new RuntimeAutomationSurface();
+        bool requested = false;
+        surface.BindLogout(
+            () => { requested = true; return true; },
+            () => true);
+
+        Assert.False(surface.Login.CanRequestLogout);
+        Assert.False(surface.Login.RequestLogout());
+        Assert.False(requested);
+    }
+
+    [Fact]
     public void DropGiveAndApplyRefuseAsUnavailableBeforeBindItems()
     {
         using var surface = new RuntimeAutomationSurface();

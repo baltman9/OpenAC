@@ -946,6 +946,13 @@ public sealed class GameWindow :
             (vendorId, itemId, amount) => result.ItemInteraction.TrySell(
                 vendorId,
                 [(amount, itemId)]));
+        _automation?.BindLogout(
+            () => _localPlayerTeleport?.TryRequestLogout() == true,
+            () => _localPlayerTeleport is not null
+                && _runtime.Session.IsInWorld
+                && !_runtime.TransitOwner.IsLogoutActive
+                && !_runtime.TransitOwner.IsTeleportActive
+                && !_runtime.TransitOwner.HasPendingTeleportStart);
         _interactionUiLateBindings = result.LateBindings;
         _magicRuntime = result.Magic;
         if (result.RetainedUi is { } retained)
