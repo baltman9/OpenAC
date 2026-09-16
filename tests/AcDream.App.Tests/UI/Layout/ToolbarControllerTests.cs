@@ -671,7 +671,7 @@ public class ToolbarControllerTests
         repo.AddOrUpdate(new ClientObject { ObjectId = item, Name = "Loot", Type = ItemType.Misc });
         repo.MoveItem(item, sidePack, 0);
         var puts = new List<(uint Item, uint Container, int Placement)>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new AcDream.Runtime.Gameplay.RuntimeItemInteraction(
             repo,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(repo)),
             new InteractionState(),
