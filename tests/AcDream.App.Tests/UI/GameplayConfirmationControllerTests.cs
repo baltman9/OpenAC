@@ -297,9 +297,12 @@ public sealed class GameplayConfirmationControllerTests
         Assert.False(controller.HandleRequest(
             new GameEvents.CharacterConfirmationRequest(4u, 7u, "Alice invites you.")));
 
+        // The rejected second request must not have replaced the open
+        // dialog's context -- a rejected request must never overwrite the answer route.
+        Assert.Equal(firstDialogContext, controller.ActiveDialogContext);
+
         Assert.True(controller.TryAnswer(42u, true));
         Assert.Equal([(2u, 42u, true)], responses);
-        Assert.Equal(firstDialogContext, firstDialogContext);
     }
 
 }

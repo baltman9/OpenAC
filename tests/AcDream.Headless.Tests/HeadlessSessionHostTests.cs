@@ -206,6 +206,42 @@ public sealed class HeadlessSessionHostTests
     }
 
     [Fact]
+    public void AConfirmationDoneOnTheWireClearsThePendingConfirmationThroughProductionRouting()
+    {
+        // Unlike the direct-call test above, this drives an actual
+        // CharacterConfirmationDone game-event envelope through the live
+        // session's GameEventWiring so the character.OnConfirmationDone ->
+        // HeadlessSessionHost.HandleConfirmationDone route is exercised end
+        // to end, not just the handler in isolation.
+        var operations = new FixtureSessionOperations();
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            new HeadlessCredentialSecret("fixture", "password"),
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+
+        WorldSession session = operations.Sessions[^1];
+
+        FieldInfo pendingField = typeof(HeadlessSessionHost)
+            .GetField(
+                "_pendingConfirmation",
+                BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var request = new GameEvents.CharacterConfirmationRequest(5u, 77u, "continue?");
+        pendingField.SetValue(host, request);
+        Assert.Equal(request, host.PendingConfirmation);
+
+        session.GameEvents.Dispatch(
+            GameEventEnvelope.TryParse(
+                WrapCharacterConfirmationDoneEnvelope(type: 5u, contextId: 77u))!
+                .Value);
+
+        Assert.Null(host.PendingConfirmation);
+    }
+
+    [Fact]
     public void LoginCommandsRouteWireOnlyClientCommandsWithExactPolarityAndOrder()
     {
         var captured = new List<byte[]>();
@@ -3273,7 +3309,23 @@ public sealed class HeadlessSessionHostTests
             _timestamp = checked(_timestamp + duration.Ticks);
     }
 
-    private static byte[] WrapPlayerDescriptionEnvelope(
+    private static byte[] WrapCharacterConfirmationDoneEnvelope(uint type, uint contextId)
+    {
+        byte[] payload = new byte[8];
+        BinaryPrimitives.WriteUInt32LittleEndian(payload, type);
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4), contextId);
+
+        byte[] body = new byte[GameEventEnvelope.HeaderSize + payload.Length];
+        BinaryPrimitives.WriteUInt32LittleEndian(body,            GameEventEnvelope.Opcode);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(4),  0u);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(8),  0u);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            body.AsSpan(12), (uint)GameEventType.CharacterConfirmationDone);
+        Array.Copy(payload, 0, body, GameEventEnvelope.HeaderSize, payload.Length);
+        return body;
+    }
+
+        private static byte[] WrapPlayerDescriptionEnvelope(
         uint options1,
         uint options2)
     {
