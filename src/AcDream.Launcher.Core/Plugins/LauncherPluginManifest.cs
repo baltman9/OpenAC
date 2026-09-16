@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -19,6 +20,37 @@ public enum LauncherPluginHostKind
 {
     Graphical,
     Headless,
+}
+
+/// <summary>A player-relevant thing a plugin does, declared in <c>capabilities</c>. Declaration
+/// order is display order, so an author cannot bury <see cref="Network"/> behind benign entries.
+/// Launcher-only: the client does not read or enforce this field.</summary>
+public enum LauncherPluginCapability
+{
+    Network,
+    Analytics,
+
+    /// <summary>Writes anywhere but its own plugin directory.</summary>
+    FileWrite,
+    ProcessLaunch,
+    NativeCode,
+    InputAutomation,
+
+    /// <summary>Reads chat or sends it. One flag covers both: a plugin that can read chat can
+    /// almost always send it, and two flags would imply a distinction the launcher cannot hold
+    /// anyone to.</summary>
+    Chat,
+}
+
+/// <summary>One entry from <c>capabilities</c>: a recognized flag and the author's disclosure
+/// sentence.</summary>
+public sealed record LauncherPluginCapabilityDeclaration(LauncherPluginCapability Name, string Note);
+
+/// <summary>The capability vocabulary this launcher understands, named the way
+/// <see cref="LauncherPluginApiRange"/> names the plugin API range it understands.</summary>
+public static class LauncherPluginCapabilityVocabulary
+{
+    public const int Current = 1;
 }
 
 /// <summary>The version core (<c>MAJOR.MINOR.PATCH</c>) a host field or the installed client names.
@@ -94,7 +126,10 @@ public sealed record LauncherPluginManifest(
     LauncherPluginHostVersion? MinHostVersion,
     LauncherPluginHostVersion? MaxHostVersion,
     IReadOnlyList<LauncherPluginHostVersion> SkipHostVersions,
-    IReadOnlyList<LauncherPluginHostKind>? Hosts)
+    IReadOnlyList<LauncherPluginHostKind>? Hosts,
+    int CapabilitiesVersion,
+    IReadOnlyList<LauncherPluginCapabilityDeclaration> Capabilities,
+    IReadOnlyList<string> UnrecognizedCapabilities)
 {
     private static readonly Regex IdPattern = new(
         @"\A[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+\z",
@@ -136,6 +171,9 @@ public sealed record LauncherPluginManifest(
         IReadOnlyList<LauncherPluginHostKind>? hosts = dto.Hosts is null
             ? null
             : ParseHosts(dto.Hosts);
+        (IReadOnlyList<LauncherPluginCapabilityDeclaration> capabilities,
+                IReadOnlyList<string> unrecognizedCapabilities) =
+            ParseCapabilities(dto.Capabilities, dto.CapabilitiesVersion);
 
         return new LauncherPluginManifest(
             dto.Id!,
@@ -147,7 +185,10 @@ public sealed record LauncherPluginManifest(
             minHostVersion,
             maxHostVersion,
             skipHostVersions,
-            hosts);
+            hosts,
+            dto.CapabilitiesVersion,
+            capabilities,
+            unrecognizedCapabilities);
     }
 
     /// <summary>The install-only rules a downloaded manifest must additionally satisfy: a namespaced
@@ -177,6 +218,18 @@ public sealed record LauncherPluginManifest(
         {
             throw new LauncherPluginManifestException(
                 $"apiVersion {ApiVersion} is not supported by this launcher");
+        }
+
+        if (CapabilitiesVersion > LauncherPluginCapabilityVocabulary.Current)
+        {
+            throw new LauncherPluginCapabilityVersionException(
+                CapabilitiesVersion, LauncherPluginCapabilityVocabulary.Current);
+        }
+
+        if (UnrecognizedCapabilities.Count > 0)
+        {
+            throw new LauncherPluginManifestException(
+                $"unrecognized capability: {UnrecognizedCapabilities[0]}");
         }
     }
 
@@ -263,6 +316,93 @@ public sealed record LauncherPluginManifest(
         return hosts;
     }
 
+    private static (
+        IReadOnlyList<LauncherPluginCapabilityDeclaration> Recognized,
+        IReadOnlyList<string> Unrecognized) ParseCapabilities(
+        IReadOnlyList<CapabilityDto>? values, int capabilitiesVersion)
+    {
+        if (values is null || values.Count == 0)
+            return ([], []);
+
+        if (capabilitiesVersion < 1)
+        {
+            throw new LauncherPluginManifestException(
+                "capabilities requires capabilitiesVersion >= 1");
+        }
+
+        // A newer vocabulary may spell its entries differently, so nothing here can judge them.
+        // Leaving them unparsed lets ValidateForInstall refuse on the version, which is the one
+        // refusal a player can act on.
+        if (capabilitiesVersion > LauncherPluginCapabilityVocabulary.Current)
+            return ([], []);
+
+        var recognized = new List<LauncherPluginCapabilityDeclaration>(values.Count);
+        var unrecognized = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (CapabilityDto dto in values)
+        {
+            if (string.IsNullOrWhiteSpace(dto.Name))
+                throw new LauncherPluginManifestException("capability entry is missing a name");
+
+            if (!seen.Add(dto.Name))
+                throw new LauncherPluginManifestException($"duplicate capability: {dto.Name}");
+
+            string note = RequireCapabilityNote(dto.Note, dto.Name);
+
+            if (Enum.TryParse(dto.Name, ignoreCase: true, out LauncherPluginCapability capability)
+                && Enum.IsDefined(capability))
+            {
+                recognized.Add(new LauncherPluginCapabilityDeclaration(capability, note));
+            }
+            else
+            {
+                unrecognized.Add(dto.Name);
+            }
+        }
+
+        return (recognized, unrecognized);
+    }
+
+    /// <summary>The disclosure sentence is attacker-controlled text rendered on the install
+    /// surface: trimmed, capped, and stripped of anything that could disguise or misrender it.</summary>
+    private static string RequireCapabilityNote(string? value, string capabilityName)
+    {
+        string trimmed = (value ?? string.Empty).Trim();
+        if (trimmed.Length == 0)
+            throw new LauncherPluginManifestException($"capability '{capabilityName}' is missing a note");
+
+        if (trimmed.Length > 120)
+        {
+            throw new LauncherPluginManifestException(
+                $"capability '{capabilityName}' note exceeds 120 characters");
+        }
+
+        foreach (char c in trimmed)
+        {
+            if (char.IsControl(c))
+            {
+                throw new LauncherPluginManifestException(
+                    $"capability '{capabilityName}' note contains a control character");
+            }
+
+            if (IsDisallowedFormattingCharacter(c))
+            {
+                throw new LauncherPluginManifestException(
+                    $"capability '{capabilityName}' note contains a disallowed formatting character");
+            }
+        }
+
+        if (trimmed.Contains("://", StringComparison.Ordinal))
+            throw new LauncherPluginManifestException($"capability '{capabilityName}' note contains a link");
+
+        return trimmed;
+    }
+
+    /// <summary>Unicode format characters (Cf) cover the bidirectional overrides and isolates
+    /// and the zero-width characters, any of which can disguise what a note actually says.</summary>
+    private static bool IsDisallowedFormattingCharacter(char c) =>
+        CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.Format;
+
     private static void Require(string? value, string jsonFieldName)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -314,11 +454,39 @@ public sealed record LauncherPluginManifest(
         public string? MaxHostVersion { get; set; }
         public IReadOnlyList<string>? SkipHostVersions { get; set; }
         public IReadOnlyList<string>? Hosts { get; set; }
+        public int CapabilitiesVersion { get; set; }
+        public IReadOnlyList<CapabilityDto>? Capabilities { get; set; }
+    }
+
+    private sealed class CapabilityDto
+    {
+        public string? Name { get; set; }
+        public string? Note { get; set; }
     }
 }
 
-public sealed class LauncherPluginManifestException : Exception
+public class LauncherPluginManifestException : Exception
 {
     public LauncherPluginManifestException(string message) : base(message) { }
     public LauncherPluginManifestException(string message, Exception inner) : base(message, inner) { }
+}
+
+/// <summary>A manifest declares a <c>capabilitiesVersion</c> newer than this launcher's vocabulary
+/// (<see cref="LauncherPluginCapabilityVocabulary"/>). Distinct from
+/// <see cref="LauncherPluginManifestException"/> so the install surface can point at the update
+/// banner instead of reporting an invalid manifest.</summary>
+public sealed class LauncherPluginCapabilityVersionException : LauncherPluginManifestException
+{
+    public LauncherPluginCapabilityVersionException(int declaredVersion, int currentVersion)
+        : base(
+            $"capabilitiesVersion {declaredVersion} is newer than this launcher's vocabulary "
+            + $"({currentVersion})")
+    {
+        DeclaredVersion = declaredVersion;
+        CurrentVersion = currentVersion;
+    }
+
+    public int DeclaredVersion { get; }
+
+    public int CurrentVersion { get; }
 }

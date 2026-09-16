@@ -224,7 +224,10 @@ public sealed class DirectInstallCheckTests : IDisposable
             new LauncherPluginHostVersion(0, 1, 0),
             null,
             [],
-            Hosts: null);
+            Hosts: null,
+            CapabilitiesVersion: 0,
+            Capabilities: [],
+            UnrecognizedCapabilities: []);
 
         string? refusal = DirectInstallCheck.Refusal(directory, manifest);
 
@@ -280,7 +283,10 @@ public sealed class DirectInstallCheckTests : IDisposable
             new LauncherPluginHostVersion(0, 1, 0),
             null,
             [],
-            [LauncherPluginHostKind.Headless]);
+            [LauncherPluginHostKind.Headless],
+            CapabilitiesVersion: 0,
+            Capabilities: [],
+            UnrecognizedCapabilities: []);
 
     private string WriteValidPlugin(string folderName)
     {
