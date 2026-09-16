@@ -92,6 +92,48 @@ public sealed class AppAutomationSurfacePluginApiTests
     }
 
     [Fact]
+    public void UsingAnOwnedTargetedUseItemGetsASpecificNoticeInsteadOfABareRefusal()
+    {
+        // A Mana Stone (and any other item that can
+        // only recharge/act on ANOTHER item) has a targeted Useability --
+        // Use(objectId) alone can never complete it, since there is no
+        // target to carry. TryUseItemForAutomation already refused it for
+        // exactly that reason, but the refusal came back bare (Refused,
+        // no notice), indistinguishable from a busy gate or a genuinely
+        // broken item. DispatchItem must name the real reason and tell
+        // the caller what to do instead.
+        var (runtime, commands) = CreateRealSession();
+        using var runtimeDisposal = runtime;
+        using var surface = new AppAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        commands.Start(runtime.Generation);
+        surface.BindItems(
+            useItem: _ => true,
+            applyItem: (_, _) => true,
+            moveItem: (_, _, _, _) => false,
+            mergeItems: (_, _, _) => false,
+            dropItem: (_, _) => false,
+            giveItem: (_, _, _) => false,
+            pickupItem: (_, _) => false,
+            identifyItem: _ => false);
+
+        uint playerId = runtime.PlayerIdentity.ServerGuid;
+        const uint manaStoneId = 0x8000_1234u;
+        runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = manaStoneId,
+            ContainerId = playerId,
+            Useability = ItemUseability.Contained << 16,
+        });
+
+        PluginItemCommandResult result = surface.Items.Use(manaStoneId);
+
+        Assert.Equal(PluginItemCommandStatus.Refused, result.Status);
+        Assert.False(string.IsNullOrWhiteSpace(result.Notice));
+        Assert.Contains("target", result.Notice, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void UsingAWorldObjectWithoutAWalkToUseRouteBoundIsRefusedRatherThanSilentlyIgnored()
     {
         var (runtime, commands) = CreateRealSession();

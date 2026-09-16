@@ -2869,6 +2869,20 @@ internal sealed class AppAutomationSurface
         }
         if (targetObjectId != 0u && objects.Get(targetObjectId) is null)
             return new(PluginItemCommandStatus.InvalidTarget);
+        if (targetObjectId == 0u
+            && ItemUseability.IsTargeted(item.Useability ?? ItemUseability.Undef))
+        {
+            // A targeted-use item (a Mana Stone, a lockpick, a tinkering
+            // tool used on another item) cannot complete through Use(id)
+            // alone -- TryUseItemForAutomation already refuses it for
+            // exactly this reason, but that refusal came back as a bare
+            // Refused with no notice, indistinguishable from every other
+            // kind of refusal. Name the real reason here instead, before
+            // ever calling into the owned-item path.
+            return new(
+                PluginItemCommandStatus.Refused,
+                "This item requires a target; call Apply(objectId, targetObjectId) instead.");
+        }
         if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
             return new(PluginItemCommandStatus.Busy);
         bool started = targetObjectId == 0u

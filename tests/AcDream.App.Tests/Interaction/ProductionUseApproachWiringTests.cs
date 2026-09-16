@@ -276,6 +276,8 @@ public sealed class ProductionUseApproachWiringTests
 
         Assert.Empty(h.Transport.Uses);
 
+        // The player actually arrives -- the query now reports close range.
+        h.Query.Approaches[Vendor] = h.Query.Approaches[Vendor] with { IsCloseRange = true };
         h.Controller.DrainOutbound();
 
         Assert.Equal(new[] { Vendor }, h.Transport.Uses);
@@ -329,6 +331,8 @@ public sealed class ProductionUseApproachWiringTests
 
         Assert.Equal(1, h.Inventory.BusyCount);
 
+        // The player actually arrives at the surviving (second) target.
+        h.Query.Approaches[OtherVendor] = h.Query.Approaches[OtherVendor] with { IsCloseRange = true };
         h.Controller.DrainOutbound();
 
         Assert.Equal(new[] { OtherVendor }, h.Transport.Uses);

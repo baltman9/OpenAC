@@ -180,9 +180,11 @@ public sealed class SelectionInteractionControllerTests
         public readonly RuntimeCombatTargetState CombatTarget;
         public readonly SelectionInteractionController Controller;
         public uint GroundObjectId { get; set; }
+        private readonly Func<long>? _nowMs;
 
-        public Harness()
+        public Harness(Func<long>? nowMs = null)
         {
+            _nowMs = nowMs;
             CompletionLifetime = Completions.BeginControllerLifetime();
             Movement = new Movement(Completions);
             SelectionInteractionController? controller = null;
@@ -231,7 +233,8 @@ public sealed class SelectionInteractionControllerTests
                 Movement,
                 CombatTarget,
                 Toasts.Add,
-                Completions);
+                Completions,
+                nowMs: _nowMs);
             Items.PendingBackpackPlacementRequested += PendingPlacements.Add;
             Items.PendingBackpackPlacementCancelled += CancelledPlacements.Add;
         }
@@ -540,9 +543,81 @@ public sealed class SelectionInteractionControllerTests
         // walk, and the actual use dispatches once the player arrives.
         Assert.Empty(h.Transport.Uses);
 
+        // The player actually arrives -- the query now reports close range.
+        h.SetApproach(closeRange: true);
         h.Controller.OnNaturalMoveToComplete();
 
         Assert.Equal(new[] { Target }, h.Transport.Uses);
+    }
+
+    [Fact]
+    public void ArrivalStillOutOfRangeCancelsTheReservationInsteadOfDispatching()
+    {
+        // A live-gate finding: local physics can report "movement complete"
+        // (WeenieError.None) once it can make no further progress toward
+        // the target -- an obstruction (a closed door, a wall) in the
+        // straight-line approach path stops the walk short of actual use
+        // range with no error of its own. Before this fix,
+        // HandleUseApproachCompletion trusted that signal unconditionally
+        // and dispatched Use anyway, so the server's own range check
+        // silently dropped the request and the caller (a plugin's
+        // Started, or a click) never learned the interaction failed --
+        // and the reservation stayed held, wedging the one-request-at-a-
+        // time gate for the rest of the session.
+        var h = new Harness();
+        h.SetApproach(closeRange: false);
+
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+        Assert.Equal(AutomationUseOutcome.Started, outcome);
+        Assert.Equal(1, h.Items.BusyCount);
+
+        // The walk "completes" naturally, but Query.Approach still reports
+        // closeRange:false -- the player never actually got within use
+        // range of the target.
+        h.Controller.OnNaturalMoveToComplete();
+
+        Assert.Empty(h.Transport.Uses);
+        Assert.Equal(0, h.Items.BusyCount);
+        Assert.True(h.Items.EnsureInventoryRequestReady());
+    }
+
+    [Fact]
+    public void ArrivalThatNeverCompletesExpiresTheReservationAfterTheTimeout()
+    {
+        // A live-verified root cause: an obstruction
+        // (a closed door, a wall) in the straight-line approach path can
+        // stop the local physics from ever calling MoveToComplete or
+        // MoveToCancelled at all -- not just report a bad arrival. A live
+        // repro against a real ACE vendor left the character frozen at a
+        // closed door for 40+ seconds with zero HandleUseApproachCompletion
+        // calls. Without a bound, the reservation and HasPendingUse would
+        // stay held for the rest of the session; every later Use, from a
+        // click or a plugin, would report Busy forever.
+        long clock = 0;
+        var h = new Harness(nowMs: () => clock);
+        h.SetApproach(closeRange: false);
+
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+        Assert.Equal(AutomationUseOutcome.Started, outcome);
+        Assert.Equal(1, h.Items.BusyCount);
+        Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
+
+        // Short of the timeout: the arrival signal simply never arrives,
+        // and nothing changes yet.
+        clock += SelectionInteractionController.PendingUseArrivalTimeoutMs - 1;
+        h.Controller.DrainOutbound();
+
+        Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
+        Assert.Equal(1, h.Items.BusyCount);
+
+        // Past the timeout: the host gives up and frees the gate.
+        clock += 2;
+        h.Controller.DrainOutbound();
+
+        Assert.False(h.Items.RuntimeTransactions.HasPendingUse);
+        Assert.Equal(0, h.Items.BusyCount);
+        Assert.True(h.Items.EnsureInventoryRequestReady());
+        Assert.Empty(h.Transport.Uses);
     }
 
     [Fact]
@@ -709,6 +784,8 @@ public sealed class SelectionInteractionControllerTests
         // Armed, not yet sent — the whole point of the fix.
         Assert.Empty(h.Transport.Uses);
 
+        // The player actually arrives -- the query now reports close range.
+        h.SetApproach(closeRange: true);
         h.Controller.OnNaturalMoveToComplete();
 
         Assert.Equal(new[] { Target }, h.Transport.Uses);
@@ -742,6 +819,8 @@ public sealed class SelectionInteractionControllerTests
         // Neither has sent yet — both are armed/superseded, not dispatched.
         Assert.Empty(h.Transport.Uses);
 
+        // The player actually arrives at the surviving (second) target.
+        h.SetApproach(closeRange: true, serverGuid: otherTarget);
         h.Controller.OnNaturalMoveToComplete();
 
         // Only the surviving (second) approach's Use goes out.

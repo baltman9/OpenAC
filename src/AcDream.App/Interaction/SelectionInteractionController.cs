@@ -29,6 +29,20 @@ internal enum AutomationUseOutcome
 
 internal sealed class SelectionInteractionController
 {
+    /// <summary>
+    /// How long an armed walk-then-use is allowed to wait for the local
+    /// physics to report arrival before this host gives up on it. Retail's
+    /// own MoveToObject has no such bound because it always resolves one
+    /// way or another; this port's local movement can stop making progress
+    /// against an obstruction (a closed door, a wall in the straight-line
+    /// path) without ever calling MoveToComplete or MoveToCancelled, which
+    /// left an armed Use waiting forever and wedged the one-request-at-a-
+    /// time gate for the rest of the session -- this is
+    /// an engineering safeguard against that missing termination signal,
+    /// not a retail timing value.
+    /// </summary>
+    internal const long PendingUseArrivalTimeoutMs = 15_000;
+
     private readonly SelectionState _selection;
     private readonly IWorldSelectionQuery _query;
     private readonly ItemInteractionController _items;
@@ -40,6 +54,8 @@ internal sealed class SelectionInteractionController
     private readonly Func<uint, bool>? _splitStack;
     private readonly Func<IEnumerable<uint>> _fellowshipMembers;
     private readonly RuntimeCombatTargetState _combatTarget;
+    private readonly Func<long> _nowMs;
+    private long? _pendingUseArmedAtMs;
 
     public SelectionInteractionController(
         SelectionState selection,
@@ -51,7 +67,8 @@ internal sealed class SelectionInteractionController
         Action<string>? toast = null,
         PlayerApproachCompletionState? approachCompletions = null,
         Func<uint, bool>? splitStack = null,
-        Func<IEnumerable<uint>>? fellowshipMembers = null)
+        Func<IEnumerable<uint>>? fellowshipMembers = null,
+        Func<long>? nowMs = null)
     {
         _selection = selection ?? throw new ArgumentNullException(nameof(selection));
         _query = query ?? throw new ArgumentNullException(nameof(query));
@@ -66,6 +83,7 @@ internal sealed class SelectionInteractionController
             ?? new PlayerApproachCompletionState();
         _splitStack = splitStack;
         _fellowshipMembers = fellowshipMembers ?? (() => Array.Empty<uint>());
+        _nowMs = nowMs ?? (() => Environment.TickCount64);
     }
 
     public bool HandleInputAction(InputAction action)
@@ -410,6 +428,21 @@ internal sealed class SelectionInteractionController
     /// </summary>
     public AutomationUseOutcome TryUseForAutomation(uint serverGuid)
     {
+        // Every exit from this method is logged at Information level: it
+        // is the plugin surface's only entry point for using a world
+        // object it does not own, it can fire at any cadence a plugin
+        // chooses, and PerformUse itself never logs for this route
+        // (log: false below) -- without a line here a "Started" that
+        // silently never completes (see HandleUseApproachCompletion) left
+        // no trace at all in the host's own log.
+        AutomationUseOutcome outcome = TryUseForAutomationCore(serverGuid);
+        Console.WriteLine(
+            $"[interaction] automation use guid=0x{serverGuid:X8} outcome={outcome}");
+        return outcome;
+    }
+
+    private AutomationUseOutcome TryUseForAutomationCore(uint serverGuid)
+    {
         if (serverGuid == 0u)
             return AutomationUseOutcome.NotUseable;
         // A plugin using another player would otherwise silently open a
@@ -500,6 +533,8 @@ internal sealed class SelectionInteractionController
                             token.ControllerLifetime,
                             token.ApproachGeneration),
                         out _);
+                    if (armed)
+                        _pendingUseArmedAtMs = _nowMs();
                 });
             if (!started || !armed)
             {
@@ -507,6 +542,7 @@ internal sealed class SelectionInteractionController
                         serverGuid, out RuntimePendingUse cancelled))
                 {
                     cancelled.Reservation?.CancelBeforeDispatch();
+                    _pendingUseArmedAtMs = null;
                 }
                 else
                 {
@@ -746,9 +782,30 @@ internal sealed class SelectionInteractionController
         RuntimePendingUse pending,
         bool accepted)
     {
+        _pendingUseArmedAtMs = null;
         if (!accepted)
         {
             pending.Reservation?.CancelBeforeDispatch();
+            return;
+        }
+
+        // The walk reported arrival, but the local physics can report
+        // "movement complete" once it can make no further progress toward
+        // the target -- an obstruction (a closed door, a wall) in the
+        // straight-line approach path stops the walk short of actual use
+        // range with no error of its own. Dispatching Use from there sends
+        // a request the server's own range check silently drops, so the
+        // caller (a plugin's Started outcome, or a click) never learns the
+        // interaction failed and the reservation would otherwise wait
+        // forever for a completion that already happened. Re-verify the
+        // player is actually within use range before sending.
+        if (!_query.TryGetApproach(pending.ServerGuid, out InteractionApproach arrived)
+            || !arrived.IsCloseRange)
+        {
+            pending.Reservation?.CancelBeforeDispatch();
+            Console.WriteLine(
+                $"[interaction] use guid=0x{pending.ServerGuid:X8} arrival short of use range -- refused");
+            _toast?.Invoke("You are too far away to do that.");
             return;
         }
 
@@ -779,7 +836,34 @@ internal sealed class SelectionInteractionController
                     completion.Token.ApproachGeneration),
                 completion.IsNatural);
         }
+        ExpireStalePendingUse();
         _transactions.DrainOutbound(DispatchQueuedInteraction);
+    }
+
+    /// <summary>
+    /// Forces a definite outcome on an armed walk-then-use that has waited
+    /// past <see cref="PendingUseArrivalTimeoutMs"/> for an arrival signal
+    /// that never came (see the constant's own comment for why that can
+    /// happen). Without this, an obstructed target left the reservation
+    /// held and HasPendingUse true for the rest of the session -- every
+    /// later Use, from a click or a plugin, reported Busy forever.
+    /// </summary>
+    private void ExpireStalePendingUse()
+    {
+        if (_pendingUseArmedAtMs is not { } armedAt
+            || _nowMs() - armedAt < PendingUseArrivalTimeoutMs)
+        {
+            return;
+        }
+
+        _pendingUseArmedAtMs = null;
+        if (_transactions.TryCancelPendingUse(out RuntimePendingUse pending))
+        {
+            pending.Reservation?.CancelBeforeDispatch();
+            Console.WriteLine(
+                $"[interaction] use guid=0x{pending.ServerGuid:X8} arrival timed out after {PendingUseArrivalTimeoutMs}ms -- refused");
+            _toast?.Invoke("You are too far away to do that.");
+        }
     }
 
     public void OnMoveToCancelled(WeenieError _) => CancelPendingApproach();
@@ -797,7 +881,10 @@ internal sealed class SelectionInteractionController
                 cancelled.PendingPlacementToken);
         }
         if (_transactions.TryCancelPendingUse(serverGuid, out RuntimePendingUse cancelledUse))
+        {
             cancelledUse.Reservation?.CancelBeforeDispatch();
+            _pendingUseArmedAtMs = null;
+        }
         if (_selection.SelectedObjectId == serverGuid)
         {
             _selection.Clear(
@@ -822,7 +909,10 @@ internal sealed class SelectionInteractionController
                 cancelled.PendingPlacementToken);
         }
         if (_transactions.TryCancelPendingUse(record.ServerGuid, out RuntimePendingUse cancelledUse))
+        {
             cancelledUse.Reservation?.CancelBeforeDispatch();
+            _pendingUseArmedAtMs = null;
+        }
         if (!replacementExists && _selection.SelectedObjectId == record.ServerGuid)
         {
             _selection.Clear(
@@ -942,7 +1032,10 @@ internal sealed class SelectionInteractionController
         // previously armed — release an in-flight Use's reservation too, not
         // just pickup's presentation token.
         if (_transactions.TryCancelPendingUse(out RuntimePendingUse pendingUse))
+        {
             pendingUse.Reservation?.CancelBeforeDispatch();
+            _pendingUseArmedAtMs = null;
+        }
     }
 
     private void DispatchQueuedInteraction(
