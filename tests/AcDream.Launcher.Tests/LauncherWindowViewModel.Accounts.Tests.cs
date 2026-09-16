@@ -295,6 +295,28 @@ public sealed partial class LauncherWindowViewModelTests
     }
 
     [Fact]
+    public async Task PlayableCheckedRowsFollowsWhatIsCheckedAndReady()
+    {
+        using var core = BatchOrchestrator();
+        using var vm = CreateInitialized(core);
+        await vm.StartBackgroundInitializationAsync();
+        vm.CloseActiveModal();
+        LauncherAccountServerRowViewModel row = vm.Accounts[0].Servers[0];
+
+        Assert.False(vm.HasPlayableCheckedRows);
+
+        row.IsChecked = true;
+        core.RaiseStateChanged();
+
+        Assert.Equal(row.CanPlay, vm.HasPlayableCheckedRows);
+
+        row.IsChecked = false;
+        core.RaiseStateChanged();
+
+        Assert.False(vm.HasPlayableCheckedRows);
+    }
+
+    [Fact]
     public async Task PollingPreservesChecksCharactersAndExpansionAndBatchCannotDoubleStart()
     {
         using var core = BatchOrchestrator();

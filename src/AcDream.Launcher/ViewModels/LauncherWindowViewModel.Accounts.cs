@@ -12,6 +12,10 @@ public sealed partial class LauncherWindowViewModel
     public string CheckedSelectionSummary => $"{AllAccountRows.Count(row => row.IsChecked)} selected · {AllAccountRows.Count(row => row.IsChecked && row.CanPlay)} ready";
     private IEnumerable<LauncherAccountServerRowViewModel> AllAccountRows => Accounts.SelectMany(account => account.Servers);
 
+    /// <summary>Whether launching the checked rows would actually do something, so the button can
+    /// show gold only when it is ready rather than whenever it is on screen.</summary>
+    public bool HasPlayableCheckedRows => AllAccountRows.Any(row => row.IsChecked && row.CanPlay);
+
     private void InitializeAccountCommands() => LaunchCheckedCommand = new AsyncRelayCommand(
         () => LaunchRowsAsync(AllAccountRows.Where(row => row.IsChecked).ToArray()),
         () => CanInteract && AllAccountRows.Any(row => row.IsChecked && row.CanPlay));
@@ -138,6 +142,7 @@ public sealed partial class LauncherWindowViewModel
     private void NotifyAccountCommands()
     {
         LaunchCheckedCommand?.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(HasPlayableCheckedRows));
         OnPropertyChanged(nameof(CheckedSelectionSummary));
         OnPropertyChanged(nameof(HasAccounts));
         foreach (LauncherAccountServerRowViewModel row in AllAccountRows) row.NotifyState();

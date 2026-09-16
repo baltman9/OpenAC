@@ -22,9 +22,11 @@
       <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
     <Style Selector="Button.primary">
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.primary.ready /template/ ContentPresenter">
       <Setter Property="Background" Value="#DBB573" />
       <Setter Property="Foreground" Value="#181A1B" />
-      <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
     <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
       <Setter Property="Background" Value="#E6C68F" />
@@ -111,6 +113,7 @@
     <Grid Grid.Row="3" Margin="14,10" RowDefinitions="Auto,Auto,*" IsVisible="{Binding IsAccountsTabSelected}">
       <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
         <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+          <Button x:Name="PlayCheckedButton" Content="Play selected" Classes="primary" Classes.ready="{Binding HasPlayableCheckedRows}" Command="{Binding LaunchCheckedCommand}" VerticalAlignment="Center" />
           <TextBlock Text="{Binding CheckedSelectionSummary}" Classes="muted" FontSize="12" VerticalAlignment="Center" />
         </StackPanel>
         <Button Grid.Column="1" Content="Check servers" Command="{Binding CheckServersCommand}" VerticalAlignment="Center" />
@@ -151,7 +154,7 @@
                               <ComboBox Grid.Column="2" ItemsSource="{Binding CharacterChoices}" SelectedItem="{Binding DisplayedCharacter, Mode=TwoWay}" HorizontalAlignment="Stretch" VerticalAlignment="Center" IsEnabled="{Binding CanEditSelection}" AutomationProperties.Name="Character" />
                               <ComboBox Grid.Column="3" ItemsSource="{Binding LaunchModes}" SelectedItem="{Binding SelectedLaunchMode, Mode=TwoWay}" HorizontalAlignment="Stretch" VerticalAlignment="Center" IsEnabled="{Binding CanEditSelection}" AutomationProperties.Name="Launch mode" />
                               <TextBlock Grid.Column="4" Text="{Binding Status}" VerticalAlignment="Center" Margin="0,2,0,0" Classes="muted" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Status}" />
-                              <Button Grid.Column="5" Content="Play" Classes="primary" Command="{Binding PlayCommand}" IsVisible="{Binding !IsActive}" VerticalAlignment="Center" HorizontalAlignment="Stretch" ToolTip.Tip="{Binding DisabledReason}" />
+                              <Button Grid.Column="5" Content="Play" Classes="primary" Classes.ready="{Binding CanPlay}" Command="{Binding PlayCommand}" IsVisible="{Binding !IsActive}" VerticalAlignment="Center" HorizontalAlignment="Stretch" ToolTip.Tip="{Binding DisabledReason}" />
                               <Button Grid.Column="5" Content="Stop" Command="{Binding StopCommand}" IsVisible="{Binding IsActive}" VerticalAlignment="Center" HorizontalAlignment="Stretch" />
                               <Button Grid.Column="6" Content="···" Padding="4" Command="{Binding OptionsCommand}" VerticalAlignment="Center" AutomationProperties.Name="Character options" />
                               <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="6" Text="{Binding LaunchError}" IsVisible="{Binding HasLaunchError}" Foreground="#FFB0A0" TextWrapping="Wrap" FontSize="12" Margin="0,3,0,3" />
@@ -269,18 +272,15 @@
       </Grid>
     </Grid>
     <Border Grid.Row="4" Background="#172128" Padding="14,8">
-      <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" IsVisible="{Binding IsAccountsTabSelected}">
-          <WrapPanel Orientation="Horizontal">
-            <Button Content="Edit accounts" Command="{Binding EditUsersTextCommand}" Margin="0,0,6,3" />
-            <Button Content="Edit Servers" Command="{Binding EditServersTextCommand}" Margin="0,0,6,3" />
-            <Button Content="Logon commands" Command="{Binding EditLogonCommandsTextCommand}" Margin="0,0,6,3" />
-          </WrapPanel>
-          <Button Grid.Column="1" x:Name="PlayCheckedButton" Content="Play selected" Classes="primary" Command="{Binding LaunchCheckedCommand}" VerticalAlignment="Top" />
-        </Grid>
-        <Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="8">
-          <TextBlock Text="{Binding OperationStatus}" Classes="muted" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding OperationStatus}" VerticalAlignment="Center" />
-          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+      <Grid RowDefinitions="Auto,Auto" RowSpacing="6">
+        <Grid ColumnDefinitions="Auto,*,Auto">
+          <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,8,0" IsVisible="{Binding IsAccountsTabSelected}">
+            <Button Content="Edit accounts" Command="{Binding EditUsersTextCommand}" />
+            <Button Content="Edit Servers" Command="{Binding EditServersTextCommand}" />
+            <Button Content="Logon commands" Command="{Binding EditLogonCommandsTextCommand}" />
+          </StackPanel>
+          <TextBlock Grid.Column="1" Text="{Binding OperationStatus}" Classes="muted" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding OperationStatus}" VerticalAlignment="Center" />
+          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" Margin="8,0,0,0">
             <Button Content="Installation &amp; updates">
               <Button.Flyout><Flyout><StackPanel Spacing="8" Width="280">
                 <TextBlock Text="Installation &amp; updates" Classes="section" />
@@ -295,7 +295,7 @@
             <Button Content="Cancel" IsVisible="{Binding IsBusy}" Command="{Binding CancelOperationCommand}" />
           </StackPanel>
         </Grid>
-        <TextBlock Grid.Row="2" Text="{Binding LastError}" Foreground="#FFB0A0" IsVisible="{Binding HasError}" TextWrapping="Wrap" MaxHeight="56" />
+        <TextBlock Grid.Row="1" Text="{Binding LastError}" Foreground="#FFB0A0" IsVisible="{Binding HasError}" TextWrapping="Wrap" MaxHeight="56" />
       </Grid>
     </Border>
 
