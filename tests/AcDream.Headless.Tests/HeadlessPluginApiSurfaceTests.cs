@@ -233,8 +233,11 @@ public sealed class HeadlessPluginApiSurfaceTests
     }
 
     [Fact]
-    public void ObjectChangedReportsIdentReceivedOnlyOnTheFirstAppraisalResponse()
+    public void ObjectChangedReportsIdentReceivedOnBothTheFirstResponseAndARefresh()
     {
+        // AcceptAppraisalResponse now raises AppraisalReceived (and so this
+        // ObjectChanged) on every accepted response, not just the first --
+        // a refresh of already-held data can still carry a changed payload.
         using GameRuntime runtime = NewRuntime();
         using var host = NewHost(runtime);
         var seen = new List<PluginObjectChange>();
@@ -245,10 +248,11 @@ public sealed class HeadlessPluginApiSurfaceTests
         runtime.ActionOwner.Transactions.AcceptAppraisalResponse(700u);
         runtime.ActionOwner.Transactions.AcceptAppraisalResponse(700u);
 
-        Assert.Single(
-            seen,
-            c => c.ObjectId == 700u
-                && c.Kind == PluginObjectChangeKind.IdentReceived);
+        Assert.Equal(
+            2,
+            seen.Count(c =>
+                c.ObjectId == 700u
+                    && c.Kind == PluginObjectChangeKind.IdentReceived));
     }
 
     [Fact]

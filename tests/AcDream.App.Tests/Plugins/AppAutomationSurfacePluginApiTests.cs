@@ -372,8 +372,12 @@ public sealed class AppAutomationSurfacePluginApiTests
     }
 
     [Fact]
-    public void ObjectChangedReportsIdentReceivedOnTheFirstAppraisalResponseOnly()
+    public void ObjectChangedReportsIdentReceivedOnBothTheFirstResponseAndARefresh()
     {
+        // AcceptAppraisalResponse now raises AppraisalReceived (and so this
+        // ObjectChanged) on every accepted response, not just the first --
+        // a refresh of already-held data can still carry a changed payload
+        // (durability, stack count) that observers need to see.
         var events = new WorldEvents();
         using var runtime = GameRuntimeTestFactory.Create();
         using var surface = new AppAutomationSurface(events);
@@ -384,13 +388,13 @@ public sealed class AppAutomationSurfacePluginApiTests
         runtime.ActionOwner.Transactions.TryRequestAppraisal(
             700u, static _ => { });
         runtime.ActionOwner.Transactions.AcceptAppraisalResponse(700u);
-        // A refresh of already-held appraisal data is not a fresh receipt.
         runtime.ActionOwner.Transactions.AcceptAppraisalResponse(700u);
 
-        Assert.Single(
-            seen,
-            c => c.ObjectId == 700u
-                && c.Kind == PluginObjectChangeKind.IdentReceived);
+        Assert.Equal(
+            2,
+            seen.Count(c =>
+                c.ObjectId == 700u
+                    && c.Kind == PluginObjectChangeKind.IdentReceived));
     }
 
     [Fact]
