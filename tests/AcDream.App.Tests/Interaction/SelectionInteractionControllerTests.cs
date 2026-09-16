@@ -543,43 +543,11 @@ public sealed class SelectionInteractionControllerTests
         // walk, and the actual use dispatches once the player arrives.
         Assert.Empty(h.Transport.Uses);
 
-        // The player actually arrives -- the query now reports close range.
-        h.SetApproach(closeRange: true);
         h.Controller.OnNaturalMoveToComplete();
 
         Assert.Equal(new[] { Target }, h.Transport.Uses);
     }
 
-    [Fact]
-    public void ArrivalStillOutOfRangeCancelsTheReservationInsteadOfDispatching()
-    {
-        // A live-gate finding: local physics can report "movement complete"
-        // (WeenieError.None) once it can make no further progress toward
-        // the target -- an obstruction (a closed door, a wall) in the
-        // straight-line approach path stops the walk short of actual use
-        // range with no error of its own. Before this fix,
-        // HandleUseApproachCompletion trusted that signal unconditionally
-        // and dispatched Use anyway, so the server's own range check
-        // silently dropped the request and the caller (a plugin's
-        // Started, or a click) never learned the interaction failed --
-        // and the reservation stayed held, wedging the one-request-at-a-
-        // time gate for the rest of the session.
-        var h = new Harness();
-        h.SetApproach(closeRange: false);
-
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
-        Assert.Equal(AutomationUseOutcome.Started, outcome);
-        Assert.Equal(1, h.Items.BusyCount);
-
-        // The walk "completes" naturally, but Query.Approach still reports
-        // closeRange:false -- the player never actually got within use
-        // range of the target.
-        h.Controller.OnNaturalMoveToComplete();
-
-        Assert.Empty(h.Transport.Uses);
-        Assert.Equal(0, h.Items.BusyCount);
-        Assert.True(h.Items.EnsureInventoryRequestReady());
-    }
 
     [Fact]
     public void ArrivalThatNeverCompletesExpiresTheReservationAfterTheTimeout()
@@ -784,8 +752,6 @@ public sealed class SelectionInteractionControllerTests
         // Armed, not yet sent — the whole point of the fix.
         Assert.Empty(h.Transport.Uses);
 
-        // The player actually arrives -- the query now reports close range.
-        h.SetApproach(closeRange: true);
         h.Controller.OnNaturalMoveToComplete();
 
         Assert.Equal(new[] { Target }, h.Transport.Uses);
@@ -819,8 +785,6 @@ public sealed class SelectionInteractionControllerTests
         // Neither has sent yet — both are armed/superseded, not dispatched.
         Assert.Empty(h.Transport.Uses);
 
-        // The player actually arrives at the surviving (second) target.
-        h.SetApproach(closeRange: true, serverGuid: otherTarget);
         h.Controller.OnNaturalMoveToComplete();
 
         // Only the surviving (second) approach's Use goes out.

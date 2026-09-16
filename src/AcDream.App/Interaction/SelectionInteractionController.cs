@@ -31,15 +31,22 @@ internal sealed class SelectionInteractionController
 {
     /// <summary>
     /// How long an armed walk-then-use is allowed to wait for the local
-    /// physics to report arrival before this host gives up on it. Retail's
-    /// own MoveToObject has no such bound because it always resolves one
-    /// way or another; this port's local movement can stop making progress
-    /// against an obstruction (a closed door, a wall in the straight-line
-    /// path) without ever calling MoveToComplete or MoveToCancelled, which
-    /// left an armed Use waiting forever and wedged the one-request-at-a-
-    /// time gate for the rest of the session -- this is
-    /// an engineering safeguard against that missing termination signal,
-    /// not a retail timing value.
+    /// physics to report arrival before this host gives up on it.
+    /// DEVIATION (deliberate, not a guess): the ported movement layer
+    /// already tracks consecutive per-tick progress failures
+    /// (MoveToManager.FailProgressCount) for exactly this situation --
+    /// an obstruction (a closed door, a wall) blocking the straight-line
+    /// path to the target -- but that counter is write-only bookkeeping
+    /// with no give-up threshold; a stalled move never calls
+    /// MoveToComplete or MoveToCancelled on its own (confirmed by the
+    /// existing MoveToManager conformance tests, which pin this as
+    /// intentional -- see FailProgressCount_IncrementsOnStall_
+    /// ButNoGiveUpThresholdExists). Left unbounded, an armed Use waits
+    /// forever and wedges the one-request-at-a-time gate for the rest of
+    /// the session. This wall-clock bound is this host's own recovery
+    /// for a case the underlying movement layer has no signal for at
+    /// all -- it belongs in the divergence register, not read as a
+    /// retail timing value.
     /// </summary>
     internal const long PendingUseArrivalTimeoutMs = 15_000;
 
@@ -789,26 +796,18 @@ internal sealed class SelectionInteractionController
             return;
         }
 
-        // The walk reported arrival, but the local physics can report
-        // "movement complete" once it can make no further progress toward
-        // the target -- an obstruction (a closed door, a wall) in the
-        // straight-line approach path stops the walk short of actual use
-        // range with no error of its own. Dispatching Use from there sends
-        // a request the server's own range check silently drops, so the
-        // caller (a plugin's Started outcome, or a click) never learns the
-        // interaction failed and the reservation would otherwise wait
-        // forever for a completion that already happened. Re-verify the
-        // player is actually within use range before sending.
-        if (!_query.TryGetApproach(pending.ServerGuid, out InteractionApproach arrived)
-            || !arrived.IsCloseRange)
-        {
-            pending.Reservation?.CancelBeforeDispatch();
-            Console.WriteLine(
-                $"[interaction] use guid=0x{pending.ServerGuid:X8} arrival short of use range -- refused");
-            _toast?.Invoke("You are too far away to do that.");
-            return;
-        }
-
+        // NOTE: an earlier version of this method re-verified use range
+        // here via a fresh _query.TryGetApproach(...).IsCloseRange check
+        // before dispatching. Live testing proved that check wrong: it
+        // compares raw center-to-center 2D distance against UseRadius with
+        // no collision-radius allowance, while the approach's own arrival
+        // criterion (MoveToManager's cylinder-aware distance, keyed off
+        // the same UseRadius) is more lenient. The mismatch produced false
+        // refusals on targets the player had genuinely just arrived at --
+        // reproduced live on a corpse still in melee range immediately
+        // after the kill. A natural completion (accepted == true) already
+        // means the approach's own criterion was satisfied; trust it
+        // rather than re-deriving a second, inconsistent one here.
         RuntimeInteractionDispatchResult result =
             _transactions.TryDispatchUse(
                 pending.ServerGuid,
