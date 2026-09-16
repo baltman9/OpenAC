@@ -152,6 +152,8 @@ using var automation = new AcDream.App.Plugins.AppAutomationSurface(
         "plugin-peers")),
     runtimeOptions.PluginTags);
 var lootClassifiers = new AcDream.Core.Plugins.PluginLootClassifierRegistry();
+var hotkeyRegistry = new AcDream.App.Input.AppHotkeyRegistry(
+    Path.Combine(applicationPaths.ConfigDirectory, "plugin-hotkeys.json"));
 using var window = new GameWindow(
     runtimeOptions,
     worldGameState,
@@ -159,7 +161,8 @@ using var window = new GameWindow(
     uiRegistry,
     graphicalPlatform,
     automation,
-    renderPackRegistry);
+    renderPackRegistry,
+    hotkeyRegistry);
 var host = new AppPluginHost(
     new SerilogAdapter(Log.Logger),
     worldGameState,
@@ -175,7 +178,8 @@ var host = new AppPluginHost(
         runtimeOptions.VtankProfileDirectoryOverride
             ?? VtankProfilesDefault.Resolve(applicationPaths.DataDirectory)),
     new AcDream.App.Plugins.WindowPluginClipboard(
-        () => window.ClipboardKeyboard));
+        () => window.ClipboardKeyboard),
+    hotkeyRegistry);
 GraphicalPluginSession pluginSession = GraphicalPluginSession.Create(
     applicationPaths,
     runtimeOptions.Plugins,

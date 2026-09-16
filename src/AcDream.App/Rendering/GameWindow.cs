@@ -264,6 +264,7 @@ public sealed class GameWindow :
     private AcDream.App.World.LiveEntityLivenessController? _liveEntityLiveness;
 
     private readonly AcDream.App.Plugins.AppAutomationSurface? _automation;
+    private readonly AcDream.App.Input.AppHotkeyRegistry? _hotkeyRegistry;
     private readonly GameRuntime _runtime;
     private readonly IDisposable _runtimeHostLease;
     private RuntimeCommunicationState _runtimeCommunication =>
@@ -459,12 +460,14 @@ public sealed class GameWindow :
         AcDream.App.Plugins.BufferedUiRegistry? uiRegistry,
         GraphicalHostPlatformServices platformServices,
         AcDream.App.Plugins.AppAutomationSurface? automation = null,
-        AcDream.App.Plugins.BufferedRenderPackRegistry? renderPackRegistry = null)
+        AcDream.App.Plugins.BufferedRenderPackRegistry? renderPackRegistry = null,
+        AcDream.App.Input.AppHotkeyRegistry? hotkeyRegistry = null)
     {
         _options = options ?? throw new System.ArgumentNullException(nameof(options));
         AcDream.Core.Rendering.RenderingDiagnostics.DumpWalkTranscriptEnabled =
             options.DumpWalkTranscript;
         _automation = automation;
+        _hotkeyRegistry = hotkeyRegistry;
         _statusWriter = new SessionStatusWriter(options.StatusFilePath);
         _platformServices = platformServices
             ?? throw new ArgumentNullException(nameof(platformServices));
@@ -715,8 +718,12 @@ public sealed class GameWindow :
         PublishCompositionOwner(ref _mouseLookCursor, value, "mouse-look cursor");
 
     void IGameWindowHostInputCameraPublication.PublishInputDispatcher(
-        AcDream.UI.Abstractions.Input.InputDispatcher value) =>
+        AcDream.UI.Abstractions.Input.InputDispatcher value)
+    {
         PublishCompositionOwner(ref _inputDispatcher, value, "input dispatcher");
+        if (_hotkeyRegistry is not null && _kbSource is not null)
+            _hotkeyRegistry.Bind(_kbSource, _keyBindings, value);
+    }
 
     void IGameWindowHostInputCameraPublication.PublishCameraController(
         CameraController value) =>
