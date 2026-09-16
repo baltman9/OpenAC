@@ -215,4 +215,24 @@ public class BufferedUiRegistryTests
         Assert.Throws<ArgumentNullException>(() =>
             registry.BindClientWindowControl(True, True, True, null!));
     }
+
+    [Fact]
+    public void UnbindClientWindowControl_ClearsAllFourDelegates()
+    {
+        var registry = new BufferedUiRegistry();
+        registry.BindClientWindowControl(
+            toggle: _ => true,
+            show: _ => true,
+            hide: _ => true,
+            isVisible: _ => true);
+
+        Assert.True(registry.ToggleClientWindow(PluginClientWindow.Inventory));
+
+        registry.UnbindClientWindowControl();
+
+        Assert.False(registry.ToggleClientWindow(PluginClientWindow.Inventory));
+        Assert.False(registry.ShowClientWindow(PluginClientWindow.Inventory));
+        Assert.False(registry.HideClientWindow(PluginClientWindow.Inventory));
+        Assert.False(registry.IsClientWindowVisible(PluginClientWindow.Inventory));
+    }
 }

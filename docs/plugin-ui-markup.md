@@ -247,8 +247,8 @@ bool isOpen = host.Ui.IsClientWindowVisible(PluginClientWindow.Spellbook);
 `PluginClientWindow` lists the retained windows a player can open this way:
 `Inventory`, `Character`, `CharacterInformation`, `Spellbook`, `Map`,
 `Options`, `Social`, `Journal`, `PositiveEffects`, `NegativeEffects`,
-`LinkStatus`, `Vitae`, `Radar`, and `KeyboardConfig`. Every method returns
-`false` on a no-window host or for a window this build does not mount --
+`LinkStatus`, `Vitae`, and `Radar`. Every method returns `false` on a
+no-window host or for a window this build does not mount --
 there is no separate "unsupported" signal to check first.
 
 This is unrelated to a plugin's own `AddPanel`/`RegisterPanel` windows: it

@@ -72,6 +72,22 @@ public sealed class BufferedUiRegistry : IScopedUiRegistry
         }
     }
 
+    /// <summary>
+    /// Unbinds the client-window delegates so a disposed RetailUiRuntime
+    /// cannot be invoked through a stale closure once a new one mounts
+    /// (for example across a reconnect). Idempotent.
+    /// </summary>
+    internal void UnbindClientWindowControl()
+    {
+        lock (_gate)
+        {
+            _toggleClientWindow = null;
+            _showClientWindow = null;
+            _hideClientWindow = null;
+            _isClientWindowVisible = null;
+        }
+    }
+
     public bool ToggleClientWindow(PluginClientWindow window)
     {
         Func<PluginClientWindow, bool>? toggle;

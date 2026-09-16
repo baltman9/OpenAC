@@ -77,9 +77,9 @@ public sealed class ScopedUiRegistryClientWindowTests
         var host = new StubHost(inner);
         var scoped = new ScopedPluginHost(host, "example.plugin", "Example");
 
-        Assert.False(scoped.Ui.ToggleClientWindow(PluginClientWindow.KeyboardConfig));
-        Assert.False(scoped.Ui.ShowClientWindow(PluginClientWindow.KeyboardConfig));
-        Assert.False(scoped.Ui.HideClientWindow(PluginClientWindow.KeyboardConfig));
+        Assert.False(scoped.Ui.ToggleClientWindow(PluginClientWindow.Journal));
+        Assert.False(scoped.Ui.ShowClientWindow(PluginClientWindow.Journal));
+        Assert.False(scoped.Ui.HideClientWindow(PluginClientWindow.Journal));
 
         scoped.Dispose();
     }

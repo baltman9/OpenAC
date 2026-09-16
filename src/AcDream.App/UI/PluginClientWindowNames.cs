@@ -27,7 +27,6 @@ public static class PluginClientWindowNames
             PluginClientWindow.LinkStatus => WindowNames.LinkStatus,
             PluginClientWindow.Vitae => WindowNames.Vitae,
             PluginClientWindow.Radar => WindowNames.Radar,
-            PluginClientWindow.KeyboardConfig => WindowNames.KeyboardConfig,
             _ => string.Empty,
         };
         return name.Length != 0;

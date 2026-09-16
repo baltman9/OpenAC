@@ -1237,18 +1237,17 @@ public sealed class RetailUiRuntime : IDisposable
     /// windows through the same seam an <see cref="AcDream.UI.Abstractions.Input.InputAction"/>
     /// keybind uses. Unknown/unavailable windows return <c>false</c>.
     /// </summary>
-    public bool ToggleClientWindow(AcDream.Plugin.Abstractions.PluginClientWindow window)
+    public bool ToggleClientWindow(PluginClientWindow window)
         => PluginClientWindowNames.TryGetName(window, out string name) && ToggleWindow(name);
 
-    public bool ShowClientWindow(AcDream.Plugin.Abstractions.PluginClientWindow window)
+    public bool ShowClientWindow(PluginClientWindow window)
         => PluginClientWindowNames.TryGetName(window, out string name) && ShowWindow(name);
 
-    public bool HideClientWindow(AcDream.Plugin.Abstractions.PluginClientWindow window)
+    public bool HideClientWindow(PluginClientWindow window)
         => PluginClientWindowNames.TryGetName(window, out string name) && HideWindow(name);
 
-    public bool IsClientWindowVisible(AcDream.Plugin.Abstractions.PluginClientWindow window)
+    public bool IsClientWindowVisible(PluginClientWindow window)
         => PluginClientWindowNames.TryGetName(window, out string name) && IsWindowVisible(name);
-
 
     public void SyncToolbarWindowButtons()
     {
@@ -4958,6 +4957,7 @@ public sealed class RetailUiRuntime : IDisposable
                 }
                 if (SalvageController is { } salvage)
                     _bindings.Inventory.ItemInteraction.PolicyActionRequested -= salvage.HandlePolicyAction;
+                _bindings.Plugins?.UnbindClientWindowControl();
             },
             () => _itemConfirmationController?.Dispose(),
             () =>

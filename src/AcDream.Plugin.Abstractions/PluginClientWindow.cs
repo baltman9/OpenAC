@@ -21,5 +21,4 @@ public enum PluginClientWindow
     LinkStatus,
     Vitae,
     Radar,
-    KeyboardConfig,
 }
