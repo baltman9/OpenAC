@@ -88,12 +88,13 @@ public sealed class SelectionInteractionControllerTests
     {
         private uint _sequence;
         public bool IsInWorld { get; set; } = true;
+        public bool RefuseSend { get; set; }
         public List<uint> Uses { get; } = new();
         public List<(uint Item, uint Container, int Placement)> Pickups { get; } = new();
 
         public bool TrySendUse(uint serverGuid, out uint sequence)
         {
-            if (!IsInWorld)
+            if (!IsInWorld || RefuseSend)
             {
                 sequence = 0u;
                 return false;
@@ -564,6 +565,114 @@ public sealed class SelectionInteractionControllerTests
 
         Assert.Equal(AutomationUseOutcome.NotUseable, outcome);
         Assert.Empty(h.Movement.Approaches);
+        Assert.Empty(h.Transport.Uses);
+    }
+
+    [Fact]
+    public void AutomationUseThrottleRefusesASecondCallWithinTheWindow()
+    {
+        var h = new Harness();
+        h.SetApproach(closeRange: true);
+
+        AutomationUseOutcome first = h.Controller.TryUseForAutomation(Target);
+        Assert.Equal(AutomationUseOutcome.Started, first);
+        Assert.Single(h.Transport.Uses);
+
+        // A second automation call made immediately after (well inside
+        // RuntimeInteractionTransactionState.RetailUseThrottleMs) must be
+        // refused by the same throttle a click is held to, not bypass it.
+        AutomationUseOutcome second = h.Controller.TryUseForAutomation(Target);
+
+        Assert.Equal(AutomationUseOutcome.Busy, second);
+        Assert.Single(h.Transport.Uses);
+    }
+
+    [Fact]
+    public void AutomationUseIsBusyWhenAnInventoryRequestIsAlreadyInFlight()
+    {
+        var h = new Harness();
+        h.SetApproach(closeRange: true);
+        // Occupy the one-request-at-a-time inventory gate directly (not
+        // through TryUseForAutomation), so this isolates the inventory
+        // gate from the use-throttle gate above.
+        ItemUseRequestReservation blocking =
+            h.Items.RuntimeTransactions.BeginUseRequestReservation();
+
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+
+        Assert.Equal(AutomationUseOutcome.Busy, outcome);
+        Assert.Empty(h.Transport.Uses);
+
+        blocking.CancelBeforeDispatch();
+    }
+
+    [Fact]
+    public void AutomationUseIncrementsBusyCountUntilTheServerConfirmsCompletion()
+    {
+        var h = new Harness();
+        h.SetApproach(closeRange: true);
+
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+
+        Assert.Equal(AutomationUseOutcome.Started, outcome);
+        Assert.Equal(1, h.Items.BusyCount);
+
+        h.Items.CompleteUse(0u);
+
+        Assert.Equal(0, h.Items.BusyCount);
+    }
+
+    [Fact]
+    public void AutomationUseReportsBusyInsteadOfCancellingAnInFlightApproach()
+    {
+        var h = new Harness();
+        h.SetApproach(closeRange: false);
+        h.Controller.SendUse(Target);
+        PlayerInteractionMovementSinkAssertSingleApproach(h, Target);
+        Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
+
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+
+        Assert.Equal(AutomationUseOutcome.Busy, outcome);
+        // The original click-driven approach is still armed, not
+        // cancelled by the automation call.
+        Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
+        Assert.Single(h.Movement.Approaches);
+    }
+
+    [Fact]
+    public void AutomationUseOfAnotherPlayerIsRefusedInsteadOfOpeningASecureTrade()
+    {
+        var h = new Harness();
+        const uint otherPlayer = 0x5000_0099u;
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = otherPlayer,
+            Type = ItemType.Creature,
+            PublicWeenieBitfield = (uint)PublicWeenieFlags.Player,
+        });
+        var tradesRequested = new List<uint>();
+        h.Items.SecureTradeRequested += (guid, _) => tradesRequested.Add(guid);
+
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(otherPlayer);
+
+        Assert.Equal(AutomationUseOutcome.NotUseable, outcome);
+        Assert.Empty(tradesRequested);
+        Assert.Empty(h.Transport.Uses);
+    }
+
+    [Fact]
+    public void AutomationUseMapsATransportSendRejectionToUnavailableNotBusy()
+    {
+        var h = new Harness();
+        h.SetApproach(closeRange: true);
+        // In-world, but the transport itself refuses to send -- distinct
+        // from NotInWorld and from the busy gates above.
+        h.Transport.RefuseSend = true;
+
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+
+        Assert.Equal(AutomationUseOutcome.Unavailable, outcome);
         Assert.Empty(h.Transport.Uses);
     }
 

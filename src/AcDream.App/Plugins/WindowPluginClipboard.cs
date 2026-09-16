@@ -10,14 +10,14 @@ namespace AcDream.App.Plugins;
 /// </summary>
 public sealed class WindowPluginClipboard(
     Func<IKeyboard?> keyboard,
-    Func<MainThreadDispatchQueue?> dispatch)
+    Func<MainThreadDispatchQueue> dispatch)
     : IPluginClipboard
 {
     private static readonly TimeSpan WriteTimeout = TimeSpan.FromSeconds(1);
 
     private readonly Func<IKeyboard?> _keyboard =
         keyboard ?? throw new ArgumentNullException(nameof(keyboard));
-    private readonly Func<MainThreadDispatchQueue?> _dispatch =
+    private readonly Func<MainThreadDispatchQueue> _dispatch =
         dispatch ?? throw new ArgumentNullException(nameof(dispatch));
 
     public bool TrySetText(string text)
@@ -48,6 +48,15 @@ public sealed class WindowPluginClipboard(
                 // which the dispatch queue below exists to prevent). Read
                 // back what actually landed instead of trusting the
                 // setter.
+                //
+                // This read-back is only a meaningful check on Windows.
+                // X11 and Wayland clipboards are ownership-based: as long
+                // as this process still owns the selection, GLFW's getter
+                // just returns its own last-set string back, regardless of
+                // whether anything reached the system clipboard -- so a
+                // Linux build cannot detect the same silent-failure class
+                // this way. That is an existing platform gap, not one this
+                // change introduces or changes.
                 written = device.ClipboardText == text;
             }
             catch
@@ -57,15 +66,10 @@ public sealed class WindowPluginClipboard(
             }
         }
 
-        MainThreadDispatchQueue? queue = _dispatch();
-        if (queue is null)
-        {
-            // No dispatch queue wired yet (very early startup). GLFW
-            // clipboard calls are main-thread-only, so this inline path is
-            // only correct if the caller already is on that thread.
-            Write();
-            return written;
-        }
-        return queue.InvokeAndWait(Write, WriteTimeout) && written;
+        // GLFW clipboard calls are main-thread-only; a plugin's own event
+        // handlers can run on whatever thread the plugin chose, so this
+        // always marshals through the dispatch queue rather than trusting
+        // the caller to already be on the right thread.
+        return _dispatch().InvokeAndWait(Write, WriteTimeout) && written;
     }
 }

@@ -18,6 +18,13 @@ internal enum AutomationUseOutcome
     Busy,
     NotUseable,
     NotInWorld,
+
+    /// <summary>
+    /// The outbound send itself was rejected by the transport layer (not
+    /// a busy gate, not an unusable target) -- distinct from Busy so a
+    /// caller does not read it as "try again shortly".
+    /// </summary>
+    Unavailable,
 }
 
 internal sealed class SelectionInteractionController
@@ -395,27 +402,64 @@ internal sealed class SelectionInteractionController
     /// walk-then-use path a click on that object takes -- an out-of-range
     /// target gets a queued approach that dispatches the use on arrival --
     /// instead of the inventory-only path the item automation surface uses
-    /// for owned items.
+    /// for owned items. Unlike a click, this can arrive on any thread at
+    /// any cadence a plugin chooses, so it is held to every gate a click
+    /// (or an owned item's own automation entry point) is held to: the
+    /// use-throttle, the one-request-at-a-time inventory gate, and "don't
+    /// preempt whatever is already in flight" rather than cancelling it.
     /// </summary>
     public AutomationUseOutcome TryUseForAutomation(uint serverGuid)
     {
         if (serverGuid == 0u)
             return AutomationUseOutcome.NotUseable;
-        return PerformUse(serverGuid, reservation: null, toast: false, log: false);
+        // A plugin using another player would otherwise silently open a
+        // secure trade (PerformUse's first branch, shared with the click
+        // path) -- refuse it here instead; a player-to-player exchange
+        // goes through the Trade surface, not Use.
+        if (_items.IsPlayerTarget(serverGuid))
+            return AutomationUseOutcome.NotUseable;
+        if (!_items.TryConsumeUseThrottleForAutomation())
+            return AutomationUseOutcome.Busy;
+        if (!_items.EnsureInventoryRequestReady())
+            return AutomationUseOutcome.Busy;
+
+        ItemUseRequestReservation reservation = _items.BeginAutomationUseReservation();
+        return PerformUse(
+            serverGuid,
+            reservation,
+            toast: false,
+            log: false,
+            preemptPending: false);
     }
 
     public void RequestUse(
         uint serverGuid,
         ItemUseRequestReservation? reservation)
-        => PerformUse(serverGuid, reservation, toast: true, log: true);
+        => PerformUse(serverGuid, reservation, toast: true, log: true, preemptPending: true);
 
     private AutomationUseOutcome PerformUse(
         uint serverGuid,
         ItemUseRequestReservation? reservation,
         bool toast,
-        bool log)
+        bool log,
+        bool preemptPending)
     {
-        CancelPendingApproach();
+        if (preemptPending)
+        {
+            // A new SendPickup/RequestUse from the user supersedes
+            // whatever approach was previously armed (G3) -- the newest
+            // click wins.
+            CancelPendingApproach();
+        }
+        else if (_transactions.HasPendingUse || _transactions.HasPendingPickup)
+        {
+            // The automation path never preempts an in-flight approach or
+            // pickup; it reports Busy and leaves whatever is already
+            // queued (a user's own pending click, or an earlier automation
+            // call) alone.
+            reservation?.CancelBeforeDispatch();
+            return AutomationUseOutcome.Busy;
+        }
 
         if (_items.TryOpenSecureTradeWithPlayer(serverGuid))
         {
@@ -483,7 +527,10 @@ internal sealed class SelectionInteractionController
         }
         if (result == RuntimeInteractionDispatchResult.NotUseable)
             return AutomationUseOutcome.NotUseable;
-        return AutomationUseOutcome.Busy;
+        // Rejected: the transport itself refused the send -- distinct from
+        // the busy gates above, so a caller does not read it as "try
+        // again shortly".
+        return AutomationUseOutcome.Unavailable;
     }
 
     public void SendPickup(uint itemGuid, uint destinationContainerId, int placement)

@@ -10,6 +10,7 @@ using AcDream.Core.Selection;
 using AcDream.Core.Spells;
 using AcDream.Core.World;
 using AcDream.Core.CharGen;
+using AcDream.App.Interaction;
 using AcDream.Content;
 using AcDream.Plugin.Abstractions;
 using AcDream.App.Runtime;
@@ -478,6 +479,25 @@ internal sealed class AppAutomationSurface
         lock (_gate)
             _useWorldObject = useWorldObject;
     }
+
+    /// <summary>
+    /// Maps the walk-then-use path's outcome onto the plugin item-command
+    /// vocabulary, kept next to BindWorldObjectUse (rather than inline at
+    /// the composition call site) so the mapping has one home and one
+    /// test.
+    /// </summary>
+    internal static PluginItemCommandResult MapWorldObjectUseOutcome(
+        AutomationUseOutcome outcome) => outcome switch
+    {
+        AutomationUseOutcome.Started =>
+            new PluginItemCommandResult(PluginItemCommandStatus.Started),
+        AutomationUseOutcome.Busy =>
+            new PluginItemCommandResult(PluginItemCommandStatus.Busy),
+        AutomationUseOutcome.NotUseable =>
+            new PluginItemCommandResult(
+                PluginItemCommandStatus.Refused, "That cannot be used."),
+        _ => new PluginItemCommandResult(PluginItemCommandStatus.Unavailable),
+    };
 
     public void BindGhostDeletion(Func<uint, bool> dismissGhost)
     {

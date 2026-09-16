@@ -1069,21 +1069,8 @@ public sealed class GameWindow :
                 _ => InputAction.None,
             }));
         _automation?.BindWorldObjectUse(objectId =>
-            result.SelectionInteractions.TryUseForAutomation(objectId) switch
-            {
-                AcDream.App.Interaction.AutomationUseOutcome.Started =>
-                    new AcDream.Plugin.Abstractions.PluginItemCommandResult(
-                        AcDream.Plugin.Abstractions.PluginItemCommandStatus.Started),
-                AcDream.App.Interaction.AutomationUseOutcome.Busy =>
-                    new AcDream.Plugin.Abstractions.PluginItemCommandResult(
-                        AcDream.Plugin.Abstractions.PluginItemCommandStatus.Busy),
-                AcDream.App.Interaction.AutomationUseOutcome.NotUseable =>
-                    new AcDream.Plugin.Abstractions.PluginItemCommandResult(
-                        AcDream.Plugin.Abstractions.PluginItemCommandStatus.Refused,
-                        "That cannot be used."),
-                _ => new AcDream.Plugin.Abstractions.PluginItemCommandResult(
-                    AcDream.Plugin.Abstractions.PluginItemCommandStatus.Unavailable),
-            });
+            AcDream.App.Plugins.AppAutomationSurface.MapWorldObjectUseOutcome(
+                result.SelectionInteractions.TryUseForAutomation(objectId)));
         _retainedUiGameplayBinding = result.RetainedGameplay;
         _paperdollViewportRenderer = result.PaperdollRenderer;
         _paperdollFramePresenter = result.PaperdollPresenter;

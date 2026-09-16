@@ -1280,14 +1280,27 @@ public sealed class ItemInteractionController : IDisposable
         ClearTargetMode();
     }
 
-    public bool TryOpenSecureTradeWithPlayer(uint targetGuid)
+    /// <summary>
+    /// True when <paramref name="targetGuid"/> is a live, other-player
+    /// object (the "Player" weenie flag, and not this client's own
+    /// player). Shared by TryOpenSecureTradeWithPlayer and the
+    /// world-object automation path, which needs to recognize a player
+    /// target WITHOUT the side effect of opening a trade -- a plugin's
+    /// Use on another player should be refused, not silently start one.
+    /// </summary>
+    public bool IsPlayerTarget(uint targetGuid)
     {
         if (targetGuid == 0u || targetGuid == _playerGuid())
             return false;
         ClientObject? target = _objects.Get(targetGuid);
-        if (target is null
-            || ((PublicWeenieFlags)(target.PublicWeenieBitfield ?? 0u)
-                & PublicWeenieFlags.Player) == 0)
+        return target is not null
+            && ((PublicWeenieFlags)(target.PublicWeenieBitfield ?? 0u)
+                & PublicWeenieFlags.Player) != 0;
+    }
+
+    public bool TryOpenSecureTradeWithPlayer(uint targetGuid)
+    {
+        if (!IsPlayerTarget(targetGuid))
             return false;
 
         if (_inNonCombatMode())
@@ -1434,6 +1447,17 @@ public sealed class ItemInteractionController : IDisposable
 
     private ItemUseRequestReservation BeginUseRequestReservation()
         => _runtimeTransactions.BeginUseRequestReservation();
+
+    /// <summary>
+    /// The same use reservation every inventory-item automation entry
+    /// point takes (TryUseItemForAutomation and friends) before dispatch,
+    /// exposed for the world-object automation path
+    /// (SelectionInteractionController.TryUseForAutomation) so a
+    /// non-owned target's busy-count/cancel-on-failure bookkeeping matches
+    /// a click exactly instead of being skipped.
+    /// </summary>
+    public ItemUseRequestReservation BeginAutomationUseReservation()
+        => BeginUseRequestReservation();
 
     private void ExecutePlacementActions(System.Collections.Generic.IReadOnlyList<ItemPolicyAction> actions)
     {
@@ -1753,6 +1777,14 @@ public sealed class ItemInteractionController : IDisposable
 
     private bool ConsumeUseThrottle()
         => _runtimeTransactions.TryConsumeUseThrottle(_nowMs());
+
+    /// <summary>
+    /// The same use-throttle gate every inventory-item automation entry
+    /// point applies, exposed for the world-object automation path so a
+    /// non-owned target cannot bypass the throttle a click (or an owned
+    /// item's automation) is held to.
+    /// </summary>
+    public bool TryConsumeUseThrottleForAutomation() => ConsumeUseThrottle();
 
     private static bool IsContainer(ClientObject item)
         => item.ContainerTypeHint != 0

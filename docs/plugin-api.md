@@ -136,6 +136,15 @@ use. A host without a window has no clipboard and returns false, as does a
 failed attempt, so always handle false rather than assuming the copy
 happened.
 
+`TrySetText` verifies the write by reading the clipboard back before
+reporting success, so a silent platform failure (the graphical backend's
+GLFW clipboard call can no-op without an exception) is reported as
+`false` rather than a false `true`. That verification is only meaningful
+on Windows: X11 and Wayland treat the clipboard as ownership-based, so as
+long as this process still owns the selection, the getter just returns
+its own last-set string back regardless of whether anything reached a
+real system clipboard.
+
 ## Objects
 
 ```csharp
@@ -253,12 +262,30 @@ the right path automatically:
   arrives. `Started` here means the walk (or the immediate use, if already
   in range) began, not that a container is open yet; watch
   `IEvents.ContainerOpened` or the vendor automation's own `Opened` event
-  for that. `Refused` means the object isn't useable at all (for example,
-  a target that requires being appraised first); `Busy` means an inventory
-  or approach request was already in flight.
+  for that.
+
+The world-object path is held to the same gates a click (or an owned
+item's own automation) is held to, rather than bypassing them:
+
+- `Refused` means the object isn't useable at all (for example, a target
+  that requires being appraised first), or is another player — a
+  player-to-player exchange goes through the Trade surface, not Use.
+- `Busy` means the use-throttle refused it, an inventory request was
+  already in flight, or an approach/use was already pending — the pending
+  one is left alone rather than cancelled.
+- `Unavailable` means the send itself was rejected by the transport,
+  distinct from `Busy`'s "try again shortly".
 
 `Apply(objectId, targetObjectId)` — using one item on another — is
 unaffected by this: it still requires `objectId` to be an owned item.
+
+Automation item commands (`Items.Use`/`Apply`/`MoveToContainer`/... and
+this world-object path) are not thread-safe against each other or against
+the client's own input: issue them from the same thread `IEvents.Tick`
+fires on, exactly like every other automation entry point. A plugin that
+calls them from its own background thread or an async continuation is
+mutating movement/inventory/transport state the client's main thread also
+touches, with no lock between the two.
 
 ### Weapon and armor profiles
 

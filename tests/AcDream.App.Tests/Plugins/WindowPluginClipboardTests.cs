@@ -14,7 +14,16 @@ public sealed class WindowPluginClipboardTests
         bool accepted = clipboard.TrySetText("hello");
 
         Assert.True(accepted);
-        Assert.Equal("hello", keyboard.ClipboardText);
+        // StoredText is read directly, not through the interface's
+        // ClipboardText accessor WindowPluginClipboard itself calls -- an
+        // independent check that the write actually reached the fake's
+        // backing store, not just that the same field it wrote read back
+        // as itself. GetCount pins that the read-back verification really
+        // ran (at least once for the write, once for the confirming read)
+        // rather than TrySetText returning true some other way.
+        Assert.Equal("hello", keyboard.StoredText);
+        Assert.Equal(1, keyboard.SetCount);
+        Assert.True(keyboard.GetCount >= 1);
     }
 
     [Fact]
@@ -30,6 +39,7 @@ public sealed class WindowPluginClipboardTests
         bool accepted = clipboard.TrySetText("hello");
 
         Assert.False(accepted);
+        Assert.Equal(string.Empty, keyboard.StoredText);
     }
 
     [Fact]
@@ -80,12 +90,12 @@ public sealed class WindowPluginClipboardTests
         // Give the worker a moment to actually reach the blocking call;
         // the queue should still be empty of completed work.
         Thread.Sleep(50);
-        Assert.Equal(string.Empty, keyboard.ClipboardText);
+        Assert.Equal(string.Empty, keyboard.StoredText);
 
         queue.Drain();
 
         Assert.True(writeObserved.Wait(TimeSpan.FromSeconds(5)));
         Assert.True(result);
-        Assert.Equal("from-worker", keyboard.ClipboardText);
+        Assert.Equal("from-worker", keyboard.StoredText);
     }
 }

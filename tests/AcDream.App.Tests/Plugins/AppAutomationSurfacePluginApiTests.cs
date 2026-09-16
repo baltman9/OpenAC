@@ -1,3 +1,4 @@
+using AcDream.App.Interaction;
 using AcDream.App.Plugins;
 using AcDream.Core.Chat;
 using AcDream.Core.Combat;
@@ -16,6 +17,40 @@ namespace AcDream.App.Tests.Plugins;
 
 public sealed class AppAutomationSurfacePluginApiTests
 {
+    [Fact]
+    public void MapWorldObjectUseOutcomeMapsEveryOutcomeToItsPluginStatus()
+    {
+        Assert.Equal(
+            PluginItemCommandStatus.Started,
+            AppAutomationSurface.MapWorldObjectUseOutcome(
+                AutomationUseOutcome.Started).Status);
+        Assert.Equal(
+            PluginItemCommandStatus.Busy,
+            AppAutomationSurface.MapWorldObjectUseOutcome(
+                AutomationUseOutcome.Busy).Status);
+        Assert.Equal(
+            PluginItemCommandStatus.Refused,
+            AppAutomationSurface.MapWorldObjectUseOutcome(
+                AutomationUseOutcome.NotUseable).Status);
+        Assert.Equal(
+            PluginItemCommandStatus.Unavailable,
+            AppAutomationSurface.MapWorldObjectUseOutcome(
+                AutomationUseOutcome.NotInWorld).Status);
+        Assert.Equal(
+            PluginItemCommandStatus.Unavailable,
+            AppAutomationSurface.MapWorldObjectUseOutcome(
+                AutomationUseOutcome.Unavailable).Status);
+    }
+
+    [Fact]
+    public void MapWorldObjectUseOutcomeGivesNotUseableAHumanNotice()
+    {
+        PluginItemCommandResult result = AppAutomationSurface.MapWorldObjectUseOutcome(
+            AutomationUseOutcome.NotUseable);
+
+        Assert.Equal("That cannot be used.", result.Notice);
+    }
+
     [Fact]
     public void UsingAWorldObjectThePluginDoesNotOwnRoutesThroughTheWalkToUsePath()
     {
