@@ -1,4 +1,4 @@
-# Plugin API: chat, lifecycle, spells, storage and clipboard
+# Plugin API: chat, lifecycle, spells, storage, clipboard, objects, confirmations, session and loot
 
 Everything here lives in `AcDream.Plugin.Abstractions` and has a default
 implementation, so a plugin written against an older build still compiles and
@@ -136,12 +136,114 @@ use. A host without a window has no clipboard and returns false, as does a
 failed attempt, so always handle false rather than assuming the copy
 happened.
 
+## Objects
+
+```csharp
+host.Events.ObjectChanged += change =>
+{
+    // change.ObjectId, change.Kind
+};
+host.Events.ContainerOpened += containerObjectId => { /* the corpse/chest/crate now open */ };
+host.Events.ContainerClosed += containerObjectId => { /* it just closed */ };
+```
+
+`ObjectChanged` fires for every change to a world object the client is
+tracking, on the same thread as `Tick`, in the host's own delivery order.
+`PluginObjectChange.Kind` is one of:
+
+| Kind | Meaning |
+|---|---|
+| `Created` | The object entered the client's object table for the first time. |
+| `Updated` | A non-positional property or other field changed. |
+| `IdentReceived` | The client took delivery of appraisal data for the object. Fires once per fresh appraisal, not on a refresh of data already held. |
+| `Moved` | The object's position changed enough to move it into a different cell. An in-cell position update that does not cross a cell boundary reports as `Updated` instead. |
+| `Released` | The object left the client's object table (deleted, withdrawn, or an owned item leaving inventory). |
+
+A bulk container reset carries no single object id and is not reported.
+
+`ContainerOpened` / `ContainerClosed` track the client's one open external
+container — a corpse, a chest, a housing storage crate. A vendor's shop pane
+is a separate surface (not covered by this event) and does not raise it.
+Replacing one open container with another before it closes still reports a
+`ContainerClosed` for the one that was open.
+
+## Confirmations
+
+```csharp
+host.Events.ConfirmationRequested += confirmation =>
+{
+    // confirmation.ContextId, confirmation.Type, confirmation.Text
+    host.Automation.Dialogs.Answer(confirmation.ContextId, accept: true);
+};
+```
+
+`ConfirmationRequested` fires whenever the server asks the client to show a
+yes/no confirmation dialog. `Type` is the server's raw wire value; the only
+one with fixed, known meaning is `5`, the crafting-percent confirmation
+("this has a chance to fail, continue?"). Every other value is server-defined
+and only distinguishable by `Text`.
+
+`Dialogs.Answer(contextId, accept)` answers the dialog exactly as the
+client's own Yes/No buttons would — it drives the same response builder, so
+the server sees the identical reply. It returns `false` when there is no
+outstanding dialog with that context id (already answered, timed out, or the
+id does not match).
+
+## Session
+
+```csharp
+if (!host.Automation.Login.Logout())
+{
+    // no in-world session to log out of
+}
+```
+
+`Login.Logout()` runs the client's own graceful logout — the same route the
+UI's logout control uses. It returns `false` when the surface is not
+`IsAvailable` (no in-world session); it does not report the outcome of the
+logout itself beyond having sent the request.
+
+## Loot
+
+Beyond the live-profile `Classify` a registered `IPluginLootClassifier`
+already provides, two more members exist:
+
+```csharp
+bool blocked = host.LootClassifiers.TryNeedsIdentification(classifierId, context);
+
+bool found = host.LootClassifiers.TryClassifyWithProfile(
+    classifierId, "Vendor", context, out PluginLootClassification classification);
+```
+
+`NeedsIdentification` (and its registry forwarder `TryNeedsIdentification`)
+reports whether an item cannot yet be classified with confidence: it lacks
+appraisal data and at least one active rule needs an appraised property to
+evaluate. A plugin can use this to hold off deciding until an identify
+request completes.
+
+`TryClassifyWithProfile` — both the classifier's own member and the
+registry's forwarder of the same name — classifies against a *named, stored*
+profile instead of the classifier's live one, such as VTank's "vendor" and
+"trader" list files. It returns `false` when the named profile does not
+exist; a classifier with no notion of named profiles defaults to the same.
+
 ## Headless
 
 A headless host implements this same contract, with a few members left as
 placeholders rather than wired to real state:
 
-- `ServerPopulation` is always `-1`.
-- `Spells.All` and `Spells.TryFindByName` are always empty / always miss.
+- `Character`, `Spells`, and `Magic` are entirely no-op: every member of
+  those three returns its inert default (`ServerPopulation` is always `-1`,
+  `Spells.All` / `TryFindByName` are always empty / always miss, `Magic`
+  never reports casting or accepts a cast request). A headless plugin that
+  needs character or spell state reads it from the bot policy layer, not
+  from this surface.
 - `CaptureMessages` is unimplemented; use `Received` instead, which does
   work.
+- `Objects`, `ContainerOpened`/`ContainerClosed`, `ConfirmationRequested`,
+  and `Login.Logout` are real and wired to the same runtime state and
+  session-command routes the graphical host uses -- these are not
+  placeholders.
+- `Dialogs.Answer` is real when the headless session was configured with a
+  confirmation route; otherwise it returns `false` like any host with
+  nothing bound.
