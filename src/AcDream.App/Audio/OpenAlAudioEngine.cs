@@ -15,7 +15,7 @@ internal interface IWorldAudioQuiescence
 public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescence
 {
     // ── Backends ─────────────────────────────────────────────────────────────
-    private AL? _al;
+    private IOpenAlResourceApi? _api;
     private OpenAlResourceLifetime? _resources;
     private bool _available;
     private bool _disposed;
@@ -46,8 +46,8 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         set
         {
             _muted = value;
-            if (_available && _al is not null)
-                _al.SetListenerProperty(ListenerFloat.Gain, value ? 0f : 1f);
+            if (_available && _api is not null)
+                _api.SetListenerGain(value ? 0f : 1f);
         }
     }
 
@@ -131,7 +131,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
             return;
         }
 
-        _al = api.AudioApi;
+        _api = api;
         _resources = new OpenAlResourceLifetime(api);
         try
         {
@@ -205,7 +205,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
                 cleanupFailure);
         }
 
-        _al = null;
+        _api = null;
     }
 
     /// <summary>The mixer settings in force.</summary>
@@ -257,7 +257,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         float volume,
         float priority)
     {
-        if (_worldAudioSuspended || FocusMuted || !_available || _al is null) return false;
+        if (_worldAudioSuspended || FocusMuted || !_available || _api is null) return false;
 
         RetailVoiceMix mix = RetailSoundMixer.Mix(
             _listenerPosition,
@@ -320,13 +320,13 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
     /// </summary>
     private void Speak(WorldVoicePool.Voice voice, uint buffer, float gain, int pan)
     {
-        _al!.SourceStop(voice.SourceId);
-        _al.SetSourceProperty(voice.SourceId, SourceInteger.Buffer, 0);  // detach old
-        _al.SetSourceProperty(voice.SourceId, SourceInteger.Buffer, (int)buffer);
-        _al.SetSourceProperty(voice.SourceId, SourceFloat.Gain, gain);
+        _api!.StopSource(voice.SourceId);
+        _api.AttachBuffer(voice.SourceId, 0);  // detach old
+        _api.AttachBuffer(voice.SourceId, buffer);
+        _api.SetSourceGain(voice.SourceId, gain);
         ApplyPan(voice.SourceId, pan);
-        _al.SetSourceProperty(voice.SourceId, SourceBoolean.Looping, false);
-        _al.SourcePlay(voice.SourceId);
+        _api.SetSourceLooping(voice.SourceId, false);
+        _api.PlaySource(voice.SourceId);
     }
 
     private long _lastProbeDumpMs;
@@ -336,7 +336,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
     // most twice a second.
     private void ProbeVoices(string what, uint waveId, uint ownerId)
     {
-        if (!AudioDiagnostics.ProbeVoicesEnabled || _al is null) return;
+        if (!AudioDiagnostics.ProbeVoicesEnabled || _api is null) return;
         long now = Environment.TickCount64;
         if (now - _lastProbeDumpMs < 500) return;
         _lastProbeDumpMs = now;
@@ -347,10 +347,10 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         for (int i = 0; i < _voices.Count; i++)
         {
             WorldVoicePool.Voice v = _voices[i];
-            _al.GetSourceProperty(v.SourceId, GetSourceInteger.SourceState, out int state);
-            _al.GetSourceProperty(v.SourceId, SourceFloat.SecOffset, out float offset);
+            string state = _api.IsSourcePlaying(v.SourceId) ? "Playing" : "Stopped";
+            float offset = _api.SourceSecondsOffset(v.SourceId);
             sb.Append(FormattableString.Invariant(
-                $" [{i}] wave=0x{v.WaveId:X8} owner=0x{v.OwnerId:X8}{(v.IsInterface ? " ui" : "")} prio={v.Priority:0.00} state={(SourceState)state} at={offset:0.00}s age={now - v.SpokeAtMs}ms"));
+                $" [{i}] wave=0x{v.WaveId:X8} owner=0x{v.OwnerId:X8}{(v.IsInterface ? " ui" : "")} prio={v.Priority:0.00} state={state} at={offset:0.00}s age={now - v.SpokeAtMs}ms"));
         }
         Console.WriteLine(sb.ToString());
     }
@@ -359,10 +359,8 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
     {
         float position = RetailSoundMixer.StereoPositionFromPan(pan);
         float azimuth = position * MaxPanAzimuthDegrees * (MathF.PI / 180f);
-        _al!.SetSourceProperty(sourceId, SourceBoolean.SourceRelative, true);
-        _al.SetSourceProperty(
+        _api!.PlaceSourceRelative(
             sourceId,
-            SourceVector3.Position,
             MathF.Sin(azimuth),
             0f,
             -MathF.Cos(azimuth));
@@ -408,7 +406,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
     public bool PlayUiWave(
         uint waveId, WaveData wave, float volume, float priority, bool isInterfaceSound = true)
     {
-        if (FocusMuted || !_available || _al is null) return false;
+        if (FocusMuted || !_available || _api is null) return false;
         if (isInterfaceSound && !InterfaceEnabled) return false;
 
         if (!RetailSoundMixer.TryGetAttenuation(0f, volume, EffectMaster, out int decibels))
@@ -444,7 +442,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         float volume,
         float priority)
     {
-        if (_worldAudioSuspended || FocusMuted || !_available || _al is null) return false;
+        if (_worldAudioSuspended || FocusMuted || !_available || _api is null) return false;
 
         RetailVoiceMix mix = RetailSoundMixer.Mix(
             _listenerPosition,
@@ -478,7 +476,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         float volume,
         float priority)
     {
-        if (_worldAudioSuspended || FocusMuted || !_available || _al is null) return false;
+        if (_worldAudioSuspended || FocusMuted || !_available || _api is null) return false;
 
         if (!RetailSoundMixer.TryGetAttenuation(0f, volume, AmbientMaster, out int decibels))
             return false;
@@ -508,7 +506,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
 
     private uint EnsureBuffer(uint waveId, WaveData wave)
     {
-        if (!_available || _al is null) return 0;
+        if (!_available || _api is null) return 0;
         if (_bufferByWaveId.TryGetValue(waveId, out var existing))
         {
             // Buffer id 0 is the "unsupported format" negative marker — no
@@ -518,7 +516,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
             return existing;
         }
 
-        uint buf = _al.GenBuffer();
+        uint buf = _api.GenerateBuffer();
         _resources!.OwnBuffer(buf);
         BufferFormat fmt = PickFormat(wave);
         if (fmt == 0)
@@ -528,8 +526,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
             return 0;
         }
 
-        fixed (byte* p = wave.PcmBytes)
-            _al.BufferData(buf, fmt, p, wave.PcmBytes.Length, wave.SampleRate);
+        _api.FillBuffer(buf, fmt, wave.PcmBytes, wave.SampleRate);
 
         _bufferByWaveId[waveId] = buf;
         _bufferBudget.RecordCreated(waveId, buf, wave.PcmBytes.Length);
@@ -557,7 +554,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
 
     private bool IsBufferAttachedToAnySource(uint bufferId)
     {
-        if (_al is null) return false;
+        if (_api is null) return false;
 
         for (int i = 0; i < _voices.Count; i++)
         {
@@ -568,8 +565,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
 
     private bool IsSourceBoundTo(uint sourceId, uint bufferId)
     {
-        _al!.GetSourceProperty(sourceId, GetSourceInteger.Buffer, out int attached);
-        return (uint)attached == bufferId;
+        return _api!.AttachedBuffer(sourceId) == bufferId;
     }
 
     private static BufferFormat PickFormat(WaveData w)
@@ -586,17 +582,16 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
 
     private bool IsStillPlaying(uint sourceId)
     {
-        if (_al is null) return false;
-        _al.GetSourceProperty(sourceId, GetSourceInteger.SourceState, out int state);
-        return state == (int)SourceState.Playing;
+        if (_api is null) return false;
+        return _api.IsSourcePlaying(sourceId);
     }
 
     private void Silence(WorldVoicePool.Voice voice)
     {
-        if (_available && _al is not null && voice.SourceId != 0)
+        if (_available && _api is not null && voice.SourceId != 0)
         {
-            _al.SourceStop(voice.SourceId);
-            _al.SetSourceProperty(voice.SourceId, SourceInteger.Buffer, 0);
+            _api.StopSource(voice.SourceId);
+            _api.AttachBuffer(voice.SourceId, 0);
         }
 
         WorldVoicePool.Vacate(voice);
