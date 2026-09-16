@@ -4,6 +4,10 @@ using AcDream.Headless.Plugins;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
 using AcDream.Runtime.Gameplay;
+using AcDream.Runtime.Session;
+using AcDream.Core.Net;
+using AcDream.Core.Net.Messages;
+using System.Net;
 
 namespace AcDream.Headless.Tests;
 
@@ -49,23 +53,21 @@ public sealed class HeadlessPluginApiSurfaceTests
     [Fact]
     public void LoginCompleteAndLogoffFollowTheInWorldEdge()
     {
-        using GameRuntime runtime = NewRuntime();
+        var (runtime, commands) = NewRealSession();
+        using GameRuntime runtimeDisposal = runtime;
         using var host = NewHost(runtime);
         int logins = 0;
         int logoffs = 0;
         host.Events.LoginComplete += () => logins++;
         host.Events.Logoff += () => logoffs++;
 
-        runtime.EventSink.EmitLifecycle(
-            RuntimeLifecycleState.Starting,
-            RuntimeLifecycleState.InWorld);
-        runtime.EventSink.EmitLifecycle(
-            RuntimeLifecycleState.InWorld,
-            RuntimeLifecycleState.Stopping);
-        runtime.EventSink.EmitLifecycle(
-            RuntimeLifecycleState.Starting,
-            RuntimeLifecycleState.InWorld);
+        commands.Start(runtime.Generation);
+        Assert.Equal(1, logins);
 
+        commands.Stop(runtime.Generation);
+        Assert.Equal(1, logoffs);
+
+        commands.Start(runtime.Generation);
         Assert.Equal(2, logins);
         Assert.Equal(1, logoffs);
     }
@@ -318,6 +320,117 @@ public sealed class HeadlessPluginApiSurfaceTests
         using var host = NewHost(runtime);
 
         Assert.False(((IDialogAutomation)host.Automation).Answer(1u, true));
+    }
+
+    // A real GameRuntime + LiveSessionController + LiveSessionHost +
+    // DirectGameRuntimeCommandAdapter through Start()/Stop() -- the exact
+    // production command boundary the headless host uses -- rather than
+    // a synthetic EmitLifecycle call a real session would never produce
+    // on its own.
+    private static (GameRuntime Runtime, DirectGameRuntimeCommandAdapter Commands) NewRealSession()
+    {
+        var gameplay = new InertOperations();
+        var sessionOps = new RealSessionOperations();
+        var runtime = new GameRuntime(new GameRuntimeDependencies(
+            gameplay,
+            gameplay,
+            gameplay,
+            gameplay,
+            SessionOperations: sessionOps));
+        var session = new LiveSessionHost(
+            runtime.Session,
+            new LiveSessionHostBindings(
+                new LiveSessionRoutingFactories(
+                    _ => new NoOpEventRoute(),
+                    _ => new NoOpCommandRoute()),
+                _ => { },
+                new LiveSessionSelectionBindings(
+                    id => runtime.PlayerIdentity.ServerGuid = id,
+                    _ => { },
+                    _ => { },
+                    _ => { },
+                    _ => { },
+                    () => { }),
+                new LiveSessionEnteredWorldBindings(
+                    _ => { },
+                    () => { },
+                    () => { },
+                    _ => { },
+                    () => { }),
+                (_, _, _) => { },
+                () => { },
+                _ => { },
+                _ => { }),
+            new LiveSessionConnectOptions(
+                true,
+                "127.0.0.1",
+                9000,
+                "headless-user",
+                "headless-password"),
+            runtime: runtime);
+        var commands = new DirectGameRuntimeCommandAdapter(runtime, session);
+        return (runtime, commands);
+    }
+
+    private sealed class RealSessionOperations : ILiveSessionOperations
+    {
+        public IPEndPoint ResolveEndpoint(string host, int port) =>
+            new(IPAddress.Loopback, port);
+
+        public WorldSession CreateSession(IPEndPoint endpoint) =>
+            new(endpoint, new NoOpTransport());
+
+        public void Connect(WorldSession session, string user, string password) { }
+
+        public CharacterList.Parsed GetCharacters(WorldSession session) =>
+            new(
+                0u,
+                [new CharacterList.Character(0x50000001u, "HeadlessPluginApiFixture", 0u)],
+                [],
+                11,
+                "HeadlessPluginApi",
+                true,
+                true);
+
+        public void EnterWorld(WorldSession session, int activeCharacterIndex) { }
+
+        public void Tick(WorldSession session) { }
+
+        public void DisposeSession(WorldSession session) => session.Dispose();
+    }
+
+    private sealed class NoOpTransport : IWorldSessionTransport
+    {
+        public void Send(ReadOnlySpan<byte> datagram) { }
+        public void Send(IPEndPoint remote, ReadOnlySpan<byte> datagram) { }
+
+        public int Receive(
+            Span<byte> destination,
+            TimeSpan timeout,
+            out IPEndPoint? from)
+        {
+            from = null;
+            return -1;
+        }
+
+        public ValueTask<NetReceiveResult> ReceiveAsync(
+            Memory<byte> destination,
+            CancellationToken cancellationToken) =>
+            throw new OperationCanceledException(cancellationToken);
+
+        public void Dispose() { }
+    }
+
+    private sealed class NoOpEventRoute : ILiveSessionEventRouting
+    {
+        public void Attach() { }
+        public void Dispose() { }
+    }
+
+    private sealed class NoOpCommandRoute : ILiveSessionCommandRouting
+    {
+        public void Activate() { }
+        public void Dispose() { }
     }
     private static GameRuntime NewRuntime()
     {
