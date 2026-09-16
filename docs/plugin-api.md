@@ -283,6 +283,12 @@ the same way: each returns `PluginTradeCommandResult` with a
 `PluginTradeCommandStatus` of `Unavailable` (no in-world session),
 `NotOpen` (no trade window is open), `InvalidItem`, or `Sent`.
 
+`Accept` is a no-op (returns `Sent` without touching the wire) once
+`MyAccepted` is already true -- the same guard the window's own Accept
+button has by disabling itself. `Decline`, `Reset`, and `End` carry no
+such guard and always resend: a partner-declined round can be declined
+again, and ending an already-closing trade is harmless.
+
 The event named `PartnerTradeAccepted` — not `PartnerAccepted` — carries the
 partner's object id when they accept. It could not be named `PartnerAccepted`
 because that name is already the live acceptance flag; C# does not allow a

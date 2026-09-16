@@ -212,4 +212,30 @@ public sealed class RuntimeTradeAutomationTests
         Assert.Equal([firstPartner, secondPartner], opened);
         Assert.Equal(secondPartner, trade.PartnerObjectId);
     }
+
+    [Fact]
+    public void AcceptIsANoOpOnceTheLocalSideAlreadyAccepted()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        uint self = host.Runtime.PlayerIdentity.ServerGuid;
+        uint partner = 0x70000099u;
+        host.Runtime.TradeOwner.ApplyRegister(
+            new GameEvents.RegisterTrade(self, partner, 0uL),
+            self);
+        var trade = new RuntimeTradeAutomation(host.Runtime);
+        var captured = new List<byte[]>();
+        host.Runtime.Session.CurrentSession!.GameActionCapture = body => captured.Add(body);
+
+        Assert.Equal(PluginTradeCommandStatus.Sent, trade.Accept().Status);
+        Assert.NotEmpty(captured);
+
+        // Simulates the server echoing the accept back down the wire.
+        host.Runtime.TradeOwner.ApplyAccept(self, self);
+        Assert.True(trade.MyAccepted);
+
+        captured.Clear();
+        Assert.Equal(PluginTradeCommandStatus.Sent, trade.Accept().Status);
+        Assert.Empty(captured);
+    }
 }

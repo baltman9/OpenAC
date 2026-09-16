@@ -72,6 +72,12 @@ public sealed class RuntimeTradeAutomation : ITradeAutomation
         return new(PluginTradeCommandStatus.Sent);
     }
 
+    // A no-op when the local side already accepted -- the retail-look
+    // window's own Accept button disables itself the moment MyAccepted
+    // flips true, so a second press (or a plugin racing the same click)
+    // never re-sends the wire command. Decline()/End() carry no such
+    // guard: they are meant to be resendable (a partner-declined round can
+    // decline again; ending an already-closing trade is harmless).
     public PluginTradeCommandResult Accept()
     {
         if (!IsAvailable)
@@ -79,6 +85,8 @@ public sealed class RuntimeTradeAutomation : ITradeAutomation
         RuntimeTradeSnapshot snapshot = Snapshot;
         if (!snapshot.IsOpen)
             return new(PluginTradeCommandStatus.NotOpen);
+        if (snapshot.SelfAccepted)
+            return new(PluginTradeCommandStatus.Sent);
         if (Session is not { } session)
             return new(PluginTradeCommandStatus.Unavailable);
         session.SendAcceptTrade(
