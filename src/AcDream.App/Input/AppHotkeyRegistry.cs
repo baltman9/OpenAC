@@ -156,6 +156,14 @@ public sealed class AppHotkeyRegistry : IHotkeyRegistry
     }
 
 
+    // Not routed through InputDispatcher's action/scope machinery -- a
+    // dynamic per-plugin action space large enough for that would be a much
+    // bigger change (see the plugin-api.md Hotkeys note for the recorded
+    // deviation). This still honours the two conditions that matter most:
+    // a rebind capture in progress (BeginCapture) and a modal scope
+    // (Dialog/EditField, not just Chat) both suppress every hotkey, the
+    // same way the dispatcher itself would refuse to route a client
+    // action into a text field or a capture-in-progress rebind screen.
     private void OnKeyDown(Key key, ModifierMask modifiers)
     {
         Entry[] snapshot;
@@ -165,8 +173,13 @@ public sealed class AppHotkeyRegistry : IHotkeyRegistry
             snapshot = _entries.ToArray();
             dispatcher = _dispatcher;
         }
-        bool chatFocused = dispatcher is not null
-            && dispatcher.ActiveScope == InputScope.Chat;
+        if (dispatcher is not null && dispatcher.IsCapturing)
+            return;
+        InputScope? activeScope = dispatcher?.ActiveScope;
+        bool chatFocused = activeScope == InputScope.Chat;
+        bool modalScope = activeScope is InputScope.Dialog or InputScope.EditField;
+        if (modalScope)
+            return;
 
         foreach (Entry entry in snapshot)
         {
@@ -193,9 +206,10 @@ public sealed class AppHotkeyRegistry : IHotkeyRegistry
             if (chatFocused && !chord.Ctrl && !chord.Alt) continue;
 
             try { handler(); }
-            catch { /* plugin errors don't propagate out of event dispatch */ }
+            catch { /* plugin errors do not propagate out of event dispatch */ }
         }
     }
+
 
     private void Revoke(Entry entry)
     {

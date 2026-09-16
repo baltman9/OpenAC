@@ -366,6 +366,16 @@ A hotkey does not fire while the chat bar has keyboard focus unless Ctrl or
 Alt is part of the chord — otherwise every letter typed into chat would also
 be a candidate hotkey press.
 
+Plugin hotkeys are a raw keyboard subscription, not a route through
+InputDispatcher's action/scope engine (a dynamic per-plugin action space
+large enough to fit that machinery would be a much bigger change than the
+rest of this surface) -- documented deviation. Two dispatcher states still
+suppress every hotkey, matching how the dispatcher itself would refuse to
+route a client action in the same situations: a rebind capture in progress
+(`InputDispatcher.BeginCapture`) and a modal `Dialog`/`EditField` scope
+pushed on top (not just `Chat`, which has its own Ctrl/Alt carve-out
+above).
+
 The graphical host may receive a `Register` call before its keyboard and
 input dispatcher exist yet (plugin loading is not strictly ordered against
 input-dispatcher composition); the registration is queued and resolved the

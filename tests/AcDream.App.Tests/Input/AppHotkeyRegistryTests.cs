@@ -222,6 +222,56 @@ public sealed class AppHotkeyRegistryTests
         Assert.Equal(1, fired);
     }
 
+    [Fact]
+    public void AHotkeyDoesNotFireWhileTheDispatcherIsCapturingARebind()
+    {
+        var registry = new AppHotkeyRegistry(overridesFilePath: null);
+        var keyboard = new FakeKeyboard();
+        var bindings = new KeyBindings();
+        InputDispatcher dispatcher = InputDispatcher.CreateDetached(
+            keyboard, new FakeMouse(), bindings);
+        registry.Bind(keyboard, bindings, dispatcher);
+
+        int fired = 0;
+        // Ctrl+H would normally fire even with chat focused; a capture in
+        // progress (the Settings panel's click-to-rebind flow) must still
+        // suppress it, since the keystroke is meant for the capture, not
+        // for triggering an unrelated plugin action.
+        registry.Register(
+            "quick-heal", "Quick Heal", new PluginKeyChord(PluginKey.H, Ctrl: true), () => fired++);
+
+        dispatcher.BeginCapture(_ => { });
+        keyboard.Fire(Key.H, ModifierMask.Ctrl);
+        Assert.Equal(0, fired);
+
+        dispatcher.CancelCapture();
+        keyboard.Fire(Key.H, ModifierMask.Ctrl);
+        Assert.Equal(1, fired);
+    }
+
+    [Fact]
+    public void AHotkeyDoesNotFireWhileADialogScopeIsPushed()
+    {
+        var registry = new AppHotkeyRegistry(overridesFilePath: null);
+        var keyboard = new FakeKeyboard();
+        var bindings = new KeyBindings();
+        InputDispatcher dispatcher = InputDispatcher.CreateDetached(
+            keyboard, new FakeMouse(), bindings);
+        registry.Bind(keyboard, bindings, dispatcher);
+
+        int fired = 0;
+        registry.Register(
+            "quick-heal", "Quick Heal", new PluginKeyChord(PluginKey.H, Ctrl: true), () => fired++);
+
+        dispatcher.PushScope(InputScope.Dialog);
+        keyboard.Fire(Key.H, ModifierMask.Ctrl);
+        Assert.Equal(0, fired);
+
+        dispatcher.PopScope(InputScope.Dialog);
+        keyboard.Fire(Key.H, ModifierMask.Ctrl);
+        Assert.Equal(1, fired);
+    }
+
     private sealed class FakeKeyboard : IKeyboardSource
     {
         public event Action<Key, ModifierMask>? KeyDown;
