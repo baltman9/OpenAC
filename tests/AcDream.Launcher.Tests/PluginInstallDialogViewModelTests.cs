@@ -299,4 +299,74 @@ public sealed class PluginInstallDialogViewModelTests
         Assert.Empty(enableCalls);
         await Task.CompletedTask;
     }
+
+    [Fact]
+    public void DeclaringNoCapabilitiesShowsNoChips()
+    {
+        var dialog = new PluginInstallDialogViewModel();
+        dialog.Open(
+            "shaneedwards/openac-plugin-hello",
+            "edwards.hello",
+            "Hello",
+            isListed: true,
+            isUpdate: false,
+            null,
+            Characters,
+            _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
+            (_, _) => { });
+
+        Assert.False(dialog.HasCapabilities);
+        Assert.Empty(dialog.Capabilities);
+    }
+
+    [Fact]
+    public void EveryDeclaredCapabilityReachesTheDialogWithItsNoteIntact()
+    {
+        var dialog = new PluginInstallDialogViewModel();
+        dialog.Open(
+            "shaneedwards/openac-plugin-hello",
+            "edwards.hello",
+            "Hello",
+            isListed: true,
+            isUpdate: false,
+            null,
+            Characters,
+            _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
+            (_, _) => { },
+            [
+                new LauncherPluginCapabilityDeclaration(
+                    LauncherPluginCapability.Network, "Sends buff usage counts to my server."),
+                new LauncherPluginCapabilityDeclaration(
+                    LauncherPluginCapability.Chat, "Reads chat to detect buff requests."),
+            ]);
+
+        Assert.True(dialog.HasCapabilities);
+        Assert.Equal(2, dialog.Capabilities.Count);
+        Assert.Equal("Sends buff usage counts to my server.", dialog.Capabilities[0].Note);
+        Assert.Equal("Reads chat to detect buff requests.", dialog.Capabilities[1].Note);
+        Assert.Equal("The author says this plugin:", dialog.CapabilitiesHeading);
+    }
+
+    [Fact]
+    public void CapabilityDisplayOrderFollowsTheVocabularyNotTheManifestArray()
+    {
+        var dialog = new PluginInstallDialogViewModel();
+        dialog.Open(
+            "shaneedwards/openac-plugin-hello",
+            "edwards.hello",
+            "Hello",
+            isListed: true,
+            isUpdate: false,
+            null,
+            Characters,
+            _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
+            (_, _) => { },
+            [
+                new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Chat, "Reads chat."),
+                new LauncherPluginCapabilityDeclaration(LauncherPluginCapability.Network, "Reaches out."),
+            ]);
+
+        Assert.Equal("uses network", dialog.Capabilities[0].Label);
+        Assert.Equal("uses chat", dialog.Capabilities[1].Label);
+    }
 }

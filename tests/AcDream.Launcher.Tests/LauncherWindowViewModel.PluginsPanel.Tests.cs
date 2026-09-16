@@ -1654,6 +1654,160 @@ public sealed partial class LauncherWindowViewModelTests
     }
 
     [Fact]
+    public async Task InstalledRowWithOneCapabilityShowsTheSingularCount()
+    {
+        using var fixture = new PluginPanelFixture();
+        fixture.WriteManifest(
+            "edwards.managed", "0.1.0", ["headless"],
+            capabilitiesVersion: LauncherPluginCapabilityVocabulary.Current,
+            capabilitiesJson: """[{ "name": "network", "note": "Sends usage counts." }]""");
+        fixture.AddRecord("edwards.managed", "shaneedwards/openac-plugin-hello", "0.1.0");
+        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
+            ? Ok(fixture.ListJson())
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        PluginInstalledRowViewModel row = Assert.Single(viewModel.Plugins.Installed);
+        Assert.True(row.HasCapabilities);
+        Assert.Equal("Uses 1 capability", row.CapabilityCountText);
+    }
+
+    [Fact]
+    public async Task InstalledRowWithSeveralCapabilitiesShowsThePluralCount()
+    {
+        using var fixture = new PluginPanelFixture();
+        fixture.WriteManifest(
+            "edwards.managed", "0.1.0", ["headless"],
+            capabilitiesVersion: LauncherPluginCapabilityVocabulary.Current,
+            capabilitiesJson: """
+                [
+                  { "name": "network", "note": "Sends usage counts." },
+                  { "name": "chat", "note": "Reads chat to detect buff requests." }
+                ]
+                """);
+        fixture.AddRecord("edwards.managed", "shaneedwards/openac-plugin-hello", "0.1.0");
+        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
+            ? Ok(fixture.ListJson())
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        PluginInstalledRowViewModel row = Assert.Single(viewModel.Plugins.Installed);
+        Assert.Equal("Uses 2 capabilities", row.CapabilityCountText);
+    }
+
+    [Fact]
+    public async Task InstalledRowDeclaringNoCapabilitiesShowsNoCount()
+    {
+        using var fixture = new PluginPanelFixture();
+        fixture.WriteManifest("edwards.managed", "0.1.0", ["headless"]);
+        fixture.AddRecord("edwards.managed", "shaneedwards/openac-plugin-hello", "0.1.0");
+        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
+            ? Ok(fixture.ListJson())
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        PluginInstalledRowViewModel row = Assert.Single(viewModel.Plugins.Installed);
+        Assert.False(row.HasCapabilities);
+        Assert.Equal(string.Empty, row.CapabilityCountText);
+    }
+
+    [Fact]
+    public async Task DiscoverRowShowsACapabilityCountOnceDetailsLoad()
+    {
+        using var fixture = new PluginPanelFixture();
+        byte[] remoteManifest = PluginPanelFixture.ManifestJson(
+            "edwards.discoverable", "0.2.0", "0.1.0", ["headless", "graphical"],
+            capabilitiesVersion: LauncherPluginCapabilityVocabulary.Current,
+            capabilitiesJson: """
+                [
+                  { "name": "network", "note": "Sends usage counts." },
+                  { "name": "chat", "note": "Reads chat to detect buff requests." }
+                ]
+                """);
+        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
+            ? Ok(fixture.ListJson())
+            : request.RequestUri == GitHubReleaseLocator.LatestAsset(
+                "shaneedwards/openac-plugin-hello", "plugin.json")
+                ? Ok(remoteManifest)
+                : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        PluginDiscoverRowViewModel row = Assert.Single(viewModel.Plugins.Discover);
+        Assert.False(row.HasCapabilities);
+
+        await viewModel.Plugins.RefreshDiscoverDetailsAsync();
+
+        Assert.True(row.HasCapabilities);
+        Assert.Equal("Uses 2 capabilities", row.CapabilityCountText);
+    }
+
+    [Fact]
+    public async Task InstallDialogListsEveryDeclaredCapabilityInVocabularyOrderWithItsNote()
+    {
+        using var fixture = new PluginPanelFixture();
+        byte[] remoteManifest = PluginPanelFixture.ManifestJson(
+            "edwards.discoverable", "0.2.0", "0.1.0", ["headless", "graphical"],
+            capabilitiesVersion: LauncherPluginCapabilityVocabulary.Current,
+            capabilitiesJson: """
+                [
+                  { "name": "chat", "note": "Reads chat to detect buff requests." },
+                  { "name": "network", "note": "Sends usage counts to my server." }
+                ]
+                """);
+        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
+            ? Ok(fixture.ListJson())
+            : request.RequestUri == GitHubReleaseLocator.LatestAsset(
+                "shaneedwards/openac-plugin-hello", "plugin.json")
+                ? Ok(remoteManifest)
+                : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+        await viewModel.Plugins.RefreshDiscoverDetailsAsync();
+
+        Assert.Single(viewModel.Plugins.Discover).InstallCommand.Execute(null);
+
+        PluginInstallDialogViewModel dialog = viewModel.Plugins.InstallDialog;
+        Assert.True(dialog.HasCapabilities);
+        Assert.Equal(2, dialog.Capabilities.Count);
+        Assert.Equal("uses network", dialog.Capabilities[0].Label);
+        Assert.Equal("Sends usage counts to my server.", dialog.Capabilities[0].Note);
+        Assert.Equal("uses chat", dialog.Capabilities[1].Label);
+        Assert.Equal("Reads chat to detect buff requests.", dialog.Capabilities[1].Note);
+    }
+
+    [Fact]
     public async Task TogglingBetaWritesTheChannelAndReChecksOnlyThatPluginNotTheWholeList()
     {
         using var fixture = new PluginPanelFixture();
@@ -2053,13 +2207,18 @@ public sealed partial class LauncherWindowViewModelTests
 
         public ApplicationPathSet Paths { get; }
 
-        public void WriteManifest(string id, string version, IReadOnlyList<string> hosts)
+        public void WriteManifest(
+            string id,
+            string version,
+            IReadOnlyList<string> hosts,
+            int? capabilitiesVersion = null,
+            string? capabilitiesJson = null)
         {
             string directory = Path.Combine(Paths.PluginsDirectory, id);
             Directory.CreateDirectory(directory);
             File.WriteAllBytes(
                 Path.Combine(directory, "plugin.json"),
-                ManifestJson(id, version, "0.1.0", hosts));
+                ManifestJson(id, version, "0.1.0", hosts, capabilitiesVersion, capabilitiesJson));
             File.WriteAllBytes(Path.Combine(directory, $"{id}.dll"), []);
         }
 

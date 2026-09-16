@@ -36,6 +36,29 @@ public sealed class PluginCharacterChoiceViewModel(PluginCharacterOption option)
     }
 }
 
+/// <summary>One capability chip on the install dialog: the author's claim, attributed rather than
+/// verified (L-300).</summary>
+public sealed class PluginCapabilityChipViewModel(LauncherPluginCapabilityDeclaration declaration)
+{
+    public string Label { get; } = DescribeLabel(declaration.Name);
+
+    public string Note { get; } = declaration.Note;
+
+    public string AutomationName { get; } = $"{DescribeLabel(declaration.Name)}: {declaration.Note}";
+
+    private static string DescribeLabel(LauncherPluginCapability capability) => capability switch
+    {
+        LauncherPluginCapability.Network => "uses network",
+        LauncherPluginCapability.Analytics => "collects analytics",
+        LauncherPluginCapability.FileWrite => "writes outside",
+        LauncherPluginCapability.ProcessLaunch => "starts programs",
+        LauncherPluginCapability.NativeCode => "native code",
+        LauncherPluginCapability.InputAutomation => "automates input",
+        LauncherPluginCapability.Chat => "uses chat",
+        _ => capability.ToString(),
+    };
+}
+
 /// <summary>The overlay a Discover row's Install (or "Add from URL") opens, in the existing
 /// <c>IsOpen</c> idiom. Repo URLs are shown as text only: nothing here opens a browser or runs
 /// downloaded code (L-300).</summary>
@@ -113,6 +136,16 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
     public ObservableCollection<PluginCharacterChoiceViewModel> Characters { get; } = [];
 
     public bool HasCharacters => Characters.Count > 0;
+
+    /// <summary>Every capability the manifest declared, in the launcher's own vocabulary order
+    /// rather than the manifest's, so an author cannot bury one behind benign entries. Empty when
+    /// the plugin declares none, which the dialog shows as nothing rather than a "none" line.</summary>
+    public ObservableCollection<PluginCapabilityChipViewModel> Capabilities { get; } = [];
+
+    public bool HasCapabilities => Capabilities.Count > 0;
+
+    /// <summary>Attributes the chips to the author, since nothing here verifies the claim.</summary>
+    public string CapabilitiesHeading => "The author says this plugin:";
 
     public bool IsOpen
     {
@@ -203,7 +236,8 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
         string? offeredVersion,
         IReadOnlyList<PluginCharacterOption> characters,
         Func<CancellationToken, Task<PluginInstallResult>> installAsync,
-        Action<string, IReadOnlyList<PluginCharacterOption>> enableForCharacters)
+        Action<string, IReadOnlyList<PluginCharacterOption>> enableForCharacters,
+        IReadOnlyList<LauncherPluginCapabilityDeclaration>? capabilities = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repo);
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
@@ -224,6 +258,13 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
             Characters.Add(new PluginCharacterChoiceViewModel(option));
         }
 
+        Capabilities.Clear();
+        foreach (LauncherPluginCapabilityDeclaration declaration in (capabilities ?? [])
+                     .OrderBy(declaration => (int)declaration.Name))
+        {
+            Capabilities.Add(new PluginCapabilityChipViewModel(declaration));
+        }
+
         Choice = PluginEnableChoice.None;
         Error = null;
         OnPropertyChanged(nameof(Repo));
@@ -234,6 +275,7 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(IsOfferedPrerelease));
         OnPropertyChanged(nameof(WarningText));
         OnPropertyChanged(nameof(HasCharacters));
+        OnPropertyChanged(nameof(HasCapabilities));
         IsOpen = true;
     }
 

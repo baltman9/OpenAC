@@ -48,6 +48,8 @@
     <Style Selector="Border.chip.update TextBlock"><Setter Property="Foreground" Value="#DBB573" /></Style>
     <Style Selector="Border.chip.blocked"><Setter Property="Background" Value="#4A2129" /><Setter Property="BorderBrush" Value="#FFB0A0" /></Style>
     <Style Selector="Border.chip.blocked TextBlock"><Setter Property="Foreground" Value="#FFB0A0" /></Style>
+    <Style Selector="Border.chip.capability"><Setter Property="Background" Value="#16262E" /><Setter Property="BorderBrush" Value="#8FB8C9" /></Style>
+    <Style Selector="Border.chip.capability TextBlock"><Setter Property="Foreground" Value="#8FB8C9" /></Style>
     <Style Selector="Border.well">
       <Setter Property="Background" Value="#0B1216" />
       <Setter Property="BorderBrush" Value="#243139" />
@@ -204,6 +206,7 @@
                         <Border Classes="chip" IsVisible="{Binding IsPrerelease}" AutomationProperties.Name="beta">
                           <TextBlock Text="beta" Classes="muted" TextWrapping="Wrap" />
                         </Border>
+                        <TextBlock Text="{Binding CapabilityCountText}" IsVisible="{Binding HasCapabilities}" Classes="muted" FontSize="12" AutomationProperties.Name="{Binding CapabilityCountText}" />
                         <Border Classes="chip update" IsVisible="{Binding HasUpdateChip}" AutomationProperties.Name="{Binding UpdateChipText}">
                           <TextBlock Text="{Binding UpdateChipText}" TextWrapping="Wrap" />
                         </Border>
@@ -251,6 +254,7 @@
                         <TextBlock Text="{Binding LatestVersion, StringFormat='Latest: v{0}'}" IsVisible="{Binding HasLatestVersion}" Classes="muted" FontSize="12" />
                         <TextBlock Text="{Binding Compatibility}" IsVisible="{Binding ShowCompatibilityWarning}" Foreground="#DBB573" FontSize="12" TextWrapping="Wrap" />
                         <TextBlock Text="{Binding Compatibility}" IsVisible="{Binding ShowCompatibilityMuted}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding CapabilityCountText}" IsVisible="{Binding HasCapabilities}" Classes="muted" FontSize="12" AutomationProperties.Name="{Binding CapabilityCountText}" />
                       </StackPanel>
                       <Button Grid.Column="1" Content="Install" Classes="primary" Command="{Binding InstallCommand}" AutomationProperties.Name="{Binding InstallAutomationName}" />
                     </Grid>
@@ -617,6 +621,26 @@
           <TextBlock Text="{Binding Plugins.InstallDialog.DisplayName}" FontSize="22" FontWeight="Bold" />
           <SelectableTextBlock Grid.Row="1" Text="{Binding Plugins.InstallDialog.Repo}" Classes="muted" TextWrapping="Wrap" />
           <TextBlock Grid.Row="2" Text="{Binding Plugins.InstallDialog.WarningText}" TextWrapping="Wrap" />
+          <StackPanel Grid.Row="3" Spacing="4" IsVisible="{Binding Plugins.InstallDialog.HasCapabilities}">
+            <TextBlock Text="{Binding Plugins.InstallDialog.CapabilitiesHeading}" FontWeight="SemiBold" />
+            <ItemsControl ItemsSource="{Binding Plugins.InstallDialog.Capabilities}" Grid.IsSharedSizeScope="True">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:PluginCapabilityChipViewModel">
+                  <Grid ColumnSpacing="8" Margin="0,0,0,3">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="Auto" SharedSizeGroup="CapabilityChip" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border Classes="chip capability" HorizontalAlignment="Left" VerticalAlignment="Top"
+                            AutomationProperties.Name="{Binding AutomationName}">
+                      <TextBlock Text="{Binding Label}" />
+                    </Border>
+                    <TextBlock Grid.Column="1" Text="{Binding Note}" Classes="muted" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
           <StackPanel Grid.Row="4" Spacing="6" IsVisible="{Binding Plugins.InstallDialog.ShowEnableChoice}">
             <TextBlock Text="Enable for" FontWeight="SemiBold" />
             <RadioButton Content="None (enable later)" GroupName="PluginEnableChoice"
