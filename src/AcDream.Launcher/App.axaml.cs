@@ -56,10 +56,11 @@ public sealed partial class App : Application
                     AppContext.BaseDirectory,
                     "acdream-bake" + executableSuffix));
 
+            LauncherVersion launcherVersion = GetLauncherVersion();
             LauncherUpdateComposition updates = LauncherUpdateComposition.Create(
                 paths,
                 rid,
-                GetLauncherVersion(),
+                launcherVersion,
                 layout.InstalledRoot,
                 () => _orchestrator?.GetSnapshot().Sessions.Any(session => session.IsActive)
                     == true,
@@ -106,6 +107,7 @@ public sealed partial class App : Application
             };
             desktop.MainWindow = mainWindow;
             _viewModel.UpdatePrompt.AutoOpenDiscoveredUpdates = false;
+            _viewModel.ConfigureVersions(launcherVersion.Value, () => updates.Versions.CachedResolution);
             _viewModel.ConfigureServerHealth(new ServerHealthService(_serverStatusClient, new UdpServerReachabilityProbe()));
             _viewModel.ConfigurePlugins(plugins, () => updates.Versions.CachedResolution);
             _viewModel.Initialize();

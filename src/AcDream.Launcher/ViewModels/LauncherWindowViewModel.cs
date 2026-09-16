@@ -457,6 +457,7 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
             OnPropertyChanged(nameof(ShowInstallationBanner));
             OnPropertyChanged(nameof(InstallationBannerTitle));
             OnPropertyChanged(nameof(InstallationStatus));
+            OnPropertyChanged(nameof(VersionText));
             RefreshFromCore();
         }
     }
@@ -575,6 +576,7 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         OnPropertyChanged(nameof(IsFirstRunRequired));
         OnPropertyChanged(nameof(ShowInstallationBanner));
         OnPropertyChanged(nameof(InstallationStatus));
+        OnPropertyChanged(nameof(VersionText));
         OnPropertyChanged(nameof(ShowGraphicalLaunchNotice));
         OnPropertyChanged(nameof(GraphicalLaunchNotice));
         OnPropertyChanged(nameof(CanLaunchGui));

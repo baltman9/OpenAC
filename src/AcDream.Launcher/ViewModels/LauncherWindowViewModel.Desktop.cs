@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using AcDream.Launcher.Core.Profiles;
 using AcDream.Launcher.Core.Status;
+using AcDream.Launcher.Core.Updates;
 
 namespace AcDream.Launcher.ViewModels;
 
@@ -65,6 +66,30 @@ public sealed partial class LauncherWindowViewModel
     {
         try { TextEditor.Open(kind); }
         catch (Exception ex) { LastError = SafeDisplayError(ex, secret: null); }
+    }
+
+    private string? _launcherVersion;
+    private Func<ClientVersionResolution?> _clientVersion = () => null;
+
+    /// <summary>The small versions shown at the top right of the window, launcher and client, without
+    /// build metadata. Plugin compatibility is judged against the client, which can differ from the
+    /// launcher while an update is pending.</summary>
+    public string VersionText => _launcherVersion is null
+        ? string.Empty
+        : $"launcher {ShortVersion(_launcherVersion)} · "
+          + (_clientVersion()?.Version is { } client ? $"client {ShortVersion(client.Value)}" : "client not installed");
+
+    public void ConfigureVersions(string launcherVersion, Func<ClientVersionResolution?> clientVersion)
+    {
+        _launcherVersion = launcherVersion;
+        _clientVersion = clientVersion ?? throw new ArgumentNullException(nameof(clientVersion));
+        OnPropertyChanged(nameof(VersionText));
+    }
+
+    private static string ShortVersion(string version)
+    {
+        int plus = version.IndexOf('+');
+        return "v" + (plus < 0 ? version : version[..plus]);
     }
 
     public void ConfigureServerHealth(IServerHealthService service)

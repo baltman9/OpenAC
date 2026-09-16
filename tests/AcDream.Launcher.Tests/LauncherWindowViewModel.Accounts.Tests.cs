@@ -1,6 +1,7 @@
 using AcDream.Launcher.Core.Orchestration;
 using AcDream.Launcher.Core.Profiles;
 using AcDream.Launcher.Core.Status;
+using AcDream.Launcher.Core.Updates;
 using AcDream.Launcher.ViewModels;
 
 namespace AcDream.Launcher.Tests;
@@ -170,6 +171,28 @@ public sealed partial class LauncherWindowViewModelTests
             Checks++;
             return Pending?.Task ?? Task.FromResult(new ServerHealthSnapshot(true, 1, 0, false, DateTimeOffset.UtcNow));
         }
+    }
+
+    [Theory]
+    [InlineData("0.1.10", "0.1.8", "launcher v0.1.10 · client v0.1.8")]
+    [InlineData("0.2.0-beta.1+3a71d75", "0.2.0+abc", "launcher v0.2.0-beta.1 · client v0.2.0")]
+    [InlineData("0.1.10", null, "launcher v0.1.10 · client not installed")]
+    public void VersionTextShowsLauncherAndClientWithoutBuildMetadata(
+        string launcher, string? client, string expected)
+    {
+        using var core = BatchOrchestrator();
+        using var vm = CreateInitialized(core);
+        ClientVersionResolution resolution = new(
+            client is null ? ClientVersionState.Missing : ClientVersionState.Verified,
+            string.Empty,
+            client is null ? null : LauncherVersion.Parse(client),
+            null,
+            null,
+            null);
+
+        vm.ConfigureVersions(launcher, () => resolution);
+
+        Assert.Equal(expected, vm.VersionText);
     }
 
     [Fact]
