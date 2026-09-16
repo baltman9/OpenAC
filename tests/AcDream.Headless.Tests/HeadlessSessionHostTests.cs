@@ -3325,7 +3325,7 @@ public sealed class HeadlessSessionHostTests
         return body;
     }
 
-        private static byte[] WrapPlayerDescriptionEnvelope(
+    private static byte[] WrapPlayerDescriptionEnvelope(
         uint options1,
         uint options2)
     {
