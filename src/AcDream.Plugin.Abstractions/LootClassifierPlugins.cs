@@ -14,6 +14,8 @@ public enum PluginLootAction
     User4 = 8,
     User5 = 9,
     KeepUpTo = 10,
+    ManaStone = 11,
+    ManaTank = 12,
 }
 
 public readonly record struct PluginLootClassificationContext(

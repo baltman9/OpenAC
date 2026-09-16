@@ -249,12 +249,10 @@ profile instead of the classifier's live one, such as VTank's "vendor" and
 "trader" list files. It returns `false` when the named profile does not
 exist; a classifier with no notion of named profiles defaults to the same.
 
-A classifier whose own vocabulary is richer than the public
-`PluginLootAction` enum still reports a match rather than "no rule fired"
-when a rule resolves to one of its private actions: it reports `NoLoot` as
-the closest public equivalent, with `Matched` true and `RuleName` left
-intact so a caller can still see which rule decided the item, even though
-the action itself does not survive translation.
+`PluginLootAction` covers MossTank's full vocabulary, including its two
+mana-transfer actions (`ManaStone`, `ManaTank`); a classifier reporting one
+of those is a real match with `Matched` true and `RuleName` set, exactly
+like any other action.
 
 ## Trade
 
