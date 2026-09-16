@@ -130,6 +130,18 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
     /// caller; this event by itself does not.
     /// </summary>
     public event Action<uint>? AppraisalReceived;
+
+    /// <summary>
+    /// Raised for every completed "use", regardless of whether this state
+    /// was the one awaiting it (LastItemUseCompletion only advances for a
+    /// use this state itself dispatched via TryDispatchUse /
+    /// TryDispatchTargetedUse). A caller that starts a use with its own
+    /// reservation -- BeginUseRequestReservation() without going through
+    /// TryDispatchUse -- correlates the outcome itself against this event,
+    /// the same generic completion the retail-look window observes.
+    /// </summary>
+    public event Action<uint>? UseCompleted;
+
     public int OutboundCount => _outbound.Count;
     public bool HasPendingPickup => _pendingPickup is not null;
     public bool HasPendingUse => _pendingUse is not null;
@@ -268,6 +280,8 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         }
         else if (_inventory.BusyCount != before)
             IncrementRevision();
+        try { UseCompleted?.Invoke(error); }
+        catch { /* observer errors do not interrupt use-completion bookkeeping */ }
     }
 
     public bool TryRequestAppraisal(

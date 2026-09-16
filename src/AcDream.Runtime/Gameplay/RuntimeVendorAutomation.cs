@@ -7,17 +7,21 @@ namespace AcDream.Runtime.Gameplay;
 // vendor contract. Buy/sell staging lives entirely on this adapter; BuyAll
 // and SellAll commit the staged lists through the same WorldSession
 // builders the retail-look vendor window's own Buy All / Sell All buttons
-// use, gated by the same interaction-transaction busy state as every other
-// item command. Shared by the graphical and headless hosts: both bind one
-// instance over the same GameRuntime.
+// use. Unlike a normal item use, a vendor transaction's outcome does not
+// flow through the interaction-transaction "awaiting use" ledger (nothing
+// here ever calls TryDispatchUse), so this adapter tracks its own
+// in-flight buy/sell and correlates it against the same generic use-
+// completion signal the retail-look window observes. Shared by the
+// graphical and headless hosts: both bind one instance over the same
+// GameRuntime.
 public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
 {
     private readonly GameRuntime _runtime;
     private readonly object _gate = new();
     private readonly List<(uint TemplateObjectId, int Count)> _buyList = [];
     private readonly List<uint> _sellList = [];
-    private long _lastCompletionRevision;
     private PluginVendorTransactionKind? _pendingKind;
+    private PluginVendorTransaction? _completedTransaction;
     private bool _disposed;
 
     private Action<uint>? _opened;
@@ -27,9 +31,8 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
     public RuntimeVendorAutomation(GameRuntime runtime)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
-        _lastCompletionRevision =
-            _runtime.ActionOwner.Transactions.LastItemUseCompletion.Revision;
         _runtime.InventoryOwner.Vendor.Changed += OnVendorChanged;
+        _runtime.ActionOwner.Transactions.UseCompleted += OnUseCompleted;
     }
 
     public bool IsAvailable =>
@@ -52,14 +55,15 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
         }
     }
 
+    // A buy/sell is in flight exactly while this adapter is awaiting its
+    // own vendor-local response -- not the client-wide inventory busy
+    // gate, which BuyAll/SellAll never touch (retail vendor transactions
+    // do not produce the generic use-completion the busy-count reservation
+    // expects, so holding that reservation open would wedge every other
+    // item command until the client reconnected).
     public bool IsBusy
     {
-        get
-        {
-            InventoryTransactionState transactions =
-                _runtime.ActionOwner.Transactions.Inventory;
-            return transactions.BusyCount != 0 || transactions.HasPendingRequest;
-        }
+        get { lock (_gate) return _pendingKind is not null; }
     }
 
     public IReadOnlyList<PluginVendorItem> Items
@@ -76,8 +80,11 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
                 VendorShopItem item = source[index];
                 int perUnit = VendorPricing.PerUnitValue(
                     item.Value ?? 0, item.DescStackSize);
-                int unitPrice = VendorPricing.BuyPrice(
-                    perUnit, item.ItemType ?? 0u, vendor.Profile.BuyPrice, 1);
+                // The vendor is SELLING this listing to the player, so it
+                // prices at its own SellPrice rate -- the same call
+                // VendorUiController.ComputeShopItemPrice makes.
+                int unitPrice = VendorPricing.SellPrice(
+                    perUnit, item.ItemType ?? 0u, vendor.Profile.SellPrice, 1);
                 built[index] = new PluginVendorItem(
                     item.ItemGuid,
                     item.WeenieClassId,
@@ -145,12 +152,24 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
         return new(PluginVendorCommandStatus.Sent);
     }
 
+    // Only a player-owned item that is not itself a vendor listing and not
+    // currently equipped is eligible to stage for sale, matching the
+    // window's own drag-to-sell gate before it evaluates full retail
+    // acceptability (value range, merchandise type mask) at commit time.
     public PluginVendorCommandResult AddToSellList(uint itemObjectId)
     {
         if (!IsAvailable) return new(PluginVendorCommandStatus.Unavailable);
         if (!IsOpen) return new(PluginVendorCommandStatus.NotOpen);
-        if (itemObjectId == 0u
-            || _runtime.InventoryOwner.Objects.Get(itemObjectId) is null)
+        if (itemObjectId == 0u)
+            return new(PluginVendorCommandStatus.InvalidItem);
+        if (_runtime.InventoryOwner.Objects.Get(itemObjectId) is not { } item)
+            return new(PluginVendorCommandStatus.InvalidItem);
+        if (VendorHasTemplate(itemObjectId))
+            return new(PluginVendorCommandStatus.InvalidItem);
+        if (item.CurrentlyEquippedLocation != EquipMask.None)
+            return new(PluginVendorCommandStatus.InvalidItem);
+        if (!_runtime.InventoryOwner.Objects.IsOwnedByObject(
+                itemObjectId, _runtime.PlayerIdentity.ServerGuid))
         {
             return new(PluginVendorCommandStatus.InvalidItem);
         }
@@ -197,14 +216,12 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
         (uint TemplateObjectId, int Count)[] items;
         lock (_gate)
         {
+            if (_pendingKind is not null)
+                return new(PluginVendorCommandStatus.Busy);
             if (_buyList.Count == 0)
                 return new(PluginVendorCommandStatus.InvalidItem);
             items = _buyList.ToArray();
         }
-        InventoryTransactionState transactions =
-            _runtime.ActionOwner.Transactions.Inventory;
-        if (transactions.BusyCount != 0 || transactions.HasPendingRequest)
-            return new(PluginVendorCommandStatus.Busy);
         if (_runtime.Session.CurrentSession is not { } session)
             return new(PluginVendorCommandStatus.Unavailable);
 
@@ -212,23 +229,15 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
         for (int index = 0; index < items.Length; index++)
             wireItems[index] = (items[index].Count, items[index].TemplateObjectId);
 
-        ItemUseRequestReservation reservation =
-            _runtime.ActionOwner.Transactions.BeginUseRequestReservation();
-        try
-        {
-            session.SendBuy(Vendor.VendorId, wireItems, Vendor.Profile.AlternateCurrencyWcid);
-        }
-        catch
-        {
-            reservation.CancelBeforeDispatch();
-            throw;
-        }
-        reservation.MarkDispatched();
         lock (_gate)
         {
+            if (_pendingKind is not null)
+                return new(PluginVendorCommandStatus.Busy);
             _pendingKind = PluginVendorTransactionKind.Buy;
-            _buyList.Clear();
         }
+        session.SendBuy(Vendor.VendorId, wireItems, Vendor.Profile.AlternateCurrencyWcid);
+        lock (_gate)
+            _buyList.Clear();
         return new(PluginVendorCommandStatus.Sent);
     }
 
@@ -239,14 +248,12 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
         uint[] items;
         lock (_gate)
         {
+            if (_pendingKind is not null)
+                return new(PluginVendorCommandStatus.Busy);
             if (_sellList.Count == 0)
                 return new(PluginVendorCommandStatus.InvalidItem);
             items = _sellList.ToArray();
         }
-        InventoryTransactionState transactions =
-            _runtime.ActionOwner.Transactions.Inventory;
-        if (transactions.BusyCount != 0 || transactions.HasPendingRequest)
-            return new(PluginVendorCommandStatus.Busy);
         if (_runtime.Session.CurrentSession is not { } session)
             return new(PluginVendorCommandStatus.Unavailable);
 
@@ -258,23 +265,15 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
             wireItems[index] = (Math.Max(1, amount), items[index]);
         }
 
-        ItemUseRequestReservation reservation =
-            _runtime.ActionOwner.Transactions.BeginUseRequestReservation();
-        try
-        {
-            session.SendSell(Vendor.VendorId, wireItems);
-        }
-        catch
-        {
-            reservation.CancelBeforeDispatch();
-            throw;
-        }
-        reservation.MarkDispatched();
         lock (_gate)
         {
+            if (_pendingKind is not null)
+                return new(PluginVendorCommandStatus.Busy);
             _pendingKind = PluginVendorTransactionKind.Sell;
-            _sellList.Clear();
         }
+        session.SendSell(Vendor.VendorId, wireItems);
+        lock (_gate)
+            _sellList.Clear();
         return new(PluginVendorCommandStatus.Sent);
     }
 
@@ -296,31 +295,37 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
         remove { lock (_gate) _transactionCompleted -= value; }
     }
 
-    // Diffs the last-seen item-use completion revision against the current
-    // one, and reports the outcome of whichever buy/sell this adapter last
-    // dispatched. Call once per host tick.
+    // Drains whichever buy/sell outcome the last generic use-completion
+    // resolved (see OnUseCompleted) and raises it. Call once per host tick.
     public void Poll()
     {
-        RuntimeItemUseCompletion completion =
-            _runtime.ActionOwner.Transactions.LastItemUseCompletion;
-        if (completion.Revision == _lastCompletionRevision)
-            return;
-        _lastCompletionRevision = completion.Revision;
-
-        PluginVendorTransactionKind? kind;
+        PluginVendorTransaction? completed;
         lock (_gate)
         {
-            kind = _pendingKind;
-            _pendingKind = null;
+            completed = _completedTransaction;
+            _completedTransaction = null;
         }
-        if (kind is not { } pendingKind)
-            return;
+        if (completed is { } transaction)
+            Raise(_transactionCompleted, transaction);
+    }
 
-        bool success = completion.WeenieError == 0u;
-        string? notice = success
-            ? null
-            : $"Vendor transaction failed (weenie error {completion.WeenieError}).";
-        Raise(_transactionCompleted, new PluginVendorTransaction(pendingKind, success, notice));
+    // Every "use" completion arrives here, not just this adapter's own --
+    // normal item use, spell casting, and this adapter's buy/sell all
+    // funnel through the one generic completion signal. Only react when
+    // this adapter itself has a buy/sell outstanding.
+    private void OnUseCompleted(uint error)
+    {
+        lock (_gate)
+        {
+            if (_pendingKind is not { } pendingKind)
+                return;
+            _pendingKind = null;
+            bool success = error == 0u;
+            string? notice = success
+                ? null
+                : $"Vendor transaction failed (weenie error {error}).";
+            _completedTransaction = new PluginVendorTransaction(pendingKind, success, notice);
+        }
     }
 
     private void OnVendorChanged(VendorTransition transition)
@@ -328,6 +333,14 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
         switch (transition.Kind)
         {
             case VendorStateTransitionKind.Opened:
+                // A vendor switch (a new ApproachVendor without an
+                // intervening Close) must not carry over a stale shopping
+                // list staged against the previous vendor's stock.
+                lock (_gate)
+                {
+                    _buyList.Clear();
+                    _sellList.Clear();
+                }
                 Raise(_opened, transition.VendorId);
                 break;
             case VendorStateTransitionKind.Closed:
@@ -338,6 +351,7 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
                     _buyList.Clear();
                     _sellList.Clear();
                     _pendingKind = null;
+                    _completedTransaction = null;
                 }
                 break;
         }
@@ -396,5 +410,6 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
             _disposed = true;
         }
         _runtime.InventoryOwner.Vendor.Changed -= OnVendorChanged;
+        _runtime.ActionOwner.Transactions.UseCompleted -= OnUseCompleted;
     }
 }

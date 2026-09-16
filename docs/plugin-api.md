@@ -306,7 +306,7 @@ host.Automation.Vendor.TransactionCompleted += result =>
 
 foreach (PluginVendorItem item in host.Automation.Vendor.Items)
 {
-    // item.TemplateObjectId, item.Name, item.UnitPrice (retail buy-rate math), item.StackSize
+    // item.TemplateObjectId, item.Name, item.UnitPrice (retail sell-rate math -- the vendor's SellPrice, what it charges the player), item.StackSize
 }
 
 host.Automation.Vendor.AddToBuyList(templateObjectId, count: 1);
@@ -317,15 +317,16 @@ host.Automation.Vendor.SellAll();
 ```
 
 `Vendor.Items` lists what the shop currently has for sale, priced with the
-same retail buy-rate formula the vendor window shows (quantity 1). Staging
+same retail sell-rate formula the vendor window shows (quantity 1). Staging
 is entirely local to this surface — `AddToBuyList` / `AddToSellList` and
 their `Remove*` / `Clear*` counterparts never touch the wire — until
 `BuyAll` or `SellAll` commits the staged list through the same builder the
 window's own Buy All / Sell All buttons use, and clears the list on send. A
 vendor selling a full stack sells however many of that item the character
 currently owns, matching the window's own default. `TryCaptureProperties`
-reads a listed item's full appraisal-shaped property set (the same data
-assessing it would show), by its `TemplateObjectId`.
+reads a listed item's already-materialized properties -- the data the
+`ApproachVendor` listing itself carried, shaped like an appraisal but not a
+live appraisal round trip -- by its `TemplateObjectId`.
 
 `IsBusy` reports whether a buy/sell (or any other item transaction) is
 already in flight — `BuyAll`/`SellAll` refuse with `Busy` rather than queue

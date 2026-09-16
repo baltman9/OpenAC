@@ -56,8 +56,35 @@ public sealed class RuntimeVendorAutomationTests
         PluginVendorItem item = Assert.Single(vendor.Items);
         Assert.Equal(0x50002000u, item.TemplateObjectId);
         Assert.Equal("Fixture Sword", item.Name);
-        // BuyPrice(100, 2.0, qty 1) == 200.
-        Assert.Equal(200, item.UnitPrice);
+        // SellPrice(100, 0.5, qty 1) == ceil(0.5*100 - 0.1) == 50.
+        Assert.Equal(50, item.UnitPrice);
+    }
+
+    [Fact]
+    public void ProjectedUnitPriceMatchesTheVendorWindowSellRateFormula()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+
+        var shopItem = new VendorShopItem(
+            ItemGuid: 0x50002000u,
+            StackSize: 1,
+            WeenieClassId: 1234u,
+            Name: "Fixture Sword",
+            ItemType: (uint)ItemType.Weapon,
+            IconId: 0x06000001u,
+            Value: 137);
+        host.Runtime.InventoryOwner.Vendor.Apply(0x40001000u, Profile, [shopItem]);
+
+        // The window's VendorUiController.ComputeShopItemPrice prices a shop
+        // listing with VendorPricing.SellPrice against the vendor's SellPrice
+        // rate -- the adapter must reproduce that exact call, not BuyPrice.
+        int perUnit = VendorPricing.PerUnitValue(shopItem.Value ?? 0, shopItem.DescStackSize);
+        int expected = VendorPricing.SellPrice(perUnit, shopItem.ItemType ?? 0u, Profile.SellPrice, 1);
+
+        PluginVendorItem item = Assert.Single(vendor.Items);
+        Assert.Equal(expected, item.UnitPrice);
     }
 
     [Fact]
@@ -115,6 +142,148 @@ public sealed class RuntimeVendorAutomationTests
         Assert.Equal(PluginVendorCommandStatus.Sent, vendor.BuyAll().Status);
         Assert.NotEmpty(captured);
         Assert.Empty(vendor.BuyList);
+    }
+
+    [Fact]
+    public void BuyAllDoesNotHoldTheClientWideInventoryBusyGate()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+        host.Runtime.InventoryOwner.Vendor.Apply(
+            0x40001000u,
+            Profile,
+            [
+                new VendorShopItem(
+                    ItemGuid: 0x50002000u,
+                    StackSize: 5,
+                    WeenieClassId: 1234u,
+                    Name: "Fixture Sword",
+                    ItemType: (uint)ItemType.Weapon,
+                    IconId: 0x06000001u,
+                    Value: 100),
+            ]);
+        host.Runtime.Session.CurrentSession!.GameActionCapture = _ => { };
+
+        vendor.AddToBuyList(0x50002000u, 1);
+        Assert.Equal(PluginVendorCommandStatus.Sent, vendor.BuyAll().Status);
+
+        // A vendor transaction is not the same "use" the client-wide busy
+        // count guards -- retail never produces the generic use-completion
+        // that reservation expects, so holding it here would wedge every
+        // other item command until the response arrived (or forever, if it
+        // never does).
+        Assert.Equal(0, host.Runtime.ActionOwner.Transactions.Inventory.BusyCount);
+    }
+
+    [Fact]
+    public void BuyAllRefusesASecondCallUntilTheResponseArrivesThenAccepts()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+        host.Runtime.InventoryOwner.Vendor.Apply(
+            0x40001000u,
+            Profile,
+            [
+                new VendorShopItem(
+                    ItemGuid: 0x50002000u,
+                    StackSize: 5,
+                    WeenieClassId: 1234u,
+                    Name: "Fixture Sword",
+                    ItemType: (uint)ItemType.Weapon,
+                    IconId: 0x06000001u,
+                    Value: 100),
+            ]);
+        host.Runtime.Session.CurrentSession!.GameActionCapture = _ => { };
+
+        vendor.AddToBuyList(0x50002000u, 1);
+        Assert.Equal(PluginVendorCommandStatus.Sent, vendor.BuyAll().Status);
+
+        vendor.AddToBuyList(0x50002000u, 1);
+        Assert.Equal(PluginVendorCommandStatus.Busy, vendor.BuyAll().Status);
+
+        // The wire's generic use-completion for the first buy arrives.
+        host.Runtime.ActionOwner.Transactions.CompleteUse(0u);
+
+        Assert.Equal(PluginVendorCommandStatus.Sent, vendor.BuyAll().Status);
+    }
+
+    [Fact]
+    public void PollRaisesTransactionCompletedOnASuccessfulBuyResponse()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+        host.Runtime.InventoryOwner.Vendor.Apply(
+            0x40001000u,
+            Profile,
+            [
+                new VendorShopItem(
+                    ItemGuid: 0x50002000u,
+                    StackSize: 5,
+                    WeenieClassId: 1234u,
+                    Name: "Fixture Sword",
+                    ItemType: (uint)ItemType.Weapon,
+                    IconId: 0x06000001u,
+                    Value: 100),
+            ]);
+        host.Runtime.Session.CurrentSession!.GameActionCapture = _ => { };
+
+        var completions = new List<PluginVendorTransaction>();
+        vendor.TransactionCompleted += completions.Add;
+
+        vendor.AddToBuyList(0x50002000u, 1);
+        vendor.BuyAll();
+
+        // Before H2, LastItemUseCompletion.Revision never advances for a
+        // vendor buy/sell (nothing here calls TryDispatchUse), so the old
+        // revision-polling Poll() never observed this response at all.
+        host.Runtime.ActionOwner.Transactions.CompleteUse(0u);
+        vendor.Poll();
+
+        PluginVendorTransaction completion = Assert.Single(completions);
+        Assert.Equal(PluginVendorTransactionKind.Buy, completion.Kind);
+        Assert.True(completion.Success);
+        Assert.Null(completion.Notice);
+    }
+
+    [Fact]
+    public void PollRaisesTransactionCompletedOnAFailedSellResponse()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+        host.Runtime.InventoryOwner.Vendor.Apply(0x40001000u, Profile, []);
+        host.Runtime.PlayerIdentity.ServerGuid = 0x50000001u;
+        host.Runtime.Session.CurrentSession!.GameActionCapture = _ => { };
+        host.Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 0x50002000u,
+            WeenieClassId = 1234u,
+            Name = "Fixture Sword",
+            Type = ItemType.Weapon,
+            IconId = 0x06000001u,
+            Value = 100,
+            StackSize = 1,
+            ContainerId = host.Runtime.PlayerIdentity.ServerGuid,
+        });
+
+        var completions = new List<PluginVendorTransaction>();
+        vendor.TransactionCompleted += completions.Add;
+
+        Assert.Equal(
+            PluginVendorCommandStatus.Sent,
+            vendor.AddToSellList(0x50002000u).Status);
+        Assert.Equal(PluginVendorCommandStatus.Sent, vendor.SellAll().Status);
+
+        host.Runtime.ActionOwner.Transactions.CompleteUse(0x0002u);
+        vendor.Poll();
+
+        PluginVendorTransaction completion = Assert.Single(completions);
+        Assert.Equal(PluginVendorTransactionKind.Sell, completion.Kind);
+        Assert.False(completion.Success);
+        Assert.NotNull(completion.Notice);
     }
 
     [Fact]
@@ -193,5 +362,150 @@ public sealed class RuntimeVendorAutomationTests
 
         Assert.Equal(1, opened);
         Assert.Equal(0x40001000u, openedVendorId);
+    }
+
+    [Fact]
+    public void AddToSellListRejectsAnItemNotOwnedByThePlayer()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+        host.Runtime.InventoryOwner.Vendor.Apply(0x40001000u, Profile, []);
+        host.Runtime.PlayerIdentity.ServerGuid = 0x50000001u;
+        host.Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 0x50002000u,
+            Type = ItemType.Weapon,
+            Value = 100,
+            StackSize = 1,
+            ContainerId = 0x50009999u, // some other container, not the player
+        });
+
+        Assert.Equal(
+            PluginVendorCommandStatus.InvalidItem,
+            vendor.AddToSellList(0x50002000u).Status);
+    }
+
+    [Fact]
+    public void AddToSellListRejectsAVendorListingGuid()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+        host.Runtime.PlayerIdentity.ServerGuid = 0x50000001u;
+        host.Runtime.InventoryOwner.Vendor.Apply(
+            0x40001000u,
+            Profile,
+            [
+                new VendorShopItem(
+                    ItemGuid: 0x50002000u,
+                    StackSize: 1,
+                    WeenieClassId: 1234u,
+                    Name: "Fixture Sword",
+                    ItemType: (uint)ItemType.Weapon,
+                    IconId: 0x06000001u,
+                    Value: 100),
+            ]);
+        // A materialized client object under the same guid, owned by the
+        // player -- ownership alone must not be enough; a vendor listing
+        // can never be staged for sale, it belongs to the shop.
+        host.Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 0x50002000u,
+            Type = ItemType.Weapon,
+            Value = 100,
+            StackSize = 1,
+            ContainerId = 0x50000001u,
+        });
+
+        Assert.Equal(
+            PluginVendorCommandStatus.InvalidItem,
+            vendor.AddToSellList(0x50002000u).Status);
+    }
+
+    [Fact]
+    public void AddToSellListRejectsAnEquippedItem()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+        host.Runtime.InventoryOwner.Vendor.Apply(0x40001000u, Profile, []);
+        host.Runtime.PlayerIdentity.ServerGuid = 0x50000001u;
+        host.Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 0x50002000u,
+            Type = ItemType.Weapon,
+            Value = 100,
+            StackSize = 1,
+            ContainerId = 0x50000001u,
+            CurrentlyEquippedLocation = EquipMask.MeleeWeapon,
+        });
+
+        Assert.Equal(
+            PluginVendorCommandStatus.InvalidItem,
+            vendor.AddToSellList(0x50002000u).Status);
+    }
+
+    [Fact]
+    public void AddToSellListAcceptsAPlayerOwnedUnequippedNonListingItem()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+        host.Runtime.InventoryOwner.Vendor.Apply(0x40001000u, Profile, []);
+        host.Runtime.PlayerIdentity.ServerGuid = 0x50000001u;
+        host.Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 0x50002000u,
+            Type = ItemType.Weapon,
+            Value = 100,
+            StackSize = 1,
+            ContainerId = 0x50000001u,
+        });
+
+        Assert.Equal(
+            PluginVendorCommandStatus.Sent,
+            vendor.AddToSellList(0x50002000u).Status);
+    }
+
+    [Fact]
+    public void OpeningAVendorClearsStagedListsFromThePreviousVendor()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+        host.Runtime.PlayerIdentity.ServerGuid = 0x50000001u;
+        host.Runtime.InventoryOwner.Vendor.Apply(
+            0x40001000u,
+            Profile,
+            [
+                new VendorShopItem(
+                    ItemGuid: 0x50002000u,
+                    StackSize: 5,
+                    WeenieClassId: 1234u,
+                    Name: "Fixture Sword",
+                    ItemType: (uint)ItemType.Weapon,
+                    IconId: 0x06000001u,
+                    Value: 100),
+            ]);
+        host.Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 0x50003000u,
+            Type = ItemType.Weapon,
+            Value = 100,
+            StackSize = 1,
+            ContainerId = 0x50000001u,
+        });
+        vendor.AddToBuyList(0x50002000u, 1);
+        vendor.AddToSellList(0x50003000u);
+        Assert.NotEmpty(vendor.BuyList);
+        Assert.NotEmpty(vendor.SellList);
+
+        // A vendor switch (a new ApproachVendor without an intervening
+        // Close) -- the old shopping list is against the wrong vendor.
+        host.Runtime.InventoryOwner.Vendor.Apply(0x40002000u, Profile, []);
+
+        Assert.Empty(vendor.BuyList);
+        Assert.Empty(vendor.SellList);
     }
 }
