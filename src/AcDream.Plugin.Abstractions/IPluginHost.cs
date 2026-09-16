@@ -19,6 +19,9 @@ public interface IPluginHost
     IPluginLootClassifierRegistry LootClassifiers =>
         NoOpPluginLootClassifierRegistry.Instance;
 
+    /// <summary>Plugin-owned keyboard hotkeys; a no-op on a host with nothing to bind.</summary>
+    IHotkeyRegistry Hotkeys => NoOpHotkeyRegistry.Instance;
+
     IAutomationSurface Automation { get; }
 
     IPluginStorage VtankProfiles => NoOpPluginStorage.Instance;
