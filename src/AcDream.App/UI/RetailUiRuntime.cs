@@ -400,6 +400,12 @@ public sealed class RetailUiRuntime : IDisposable
             bindings.Host.ShowWindow,
             bindings.Host.HideWindow);
 
+        bindings.Plugins?.BindClientWindowControl(
+            ToggleClientWindow,
+            ShowClientWindow,
+            HideClientWindow,
+            IsClientWindowVisible);
+
         ChatSettings chatSettings = bindings.Chat.Store?.LoadChat() ?? ChatSettings.Default;
         WindowLockPresentation = new RetailWindowLockPresentationController(
             bindings.Host.Root.WindowManager);
@@ -1206,13 +1212,43 @@ public sealed class RetailUiRuntime : IDisposable
             (int)maximumPrice);
     }
 
-    public void CloseWindow(string name)
-    {
-        if (RetailPanelCatalog.TryGetPanelId(name, out uint panelId))
-            _panelUi.SetPanelVisibility(panelId, visible: false);
-        else
-            Host.HideWindow(name);
-    }
+    /// <summary>Shows a retained window by its <see cref="WindowNames"/> name.</summary>
+    public bool ShowWindow(string name)
+        => RetailPanelCatalog.TryGetPanelId(name, out uint panelId)
+            ? _panelUi.SetPanelVisibility(panelId, visible: true)
+            : Host.ShowWindow(name);
+
+    /// <summary>Hides a retained window by its <see cref="WindowNames"/> name.</summary>
+    public bool HideWindow(string name)
+        => RetailPanelCatalog.TryGetPanelId(name, out uint panelId)
+            ? _panelUi.SetPanelVisibility(panelId, visible: false)
+            : Host.HideWindow(name);
+
+    /// <summary>Whether a retained window by its <see cref="WindowNames"/> name is currently visible.</summary>
+    public bool IsWindowVisible(string name)
+        => RetailPanelCatalog.TryGetPanelId(name, out uint panelId)
+            ? _panelUi.IsPanelVisible(panelId)
+            : Host.IsWindowVisible(name);
+
+    public void CloseWindow(string name) => HideWindow(name);
+
+    /// <summary>
+    /// Plugin-facing window control: toggles one of the client's own
+    /// windows through the same seam an <see cref="AcDream.UI.Abstractions.Input.InputAction"/>
+    /// keybind uses. Unknown/unavailable windows return <c>false</c>.
+    /// </summary>
+    public bool ToggleClientWindow(AcDream.Plugin.Abstractions.PluginClientWindow window)
+        => PluginClientWindowNames.TryGetName(window, out string name) && ToggleWindow(name);
+
+    public bool ShowClientWindow(AcDream.Plugin.Abstractions.PluginClientWindow window)
+        => PluginClientWindowNames.TryGetName(window, out string name) && ShowWindow(name);
+
+    public bool HideClientWindow(AcDream.Plugin.Abstractions.PluginClientWindow window)
+        => PluginClientWindowNames.TryGetName(window, out string name) && HideWindow(name);
+
+    public bool IsClientWindowVisible(AcDream.Plugin.Abstractions.PluginClientWindow window)
+        => PluginClientWindowNames.TryGetName(window, out string name) && IsWindowVisible(name);
+
 
     public void SyncToolbarWindowButtons()
     {

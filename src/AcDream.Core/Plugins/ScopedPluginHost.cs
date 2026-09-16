@@ -1181,6 +1181,22 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             bool visible) =>
             _inner.SetControlVisible(_owner, viewName, controlName, visible);
 
+        // Client-window control is global (retained top-level windows the
+        // player toggles with a keybind or toolbar button), not scoped to
+        // this plugin's own registered views, so it forwards straight to
+        // the host without threading the owner through.
+        public bool ToggleClientWindow(PluginClientWindow window) =>
+            _inner.ToggleClientWindow(window);
+
+        public bool ShowClientWindow(PluginClientWindow window) =>
+            _inner.ShowClientWindow(window);
+
+        public bool HideClientWindow(PluginClientWindow window) =>
+            _inner.HideClientWindow(window);
+
+        public bool IsClientWindowVisible(PluginClientWindow window) =>
+            _inner.IsClientWindowVisible(window);
+
         private void AddRegistration(IDisposable registration)
         {
             lock (_gate)

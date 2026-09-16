@@ -51,6 +51,22 @@ public interface IUiRegistry
     bool ControlExists(string viewName, string controlName) => false;
     bool SetControlLabel(string viewName, string controlName, string label) => false;
     bool SetControlVisible(string viewName, string controlName, bool visible) => false;
+
+    /// <summary>
+    /// Shows one of the client's own windows if it is hidden, hides it if
+    /// shown. Returns whether the window ended up visible; a no-window host
+    /// or a window this build does not mount always returns <c>false</c>.
+    /// </summary>
+    bool ToggleClientWindow(PluginClientWindow window) => false;
+
+    /// <summary>Shows one of the client's own windows. Returns whether it is now visible.</summary>
+    bool ShowClientWindow(PluginClientWindow window) => false;
+
+    /// <summary>Hides one of the client's own windows. Returns whether the host recognized it.</summary>
+    bool HideClientWindow(PluginClientWindow window) => false;
+
+    /// <summary>Whether one of the client's own windows is currently visible.</summary>
+    bool IsClientWindowVisible(PluginClientWindow window) => false;
 }
 
 public interface IScopedUiRegistry : IUiRegistry
@@ -146,6 +162,14 @@ public sealed class NoOpUiRegistry : IScopedUiRegistry
         PluginPanelDescriptor descriptor,
         string markupContent,
         object binding) => NoOpUiRegistration.Instance;
+
+    public bool ToggleClientWindow(PluginClientWindow window) => false;
+
+    public bool ShowClientWindow(PluginClientWindow window) => false;
+
+    public bool HideClientWindow(PluginClientWindow window) => false;
+
+    public bool IsClientWindowVisible(PluginClientWindow window) => false;
 
     private sealed class NoOpRegistration : IDisposable
     {
