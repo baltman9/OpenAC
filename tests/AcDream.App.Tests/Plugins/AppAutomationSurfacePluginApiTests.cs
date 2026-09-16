@@ -290,6 +290,172 @@ public sealed class AppAutomationSurfacePluginApiTests
         Assert.Equal(274, surface.Character.ServerPopulation);
     }
 
+    [Fact]
+    public void ObjectChangedMapsEntityAndInventoryDeltasToPluginKinds()
+    {
+        var events = new WorldEvents();
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new AppAutomationSurface(events);
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        var seen = new List<PluginObjectChange>();
+        events.ObjectChanged += seen.Add;
+        var observer = (IRuntimeEventObserver)surface;
+        RuntimeEventStamp stamp = default;
+
+        observer.OnEntity(new RuntimeEntityDelta(
+            stamp,
+            RuntimeEntityChange.Registered,
+            new RuntimeEntitySnapshot(
+                new RuntimeEntityIdentity(100u, 1u, 1), 0u, 0u, null)));
+        observer.OnEntity(new RuntimeEntityDelta(
+            stamp,
+            RuntimeEntityChange.Rebucketed,
+            new RuntimeEntitySnapshot(
+                new RuntimeEntityIdentity(100u, 1u, 1), 0u, 0u, null)));
+        observer.OnEntity(new RuntimeEntityDelta(
+            stamp,
+            RuntimeEntityChange.Withdrawn,
+            new RuntimeEntitySnapshot(
+                new RuntimeEntityIdentity(100u, 1u, 1), 0u, 0u, null)));
+        observer.OnEntity(new RuntimeEntityDelta(
+            stamp,
+            RuntimeEntityChange.Hidden,
+            new RuntimeEntitySnapshot(
+                new RuntimeEntityIdentity(100u, 1u, 1), 0u, 0u, null)));
+        observer.OnInventory(new RuntimeInventoryDelta(
+            stamp,
+            RuntimeInventoryChange.Added,
+            new RuntimeInventoryItemSnapshot(
+                200u, 1, "Item", 0u, 0, 0u, 0u, 0, 0)));
+        observer.OnInventory(new RuntimeInventoryDelta(
+            stamp,
+            RuntimeInventoryChange.Removed,
+            new RuntimeInventoryItemSnapshot(
+                200u, 1, "Item", 0u, 0, 0u, 0u, 0, 0)));
+        observer.OnInventory(new RuntimeInventoryDelta(
+            stamp,
+            RuntimeInventoryChange.Cleared,
+            default));
+
+        Assert.Equal(
+            new (uint ObjectId, PluginObjectChangeKind Kind)[]
+            {
+                (100u, PluginObjectChangeKind.Created),
+                (100u, PluginObjectChangeKind.Moved),
+                (100u, PluginObjectChangeKind.Released),
+                (100u, PluginObjectChangeKind.Updated),
+                (200u, PluginObjectChangeKind.Created),
+                (200u, PluginObjectChangeKind.Released),
+            },
+            seen.Select(static c => (c.ObjectId, c.Kind)));
+    }
+
+    [Fact]
+    public void ContainerOpenedAndClosedFireOnExternalContainerTransitions()
+    {
+        var events = new WorldEvents();
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new AppAutomationSurface(events);
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        uint? opened = null;
+        uint? closed = null;
+        events.ContainerOpened += id => opened = id;
+        events.ContainerClosed += id => closed = id;
+
+        runtime.InventoryOwner.ExternalContainers.RequestOpen(500u);
+        runtime.InventoryOwner.ExternalContainers.ApplyViewContents(500u);
+        Assert.Equal(500u, opened);
+        Assert.Null(closed);
+
+        runtime.InventoryOwner.ExternalContainers.ApplyClose(500u);
+        Assert.Equal(500u, closed);
+    }
+
+    [Fact]
+    public void ObjectChangedReportsIdentReceivedOnTheFirstAppraisalResponseOnly()
+    {
+        var events = new WorldEvents();
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new AppAutomationSurface(events);
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        var seen = new List<PluginObjectChange>();
+        events.ObjectChanged += seen.Add;
+
+        runtime.ActionOwner.Transactions.TryRequestAppraisal(
+            700u, static _ => { });
+        runtime.ActionOwner.Transactions.AcceptAppraisalResponse(700u);
+        // A refresh of already-held appraisal data is not a fresh receipt.
+        runtime.ActionOwner.Transactions.AcceptAppraisalResponse(700u);
+
+        Assert.Single(
+            seen,
+            c => c.ObjectId == 700u
+                && c.Kind == PluginObjectChangeKind.IdentReceived);
+    }
+
+    [Fact]
+    public void LogoutIsUnavailableWithoutAnInWorldSessionAndNeverCallsTheRoute()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new AppAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        int calls = 0;
+        surface.BindLogout(() =>
+        {
+            calls++;
+            return true;
+        });
+
+        // The runtime never reached RuntimeLifecycleState.InWorld in this
+        // fixture (that requires a driven session), so IsAvailable is false
+        // and Logout must refuse without ever touching the bound route --
+        // matching every other automation command's IsAvailable gate.
+        Assert.False(((ILoginAutomation)surface).Logout());
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
+    public void DialogsAnswerForwardsToTheBoundRoute()
+    {
+        using var surface = new AppAutomationSurface();
+        uint? seenContext = null;
+        bool? seenAccept = null;
+        surface.BindDialogs((contextId, accept) =>
+        {
+            seenContext = contextId;
+            seenAccept = accept;
+            return true;
+        });
+
+        bool result = ((IDialogAutomation)surface).Answer(42u, true);
+
+        Assert.True(result);
+        Assert.Equal(42u, seenContext);
+        Assert.True(seenAccept);
+    }
+
+    [Fact]
+    public void DialogsAnswerReturnsFalseWithoutABoundRoute()
+    {
+        using var surface = new AppAutomationSurface();
+
+        Assert.False(((IDialogAutomation)surface).Answer(1u, true));
+    }
+
+    [Fact]
+    public void RaiseConfirmationRequestedFiresTheEvent()
+    {
+        var events = new WorldEvents();
+        using var surface = new AppAutomationSurface(events);
+        PluginConfirmation? seen = null;
+        events.ConfirmationRequested += c => seen = c;
+
+        surface.RaiseConfirmationRequested(
+            new PluginConfirmation(7u, 5, "Continue?"));
+
+        Assert.Equal(new PluginConfirmation(7u, 5, "Continue?"), seen);
+    }
+
     private static void Enter(GameRuntime runtime) =>
         runtime.EventSink.EmitLifecycle(
             RuntimeLifecycleState.Starting,
