@@ -449,6 +449,66 @@ public sealed class RuntimeInteractionTransactionStateTests
     }
 
     [Fact]
+    public void ReidentifyOfACompletedObjectThenCancelledLeavesNoFalseCompletion()
+    {
+        // HIGH-3: LastCompletedAppraisalId is a one-shot signal for the
+        // request that produced it, not a sticky history. A plugin
+        // re-identifying an object it already saw complete, whose new
+        // request is then cancelled (CancelObjectAppraisalForSpell) before
+        // it ever completes again, must not see the OLD completion
+        // misread as an answer to the new request -- a poll of
+        // "CurrentObjectId == myId && AwaitingObjectId != myId" would be
+        // trivially (and wrongly) true the instant the new request was
+        // accepted, since both halves were already true from the first
+        // completion.
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+        var sent = new List<uint>();
+
+        Assert.True(state.TryRequestAppraisal(
+            Container, sent.Add, AppraisalRequestOrigin.Automation));
+        state.AcceptAppraisalResponse(Container);
+        Assert.Equal(Container, state.LastCompletedAppraisalId);
+
+        Assert.True(state.TryRequestAppraisal(
+            Container, sent.Add, AppraisalRequestOrigin.Automation));
+        Assert.Equal(0u, state.LastCompletedAppraisalId);
+
+        Assert.True(state.CancelObjectAppraisalForSpell(sent.Add));
+
+        Assert.Equal(0u, state.LastCompletedAppraisalId);
+        Assert.Equal(0u, state.AwaitingAppraisalId);
+    }
+
+    [Fact]
+    public void ReidentifyOfACompletedObjectThenDisplacedByAnotherRequestLeavesNoFalseCompletion()
+    {
+        // HIGH-3, the other half: instead of a cancel, the re-identify's
+        // awaiting slot gets displaced by an unrelated request before it
+        // completes again. The stale completion from the FIRST identify
+        // must not survive to be misread as an answer to the second.
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+        var sent = new List<uint>();
+
+        Assert.True(state.TryRequestAppraisal(
+            Container, sent.Add, AppraisalRequestOrigin.Automation));
+        state.AcceptAppraisalResponse(Container);
+        Assert.Equal(Container, state.LastCompletedAppraisalId);
+
+        Assert.True(state.TryRequestAppraisal(
+            Container, sent.Add, AppraisalRequestOrigin.Automation));
+        Assert.Equal(0u, state.LastCompletedAppraisalId);
+
+        // A user assess for a different object displaces Container's
+        // still-in-flight re-identify out of the single awaiting slot.
+        Assert.True(state.TryRequestAppraisal(Item, sent.Add));
+        Assert.Equal(Item, state.AwaitingAppraisalId);
+
+        Assert.Equal(0u, state.LastCompletedAppraisalId);
+    }
+
+    [Fact]
     public void AppraisalReceivedFiresForAnAutomationOriginResponseThatDoesNotPresent()
     {
         // Plugin-facing observers (IEvents.ObjectChanged(IdentReceived),

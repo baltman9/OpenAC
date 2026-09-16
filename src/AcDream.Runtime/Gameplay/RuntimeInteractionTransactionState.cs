@@ -167,7 +167,14 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
     /// scanners, trackers) poll this -- via
     /// ILootAutomation.Appraisal.CurrentObjectId -- to learn that their own
     /// Identify request completed, which must not depend on whether the
-    /// user's examination window happens to be showing that object.
+    /// user's examination window happens to be showing that object. It is
+    /// a one-shot signal for the request that produced it, not a history:
+    /// TryRequestAppraisal clears it the moment a new request for THAT
+    /// SAME object is accepted, and CancelObjectAppraisalForSpell clears
+    /// it unconditionally along with the rest of the slot. A poll of
+    /// "CurrentObjectId == myId" is only meaningful for the request you
+    /// yourself most recently issued for myId -- an earlier completion of
+    /// the same id does not linger to be misread as this one's.
     /// </summary>
     public uint LastCompletedAppraisalId => _lastCompletedAppraisalId;
 
@@ -359,6 +366,18 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
             return false;
         }
 
+        // LastCompletedAppraisalId is a one-shot completion signal, not a
+        // history of every object ever appraised: a plugin re-identifying
+        // the same object it already saw complete needs a fresh signal for
+        // THIS request, not a stale true left over from the last one. Left
+        // sticky, a plugin polling "CurrentObjectId == myId &&
+        // AwaitingObjectId != myId" would see a false completion the
+        // instant it issued the new request (both halves already true from
+        // the prior round), or after this request was cancelled/displaced
+        // without ever completing.
+        if (objectId == _lastCompletedAppraisalId)
+            _lastCompletedAppraisalId = 0u;
+
         uint epoch = _clearEpoch;
         bool acquiredBusy = _awaitingAppraisalId == 0u;
         if (acquiredBusy)
@@ -492,6 +511,11 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         _awaitingAppraisalId = 0u;
         _awaitingAppraisalOrigin = default;
         _currentAppraisalId = 0u;
+        // Wipe the completion signal along with the rest of the slot --
+        // this is a full appraisal-state takeover for the spell-examine
+        // view, and leaving a stale LastCompletedAppraisalId behind risks
+        // a plugin later reading a "completion" that predates this cancel.
+        _lastCompletedAppraisalId = 0u;
         IncrementRevision();
         sendAppraisal(0u);
         return true;

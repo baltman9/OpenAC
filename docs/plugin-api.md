@@ -217,6 +217,16 @@ else entirely (or nothing). Compare it against the id you passed to
 `Identify`, together with `AwaitingObjectId` no longer matching that same
 id, to know the response has landed.
 
+`CurrentObjectId` is only meaningful for the request you yourself most
+recently accepted -- it is not a history of every object ever appraised.
+Issuing a new `Identify` for the same object id you previously saw
+complete clears the signal for that id immediately (before the new
+request is even sent), and cancelling the slot for a spell examine clears
+it unconditionally. Do not compare `CurrentObjectId` against an id from
+an earlier, already-consumed `Identify` call -- only against the id you
+passed to the `Identify` call whose completion you are currently waiting
+on.
+
 `ContainerOpened` / `ContainerClosed` track the client's one open external
 container — a corpse, a chest, a housing storage crate. A vendor's shop pane
 is a separate surface (not covered by this event) and does not raise it.

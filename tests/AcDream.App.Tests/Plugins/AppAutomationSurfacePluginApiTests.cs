@@ -5,6 +5,7 @@ using AcDream.Core.Plugins;
 using AcDream.Core.Spells;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
+using AcDream.Runtime.Gameplay;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Items;
@@ -403,6 +404,44 @@ public sealed class AppAutomationSurfacePluginApiTests
             seen.Count(c =>
                 c.ObjectId == 700u
                     && c.Kind == PluginObjectChangeKind.IdentReceived));
+    }
+
+    [Fact]
+    public void LootAppraisalCurrentObjectIdAdvancesForAnAutomationResponseThatDoesNotPresent()
+    {
+        // Pins AppAutomationSurface's ILootAutomation.Appraisal mapping:
+        // PluginAppraisalState.CurrentObjectId must read
+        // RuntimeInteractionTransactionState.LastCompletedAppraisalId, not
+        // CurrentAppraisalId (the examination window's presentation
+        // target). An Automation-origin response for an object other than
+        // whatever the window is showing never retargets presentation, so
+        // if this mapping regressed back to CurrentAppraisalId, a plugin
+        // polling Appraisal.CurrentObjectId for its own Identify to finish
+        // would never see it -- exactly the corpse-looting stall HIGH-1
+        // fixed.
+        var events = new WorldEvents();
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new AppAutomationSurface(events);
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        ILootAutomation loot = surface.Loot;
+
+        Assert.Equal(0u, loot.Appraisal.CurrentObjectId);
+
+        runtime.ActionOwner.Transactions.TryRequestAppraisal(
+            701u,
+            static _ => { },
+            AppraisalRequestOrigin.Automation);
+        RuntimeAppraisalResponseAcceptance acceptance =
+            runtime.ActionOwner.Transactions.AcceptAppraisalResponse(701u);
+
+        // The response did not retarget presentation (nothing was already
+        // current for it to refresh in place) -- proving this test would
+        // have caught a regression back to mapping CurrentAppraisalId.
+        Assert.False(acceptance.PresentInUi);
+        Assert.Equal(0u, runtime.ActionOwner.Transactions.CurrentAppraisalId);
+
+        Assert.Equal(701u, loot.Appraisal.CurrentObjectId);
+        Assert.Equal(0u, loot.Appraisal.AwaitingObjectId);
     }
 
     [Fact]
