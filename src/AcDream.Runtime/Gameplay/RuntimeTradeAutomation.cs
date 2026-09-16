@@ -14,6 +14,7 @@ public sealed class RuntimeTradeAutomation : ITradeAutomation
 
     private long _lastRevision = long.MinValue;
     private bool _wasOpen;
+    private uint _lastPartnerGuid;
     private bool _wasPartnerAccepted;
     private HashSet<uint> _lastSelfItems = [];
     private HashSet<uint> _lastPartnerItems = [];
@@ -159,6 +160,7 @@ public sealed class RuntimeTradeAutomation : ITradeAutomation
         if (snapshot.IsOpen && !_wasOpen)
         {
             _wasOpen = true;
+            _lastPartnerGuid = snapshot.PartnerGuid;
             _lastSelfItems = [];
             _lastPartnerItems = [];
             _wasPartnerAccepted = false;
@@ -171,10 +173,33 @@ public sealed class RuntimeTradeAutomation : ITradeAutomation
         else if (!snapshot.IsOpen && _wasOpen)
         {
             _wasOpen = false;
+            _lastPartnerGuid = 0u;
             _lastSelfItems = [];
             _lastPartnerItems = [];
             _wasPartnerAccepted = false;
             Raise(_closed);
+        }
+        else if (snapshot.IsOpen
+            && _wasOpen
+            && snapshot.PartnerGuid != _lastPartnerGuid)
+        {
+            // The trade owner reused the same open window for a different
+            // partner without an intervening Closed report -- one tick
+            // between two distinct trades. A caller only ever sees Closed
+            // then Opened, one pair per Poll() call: two swaps landing
+            // inside the same poll interval coalesce into a single
+            // close+open for the final partner (documented in the plugin
+            // API doc).
+            _lastPartnerGuid = snapshot.PartnerGuid;
+            _lastSelfItems = [];
+            _lastPartnerItems = [];
+            _wasPartnerAccepted = false;
+            Raise(_closed);
+            Raise(
+                _opened,
+                new PluginTradeOpened(
+                    _runtime.PlayerIdentity.ServerGuid,
+                    snapshot.PartnerGuid));
         }
 
         if (snapshot.Revision == _lastRevision)

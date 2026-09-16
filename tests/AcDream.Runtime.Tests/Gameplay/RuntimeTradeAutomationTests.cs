@@ -176,4 +176,40 @@ public sealed class RuntimeTradeAutomationTests
         trade.Poll();
         Assert.Equal(1, accepted);
     }
+
+    [Fact]
+    public void APartnerSwapWithinOneOpenWindowClosesTheOldTradeAndOpensTheNew()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        uint self = host.Runtime.PlayerIdentity.ServerGuid;
+        uint firstPartner = 0x70000099u;
+        uint secondPartner = 0x7000009Au;
+        host.Runtime.TradeOwner.ApplyRegister(
+            new GameEvents.RegisterTrade(self, firstPartner, 0uL),
+            self);
+        var trade = new RuntimeTradeAutomation(host.Runtime);
+
+        var opened = new List<uint>();
+        int closed = 0;
+        trade.Opened += o => opened.Add(o.PartnerObjectId);
+        trade.Closed += () => closed++;
+
+        trade.Poll();
+        Assert.Equal([firstPartner], opened);
+        Assert.Equal(0, closed);
+
+        // The retail-look window's own trade owner can register a second
+        // trade for a different partner while IsOpen never dipped to false
+        // in between -- a Poll() cadence that only diffs IsOpen would miss
+        // this entirely and keep reporting the first partner.
+        host.Runtime.TradeOwner.ApplyRegister(
+            new GameEvents.RegisterTrade(self, secondPartner, 0uL),
+            self);
+        trade.Poll();
+
+        Assert.Equal(1, closed);
+        Assert.Equal([firstPartner, secondPartner], opened);
+        Assert.Equal(secondPartner, trade.PartnerObjectId);
+    }
 }

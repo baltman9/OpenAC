@@ -293,6 +293,15 @@ InitiatorObjectId` is always the local player's own object id, and
 `PartnerObjectId` is always the other side, regardless of who actually sent
 the open request.
 
+A trade owner that registers a new partner while the window never closed
+in between (one open trade replaced by another inside a single `Poll()`
+interval) is reported as a `Closed` for the old partner immediately
+followed by an `Opened` for the new one -- `Poll()` tracks the partner
+guid, not just open/closed. Two or more such swaps landing inside the
+same interval coalesce into a single close+open pair for the final
+partner; an intermediate partner in that window is never individually
+reported.
+
 ## Vendor
 
 ```csharp
