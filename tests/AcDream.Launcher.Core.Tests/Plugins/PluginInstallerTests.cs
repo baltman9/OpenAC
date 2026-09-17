@@ -435,6 +435,46 @@ public sealed class PluginInstallerTests
     }
 
     [Fact]
+    public async Task InstallingAPrereleaseVersionWritesTheChannelAsBeta()
+    {
+        using var fixture = new Fixture();
+        var release = fixture.BuildRelease(Id, "0.2.0-beta.1");
+        fixture.RegisterRelease(Repo, release);
+
+        await fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null);
+
+        Assert.Equal(PluginReleaseChannel.Beta, fixture.RecordStore.Find(Id)!.Channel);
+    }
+
+    [Fact]
+    public async Task InstallingAStableVersionWritesTheChannelAsStable()
+    {
+        using var fixture = new Fixture();
+        var release = fixture.BuildRelease(Id, "0.1.0");
+        fixture.RegisterRelease(Repo, release);
+
+        await fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null);
+
+        Assert.Equal(PluginReleaseChannel.Stable, fixture.RecordStore.Find(Id)!.Channel);
+    }
+
+    [Fact]
+    public async Task UpdatingABetaChannelPluginToAStableReleaseKeepsItOnBeta()
+    {
+        using var fixture = new Fixture();
+        var first = fixture.BuildRelease(Id, "0.2.0-beta.1");
+        fixture.RegisterRelease(Repo, first);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, first.Tag, null, null);
+        Assert.Equal(PluginReleaseChannel.Beta, fixture.RecordStore.Find(Id)!.Channel);
+
+        var stable = fixture.BuildRelease(Id, "0.2.0");
+        fixture.RegisterRelease(Repo, stable);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, stable.Tag, null, null);
+
+        Assert.Equal(PluginReleaseChannel.Beta, fixture.RecordStore.Find(Id)!.Channel);
+    }
+
+    [Fact]
     public async Task InstallRefusedWhileASessionLeaseIsHeld()
     {
         using var fixture = new Fixture();

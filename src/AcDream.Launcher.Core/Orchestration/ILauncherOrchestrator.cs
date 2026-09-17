@@ -40,6 +40,12 @@ public interface ILauncherOrchestrator : IDisposable
     {
     }
 
+    /// <summary>Launcher-wide: offers a beta-only plugin in Discover and Add from URL when true
+    /// (L-319 amendment). A no-op default, since most fakes never exercise it.</summary>
+    void SetShowBetaPlugins(bool value)
+    {
+    }
+
     void AddServer(string name, string host, int port);
 
     void EditServer(string name, string newName, string newHost, int newPort);

@@ -176,6 +176,7 @@
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
           <Button Content="Add from URL" Command="{Binding Plugins.AddFromUrlCommand}" />
           <Button Content="Refresh list" Command="{Binding Plugins.CheckNowCommand}" />
+          <CheckBox Content="Show beta plugins" IsChecked="{Binding Plugins.ShowBetaPlugins, Mode=TwoWay}" VerticalAlignment="Center" AutomationProperties.Name="Show beta plugins" />
         </StackPanel>
       </Grid>
       <StackPanel Grid.Row="1" Spacing="2" Margin="0,0,0,6">

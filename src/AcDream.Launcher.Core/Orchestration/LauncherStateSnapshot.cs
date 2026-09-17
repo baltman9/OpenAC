@@ -75,7 +75,8 @@ public sealed record LauncherStateSnapshot(
     LauncherPlatformCapabilities Platform,
     bool IsInstallationReady,
     string InstallationStatus,
-    IReadOnlyList<string>? SharedAccountNames = null);
+    IReadOnlyList<string>? SharedAccountNames = null,
+    bool ShowBetaPlugins = false);
 
 public sealed class LauncherOperationException : Exception
 {

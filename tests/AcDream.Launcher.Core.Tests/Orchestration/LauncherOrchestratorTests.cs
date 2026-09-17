@@ -37,6 +37,31 @@ public sealed class LauncherOrchestratorTests : IDisposable
     }
 
     [Fact]
+    public void SetShowBetaPluginsPersistsToDiskForAFreshOrchestratorInstance()
+    {
+        using LauncherOrchestrator orchestrator = CreateOrchestrator();
+        Assert.False(orchestrator.GetSnapshot().ShowBetaPlugins);
+
+        orchestrator.SetShowBetaPlugins(true);
+        Assert.True(orchestrator.GetSnapshot().ShowBetaPlugins);
+
+        string profilePath = Path.Combine(_paths.ConfigDirectory, "launcher-profiles.json");
+        var reloadedStore = new LauncherProfileStore(profilePath);
+        using var reloaded = new LauncherOrchestrator(
+            reloadedStore,
+            _paths,
+            new LauncherExecutableSet(
+                "gui-host",
+                "headless-host",
+                fileExists: _ => true,
+                hasUnixExecutePermission: _ => true),
+            new LauncherInstallRecord("dats", "pak"));
+        reloaded.LoadProfiles();
+
+        Assert.True(reloaded.GetSnapshot().ShowBetaPlugins);
+    }
+
+    [Fact]
     public async Task AssetVersionCrashProducesActionableErrorWithoutExposingStderr()
     {
         var supervisors = new FakeSupervisorFactory();

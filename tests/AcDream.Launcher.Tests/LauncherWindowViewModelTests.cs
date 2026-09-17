@@ -1011,6 +1011,10 @@ public sealed partial class LauncherWindowViewModelTests
         public string InstallationStatus { get; private set; } =
             "No installed client is configured.";
 
+        /// <summary>Set by <see cref="SetShowBetaPlugins"/>, the way a real profile store would
+        /// hold it, so a freshly configured view model reads back whatever the last one wrote.</summary>
+        public bool ShowBetaPlugins { get; private set; }
+
         public void LoadProfiles() => LoadCalled = true;
 
         public LauncherStateSnapshot GetSnapshot() => new(
@@ -1018,7 +1022,10 @@ public sealed partial class LauncherWindowViewModelTests
             [Session],
             Platform,
             IsInstallationReady: InstalledRecord is not null,
-            InstallationStatus);
+            InstallationStatus,
+            ShowBetaPlugins: ShowBetaPlugins);
+
+        public void SetShowBetaPlugins(bool value) => ShowBetaPlugins = value;
 
         public LauncherCapability GetLaunchCapability(LaunchMode mode) =>
             Platform.ForLaunchMode(mode);

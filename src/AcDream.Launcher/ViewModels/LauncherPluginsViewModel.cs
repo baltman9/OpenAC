@@ -207,6 +207,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject
     private string? _error;
     private string? _statusText;
     private bool _isRateLimited;
+    private bool _showBetaPlugins;
     private string _addFromUrlText = string.Empty;
     private bool _isRemoveDialogOpen;
     private InstalledPluginInfo? _removeTarget;
@@ -409,6 +410,37 @@ public sealed class LauncherPluginsViewModel : ObservableObject
         private set => SetProperty(ref _isRateLimited, value);
     }
 
+    /// <summary>Launcher-wide (L-319 amendment): offers a beta-only repo in Discover and Add from
+    /// URL when on, persisted through the orchestrator like every other launcher setting. Off keeps
+    /// every resolve on <see cref="PluginReleaseChannel.Stable"/>, exactly as before the setting
+    /// existed. Toggling re-runs Discover's own details for the rows already showing, never a full
+    /// Check.</summary>
+    public bool ShowBetaPlugins
+    {
+        get => _showBetaPlugins;
+        set
+        {
+            if (!SetProperty(ref _showBetaPlugins, value))
+            {
+                return;
+            }
+
+            _orchestrator.SetShowBetaPlugins(value);
+            foreach (PluginDiscoverRowViewModel row in _allDiscover)
+            {
+                _discoverDetailsCache.Remove(row.Id);
+                row.LatestVersion = null;
+                row.Compatibility = null;
+            }
+
+            _ = RefreshDiscoverDetailsAsync();
+        }
+    }
+
+    /// <summary>What Discover's own details and Add from URL resolve with (L-319 amendment).</summary>
+    private PluginReleaseChannel DiscoverChannel =>
+        ShowBetaPlugins ? PluginReleaseChannel.Beta : PluginReleaseChannel.Stable;
+
     public bool IsUsingCachedList => _listAgeUtc is not null;
 
     public string ListAgeText => _listAgeUtc is { } age
@@ -448,6 +480,10 @@ public sealed class LauncherPluginsViewModel : ObservableObject
         _composition = composition ?? throw new ArgumentNullException(nameof(composition));
         _clientVersionResolver = clientVersionResolver
             ?? throw new ArgumentNullException(nameof(clientVersionResolver));
+        SetProperty(
+            ref _showBetaPlugins,
+            _orchestrator.GetSnapshot().ShowBetaPlugins,
+            nameof(ShowBetaPlugins));
         NotifyCommandStates();
     }
 
@@ -685,7 +721,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject
             try
             {
                 result = await _composition.ReleaseResolver
-                    .ResolveAsync(row.Repo, PluginReleaseChannel.Stable)
+                    .ResolveAsync(row.Repo, DiscoverChannel)
                     .ConfigureAwait(true);
             }
             catch (LauncherUpdateException)
@@ -946,7 +982,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject
         try
         {
             PluginReleaseResolveResult result = await _composition.ReleaseResolver
-                .ResolveAsync(repo, PluginReleaseChannel.Stable)
+                .ResolveAsync(repo, DiscoverChannel)
                 .ConfigureAwait(true);
             switch (result.Status)
             {

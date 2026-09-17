@@ -1672,6 +1672,200 @@ public sealed partial class LauncherWindowViewModelTests
         Assert.True(direct.IsPrerelease);
     }
 
+    [Fact]
+    public async Task WithShowBetaPluginsOffABetaOnlyRepoIsNotOfferedInDiscoverOrAddFromUrl()
+    {
+        using var fixture = new PluginPanelFixture();
+        const string repo = "shaneedwards/openac-plugin-hello";
+        Uri stableUri = GitHubReleaseLocator.LatestAsset(repo, "plugin.json");
+        Uri feedUri = GitHubReleaseLocator.ReleasesFeed(repo);
+        Uri betaTaggedUri = GitHubReleaseLocator.TaggedAsset(repo, "v0.2.0-beta.1", "plugin.json");
+        byte[] feedBytes = System.Text.Encoding.UTF8.GetBytes($$"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <entry><link rel="alternate" href="https://github.com/{{repo}}/releases/tag/v0.2.0-beta.1"/></entry>
+            </feed>
+            """);
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(fixture.ListJson());
+            }
+
+            if (request.RequestUri == stableUri)
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            if (request.RequestUri == feedUri)
+            {
+                return Ok(feedBytes);
+            }
+
+            if (request.RequestUri == betaTaggedUri)
+            {
+                return Ok(PluginPanelFixture.ManifestJson(
+                    "edwards.discoverable", "0.2.0-beta.1", "0.1.0", ["headless"]));
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        Assert.False(viewModel.Plugins.ShowBetaPlugins);
+        PluginDiscoverRowViewModel row = Assert.Single(viewModel.Plugins.Discover);
+        await viewModel.Plugins.RefreshDiscoverDetailsAsync();
+        Assert.False(row.HasLatestVersion);
+
+        viewModel.Plugins.AddFromUrlText = "https://github.com/" + repo;
+        await viewModel.Plugins.AddFromUrlCommand.ExecuteAsync();
+        Assert.False(viewModel.Plugins.InstallDialog.IsOpen);
+        Assert.True(viewModel.Plugins.HasError);
+    }
+
+    [Fact]
+    public async Task WithShowBetaPluginsOnABetaOnlyRepoIsOfferedInstallsWithTheBetaChannelAndChip()
+    {
+        using var fixture = new PluginPanelFixture();
+        const string repo = "shaneedwards/openac-plugin-hello";
+        const string id = "edwards.discoverable";
+        Uri stableUri = GitHubReleaseLocator.LatestAsset(repo, "plugin.json");
+        Uri feedUri = GitHubReleaseLocator.ReleasesFeed(repo);
+        Uri betaTaggedUri = GitHubReleaseLocator.TaggedAsset(repo, "v0.2.0-beta.1", "plugin.json");
+        byte[] manifestBytes = PluginPanelFixture.ManifestJson(id, "0.2.0-beta.1", "0.1.0", ["headless"]);
+        byte[] zipBytes = PluginPanelFixture.BuildZip(id, manifestBytes);
+        string zipName = $"{id}-0.2.0-beta.1.zip";
+        Uri zipUri = GitHubReleaseLocator.TaggedAsset(repo, "v0.2.0-beta.1", zipName);
+        Uri shaUri = GitHubReleaseLocator.TaggedAsset(repo, "v0.2.0-beta.1", zipName + ".sha256");
+        byte[] feedBytes = System.Text.Encoding.UTF8.GetBytes($$"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <entry><link rel="alternate" href="https://github.com/{{repo}}/releases/tag/v0.2.0-beta.1"/></entry>
+            </feed>
+            """);
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(fixture.ListJson());
+            }
+
+            if (request.RequestUri == stableUri)
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            if (request.RequestUri == feedUri)
+            {
+                return Ok(feedBytes);
+            }
+
+            if (request.RequestUri == betaTaggedUri)
+            {
+                return Ok(manifestBytes);
+            }
+
+            if (request.RequestUri == shaUri)
+            {
+                return Ok(System.Text.Encoding.UTF8.GetBytes(
+                    $"{PluginPanelFixture.Sha256(zipBytes)}  {zipName}\n"));
+            }
+
+            if (request.RequestUri == zipUri)
+            {
+                return Ok(zipBytes);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        viewModel.Plugins.ShowBetaPlugins = true;
+
+        PluginDiscoverRowViewModel row = Assert.Single(viewModel.Plugins.Discover);
+        Assert.Equal("0.2.0-beta.1", row.LatestVersion);
+
+        row.InstallCommand.Execute(null);
+        Assert.True(viewModel.Plugins.InstallDialog.IsOpen);
+        Assert.True(viewModel.Plugins.InstallDialog.IsOfferedPrerelease);
+        Assert.Contains("pre-release", viewModel.Plugins.InstallDialog.WarningText, StringComparison.Ordinal);
+
+        await viewModel.Plugins.InstallDialog.ConfirmCommand.ExecuteAsync();
+        Assert.False(viewModel.Plugins.InstallDialog.IsOpen);
+
+        InstalledPluginRecordStore store = InstalledPluginRecordStore.ForApplicationPaths(fixture.Paths);
+        store.Load();
+        Assert.Equal(PluginReleaseChannel.Beta, store.Find(id)!.Channel);
+
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+        PluginInstalledRowViewModel installed = Assert.Single(
+            viewModel.Plugins.Installed, r => r.Id == id);
+        Assert.True(installed.IsPrerelease);
+    }
+
+    [Fact]
+    public async Task ShowBetaPluginsPersistsAcrossAViewModelReload()
+    {
+        using var fixture = new PluginPanelFixture();
+        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
+            ? Ok(fixture.ListJson())
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        viewModel.Plugins.ShowBetaPlugins = true;
+
+        // A fresh view model over the same orchestrator (the way a window reopen would), reading
+        // whatever the setting last wrote rather than defaulting off again.
+        using var reloadedViewModel = CreateInitialized(orchestrator);
+        reloadedViewModel.ConfigurePlugins(composition, () => null);
+
+        Assert.True(reloadedViewModel.Plugins.ShowBetaPlugins);
+    }
+
+    [Fact]
+    public async Task TogglingShowBetaPluginsNeverChangesInstalledRecords()
+    {
+        using var fixture = new PluginPanelFixture();
+        fixture.WriteManifest("edwards.managed", "0.1.0", ["headless"]);
+        fixture.AddRecord("edwards.managed", "shaneedwards/openac-plugin-hello", "0.1.0");
+        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
+            ? Ok(fixture.ListJson())
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        viewModel.Plugins.ShowBetaPlugins = true;
+        viewModel.Plugins.ShowBetaPlugins = false;
+
+        InstalledPluginRecordStore store = InstalledPluginRecordStore.ForApplicationPaths(fixture.Paths);
+        store.Load();
+        Assert.Equal(PluginReleaseChannel.Stable, store.Find("edwards.managed")!.Channel);
+    }
+
     private sealed class PluginPanelFixture : IDisposable
     {
         private readonly string _root = Path.Combine(
@@ -1716,6 +1910,32 @@ public sealed partial class LauncherWindowViewModelTests
                 }
                 """);
         }
+
+        /// <summary>A zip an install can actually extract: the given <paramref name="manifestBytes"/>
+        /// at <c>plugin.json</c> and a placeholder entry DLL matching its declared name.</summary>
+        public static byte[] BuildZip(string id, byte[] manifestBytes)
+        {
+            using var output = new MemoryStream();
+            using (var archive = new System.IO.Compression.ZipArchive(
+                output, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+            {
+                using (Stream entryStream = archive.CreateEntry("plugin.json").Open())
+                {
+                    entryStream.Write(manifestBytes, 0, manifestBytes.Length);
+                }
+
+                byte[] dllBytes = System.Text.Encoding.UTF8.GetBytes("binary-" + id);
+                using (Stream entryStream = archive.CreateEntry($"{id}.dll").Open())
+                {
+                    entryStream.Write(dllBytes, 0, dllBytes.Length);
+                }
+            }
+
+            return output.ToArray();
+        }
+
+        public static string Sha256(byte[] bytes) =>
+            Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
 
         public void AddRecord(
             string id,

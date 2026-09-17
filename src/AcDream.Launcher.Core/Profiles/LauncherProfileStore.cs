@@ -165,6 +165,8 @@ public sealed class LauncherProfileStore
         }
     }
 
+    /// <summary>The launcher-wide beta discovery setting (L-319 amendment).</summary>
+    public void SetShowBetaPlugins(bool value) => Document.ShowBetaPlugins = value;
 
     public ServerProfile AddServer(string name, string host, int port)
     {

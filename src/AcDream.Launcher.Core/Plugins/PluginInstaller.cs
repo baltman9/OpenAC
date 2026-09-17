@@ -251,6 +251,7 @@ public sealed class PluginInstaller
                     manifest.Version,
                     tag,
                     shaFile.Sha256,
+                    pluginVersion.IsPreRelease,
                     existingRecord,
                     stagingDirectory,
                     targetDirectory);
@@ -501,11 +502,18 @@ public sealed class PluginInstaller
         string newVersion,
         string newTag,
         string newZipSha256,
+        bool newVersionIsPreRelease,
         InstalledPluginRecord? existingRecord,
         string stagingDirectory,
         string targetDirectory)
     {
         var pending = new PendingPluginInstall(newVersion, newTag, newZipSha256);
+        // The channel follows the version just fetched (L-319 amendment): a prerelease always lands
+        // on beta; a stable release keeps whatever channel an existing record already carries, so a
+        // beta player's update to stable never downgrades them off the channel.
+        PluginReleaseChannel channel = newVersionIsPreRelease
+            ? PluginReleaseChannel.Beta
+            : existingRecord?.Channel ?? PluginReleaseChannel.Stable;
         InstalledPluginRecord pendingRecord = existingRecord is null
             ? new InstalledPluginRecord(
                 id,
@@ -516,7 +524,10 @@ public sealed class PluginInstaller
                 ZipSha256: null,
                 InstalledAt: DateTimeOffset.UtcNow,
                 Pending: pending)
-            : existingRecord with { Pending = pending };
+            {
+                Channel = channel,
+            }
+            : existingRecord with { Pending = pending, Channel = channel };
 
         Upsert(pendingRecord);
         _recordStore.Save();

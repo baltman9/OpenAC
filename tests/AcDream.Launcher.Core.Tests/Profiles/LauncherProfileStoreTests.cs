@@ -61,6 +61,33 @@ public sealed class LauncherProfileStoreTests : IDisposable
     }
 
     [Fact]
+    public void SaveNeverWritesShowBetaPluginsWhenFalse()
+    {
+        var store = new LauncherProfileStore(_filePath);
+        store.Load();
+        store.AddServer("Local ACE", "127.0.0.1", 9000);
+
+        store.Save();
+
+        Assert.DoesNotContain("showBetaPlugins", File.ReadAllText(_filePath));
+    }
+
+    [Fact]
+    public void ShowBetaPluginsRoundTrips()
+    {
+        var store = new LauncherProfileStore(_filePath);
+        store.Load();
+        store.SetShowBetaPlugins(true);
+        store.Save();
+        Assert.Contains("\"showBetaPlugins\": true", File.ReadAllText(_filePath));
+
+        var reloaded = new LauncherProfileStore(_filePath);
+        reloaded.Load();
+
+        Assert.True(reloaded.Document.ShowBetaPlugins);
+    }
+
+    [Fact]
     public void AddServerRejectsDuplicateName()
     {
         var store = new LauncherProfileStore(_filePath);

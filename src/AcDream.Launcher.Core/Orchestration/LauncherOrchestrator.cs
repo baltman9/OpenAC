@@ -95,7 +95,8 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
                 _platform,
                 _installRecord is not null,
                 _installationStatus,
-                _profileStore.Document.Users?.Select(user => user.Account).ToArray());
+                _profileStore.Document.Users?.Select(user => user.Account).ToArray(),
+                _profileStore.Document.ShowBetaPlugins);
         }
     }
 
@@ -381,6 +382,10 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
                 accountName,
                 selectedCharacter,
                 selectedLaunchMode));
+
+    /// <summary>Launcher-wide beta discovery setting (L-319 amendment).</summary>
+    public void SetShowBetaPlugins(bool value) =>
+        MutateProfiles(() => _profileStore.SetShowBetaPlugins(value));
 
     public void RemoveCharacter(
         string serverName,
