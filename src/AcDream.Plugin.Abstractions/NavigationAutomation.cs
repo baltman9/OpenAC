@@ -343,6 +343,12 @@ public readonly record struct PluginGoToReport(
     /// not open, beside the spot where it last stopped making progress; otherwise zero.
     /// </summary>
     public uint BlockedByObjectId { get; init; }
+
+    /// <summary>
+    /// Who asked for the walk under way: a plugin's id, or "player" for a chat command;
+    /// null once no walk is under way.
+    /// </summary>
+    public string? Owner { get; init; }
 }
 
 /// <summary>What became of a movement command a plugin sent.</summary>
@@ -362,6 +368,13 @@ public enum PluginNavigationCommandStatus
     /// it arrived for a session that has already ended.
     /// </summary>
     Rejected,
+
+    /// <summary>
+    /// Another owner's walk is under way, so this one was refused rather than taking the
+    /// character from it: a plugin cannot start or stop a walk another plugin started. The
+    /// player's own commands always win.
+    /// </summary>
+    Held,
 }
 
 /// <summary>

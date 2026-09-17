@@ -23,7 +23,7 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
 
     private readonly object _gate = new();
     private readonly Func<bool> _isAvailable;
-    private readonly List<Func<string?>> _pauses = [];
+    private readonly List<GoToPause> _pauses = [];
     private GameRuntime? _runtime;
     private IRuntimeMovementCommands? _commands;
     private Func<RuntimeGenerationToken>? _generation;
@@ -368,77 +368,26 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
 
     // ── Walks the client plans ────────────────────────────────────────────
 
-    public PluginNavigationCommandStatus GoTo(uint objectId, float arrivalMeters)
-    {
-        if (!TryWalk(out NavigationWalkController walk))
-            return PluginNavigationCommandStatus.Unavailable;
-        if (objectId == 0u || !(arrivalMeters > 0f) || arrivalMeters > MaximumGoToArrivalMeters)
-            return PluginNavigationCommandStatus.Rejected;
-        walk.WalkTo(objectId, arrivalMeters);
-        return PluginNavigationCommandStatus.Accepted;
-    }
+    public PluginNavigationCommandStatus GoTo(uint objectId, float arrivalMeters) =>
+        GoToFor(PlayerOwner, objectId, arrivalMeters);
 
-    public PluginNavigationCommandStatus GoTo(PluginNavigationPosition position, float arrivalMeters)
-    {
-        if (!TryWalk(out NavigationWalkController walk))
-            return PluginNavigationCommandStatus.Unavailable;
-        if (!double.IsFinite(position.EastWest)
-            || !double.IsFinite(position.NorthSouth)
-            || double.IsInfinity(position.Elevation)
-            || !(arrivalMeters > 0f)
-            || arrivalMeters > MaximumGoToArrivalMeters)
-        {
-            return PluginNavigationCommandStatus.Rejected;
-        }
-        walk.WalkToPlace(position.CellId, RuntimeNavigationProjection.LandblockLocal(position), arrivalMeters);
-        return PluginNavigationCommandStatus.Accepted;
-    }
+    public PluginNavigationCommandStatus GoTo(PluginNavigationPosition position, float arrivalMeters) =>
+        GoToFor(PlayerOwner, position, arrivalMeters);
 
-    public PluginNavigationCommandStatus StandOn(uint objectId, float arrivalMeters)
-    {
-        if (!TryWalk(out NavigationWalkController walk))
-            return PluginNavigationCommandStatus.Unavailable;
-        if (objectId == 0u || !(arrivalMeters > 0f) || arrivalMeters > MaximumGoToArrivalMeters)
-            return PluginNavigationCommandStatus.Rejected;
-        walk.StandOn(objectId, arrivalMeters);
-        return PluginNavigationCommandStatus.Accepted;
-    }
+    public PluginNavigationCommandStatus StandOn(uint objectId, float arrivalMeters) =>
+        StandOnFor(PlayerOwner, objectId, arrivalMeters);
 
     /// <summary>How far behind a player a follow keeps when no buffer is given.</summary>
     public const float DefaultFollowMeters = NavigationWalkController.DefaultFollowMeters;
 
-    public PluginNavigationCommandStatus Follow(uint playerId, float bufferMeters)
-    {
-        if (!TryWalk(out NavigationWalkController walk))
-            return PluginNavigationCommandStatus.Unavailable;
-        if (playerId == 0u || !(bufferMeters > 0f) || bufferMeters > MaximumGoToArrivalMeters)
-            return PluginNavigationCommandStatus.Rejected;
-        walk.Follow(playerId, bufferMeters);
-        return PluginNavigationCommandStatus.Accepted;
-    }
+    public PluginNavigationCommandStatus Follow(uint playerId, float bufferMeters) =>
+        FollowFor(PlayerOwner, playerId, bufferMeters);
 
-    public PluginNavigationCommandStatus StopGoTo()
-    {
-        if (!TryWalk(out NavigationWalkController walk))
-            return PluginNavigationCommandStatus.Unavailable;
-        if (!walk.IsBusy)
-            return PluginNavigationCommandStatus.Rejected;
-        walk.Stop();
-        return PluginNavigationCommandStatus.Accepted;
-    }
+    public PluginNavigationCommandStatus StopGoTo() => StopGoToFor(PlayerOwner);
 
-    public PluginGoToReport GoToReport =>
-        TryWalk(out NavigationWalkController walk)
-            ? RuntimeNavigationProjection.GoToReport(walk.Report)
-            : default;
+    public PluginGoToReport GoToReport => GoToReportFor();
 
-    public IDisposable PauseGoToWhile(Func<string?> need)
-    {
-        ArgumentNullException.ThrowIfNull(need);
-        lock (_gate)
-            _pauses.Add(need);
-        return new GoToPause(this, need);
-    }
+    public IDisposable PauseGoToWhile(Func<string?> need) => PauseGoToWhileFor(PlayerOwner, need);
 
     /// <summary>
     /// What needs the character now, so that a walk waits for it: a plugin that asked walks
@@ -447,15 +396,15 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
     /// </summary>
     internal string? PauseReason()
     {
-        Func<string?>[] pauses;
+        GoToPause[] pauses;
         lock (_gate)
             pauses = [.. _pauses];
-        foreach (Func<string?> pause in pauses)
+        foreach (GoToPause pause in pauses)
         {
             string? need;
             try
             {
-                need = pause();
+                need = pause.Need();
             }
             catch (Exception)
             {
@@ -478,18 +427,24 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
     }
 
     /// <summary>A plugin's request that walks wait while it needs the character, ended by disposing it.</summary>
-    private sealed class GoToPause(RuntimeNavigationAutomation owner, Func<string?> need) : IDisposable
+    private sealed class GoToPause(RuntimeNavigationAutomation navigation, string owner, Func<string?> need) : IDisposable
     {
         private bool _disposed;
 
+        /// <summary>The plugin id that asked, or the player.</summary>
+        public string Owner { get; } = owner;
+
+        /// <summary>What the owner says it needs the character for; null when nothing.</summary>
+        public Func<string?> Need { get; } = need;
+
         public void Dispose()
         {
-            lock (owner._gate)
+            lock (navigation._gate)
             {
                 if (_disposed)
                     return;
                 _disposed = true;
-                owner._pauses.Remove(need);
+                navigation._pauses.Remove(this);
             }
         }
     }

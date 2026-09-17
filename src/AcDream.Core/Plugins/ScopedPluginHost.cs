@@ -36,7 +36,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             inner.LootClassifiers,
             pluginId,
             pluginDisplayName);
-        _automation = new ScopedAutomationSurface(inner);
+        _automation = new ScopedAutomationSurface(inner, pluginId);
         _hotkeys = new ScopedHotkeyRegistry(inner.Hotkeys, pluginId);
     }
 
@@ -127,12 +127,14 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     /// is actually wrapped, and it re-wraps lazily when the live chat
     /// instance changes.
     /// </summary>
-    private sealed class ScopedAutomationSurface(IPluginHost host)
+    private sealed class ScopedAutomationSurface(IPluginHost host, string pluginId)
         : IAutomationSurface, IDisposable
     {
         private readonly object _gate = new();
         private IPluginChat? _chatSource;
         private ScopedPluginChat? _chatWrapper;
+        private INavigationAutomation? _navigationSource;
+        private INavigationAutomation? _navigationScope;
         private bool _disposed;
 
         private IAutomationSurface Inner => host.Automation;
@@ -175,7 +177,27 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         public ILootAutomation Loot => Inner.Loot;
         public IFellowshipAutomation Fellowship => Inner.Fellowship;
         public IEnchantmentAutomation Enchantments => Inner.Enchantments;
-        public INavigationAutomation Navigation => Inner.Navigation;
+        // A host whose navigation can tell plugins apart hands this plugin its own view,
+        // so its walks and pauses are its own and go with it when it is disabled.
+        public INavigationAutomation Navigation
+        {
+            get
+            {
+                INavigationAutomation source = Inner.Navigation;
+                lock (_gate)
+                {
+                    if (!ReferenceEquals(_navigationSource, source))
+                    {
+                        (_navigationSource as IScopedNavigationSource)?.Release(pluginId);
+                        _navigationSource = source;
+                        _navigationScope = source is IScopedNavigationSource scoped
+                            ? scoped.ScopeTo(pluginId)
+                            : source;
+                    }
+                    return _navigationScope!;
+                }
+            }
+        }
         public IWorldObjectAutomation Objects => Inner.Objects;
         public IWorldTimeAutomation WorldTime => Inner.WorldTime;
         public ILoginAutomation Login => Inner.Login;
@@ -188,11 +210,17 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
 
         public void Dispose()
         {
+            INavigationAutomation? navigation;
             lock (_gate)
             {
                 _disposed = true;
                 _chatWrapper?.Dispose();
+                navigation = _navigationSource;
+                _navigationSource = null;
+                _navigationScope = null;
             }
+            // The plugin is going: its walk stops and its pauses are dropped.
+            (navigation as IScopedNavigationSource)?.Release(pluginId);
         }
     }
 

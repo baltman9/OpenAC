@@ -71,7 +71,8 @@ constructor. The host creates it with no arguments, then calls:
 large surface: character, items, spells, combat, world objects, trade,
 vendor, navigation, fellowship, login. Check `IsAvailable` on a surface
 before relying on it; a host that cannot provide something returns an inert
-value rather than throwing.
+value rather than throwing. Walks the client plans for you, and the rule that
+one plugin drives the character at a time, are in [navigation.md](navigation.md).
 
 ## Installing and running
 

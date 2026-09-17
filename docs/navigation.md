@@ -192,11 +192,27 @@ Everything is on `host.Automation.Navigation`. A host without navigation answers
 | `GoToReport` | The latest walk: its state, meters left, how often it planned again, a reason, and what blocked it. |
 | `PauseGoToWhile(need)` | Registers a callback asked every frame a walk is under way. While it returns a reason, such as `"fighting a monster"`, the walk stops and waits. Dispose the result to unregister. |
 
+### Who is driving
+
+One walk runs at a time, and it belongs to whoever asked for it: a plugin, or the
+player through a `/nav` command. While a plugin's walk is under way, another plugin's
+`GoTo`, `StandOn` or `Follow` answers `Held` instead of taking the character, and a
+plugin's `StopGoTo` ends only the walk it started. The player's own commands always
+win: a `/nav go to` replaces any plugin's walk, `/nav stop` ends any, and the player's
+movement keys interrupt any. `GoToReport.Owner` says who owns the walk under way, so a
+plugin that was refused can see why.
+
+A plugin's walks and pauses are its own. When it is disabled or unloaded, the walk it
+started stops and every `PauseGoToWhile` it registered is dropped, whether or not it
+disposed them. A plugin that wants the character while another plugin's walk is under
+way asks the player, or waits for the report to show that walk ended; it cannot take it.
+
 ### Statuses
 
 - `Accepted`: the request was taken. Watch its report.
 - `Rejected`: the arguments are wrong: an object id of 0, a position that isn't finite, an arrival distance outside 0 to 50 m, a jump's power outside 0 to 1, a move past its limits, or nothing to stop.
 - `Unavailable`: there is no character in the world, or the host has no navigation.
+- `Held`: another plugin's walk is under way; see [Who is driving](#who-is-driving).
 
 ### Walking to an object
 
