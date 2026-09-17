@@ -46,6 +46,10 @@ public static class GitHubReleaseLocator
             $"releases/download/{Uri.EscapeDataString(tag)}/{Uri.EscapeDataString(assetName)}");
     }
 
+    /// <summary>The repo's releases Atom feed, the only no-setup way to see a prerelease (L-308,
+    /// L-319): <c>releases/latest</c> skips them and the REST API is forbidden.</summary>
+    public static Uri ReleasesFeed(string repo) => BuildUri(repo, "releases.atom");
+
     /// <summary>Parses an <c>https://github.com/{owner}/{repo}</c> URL a user typed in. Nothing else
     /// is accepted: no query, fragment, credentials, or extra path segments.</summary>
     public static bool TryParseRepoUrl(string? value, out string repo)
