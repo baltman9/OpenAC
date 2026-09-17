@@ -1,6 +1,8 @@
 using System.Numerics;
+using AcDream.Core.Items;
 using AcDream.Core.Navigation;
 using AcDream.Core.Physics;
+using AcDream.Core.Properties;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Navigation;
@@ -110,6 +112,46 @@ public sealed class RuntimeNavigationAutomationTests
         Assert.Equal(local.X, placed.X, 2);
         Assert.Equal(local.Y, placed.Y, 2);
         Assert.Equal(local.Z, placed.Z, 2);
+    }
+
+    /// <summary>
+    /// A door reads open or closed as the world shows it: a door's Open property comes with an
+    /// appraisal and does not follow the door opening and closing afterwards, while an open door
+    /// stops colliding.
+    /// </summary>
+    [Theory]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, true)]
+    [InlineData(false, false, false)]
+    public void ADoorReadsOpenWhenTheWorldShowsItOpenWhateverItsAppraisalSaid(bool passable, bool appraisedOpen, bool open)
+    {
+        var door = new ClientObject { ObjectId = 0x7A000001u, PublicWeenieBitfield = (uint)PublicWeenieFlags.Door };
+        door.Properties.Bools[(uint)PropertyBool.Open] = appraisedOpen;
+        PhysicsStateFlags state = passable ? PhysicsStateFlags.Ethereal : PhysicsStateFlags.None;
+
+        PluginNavigationObject seen = RuntimeNavigationProjection.Enrich(
+            new PluginNavigationObject(door.ObjectId, "Door", default),
+            door,
+            state);
+
+        Assert.True(seen.IsDoor);
+        Assert.Equal(open, seen.IsOpen);
+    }
+
+    /// <summary>A door the client has appraised knows its lock, even when the appraisal named no lock at all.</summary>
+    [Fact]
+    public void AnAppraisedDoorKnowsItsLockStateEvenWithNoLockProperty()
+    {
+        var door = new ClientObject { ObjectId = 0x7A000001u, PublicWeenieBitfield = (uint)PublicWeenieFlags.Door };
+        var nothingYet = RuntimeNavigationProjection.Enrich(new PluginNavigationObject(door.ObjectId, "Door", default), door, PhysicsStateFlags.None);
+
+        door.LastAppraisalTimeMs = 1;
+        var appraised = RuntimeNavigationProjection.Enrich(new PluginNavigationObject(door.ObjectId, "Door", default), door, PhysicsStateFlags.None);
+
+        Assert.False(nothingYet.HasLockState);
+        Assert.True(appraised.HasLockState);
+        Assert.False(appraised.IsLocked);
     }
 
     [Fact]

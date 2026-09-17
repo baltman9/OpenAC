@@ -200,7 +200,8 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
                     ?? record.Snapshot.Name
                     ?? $"0x{objectId:X8}",
                 RuntimeNavigationProjection.Position(current)),
-            runtime.InventoryOwner.Objects.Get(objectId));
+            runtime.InventoryOwner.Objects.Get(objectId),
+            record.FinalPhysicsState);
         return true;
     }
 
@@ -243,7 +244,8 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
             nearestDistance = distance;
             nearest = RuntimeNavigationProjection.Enrich(
                 new PluginNavigationObject(objectId, candidateName, candidate),
-                runtime.InventoryOwner.Objects.Get(objectId));
+                runtime.InventoryOwner.Objects.Get(objectId),
+                record.FinalPhysicsState);
             found = true;
         }
 
@@ -272,7 +274,8 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
                     record.ServerGuid,
                     name,
                     RuntimeNavigationProjection.Position(position)),
-                item));
+                item,
+                record.FinalPhysicsState));
         }
         result.Sort(static (left, right) => left.ObjectId.CompareTo(right.ObjectId));
         return result;
@@ -527,19 +530,27 @@ internal static class RuntimeNavigationProjection
                 new Vector3(value.PositionX, value.PositionY, value.PositionZ),
                 new Quaternion(value.RotationX, value.RotationY, value.RotationZ, value.RotationW));
 
-    /// <summary>An object with what its appraisal says about a door it is: open, locked, and how hard its lock is.</summary>
-    public static PluginNavigationObject Enrich(in PluginNavigationObject value, ClientObject? item)
+    /// <summary>
+    /// An object with what the client knows of a door it is: open, locked, and how hard its lock
+    /// is. A door stands open when the world shows it passable, as <paramref name="physicsState"/>
+    /// says, since its Open property comes with an appraisal and does not follow the door opening
+    /// and closing afterwards. Its lock is known once it has been appraised.
+    /// </summary>
+    public static PluginNavigationObject Enrich(in PluginNavigationObject value, ClientObject? item, PhysicsStateFlags? physicsState)
     {
         if (item is null)
             return value;
+        bool door = ((PublicWeenieFlags)(item.PublicWeenieBitfield ?? 0u) & PublicWeenieFlags.Door) != 0;
         bool hasOpen = item.Properties.Bools.TryGetValue((uint)PropertyBool.Open, out bool isOpen);
         bool hasLocked = item.Properties.Bools.TryGetValue((uint)PropertyBool.Locked, out bool isLocked);
         return value with
         {
-            IsDoor = ((PublicWeenieFlags)(item.PublicWeenieBitfield ?? 0u) & PublicWeenieFlags.Door) != 0,
-            IsOpen = hasOpen && isOpen,
+            IsDoor = door,
+            IsOpen = door && physicsState is { } state
+                ? state.HasFlag(PhysicsStateFlags.Ethereal)
+                : hasOpen && isOpen,
             IsLocked = hasLocked && isLocked,
-            HasLockState = hasOpen || hasLocked,
+            HasLockState = hasOpen || hasLocked || item.LastAppraisalTimeMs > 0,
             LockDifficulty = item.Properties.GetInt((uint)PropertyInt.ResistLockpick),
         };
     }
