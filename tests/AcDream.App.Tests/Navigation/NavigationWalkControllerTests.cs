@@ -1008,6 +1008,64 @@ public sealed class NavigationWalkControllerTests
         Assert.InRange(x, 39f, 41f);
     }
 
+    /// <summary>
+    /// A walk stuck in a passage so narrow that keeping out of where it stuck leaves no route
+    /// plans through that spot again and goes on down its ladder of ways off, rather than
+    /// ending at the first stop.
+    /// </summary>
+    [Fact]
+    public void AWalkStuckInAPassageWithNoOtherWayKeepsTryingDifferentWaysOff()
+    {
+        var body = new SimulatedBody(new Vector3(40f, 34f, 0f)) { Stuck = true };
+        var walk = new NavigationWalkController(CellWorld(Passage), body, new Goals { [Target] = new Vector3(40f, 56f, 0f) });
+        var heard = new List<string>();
+        walk.Narration = heard.Add;
+
+        walk.WalkTo(Target);
+        NavigationWalkReport report = RunUntilSettled(walk, body, seconds: 200f);
+
+        Assert.Equal(NavigationWalkState.Blocked, report.State);
+        Assert.Contains(heard, line => line.Contains("no route keeps out of where the character stuck", StringComparison.Ordinal));
+        Assert.Contains(heard, line => line.Contains("stepping back 1 m first", StringComparison.Ordinal));
+        Assert.Contains(heard, line => line.Contains("hopping forward first", StringComparison.Ordinal));
+        Assert.Equal(NavigationWalkController.MaximumReplans, heard.Count(line => line.Contains("planning again (", StringComparison.Ordinal)));
+    }
+
+    /// <summary>
+    /// A follow stuck in such a passage keeps going round the ways off for as long as it stays
+    /// stuck, starting over without starting the ways off over: only its very first stop tries
+    /// nothing.
+    /// </summary>
+    [Fact]
+    public void AFollowStuckInAPassageWithNoOtherWayKeepsTryingDifferentWaysOff()
+    {
+        var body = new SimulatedBody(new Vector3(40f, 34f, 0f)) { Stuck = true };
+        var goals = new Goals { [Target] = new Vector3(40f, 56f, 0f) };
+        goals.Players.Add(Target);
+        var walk = new NavigationWalkController(CellWorld(Passage), body, goals);
+        var heard = new List<string>();
+        walk.Narration = heard.Add;
+
+        walk.Follow(Target, 3f);
+        RunUntil(walk, body, _ => heard.Count(line => line.Contains("hopping forward first", StringComparison.Ordinal)) >= 3, seconds: 600f);
+
+        Assert.True(walk.IsBusy);
+        string[] stops = [.. heard.Where(line => line.Contains("planning again (", StringComparison.Ordinal))];
+        Assert.True(stops.Length > 2 * NavigationWalkController.MaximumReplans, $"stopped {stops.Length} times");
+        Assert.Single(stops, line => !line.Contains(" first", StringComparison.Ordinal));
+        Assert.Contains(stops, line => line.Contains("stepping back 1 m first", StringComparison.Ordinal));
+        Assert.Contains(stops, line => line.Contains("sidestepping 1 m to the", StringComparison.Ordinal));
+        Assert.True(body.Jumps >= 3);
+    }
+
+    /// <summary>A dead-end passage 1.6 m wide and 3 m tall: walls at x = 39.2 and x = 40.8 from y = 30 to y = 60, closed at y = 30.</summary>
+    private static readonly Vector3[][] Passage =
+    [
+        [new(39.2f, 30f, 0f), new(39.2f, 60f, 0f), new(39.2f, 60f, 3f), new(39.2f, 30f, 3f)],
+        [new(40.8f, 30f, 0f), new(40.8f, 60f, 0f), new(40.8f, 60f, 3f), new(40.8f, 30f, 3f)],
+        [new(39.2f, 30f, 0f), new(40.8f, 30f, 0f), new(40.8f, 30f, 3f), new(39.2f, 30f, 3f)],
+    ];
+
     /// <summary>A corridor 4 m wide and 3 m tall, walls at x = 38 and x = 42 from y = 30 to y = 60.</summary>
     private static readonly Vector3[][] Corridor =
     [

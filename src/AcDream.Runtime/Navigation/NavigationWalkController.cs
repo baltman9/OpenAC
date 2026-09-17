@@ -920,7 +920,7 @@ internal sealed partial class NavigationWalkController
         Vector3 from = sample.Position;
         Vector3 to = active.Goal;
         float arrival = PlanningRadius(active.Chasing is null ? active.ArrivalMeters : PortalArrivalMeters);
-        NavAvoidance[] avoid = [.. active.Avoid, .. active.PassingAvoid, .. Portals(grid, sample.Body, active.GoalObjectId, to)];
+        NavAvoidance[] avoid = [.. active.Avoid, .. active.StuckSpots, .. active.PassingAvoid, .. Portals(grid, sample.Body, active.GoalObjectId, to)];
         active.PassingAvoid.Clear();
         NavAvoidance[] obstacles = Obstacles(grid, sample.Body, active.GoalObjectId);
         NavAvoidance[] crowd = Crowd(sample, active.GoalObjectId);
@@ -957,13 +957,15 @@ internal sealed partial class NavigationWalkController
                 + $"keeping out of {avoid.Length} spots and {obstacles.Length} placed objects, passing {crowd.Length} creatures; "
                 + $"{(leaps is null ? "no leaps" : "leaps allowed")}"));
         }
+        // A follow that plans again around where it stuck holds only if planning through that spot fails too.
+        ConcurrentQueue<string>? notes = active.StuckSpots.Count > 0 ? null : _searchNotes;
         _routingFor = active;
         _routing = staged
             ? Task.Run(() => AroundObstacles(to, avoid, obstacles, spots => NavRouter.FindToward(grid, from, to, RegionMargin, spots, leaps, crowd)))
             : onto is not null
                 ? Task.Run(() => AroundObstacles(to, avoid, obstacles, spots => NavRouter.FindOnto(grid, from, onto, arrival, spots, leaps, crowd)))
                 : followFloor
-                    ? Task.Run(() => AroundObstacles(to, avoid, obstacles, spots => FollowRoute(grid, from, to, arrival, spots, leaps, crowd, goalRadius, _searchNotes)))
+                    ? Task.Run(() => AroundObstacles(to, avoid, obstacles, spots => FollowRoute(grid, from, to, arrival, spots, leaps, crowd, goalRadius, notes)))
                     : Task.Run(() => AroundObstacles(to, avoid, obstacles, spots => NavRouter.Find(grid, from, to, arrival, spots, leaps, crowd, onGoalFloor, goalRadius)));
     }
 
@@ -1204,7 +1206,7 @@ internal sealed partial class NavigationWalkController
             // Only the first stops keep later plans out of the spot ahead: a body that keeps
             // stopping in one place would otherwise ring itself in, as on the only stairs down.
             if (active.Replans < AvoidedStops)
-                active.Avoid.Add(new NavAvoidance(spot, BlockedSpotRadius));
+                active.StuckSpots.Add(new NavAvoidance(spot, BlockedSpotRadius));
         }
         if (active.Replans >= MaximumReplans)
         {
@@ -1214,7 +1216,7 @@ internal sealed partial class NavigationWalkController
 
         // Planning again from the very spot a body is pressed against something rarely frees it,
         // so each stop after the first tries a different way off it first.
-        int attempt = active.Replans;
+        int attempt = active.Recoveries++;
         active.Replans++;
         active.Builds = 0;
         _driver = null;
@@ -1228,12 +1230,14 @@ internal sealed partial class NavigationWalkController
     /// <summary>
     /// Tries a way off whatever a stopped body met, a different one at each stop: none at the
     /// first, then stepping back, moving to the roomiest spot nearby, sidestepping toward the more
-    /// open side, sidestepping the other way, and hopping forward. Says what it tried, or null.
+    /// open side, sidestepping the other way, and hopping forward, and round those ways again
+    /// for a follow that keeps stopping. Says what it tried, or null.
     /// </summary>
     private string? Recover(Request active, in NavigationWalkBodySample sample, int attempt)
     {
         var culture = System.Globalization.CultureInfo.InvariantCulture;
-        switch (attempt % MaximumReplans)
+        int way = attempt == 0 ? 0 : ((attempt - 1) % (MaximumReplans - 1)) + 1;
+        switch (way)
         {
             case 1:
                 return Moves(active, RuntimeMoveDirection.Backward, $"stepping back {RecoveryMeters:0.#} m");
@@ -1246,11 +1250,11 @@ internal sealed partial class NavigationWalkController
             case 3:
             case 4:
                 bool openLeft = RoomToward(sample, left: true) >= RoomToward(sample, left: false);
-                bool left = attempt % MaximumReplans == 3 ? openLeft : !openLeft;
+                bool left = way == 3 ? openLeft : !openLeft;
                 return Moves(
                     active,
                     left ? RuntimeMoveDirection.StrafeLeft : RuntimeMoveDirection.StrafeRight,
-                    $"sidestepping {RecoveryMeters:0.#} m to the {(left ? "left" : "right")}{(attempt % MaximumReplans == 3 ? ", the more open side" : string.Empty)}");
+                    $"sidestepping {RecoveryMeters:0.#} m to the {(left ? "left" : "right")}{(way == 3 ? ", the more open side" : string.Empty)}");
             case 5:
                 if (!_body.BeginJump(HopPower, RuntimeMovePace.Walk))
                     return null;
@@ -1939,6 +1943,17 @@ internal sealed partial class NavigationWalkController
             if (passed > 0)
                 Say($"Route: no way around {passed} of the objects the server placed arrives, so the route passes them");
         }
+        if (route.Outcome != NavRouteOutcome.Routed && requester.StuckSpots.Count > 0)
+        {
+            // Where the only way on passes the spot the character stuck at, such as a narrow
+            // stair, keeping out of it leaves no route: plan through it again, and let the next
+            // stop try the next way off.
+            requester.StuckSpots.Clear();
+            string through = "no route keeps out of where the character stuck; planning through it again";
+            Publish(requester, NavigationWalkState.Planning, through, float.NaN);
+            Say($"{(requester.Follow ? "Follow" : "Walk to")} {Label(requester)}: {through}");
+            return;
+        }
         if (route.Outcome != NavRouteOutcome.Routed)
         {
             if (requester.AvoidedDoor is { } avoided)
@@ -2309,8 +2324,10 @@ internal sealed partial class NavigationWalkController
         request.Builds = 0;
         request.Replans = 0;
         request.Avoid.Clear();
+        request.StuckSpots.Clear();
         if (state is NavigationWalkState.Arrived or NavigationWalkState.ArrivedWithoutSight)
         {
+            request.Recoveries = 0;
             request.Settled = true;
             request.FollowSaid = null;
             request.StepOffs = 0;
@@ -2433,6 +2450,7 @@ internal sealed partial class NavigationWalkController
         request.Replans = 0;
         request.Stages = 0;
         request.Avoid.Clear();
+        request.StuckSpots.Clear();
         request.FollowRetryAt = 0d;
         request.FollowSaid = null;
     }
@@ -2748,6 +2766,12 @@ internal sealed partial class NavigationWalkController
 
         public int Replans { get; set; }
 
+        /// <summary>
+        /// The ways off tried since the walk last arrived, which picks the next one. A follow
+        /// keeps it when it starts over, so a follower stuck in one place goes on to new ways off.
+        /// </summary>
+        public int Recoveries { get; set; }
+
         /// <summary>Grids built for the current plan.</summary>
         public int Builds { get; set; }
 
@@ -2757,8 +2781,14 @@ internal sealed partial class NavigationWalkController
         /// <summary>The stages of the walk already walked.</summary>
         public int Stages { get; set; }
 
-        /// <summary>The spots where the walk stopped making progress, which later plans keep out of.</summary>
+        /// <summary>The objects and doors in the way, which later plans keep out of.</summary>
         public List<NavAvoidance> Avoid { get; } = [];
+
+        /// <summary>
+        /// The spots where the walk stopped making progress, which later plans keep out of
+        /// while a route still arrives without them.
+        /// </summary>
+        public List<NavAvoidance> StuckSpots { get; } = [];
 
         /// <summary>
         /// The object the walk last stopped making progress beside, whose whole
