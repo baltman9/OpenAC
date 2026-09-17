@@ -12,6 +12,12 @@ namespace AcDream.App.Diagnostics;
 /// <para>The ranges are sequential — one starts only after every earlier
 /// command has completed — so the stages of a frame add up to that frame's GPU
 /// time instead of each one counting the wait for everything before it.</para>
+/// <para><b>Bracket a whole render pass, not part of one.</b> Measured on a
+/// dense outdoor scene, ranges nested inside one pass reported about a seventh
+/// of what the drawing they bracket actually costs: a comparison against a run
+/// with that drawing switched off put one of them at 1.7 ms where its range
+/// read 0.16 ms. A range that spans a pass reads correctly. To attribute work
+/// inside a pass, compare runs with parts of it switched off.</para>
 /// <para>Off unless <see cref="RenderingDiagnostics.GpuStageProfEnabled"/> is
 /// set.</para>
 /// </summary>
@@ -31,6 +37,8 @@ public sealed class GpuStageProfiler
 
     private readonly List<string> _order = [];
     private readonly Dictionary<string, FrameStatsBuffer> _stages = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, FrameStatsBuffer> _stageRanges = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> _rangesThisSample = new(StringComparer.Ordinal);
     private readonly Dictionary<string, double> _snapshot = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _usedThisFrame = new(StringComparer.Ordinal);
     private int _lastGeneration = -1;
@@ -98,10 +106,12 @@ public sealed class GpuStageProfiler
             (string name, double milliseconds) = resolved[i];
             string stage = BaseStageName(name);
             _snapshot[stage] = _snapshot.GetValueOrDefault(stage) + milliseconds;
+            _rangesThisSample[stage] = _rangesThisSample.GetValueOrDefault(stage) + 1;
         }
 
         foreach ((string stage, double milliseconds) in _snapshot)
-            Record(stage, milliseconds);
+            Record(stage, milliseconds, _rangesThisSample.GetValueOrDefault(stage));
+        _rangesThisSample.Clear();
         _samplesInWindow++;
 
         long nowTicks = DateTime.UtcNow.Ticks;
@@ -125,19 +135,23 @@ public sealed class GpuStageProfiler
         _samplesInWindow = 0;
         foreach (FrameStatsBuffer buffer in _stages.Values)
             buffer.Reset();
+        foreach (FrameStatsBuffer buffer in _stageRanges.Values)
+            buffer.Reset();
     }
 
-    internal void Record(string stage, double milliseconds)
+    internal void Record(string stage, double milliseconds, int rangeCount = 1)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(stage);
         if (!_stages.TryGetValue(stage, out FrameStatsBuffer? buffer))
         {
             buffer = new FrameStatsBuffer(WindowCapacity);
             _stages.Add(stage, buffer);
+            _stageRanges.Add(stage, new FrameStatsBuffer(WindowCapacity));
             _order.Add(stage);
         }
 
         buffer.Push((long)Math.Round(milliseconds * 1000d));
+        _stageRanges[stage].Push(rangeCount);
     }
 
     internal string FormatReport()
@@ -152,10 +166,11 @@ public sealed class GpuStageProfiler
                 continue;
             sb.AppendFormat(
                 ci,
-                " | {0} p50={1:0.000} p95={2:0.000}",
+                " | {0} p50={1:0.000} p95={2:0.000} x{3}",
                 stage,
                 buffer.Percentile(0.50) / 1000d,
-                buffer.Percentile(0.95) / 1000d);
+                buffer.Percentile(0.95) / 1000d,
+                _stageRanges[stage].Percentile(0.50));
         }
 
         return sb.ToString();

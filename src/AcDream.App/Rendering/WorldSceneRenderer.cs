@@ -287,14 +287,10 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
             }
 
             _passes.DisableClipDistances();
-            using (Diagnostics.GpuStageProfiler.Measure(
-                _passes.StageEncoder, "world-post-particles"))
-            {
-                _passes.DrawPostWorldParticles(
-                    clipRoot,
-                    pviewResult?.ClipAssembly,
-                    in camera);
-            }
+            _passes.DrawPostWorldParticles(
+                clipRoot,
+                pviewResult?.ClipAssembly,
+                in camera);
 
             if (clipRoot is null && drawSkyThisFrame)
             {

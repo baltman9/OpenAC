@@ -101,8 +101,6 @@ internal sealed partial class RetailPViewPassExecutor : IEnvCellImmediateDrawSin
     internal (int Width, int Height)? WalkAttachmentExtent =>
         _entities.WalkAttachmentExtent;
 
-    /// <summary>The open world-pass encoder, for stage timing only.</summary>
-    internal IGpuPassEncoder? StageEncoder => _entities.CurrentPassEncoder;
 
     public void AbortFrame()
     {
