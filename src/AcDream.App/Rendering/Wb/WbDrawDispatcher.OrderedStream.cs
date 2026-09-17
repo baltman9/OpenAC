@@ -199,6 +199,11 @@ public sealed unsafe partial class WbDrawDispatcher
     internal (int Width, int Height)? WalkAttachmentExtent =>
         _scope is null ? null : (_scope.AttachmentWidth, _scope.AttachmentHeight);
 
+    /// <summary>The open world-pass encoder, or null outside the world phase.
+    /// Diagnostics that bracket a stage of world drawing need it; drawing
+    /// itself goes through RequireWalkSubmission.</summary>
+    internal IGpuPassEncoder? CurrentPassEncoder => _scope?.CurrentEncoder;
+
 
     private OrderedDrawStream? _orderedStream;
     private List<OrderedMergeRun> _orderedRuns = new();

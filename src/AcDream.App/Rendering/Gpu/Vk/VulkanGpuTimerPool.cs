@@ -4,15 +4,19 @@ namespace AcDream.App.Rendering.Gpu.Vk;
 
 internal sealed unsafe class VulkanGpuTimerPool : IGpuTimerPool, IDisposable
 {
-    /// <summary>Distinct named scopes measurable per frame. Two queries each.</summary>
-    internal const int MaxScopesPerFrame = 16;
+    /// <summary>Distinct named ranges measurable per frame. Two queries each.
+    /// Per-stage attribution records a range per batch, so the budget has to
+    /// cover a busy frame's worth of them rather than a handful.</summary>
+    internal const int MaxScopesPerFrame = 192;
 
     private readonly Silk.NET.Vulkan.Vk _vk;
     private readonly Device _device;
     private readonly double _timestampPeriodNanoseconds;
     private readonly QueryPool[] _pools;
     private readonly List<string>[] _scopeNames;
+    private readonly HashSet<string>[] _scopeNameSet;
     private readonly Dictionary<string, double> _resolved = new(StringComparer.Ordinal);
+    private readonly List<(string Name, double Milliseconds)> _lastResolved = [];
 
     private int _currentSlot;
     private bool _disposed;
@@ -33,9 +37,11 @@ internal sealed unsafe class VulkanGpuTimerPool : IGpuTimerPool, IDisposable
 
         _pools = new QueryPool[flightCount];
         _scopeNames = new List<string>[flightCount];
+        _scopeNameSet = new HashSet<string>[flightCount];
         for (int slot = 0; slot < flightCount; slot++)
         {
             _scopeNames[slot] = [];
+            _scopeNameSet[slot] = new HashSet<string>(StringComparer.Ordinal);
             if (!isSupported)
                 continue;
 
@@ -65,12 +71,25 @@ internal sealed unsafe class VulkanGpuTimerPool : IGpuTimerPool, IDisposable
         {
             Resolve(slotIndex, names);
             names.Clear();
+            _scopeNameSet[slotIndex].Clear();
         }
 
         _vk.ResetQueryPool(_device, _pools[slotIndex], 0, MaxScopesPerFrame * 2);
     }
 
-    internal IDisposable BeginScope(CommandBuffer commands, string scopeName)
+    internal IDisposable BeginScope(CommandBuffer commands, string scopeName) =>
+        BeginScope(commands, scopeName, sequential: false);
+
+    /// <summary>Opens a measured range.
+    /// <para><paramref name="sequential"/> false starts the range at the top of
+    /// the pipeline: the right reading for a range that brackets the whole
+    /// frame, because the timestamp lands as the frame's first command is
+    /// reached.</para>
+    /// <para><paramref name="sequential"/> true starts it after every earlier
+    /// command has completed, so the range reports only its own work. Stage
+    /// ranges recorded back to back then add up instead of each one counting
+    /// the wait for everything before it.</para></summary>
+    internal IDisposable BeginScope(CommandBuffer commands, string scopeName, bool sequential)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(scopeName);
         if (!IsSupported || _disposed)
@@ -79,7 +98,7 @@ internal sealed unsafe class VulkanGpuTimerPool : IGpuTimerPool, IDisposable
         List<string> names = _scopeNames[_currentSlot];
         if (names.Count >= MaxScopesPerFrame)
             return NullScope.Instance;
-        if (names.Contains(scopeName, StringComparer.Ordinal))
+        if (!_scopeNameSet[_currentSlot].Add(scopeName))
         {
             throw new InvalidOperationException(
                 $"GPU timer scope '{scopeName}' has already been measured this frame. Two ranges " +
@@ -90,7 +109,7 @@ internal sealed unsafe class VulkanGpuTimerPool : IGpuTimerPool, IDisposable
         names.Add(scopeName);
         _vk.CmdWriteTimestamp2(
             commands,
-            PipelineStageFlags2.TopOfPipeBit,
+            sequential ? PipelineStageFlags2.AllCommandsBit : PipelineStageFlags2.TopOfPipeBit,
             _pools[_currentSlot],
             (uint)(index * 2));
         return new ActiveScope(this, commands, _currentSlot, index);
@@ -129,6 +148,8 @@ internal sealed unsafe class VulkanGpuTimerPool : IGpuTimerPool, IDisposable
                 return;
         }
 
+        ResolveGeneration++;
+        _lastResolved.Clear();
         for (int i = 0; i < names.Count; i++)
         {
             ulong start = results[i * 2];
@@ -136,9 +157,20 @@ internal sealed unsafe class VulkanGpuTimerPool : IGpuTimerPool, IDisposable
             if (end <= start)
                 continue;
             double nanoseconds = (end - start) * _timestampPeriodNanoseconds;
-            _resolved[names[i]] = nanoseconds / 1_000_000d;
+            double milliseconds = nanoseconds / 1_000_000d;
+            _resolved[names[i]] = milliseconds;
+            _lastResolved.Add((names[i], milliseconds));
         }
     }
+
+    /// <summary>Counts completed read-backs. A reader that only wants each
+    /// measured frame once compares this against what it saw last.</summary>
+    public int ResolveGeneration { get; private set; }
+
+    /// <summary>The ranges of the one frame the last read-back covered — not
+    /// the running table, which keeps a stale value for a range that frame did
+    /// not record.</summary>
+    public IReadOnlyList<(string Name, double Milliseconds)> LastResolved => _lastResolved;
 
     public bool TryResolve(string scopeName, out double milliseconds) =>
         _resolved.TryGetValue(scopeName, out milliseconds);

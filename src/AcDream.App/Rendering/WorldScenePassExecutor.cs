@@ -8,6 +8,10 @@ namespace AcDream.App.Rendering;
 
 internal interface IWorldScenePassExecutor
 {
+    /// <summary>The open world-pass encoder, for stage timing only; null when
+    /// the implementation has no GPU pass.</summary>
+    AcDream.App.Rendering.Gpu.IGpuPassEncoder? StageEncoder => null;
+
     /// <summary>Uploads the day group's sky objects; runs before the pass opens.</summary>
     void PrepareSky(DayGroupData? activeDayGroup);
 
@@ -89,6 +93,9 @@ internal sealed class WorldScenePassExecutor : IWorldScenePassExecutor
         _particles = particles;
         _particleRenderer = particleRenderer;
     }
+
+    public AcDream.App.Rendering.Gpu.IGpuPassEncoder? StageEncoder =>
+        _entities.CurrentPassEncoder;
 
     public void BeginFrame()
     {

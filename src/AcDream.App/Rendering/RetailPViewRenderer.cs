@@ -257,14 +257,23 @@ internal sealed class RetailPViewRenderer
             };
             try
             {
-                DrawWalkDrivenStatics(ctx, walkExecutor, walkDriver!);
+                using (Diagnostics.GpuStageProfiler.Measure(
+                    walkExecutor.StageEncoder, "world-statics"))
+                {
+                    DrawWalkDrivenStatics(ctx, walkExecutor, walkDriver!);
+                }
+
                 if (ctx.RootCell.IsOutdoorNode)
                 {
-                    DrawLandscapeDynamicsPhase(
-                        ctx,
-                        passes,
-                        clipAssembly,
-                        walkDriver);
+                    using (Diagnostics.GpuStageProfiler.Measure(
+                        walkExecutor.StageEncoder, "world-dynamics"))
+                    {
+                        DrawLandscapeDynamicsPhase(
+                            ctx,
+                            passes,
+                            clipAssembly,
+                            walkDriver);
+                    }
                 }
             }
             finally
@@ -274,7 +283,11 @@ internal sealed class RetailPViewRenderer
             }
 
 
-            passes.DrawUnattachedSceneParticles(ctx, outdoorCells: false);
+            using (Diagnostics.GpuStageProfiler.Measure(
+                walkExecutor.StageEncoder, "world-scene-particles"))
+            {
+                passes.DrawUnattachedSceneParticles(ctx, outdoorCells: false);
+            }
 
             return result;
         }

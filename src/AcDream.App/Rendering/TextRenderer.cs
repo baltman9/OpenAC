@@ -293,6 +293,8 @@ public sealed class TextRenderer : IDisposable
             Depth = null,
             SampleCount = 1,
         });
+        using IDisposable? stage = AcDream.App.Diagnostics.GpuStageProfiler.Measure(
+            encoder, "ui-text");
         encoder.BindPipeline(_pipeline);
 
         DrawLayer(_spriteSegs, _segUsed, _rectBuf, _rectVerts, _textBuf, _textVerts, font, frame, encoder);

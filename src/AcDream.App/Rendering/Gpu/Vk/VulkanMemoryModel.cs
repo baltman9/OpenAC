@@ -258,6 +258,14 @@ internal sealed class VulkanMemoryTypePool
         }
     }
 
+    /// <summary>Bytes in use in one block, for the memory report: a block far
+    /// below its capacity is committed memory the process is paying for and
+    /// not using.</summary>
+    internal ulong BlockUsedBytes(int index) =>
+        index >= 0 && index < _blocks.Count && _blocks[index] is { } block
+            ? block.UsedBytes
+            : 0UL;
+
     private VulkanMemoryBlockFreeList BlockAt(int index) =>
         index >= 0 && index < _blocks.Count && _blocks[index] is { } block
             ? block

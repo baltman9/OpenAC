@@ -110,6 +110,9 @@ libraries directly. It does not require those environment variables.
 | `ACDREAM_UNCAPPED_RENDER=1` | Disable frame pacing (for measurement only) |
 | `ACDREAM_DISPLAY_PROTOCOL=auto\|x11\|wayland` | Linux window backend selection |
 | `ACDREAM_DEVTOOLS=1` | Enable the Vulkan validation and debug-utils layers |
+| `ACDREAM_FRAME_PROF=1` | Print the rolling `[frame-prof]` CPU/GPU/allocation line |
+| `ACDREAM_FRAME_HISTORY=<path>` | Write one CSV row per frame to that path on exit |
+| `ACDREAM_GPU_STAGE_PROF=1` | Print the rolling `[gpu-stage]` per-stage GPU attribution line |
 
 A few other `ACDREAM_*` variables switch original-client behaviors that are
 on by default (`ACDREAM_RETAIL_CHASE`, `ACDREAM_CAMERA_COLLIDE`,

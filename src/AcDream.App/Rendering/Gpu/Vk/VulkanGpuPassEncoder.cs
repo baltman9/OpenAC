@@ -329,6 +329,9 @@ internal sealed unsafe class VulkanGpuPassEncoder : IGpuPassEncoder
     public IDisposable BeginTimerScope(string scopeName) =>
         _device.TimerPool.BeginScope(_commands, scopeName);
 
+    public IDisposable BeginStageTimerScope(string scopeName) =>
+        _device.TimerPool.BeginScope(_commands, scopeName, sequential: true);
+
     public void Dispose()
     {
         if (_closed)

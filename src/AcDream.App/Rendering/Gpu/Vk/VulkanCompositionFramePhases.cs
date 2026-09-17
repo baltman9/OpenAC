@@ -263,6 +263,8 @@ internal sealed class VulkanWorldScenePhase : IWorldSceneFramePhase
                 {
                     using IDisposable receiverTimer = encoder.BeginTimerScope(
                         RenderPackPerformanceScopeNames.EnhancedWorldReceiver);
+                    using IDisposable? receiverStage =
+                        AcDream.App.Diagnostics.GpuStageProfiler.Measure(encoder, "world");
                     long receiverStarted = Stopwatch.GetTimestamp();
                     try
                     {
