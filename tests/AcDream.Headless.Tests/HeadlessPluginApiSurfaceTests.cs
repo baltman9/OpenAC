@@ -107,6 +107,37 @@ public sealed class HeadlessPluginApiSurfaceTests
         Assert.False(host.Automation.Character.IsInWorld);
     }
 
+    // Defect 13's actual blocker: AutoTradeAccept.Start() subscribes at
+    // Enable() time (identity-independent), but its handler resolves the
+    // partner's NAME through Automation.Objects.TryGet before checking the
+    // whitelist. HeadlessAutomationSurface.Objects was the NoOp stub (always
+    // returns false), so the whitelist check was never reachable on the
+    // headless host regardless of Character.
+    [Fact]
+    public void ObjectsTryGetResolvesAKnownObjectsNameAndClass()
+    {
+        var (runtime, commands) = NewRealSession();
+        using GameRuntime runtimeDisposal = runtime;
+        using var host = NewHost(runtime);
+        commands.Start(runtime.Generation);
+
+        Assert.NotSame(NoOpAutomationSurface.Instance, host.Automation.Objects);
+
+        const uint partnerGuid = 0x50000123u;
+        runtime.InventoryOwner.Objects.AddOrUpdate(new AcDream.Core.Items.ClientObject
+        {
+            ObjectId = partnerGuid,
+            Name = "+Acdream",
+            PublicWeenieBitfield = 0x00000008u, // Player
+        });
+
+        bool found = host.Automation.Objects.TryGet(partnerGuid, out PluginWorldObject value);
+
+        Assert.True(found);
+        Assert.Equal("+Acdream", value.Name);
+        Assert.Equal(PluginObjectClass.Player, value.ObjectClass);
+    }
+
     [Fact]
     public void TheDeathMessageReachesPlugins()
     {

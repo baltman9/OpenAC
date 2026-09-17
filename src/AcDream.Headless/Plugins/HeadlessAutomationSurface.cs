@@ -12,6 +12,7 @@ internal sealed class HeadlessAutomationSurface
     private readonly RuntimeTradeAutomation _trade;
     private readonly RuntimeVendorAutomation _vendor;
     private readonly HeadlessCharacterInfo _character;
+    private readonly HeadlessWorldObjectAutomation _objects;
     private readonly Func<string, bool>? _submitChatText;
     private readonly Func<bool>? _requestLogout;
     private readonly Func<uint, bool, bool>? _answerConfirmation;
@@ -28,6 +29,7 @@ internal sealed class HeadlessAutomationSurface
         _trade = new RuntimeTradeAutomation(runtime);
         _vendor = new RuntimeVendorAutomation(runtime);
         _character = new HeadlessCharacterInfo(runtime);
+        _objects = new HeadlessWorldObjectAutomation(runtime);
         _submitChatText = submitChatText;
         _requestLogout = requestLogout;
         _answerConfirmation = answerConfirmation;
@@ -37,6 +39,7 @@ internal sealed class HeadlessAutomationSurface
         _runtime.Lifecycle.State == RuntimeLifecycleState.InWorld;
 
     public ICharacterInfo Character => _character;
+    public IWorldObjectAutomation Objects => _objects;
     public ISpellCatalog Spells => NoOpAutomationSurface.Instance.Spells;
     public IMagicCommands Magic => NoOpAutomationSurface.Instance.Magic;
     public IPluginChat Chat => this;
