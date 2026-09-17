@@ -6,6 +6,7 @@ using AcDream.Launcher.Core.Orchestration;
 using AcDream.Launcher.Core.Profiles;
 using AcDream.Launcher.ViewModels;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Headless.XUnit;
@@ -29,6 +30,8 @@ public sealed class MainWindowViewTests
         ("ProfileTextBox", typeof(TextBox)),
         ("CharacterPluginsPanel", typeof(ScrollViewer)),
         ("SessionLogCloseButton", typeof(Button)),
+        ("SettingsButton", typeof(Button)),
+        ("SettingsCloseButton", typeof(Button)),
         ("ServerNameTextBox", typeof(TextBox)),
         ("AccountNameTextBox", typeof(TextBox)),
         ("CharacterNameTextBox", typeof(TextBox)),
@@ -51,6 +54,7 @@ public sealed class MainWindowViewTests
         ResizingKeepsBatchActionsVisibleWhileManyAccountsScroll();
         ProfileEditorsExposeTwoFieldsAndMaskPasswords();
         TabsRenderAndSwitchBetweenAccountsAndPlugins();
+        TheGearOpensSettingsAndTheBetaCheckboxRoundTripsThroughThePlugins();
     }
 
     private static void EveryExplicitlyNamedControlIsAssignedAfterConstruction()
@@ -358,6 +362,10 @@ public sealed class MainWindowViewTests
             Assert.False(accountsTab.IsChecked);
             Assert.False(accountsScroll.IsEffectivelyVisible);
             Assert.True(pluginsScroll.IsEffectivelyVisible);
+            Assert.DoesNotContain(
+                window.GetVisualDescendants().OfType<CheckBox>(),
+                checkBox => Equals(AutomationProperties.GetName(checkBox), "Show beta plugins")
+                    && checkBox.IsEffectivelyVisible);
 
             accountsTab.Command?.Execute(null);
             window.UpdateLayout();
@@ -366,6 +374,44 @@ public sealed class MainWindowViewTests
             Assert.True(viewModel.IsAccountsTabSelected);
             Assert.True(accountsScroll.IsEffectivelyVisible);
             Assert.False(pluginsScroll.IsEffectivelyVisible);
+        }
+        finally
+        {
+            CloseTestWindow(window);
+        }
+    }
+
+    private static void TheGearOpensSettingsAndTheBetaCheckboxRoundTripsThroughThePlugins()
+    {
+        using LauncherWindowViewModel viewModel = CreateViewModel();
+        var window = new MainWindow { DataContext = viewModel };
+        try
+        {
+            window.Show();
+
+            var settingsButton = (Button)GetNamedField(window, "SettingsButton")!;
+            var closeButton = (Button)GetNamedField(window, "SettingsCloseButton")!;
+            Assert.False(viewModel.IsSettingsOpen);
+
+            settingsButton.Command?.Execute(null);
+            Assert.True(viewModel.IsSettingsOpen);
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            Assert.Same(closeButton, CurrentFocus(window));
+
+            var betaCheckBox = window
+                .GetVisualDescendants()
+                .OfType<CheckBox>()
+                .First(checkBox => Equals(AutomationProperties.GetName(checkBox), "Show beta plugins"));
+            Assert.False(viewModel.Plugins.ShowBetaPlugins);
+            betaCheckBox.IsChecked = true;
+            Assert.True(viewModel.Plugins.ShowBetaPlugins);
+
+            closeButton.Command?.Execute(null);
+            Assert.False(viewModel.IsSettingsOpen);
+            Dispatcher.UIThread.RunJobs();
+            Assert.NotSame(closeButton, CurrentFocus(window));
+            Assert.True(viewModel.Plugins.ShowBetaPlugins);
         }
         finally
         {

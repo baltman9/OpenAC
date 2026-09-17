@@ -32,6 +32,14 @@
       <Setter Property="Background" Value="#E6C68F" />
       <Setter Property="Foreground" Value="#181A1B" />
     </Style>
+    <Style Selector="Button.icon /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.icon:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#202C33" />
+      <Setter Property="BorderBrush" Value="#405059" />
+    </Style>
     <Style Selector="Button.danger"><Setter Property="Foreground" Value="#FFB0A0" /></Style>
     <Style Selector="Button.destructive:pointerover /template/ ContentPresenter"><Setter Property="Background" Value="#4A2129" /><Setter Property="BorderBrush" Value="#FFB0A0" /><Setter Property="Foreground" Value="#FFB0A0" /></Style>
     <Style Selector="TextBlock.muted"><Setter Property="Foreground" Value="#A9BBC5" /></Style>
@@ -93,7 +101,7 @@
         <TextBlock Text="OpenAC" FontFamily="Georgia,serif" FontSize="27" Foreground="#DBB573" />
         <TextBlock Text="Asheron's Call forever." FontFamily="Georgia,serif" FontSize="18" Foreground="#F0E4CD" />
       </StackPanel>
-      <TextBlock Grid.Column="1" Text="{Binding VersionText}" Foreground="#7C8F99" FontSize="12" VerticalAlignment="Top" AutomationProperties.Name="{Binding VersionText}" />
+      <TextBlock Grid.Column="1" Text="{Binding VersionText}" Foreground="#7C8F99" FontSize="12" TextAlignment="Right" VerticalAlignment="Top" AutomationProperties.Name="{Binding VersionText}" />
       </Grid>
     </Border>
     <StackPanel Grid.Row="1" Spacing="4">
@@ -111,12 +119,19 @@
       </Border>
     </StackPanel>
     <Border Grid.Row="2" Margin="14,10,14,0" BorderBrush="#35434B" BorderThickness="0,0,0,1">
-      <StackPanel Orientation="Horizontal" Spacing="2">
-        <ToggleButton x:Name="AccountsTabButton" Classes="tab" Content="Accounts" IsChecked="{Binding IsAccountsTabSelected, Mode=OneWay}"
-                      Command="{Binding SelectAccountsTabCommand}" AutomationProperties.Name="Accounts tab" />
-        <ToggleButton x:Name="PluginsTabButton" Classes="tab" Content="Plugins" IsChecked="{Binding IsPluginsTabSelected, Mode=OneWay}"
-                      Command="{Binding SelectPluginsTabCommand}" AutomationProperties.Name="Plugins tab" />
-      </StackPanel>
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Orientation="Horizontal" Spacing="2">
+          <ToggleButton x:Name="AccountsTabButton" Classes="tab" Content="Accounts" IsChecked="{Binding IsAccountsTabSelected, Mode=OneWay}"
+                        Command="{Binding SelectAccountsTabCommand}" AutomationProperties.Name="Accounts tab" />
+          <ToggleButton x:Name="PluginsTabButton" Classes="tab" Content="Plugins" IsChecked="{Binding IsPluginsTabSelected, Mode=OneWay}"
+                        Command="{Binding SelectPluginsTabCommand}" AutomationProperties.Name="Plugins tab" />
+        </StackPanel>
+        <Button Grid.Column="1" x:Name="SettingsButton" Classes="icon" Padding="6" VerticalAlignment="Center" Margin="0,0,0,6"
+                Command="{Binding OpenSettingsCommand}" AutomationProperties.Name="Settings" ToolTip.Tip="Settings">
+          <Path Width="16" Height="16" Stretch="Uniform" Fill="#A9BBC5"
+                Data="M 8,1 L 9.91,3.38 L 12.95,3.05 L 12.62,6.09 L 15,8 L 12.62,9.91 L 12.95,12.95 L 9.91,12.62 L 8,15 L 6.09,12.62 L 3.05,12.95 L 3.38,9.91 L 1,8 L 3.38,6.09 L 3.05,3.05 L 6.09,3.38 Z M 8,5.7 L 9.15,6.01 L 9.99,6.85 L 10.3,8 L 9.99,9.15 L 9.15,9.99 L 8,10.3 L 6.85,9.99 L 6.01,9.15 L 5.7,8 L 6.01,6.85 L 6.85,6.01 Z" />
+        </Button>
+      </Grid>
     </Border>
     <Grid Grid.Row="3" Margin="14,10" RowDefinitions="Auto,Auto,*" IsVisible="{Binding IsAccountsTabSelected}">
       <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
@@ -189,7 +204,6 @@
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
           <Button Content="Add from URL" Command="{Binding Plugins.AddFromUrlCommand}" />
           <Button Content="Refresh list" Command="{Binding Plugins.CheckNowCommand}" />
-          <CheckBox Content="Show beta plugins" IsChecked="{Binding Plugins.ShowBetaPlugins, Mode=TwoWay}" VerticalAlignment="Center" AutomationProperties.Name="Show beta plugins" />
         </StackPanel>
       </Grid>
       <StackPanel Grid.Row="1" Spacing="2" Margin="0,0,0,6">
@@ -657,6 +671,22 @@
           </ItemsControl.ItemTemplate></ItemsControl></ScrollViewer>
           <Button Grid.Row="2" x:Name="SessionLogCloseButton" Content="Close" Command="{Binding CloseDesktopDialogCommand}" HorizontalAlignment="Right" />
         </Grid>
+      </Border>
+    </Border>
+    <Border Grid.RowSpan="5" ZIndex="40" Background="#E010171C" IsVisible="{Binding IsSettingsOpen}"
+            KeyboardNavigation.TabNavigation="Cycle" KeyDown="OnModalKeyDown" AutomationProperties.Name="Launcher settings dialog">
+      <Border Classes="card" Margin="24" MaxWidth="480" VerticalAlignment="Center">
+        <StackPanel Spacing="14">
+          <TextBlock Text="Launcher settings" FontSize="22" FontWeight="Bold" />
+          <StackPanel Spacing="0">
+            <CheckBox Content="Show beta plugins" IsChecked="{Binding Plugins.ShowBetaPlugins, Mode=TwoWay}" AutomationProperties.Name="Show beta plugins" />
+            <TextBlock Text="Show development and testing versions of plugins for download. Beta plugins are more likely to contain bugs and could create issues for your characters. Use with caution."
+                       Classes="muted" FontSize="12" TextWrapping="Wrap" Margin="28,0,0,0" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="SettingsCloseButton" Content="Close" AutomationProperties.Name="Close launcher settings" Command="{Binding CloseDesktopDialogCommand}" />
+          </StackPanel>
+        </StackPanel>
       </Border>
     </Border>
     <Border Grid.RowSpan="5" ZIndex="40" Background="#E010171C" IsVisible="{Binding Plugins.InstallDialog.IsOpen}"

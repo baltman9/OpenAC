@@ -158,6 +158,7 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         || (TextEditor?.IsOpen ?? false)
         || IsCharacterOptionsOpen
         || IsSessionLogOpen
+        || IsSettingsOpen
         || Plugins.InstallDialog.IsOpen
         || Plugins.IsRemoveDialogOpen;
 

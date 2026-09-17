@@ -122,6 +122,10 @@ public sealed partial class MainWindow : Window
         {
             SessionLogCloseButton.Focus();
         }
+        else if (viewModel.IsSettingsOpen)
+        {
+            SettingsCloseButton.Focus();
+        }
         else if (viewModel.EditorDialog.IsOpen)
         {
             Control target = viewModel.EditorDialog.Kind switch

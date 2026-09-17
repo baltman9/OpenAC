@@ -14,6 +14,7 @@ public sealed partial class LauncherWindowViewModel
     private readonly CancellationTokenSource _healthCancellation = new();
     private bool _isCharacterOptionsOpen;
     private bool _isSessionLogOpen;
+    private bool _isSettingsOpen;
 
     public ProfileTextEditorViewModel TextEditor { get; private set; } = null!;
     public RelayCommand EditUsersTextCommand { get; private set; } = null!;
@@ -23,6 +24,7 @@ public sealed partial class LauncherWindowViewModel
     public AsyncRelayCommand CheckForUpdatesCommand { get; private set; } = null!;
     public AsyncRelayCommand CheckServersCommand { get; private set; } = null!;
     public RelayCommand OpenSessionLogCommand { get; private set; } = null!;
+    public RelayCommand OpenSettingsCommand { get; private set; } = null!;
     public RelayCommand CloseDesktopDialogCommand { get; private set; } = null!;
     public RelayCommand SaveRowOptionsCommand { get; private set; } = null!;
     public bool ShowUpdateBanner => UpdatePrompt.IsClientUpdateAvailable || UpdatePrompt.IsLauncherUpdateAvailable;
@@ -36,6 +38,11 @@ public sealed partial class LauncherWindowViewModel
     {
         get => _isSessionLogOpen;
         private set { if (SetProperty(ref _isSessionLogOpen, value)) NotifyDesktopModal(); }
+    }
+    public bool IsSettingsOpen
+    {
+        get => _isSettingsOpen;
+        private set { if (SetProperty(ref _isSettingsOpen, value)) NotifyDesktopModal(); }
     }
 
     private void InitializeDesktop()
@@ -54,6 +61,7 @@ public sealed partial class LauncherWindowViewModel
         }, () => CanInteract && !UpdatePrompt.IsBusy);
         CheckServersCommand = new AsyncRelayCommand(CheckServerHealthAsync, () => _serverHealth is not null && !_disposed);
         OpenSessionLogCommand = new RelayCommand(() => IsSessionLogOpen = true, () => CanInteract);
+        OpenSettingsCommand = new RelayCommand(() => IsSettingsOpen = true, () => CanInteract);
         CloseDesktopDialogCommand = new RelayCommand(CloseDesktopDialogs);
         SaveRowOptionsCommand = new RelayCommand(() =>
         {
@@ -71,12 +79,12 @@ public sealed partial class LauncherWindowViewModel
     private string? _launcherVersion;
     private Func<ClientVersionResolution?> _clientVersion = () => null;
 
-    /// <summary>The small versions shown at the top right of the window, launcher and client, without
+    /// <summary>The small versions shown at the top right of the window, launcher above client, without
     /// build metadata. Plugin compatibility is judged against the client, which can differ from the
     /// launcher while an update is pending.</summary>
     public string VersionText => _launcherVersion is null
         ? string.Empty
-        : $"launcher {ShortVersion(_launcherVersion)} · "
+        : $"launcher {ShortVersion(_launcherVersion)}\n"
           + (_clientVersion()?.Version is { } client ? $"client {ShortVersion(client.Value)}" : "client not installed");
 
     public void ConfigureVersions(string launcherVersion, Func<ClientVersionResolution?> clientVersion)
@@ -183,6 +191,7 @@ public sealed partial class LauncherWindowViewModel
     {
         IsCharacterOptionsOpen = false;
         IsSessionLogOpen = false;
+        IsSettingsOpen = false;
     }
 
     private void OnDesktopUpdateChanged(object? sender, PropertyChangedEventArgs e)
@@ -200,6 +209,7 @@ public sealed partial class LauncherWindowViewModel
         ReviewUpdateCommand?.NotifyCanExecuteChanged();
         CheckForUpdatesCommand?.NotifyCanExecuteChanged();
         OpenSessionLogCommand?.NotifyCanExecuteChanged();
+        OpenSettingsCommand?.NotifyCanExecuteChanged();
         SaveRowOptionsCommand?.NotifyCanExecuteChanged();
     }
 

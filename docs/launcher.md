@@ -67,10 +67,11 @@ downgrades an installed beta; it just stops offering pre-releases until a
 stable release passes it. The release feed can lag a new release by up to a
 minute.
 
-The **Show beta plugins** checkbox next to Refresh list is off by default and
-covers Discover and Add from URL instead: on, a plugin with no stable release
-yet can be found and installed, landing on the beta channel with the same
-pre-release notice; off, only its stable releases are offered.
+The **Show beta plugins** checkbox, in Launcher settings behind the gear icon
+on the tab row, is off by default and covers Discover and Add from URL
+instead: on, a plugin with no stable release yet can be found and installed,
+landing on the beta channel with the same pre-release notice; off, only its
+stable releases are offered.
 
 Every row shows its compatibility with the installed client: compatible and
 which version, graphical-only or headless-only when the plugin restricts
