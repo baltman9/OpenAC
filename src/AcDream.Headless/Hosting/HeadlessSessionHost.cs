@@ -186,6 +186,7 @@ internal sealed class HeadlessSessionHost : IDisposable
         IHeadlessBotPolicy? policyOverride = null,
         IRuntimePlacementProjectionSink? placementSinkOverride = null,
         FellowshipAllegianceGateCoordinator? gateCoordinator = null,
+        IPluginStorage? storage = null,
         IEnumerable<string>? pluginRoots = null,
         IPluginStorage? vtankProfiles = null)
     {
@@ -295,6 +296,7 @@ internal sealed class HeadlessSessionHost : IDisposable
                 pluginRoots ?? [],
                 descriptor.Plugins,
                 pluginCommands,
+                storage,
                 vtankProfiles,
                 descriptor.PluginSettings,
                 SubmitChatText,

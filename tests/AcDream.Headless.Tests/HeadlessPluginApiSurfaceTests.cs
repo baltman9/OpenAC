@@ -138,6 +138,49 @@ public sealed class HeadlessPluginApiSurfaceTests
         Assert.Equal(PluginObjectClass.Player, value.ObjectClass);
     }
 
+    // Defect 13's third and deepest blocker: IPluginHost.Storage has a
+    // default interface member returning NoOpPluginStorage (ReadText always
+    // null, WriteText a no-op). HeadlessPluginHost never overrode it, so
+    // ScopedPluginHost's per-plugin storage wrapper always wrapped the NoOp
+    // instance -- every headless plugin's persisted settings file (Mag-
+    // Tools.xml's AutoTradeAccept/Enabled and Whitelist among them) was
+    // silently never read from or written to disk, regardless of what the
+    // real file on disk said.
+    [Fact]
+    public void StorageIsRealWhenSuppliedAndRoundTripsAFile()
+    {
+        string root = Directory.CreateTempSubdirectory("acdream-headless-storage-test-").FullName;
+        try
+        {
+            var storage = new FilePluginStorage(root);
+            using GameRuntime runtime = NewRuntime();
+            using var host = new HeadlessPluginHost(
+                runtime, new InertLogger(), storage: storage);
+
+            Assert.NotSame(NoOpAutomationSurface.Instance, host.Automation);
+            Assert.NotSame(
+                AcDream.Plugin.Abstractions.NoOpPluginStorage.Instance, host.Storage);
+
+            host.Storage.WriteText("probe.txt", "hello");
+            Assert.Equal("hello", host.Storage.ReadText("probe.txt"));
+            Assert.True(File.Exists(Path.Combine(root, "probe.txt")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void StorageDefaultsToNoOpWhenNotSupplied()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = new HeadlessPluginHost(runtime, new InertLogger());
+
+        Assert.Same(
+            AcDream.Plugin.Abstractions.NoOpPluginStorage.Instance, host.Storage);
+    }
+
     [Fact]
     public void TheDeathMessageReachesPlugins()
     {

@@ -61,6 +61,8 @@ internal sealed class HeadlessProcessHost : IDisposable
             Path.Combine(AppContext.BaseDirectory, "plugins"),
             paths.PluginsDirectory,
         ];
+        var pluginStorage = new AcDream.Headless.Plugins.FilePluginStorage(
+            Path.Combine(paths.ConfigDirectory, "plugins"));
         var vtankProfiles = new AcDream.Headless.Plugins.FilePluginStorage(
             paths.VtankProfilesDirectory);
         HeadlessProcessContentOwner? content = null;
@@ -112,6 +114,7 @@ internal sealed class HeadlessProcessHost : IDisposable
                         contentLease: contentLease,
                         gateCoordinator: gateCoordinator,
                         pluginRoots: pluginRoots,
+                        storage: pluginStorage,
                         vtankProfiles: vtankProfiles));
                 }
                 catch
