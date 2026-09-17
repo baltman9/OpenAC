@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using AcDream.App.Rendering.Wb;
 
 namespace AcDream.App.Rendering.Walk;
@@ -50,6 +51,26 @@ internal sealed class OrderedDrawStream
     public readonly List<bool> AllowInstanceMerges = new();
 
     public int Count => Keys.Count;
+
+    // Contiguous views for the upload path, which sends each array to the GPU
+    // as one block rather than walking the stream command by command.
+    public ReadOnlySpan<Matrix4x4> TransformSpan =>
+        CollectionsMarshal.AsSpan(Transforms);
+
+    public ReadOnlySpan<uint> ClipSlotSpan => CollectionsMarshal.AsSpan(ClipSlots);
+
+    public ReadOnlySpan<WbDrawDispatcher.InstanceLightSet> LightSpan =>
+        CollectionsMarshal.AsSpan(Lights);
+
+    public ReadOnlySpan<uint> IndoorFlagSpan => CollectionsMarshal.AsSpan(IndoorFlags);
+
+    public ReadOnlySpan<float> AlphaSpan => CollectionsMarshal.AsSpan(Alphas);
+
+    public ReadOnlySpan<Vector2> SelectionLightingSpan =>
+        CollectionsMarshal.AsSpan(SelectionLighting);
+
+    public ReadOnlySpan<uint> DetailCategorySpan =>
+        CollectionsMarshal.AsSpan(DetailCategories);
 
     public void Append(in OrderedDrawCommand command)
     {
