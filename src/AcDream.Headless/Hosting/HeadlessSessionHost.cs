@@ -188,7 +188,8 @@ internal sealed class HeadlessSessionHost : IDisposable
         FellowshipAllegianceGateCoordinator? gateCoordinator = null,
         IPluginStorage? storage = null,
         IEnumerable<string>? pluginRoots = null,
-        IPluginStorage? vtankProfiles = null)
+        IPluginStorage? vtankProfiles = null,
+        Action? requestProcessStop = null)
     {
         _descriptor = descriptor
             ?? throw new ArgumentNullException(nameof(descriptor));
@@ -288,6 +289,13 @@ internal sealed class HeadlessSessionHost : IDisposable
                 RespondToConfirmation(accept);
                 return true;
             }
+            bool RequestGracefulStop()
+            {
+                if (requestProcessStop is null)
+                    return false;
+                requestProcessStop();
+                return true;
+            }
             pluginSession = HeadlessPluginSession.Create(
                 runtime,
                 diagnostics,
@@ -301,7 +309,8 @@ internal sealed class HeadlessSessionHost : IDisposable
                 descriptor.PluginSettings,
                 SubmitChatText,
                 RequestLogout,
-                AnswerConfirmation);
+                AnswerConfirmation,
+                RequestGracefulStop);
             var liveSession = new LiveSessionHost(
                 runtime.Session,
                 new LiveSessionHostBindings(

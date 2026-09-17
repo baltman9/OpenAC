@@ -430,6 +430,49 @@ public sealed class HeadlessPluginApiSurfaceTests
     }
 
     [Fact]
+    public void WindowMinimizeAndRestoreAreUnavailableAndIsMinimizedIsFalse()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+
+        Assert.False(host.Window.IsMinimized);
+        Assert.Equal(HostWindowStatus.Unavailable, host.Window.Minimize().Status);
+        Assert.Equal(HostWindowStatus.Unavailable, host.Window.Restore().Status);
+    }
+
+    [Fact]
+    public void WindowRequestCloseIsUnavailableWithoutARoute()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+
+        Assert.Equal(
+            HostWindowStatus.Unavailable,
+            host.Window.RequestClose().Status);
+    }
+
+    [Fact]
+    public void WindowRequestCloseReachesTheGracefulStopRouteExactlyOnce()
+    {
+        using GameRuntime runtime = NewRuntime();
+        int calls = 0;
+        bool RequestGracefulStop()
+        {
+            calls++;
+            return true;
+        }
+        using var host = new HeadlessPluginHost(
+            runtime,
+            new InertLogger(),
+            requestGracefulStop: RequestGracefulStop);
+
+        HostWindowResult result = host.Window.RequestClose();
+
+        Assert.Equal(HostWindowStatus.Done, result.Status);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
     public void DialogsAnswerForwardsToTheBoundRoute()
     {
         using GameRuntime runtime = NewRuntime();

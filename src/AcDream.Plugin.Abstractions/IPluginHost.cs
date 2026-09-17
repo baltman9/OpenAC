@@ -29,6 +29,9 @@ public interface IPluginHost
     /// <summary>The host's text clipboard; inert without a window.</summary>
     IPluginClipboard Clipboard => NoOpPluginClipboard.Instance;
 
+    /// <summary>The host's own OS window; inert without one.</summary>
+    IHostWindow Window => NoOpHostWindow.Instance;
+
     IReadOnlyDictionary<string, string> SessionSettings =>
         EmptySessionSettings;
 

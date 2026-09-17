@@ -289,6 +289,27 @@ public sealed class GameWindow :
     internal AcDream.App.Plugins.MainThreadDispatchQueue ClipboardDispatch { get; } =
         new();
 
+    /// <summary>
+    /// Cached copy of whether the OS window is minimized, kept current by
+    /// the window's own StateChanged callback (fired on this window's own
+    /// thread) rather than read live off Silk.NET on a plugin's calling
+    /// thread -- glfwGetWindowAttrib, like the clipboard calls
+    /// ClipboardDispatch exists for, is documented main-thread-only, so a
+    /// live read from an arbitrary thread would carry the same silent-
+    /// failure hazard.
+    /// </summary>
+    internal volatile bool PluginWindowIsMinimized;
+
+    /// <summary>
+    /// The native window, for plugin minimize/restore/close. Calls must be
+    /// marshalled through ClipboardDispatch (renamed in spirit only -- it
+    /// is this window's general main-thread dispatch queue) exactly like
+    /// the clipboard: GLFW window-state and close calls are main-thread-
+    /// only.
+    /// </summary>
+    internal AcDream.App.Plugins.IPluginHostWindowTarget? PluginWindowHandle =>
+        _window is null ? null : new AcDream.App.Plugins.SilkPluginHostWindowTarget(_window);
+
     public AcDream.Core.Chat.ChatLog Chat => _runtimeCommunication.Chat;
     public AcDream.Core.Chat.TurbineChatState TurbineChat =>
         _runtimeCommunication.TurbineChat;
@@ -619,6 +640,9 @@ public sealed class GameWindow :
 
         _window = Window.Create(options);
         IWindow window = _window;
+        PluginWindowIsMinimized = window.WindowState == WindowState.Minimized;
+        window.StateChanged += state =>
+            PluginWindowIsMinimized = state == WindowState.Minimized;
         _runtimeSettings.BindDisplayWindow(
             new SilkRuntimeDisplayWindowTarget(window),
             _options.ExactAutomationFramebuffer,

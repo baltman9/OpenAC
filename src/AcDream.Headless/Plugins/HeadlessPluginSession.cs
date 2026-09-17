@@ -47,7 +47,8 @@ internal sealed class HeadlessPluginSession : IDisposable
         IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
         Func<string, bool>? submitChatText = null,
         Func<bool>? requestLogout = null,
-        Func<uint, bool, bool>? answerConfirmation = null)
+        Func<uint, bool, bool>? answerConfirmation = null,
+        Func<bool>? requestGracefulStop = null)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(diagnostics);
@@ -67,7 +68,8 @@ internal sealed class HeadlessPluginSession : IDisposable
             sessionSettings,
             submitChatText,
             requestLogout,
-            answerConfirmation);
+            answerConfirmation,
+            requestGracefulStop);
         var plugins = new PluginSession(
             host,
             status => Report(statusWriter, sessionId, status),

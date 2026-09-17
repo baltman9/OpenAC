@@ -56,6 +56,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             : _inner.SessionSettings;
 
     public IPluginClipboard Clipboard => _inner.Clipboard;
+    public IHostWindow Window => _inner.Window;
     public IAutomationSurface Automation => _automation;
     public IHotkeyRegistry Hotkeys => _hotkeys;
 

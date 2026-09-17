@@ -180,7 +180,11 @@ var host = new AppPluginHost(
     new AcDream.App.Plugins.WindowPluginClipboard(
         () => window.ClipboardKeyboard,
         () => window.ClipboardDispatch),
-    hotkeyRegistry);
+    hotkeyRegistry,
+    new AcDream.App.Plugins.WindowPluginHostWindow(
+        () => window.PluginWindowHandle,
+        () => window.PluginWindowIsMinimized,
+        () => window.ClipboardDispatch));
 GraphicalPluginSession pluginSession = GraphicalPluginSession.Create(
     applicationPaths,
     runtimeOptions.Plugins,

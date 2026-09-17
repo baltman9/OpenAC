@@ -587,6 +587,41 @@ so a corrupt or hand-edited plugin override file can never touch the
 client's own binding schema). There is no in-client rebind UI yet; a
 plugin (or a future Settings panel) calls `Rebind` directly.
 
+## Host window
+
+```csharp
+if (host.Window.IsMinimized)
+    host.Window.Restore();
+
+HostWindowResult result = host.Window.Minimize();
+if (!result.Succeeded)
+    host.Log.Warn("could not minimize the client window.");
+```
+
+`host.Window` is one of the client's own OS window: minimize, restore, and
+request-close, the same three controls the title bar already offers.
+
+`Minimize()`/`Restore()` act on the OS window itself (GLFW iconify/restore
+-- Windows, Linux, and macOS all go through the same call). Both report
+`HostWindowStatus.Done` only once the window actually reports the new state
+back, not just because the call was made; a write that does not stick (no
+window focus, a platform that refuses it) reports `Unavailable`. `IsMinimized`
+reads a cached flag kept current by the window's own state-change callback,
+not a live read of the window's state -- the same window calls the writes
+above go through are documented main-thread-only, so a live read from
+whatever thread a plugin happens to call this from would carry the same
+silent-failure risk the write side already has to guard against.
+
+`RequestClose()` takes the exact route the window's own close button uses:
+graceful logout, then teardown, then process exit. It never terminates the
+process directly -- there is no `Environment.Exit`/`Process.Kill` on this
+path, on either host. On a host with no window (headless), `Minimize`,
+`Restore`, and `IsMinimized` stay at the interface's inert defaults
+(`Unavailable`/`false`), but `RequestClose` still has somewhere real to go:
+it ends the plugin's own session through the process's normal terminal
+path -- the same one a SIGINT/SIGTERM or a policy-driven stop already uses
+-- rather than terminating anything directly.
+
 ## Headless
 
 A headless host implements this same contract, with a few members left as
@@ -637,6 +672,11 @@ placeholders rather than wired to real state:
 - `Hotkeys` is the inert no-op registry — there is no keyboard to bind to
   without a window. `Register` always returns a handle with `IsBound`
   `false` and the handler never fires.
+- `Window.Minimize`/`Restore`/`IsMinimized` stay at the interface's inert
+  defaults -- there is no OS window on a headless host.
+  `Window.RequestClose` is real: it ends the plugin's own session through
+  the process's normal terminal path, the same one a SIGINT/SIGTERM or a
+  policy-driven stop already uses.
 - Everything else on `IAutomationSurface` not named above --
   `Combat`/`Equipment`/`Items`/`Loot`/`Fellowship`/`Enchantments`/
   `Navigation`/`WorldTime`/`Network`/`Recovery`/`Projectile`/`Selection`

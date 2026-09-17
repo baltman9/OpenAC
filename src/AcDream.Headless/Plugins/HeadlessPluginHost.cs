@@ -57,7 +57,8 @@ internal sealed class HeadlessPluginHost
         IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
         Func<string, bool>? submitChatText = null,
         Func<bool>? requestLogout = null,
-        Func<uint, bool, bool>? answerConfirmation = null)
+        Func<uint, bool, bool>? answerConfirmation = null,
+        Func<bool>? requestGracefulStop = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         Log = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -65,6 +66,7 @@ internal sealed class HeadlessPluginHost
         Storage = storage ?? NoOpPluginStorage.Instance;
         VtankProfiles = vtankProfiles ?? NoOpPluginStorage.Instance;
         _sessionSettingsByPlugin = CopySessionSettings(sessionSettings);
+        Window = new HeadlessHostWindow(requestGracefulStop);
         _automation = new HeadlessAutomationSurface(
             runtime,
             submitChatText,
@@ -106,6 +108,8 @@ internal sealed class HeadlessPluginHost
     public IAutomationSurface Automation => _automation;
 
     public IUiRegistry Ui => NoOpUiRegistry.Instance;
+
+    public IHostWindow Window { get; }
 
     public IReadOnlyDictionary<string, string> SessionSettings => EmptySettings;
 

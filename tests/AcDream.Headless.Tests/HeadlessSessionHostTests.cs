@@ -18,6 +18,7 @@ using AcDream.Headless.Credentials;
 using AcDream.Headless.Diagnostics;
 using AcDream.Headless.Hosting;
 using AcDream.Headless.Platform;
+using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
 using AcDream.Runtime.Entities;
 using AcDream.Runtime.Gameplay;
@@ -664,6 +665,72 @@ public sealed class HeadlessSessionHostTests
                 disconnected[1].GetProperty("reason").GetString());
 
             JsonElement exited = events[^1];
+            Assert.Equal(0, exited.GetProperty("code").GetInt32());
+            Assert.Equal("graceful", exited.GetProperty("reason").GetString());
+        }
+        finally
+        {
+            if (File.Exists(statusPath))
+                File.Delete(statusPath);
+        }
+    }
+
+    [Fact]
+    public void PluginRequestCloseReachesTheSameHookSigintUsesAndTheSessionRecordsTheNormalTerminalEvent()
+    {
+        // IHostWindow.RequestClose on a headless host never terminates
+        // anything itself -- it hands off to the process's normal
+        // terminal path. Here that hand-off is the requestProcessStop
+        // callback HeadlessProcessHost wires to its own
+        // _consoleQuitRequested.Cancel -- the exact same delegate a
+        // SIGINT/SIGTERM handler or a policy-driven stop already invokes
+        // in production (see HeadlessConsoleTests's
+        // ConsoleLineReachesTheSessionAndQuitEndsTheProcessGracefully for
+        // the console's own use of that path). This test proves the
+        // plugin-facing hand-off reaches that hook exactly once, and that
+        // the session's ensuing disposal -- what cancelling the token
+        // ultimately causes -- writes the normal "exited" terminal status
+        // event rather than anything abnormal.
+        string statusPath = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-headless-requestclose-status-{Guid.NewGuid():N}.jsonl");
+        try
+        {
+            var operations = new FixtureSessionOperations();
+            using var diagnosticsOutput = new StringWriter();
+            using var credential = new HeadlessCredentialSecret(
+                "fixture",
+                "password");
+            int processStopRequests = 0;
+            var host = new HeadlessSessionHost(
+                Descriptor(statusFile: statusPath),
+                credential,
+                new HeadlessDiagnosticWriter(diagnosticsOutput),
+                operations,
+                requestProcessStop: () => processStopRequests++);
+
+            Assert.Equal(
+                RuntimeSessionStartStatus.Connected,
+                host.Start().Status);
+
+            HostWindowResult result = host.Plugins.Host.Window.RequestClose();
+
+            Assert.Equal(HostWindowStatus.Done, result.Status);
+            Assert.Equal(1, processStopRequests);
+
+            // Cancelling the process's quit token (what the reached hook
+            // does in production) unwinds the scheduler loop and lets the
+            // process's `using` block dispose each session -- modeled
+            // here directly since this test targets the session in
+            // isolation, not the multi-threaded process host.
+            host.Dispose();
+
+            JsonElement[] events = File.ReadAllLines(statusPath)
+                .Select(static line => JsonDocument.Parse(line).RootElement.Clone())
+                .ToArray();
+            JsonElement exited = Assert.Single(
+                events,
+                static item => item.GetProperty("e").GetString() == "exited");
             Assert.Equal(0, exited.GetProperty("code").GetInt32());
             Assert.Equal("graceful", exited.GetProperty("reason").GetString());
         }
