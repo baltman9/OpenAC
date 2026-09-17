@@ -8,17 +8,45 @@ namespace AcDream.Plugin.Abstractions;
 /// </summary>
 public enum PluginClientWindow
 {
+    /// <summary>The backpack and equipment window.</summary>
     Inventory,
+
+    /// <summary>The character sheet: attributes, vitals and skills.</summary>
     Character,
+
+    /// <summary>
+    /// The character-information window: birth date, time played, deaths,
+    /// innate attributes, masteries and augmentations.
+    /// </summary>
     CharacterInformation,
+
+    /// <summary>The spellbook.</summary>
     Spellbook,
+
+    /// <summary>The two-tab window holding the map and the housing page.</summary>
     Map,
+
+    /// <summary>The client's settings window.</summary>
     Options,
+
+    /// <summary>The social window: friends, allegiance, fellowship and squelch.</summary>
     Social,
+
+    /// <summary>The quest journal.</summary>
     Journal,
+
+    /// <summary>The list of beneficial effects currently on the character.</summary>
     PositiveEffects,
+
+    /// <summary>The list of harmful effects currently on the character.</summary>
     NegativeEffects,
+
+    /// <summary>The connection-quality indicator.</summary>
     LinkStatus,
+
+    /// <summary>The window showing the character's current death penalty.</summary>
     Vitae,
+
+    /// <summary>The radar.</summary>
     Radar,
 }
