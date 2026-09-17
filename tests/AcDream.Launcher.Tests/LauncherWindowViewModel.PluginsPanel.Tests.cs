@@ -2688,6 +2688,98 @@ public sealed partial class LauncherWindowViewModelTests
         Assert.Equal(PluginReleaseChannel.Stable, store.Find("edwards.managed")!.Channel);
     }
 
+    [Fact]
+    public async Task UpdateDialogShowsTheBetaReleasesOwnCapabilitiesNotTheStableOnes()
+    {
+        using var fixture = new PluginPanelFixture();
+        fixture.WriteManifest(
+            "edwards.managed", "0.1.0", ["headless"],
+            capabilitiesVersion: LauncherPluginCapabilityVocabulary.Current,
+            capabilitiesJson: """[{ "name": "network", "note": "Sends usage counts." }]""");
+        fixture.AddRecord(
+            "edwards.managed", "shaneedwards/openac-plugin-hello", "0.1.0",
+            channel: PluginReleaseChannel.Beta);
+        const string repo = "shaneedwards/openac-plugin-hello";
+        Uri stableUri = GitHubReleaseLocator.LatestAsset(repo, "plugin.json");
+        Uri stableTaggedUri = GitHubReleaseLocator.TaggedAsset(repo, "v0.1.0", "plugin.json");
+        Uri feedUri = GitHubReleaseLocator.ReleasesFeed(repo);
+        Uri betaTaggedUri = GitHubReleaseLocator.TaggedAsset(repo, "v0.2.0-beta.1", "plugin.json");
+        byte[] feedBytes = System.Text.Encoding.UTF8.GetBytes($$"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <entry><link rel="alternate" href="https://github.com/{{repo}}/releases/tag/v0.2.0-beta.1"/></entry>
+            </feed>
+            """);
+        byte[] betaManifest = PluginPanelFixture.ManifestJson(
+            "edwards.managed", "0.2.0-beta.1", "0.1.0", ["headless"],
+            capabilitiesVersion: LauncherPluginCapabilityVocabulary.Current,
+            capabilitiesJson: """
+                [
+                  { "name": "network", "note": "Sends usage counts." },
+                  { "name": "chat", "note": "Reads chat to detect buff requests." }
+                ]
+                """);
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(fixture.ListJson());
+            }
+
+            if (request.RequestUri == stableUri)
+            {
+                return Redirect(stableTaggedUri);
+            }
+
+            if (request.RequestUri == stableTaggedUri)
+            {
+                return Ok(PluginPanelFixture.ManifestJson(
+                    "edwards.managed", "0.1.0", "0.1.0", ["headless"],
+                    capabilitiesVersion: LauncherPluginCapabilityVocabulary.Current,
+                    capabilitiesJson: """[{ "name": "network", "note": "Sends usage counts." }]"""));
+            }
+
+            if (request.RequestUri == feedUri)
+            {
+                return Ok(feedBytes);
+            }
+
+            if (request.RequestUri == betaTaggedUri)
+            {
+                return Ok(betaManifest);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        PluginInstalledRowViewModel managed = Assert.Single(
+            viewModel.Plugins.Installed, row => row.Id == "edwards.managed");
+        Assert.True(managed.UpdateAvailable);
+        Assert.Equal("0.2.0-beta.1", managed.UpdateVersion);
+        // The beta release adds "chat" beyond what the installed stable version declares, so the
+        // update chip and dialog must both reflect the beta manifest's own list, not the stable
+        // release's, even though the installed capabilities on disk are still the stable ones.
+        Assert.True(managed.UpdateCapabilitiesChanged);
+
+        managed.UpdateCommand!.Execute(null);
+
+        PluginInstallDialogViewModel dialog = viewModel.Plugins.InstallDialog;
+        Assert.True(dialog.IsOpen);
+        Assert.True(dialog.CapabilitiesChanged);
+        Assert.Equal(2, dialog.Capabilities.Count);
+        // "chat" is new since the installed (stable) version, so it carries the "(new)" mark;
+        // "network" was already declared, so it reads plainly.
+        Assert.Contains(dialog.Capabilities, chip => chip.Label == "uses chat (new)" && chip.IsNew);
+        Assert.Contains(dialog.Capabilities, chip => chip.Label == "uses network" && !chip.IsNew);
+    }
+
     private sealed class PluginPanelFixture : IDisposable
     {
         private readonly string _root = Path.Combine(
