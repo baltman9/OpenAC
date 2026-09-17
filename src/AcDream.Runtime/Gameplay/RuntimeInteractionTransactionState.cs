@@ -341,6 +341,11 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         catch { /* observer errors do not interrupt use-completion bookkeeping */ }
     }
 
+    /// <summary>
+    /// Asks the server to appraise an object. A quiet appraisal, such as one a walk asks
+    /// for to learn whether a door is locked, updates the object without becoming the
+    /// appraisal the character is looking at.
+    /// </summary>
     public bool TryRequestAppraisal(
         uint objectId,
         Action<uint> sendAppraisal,

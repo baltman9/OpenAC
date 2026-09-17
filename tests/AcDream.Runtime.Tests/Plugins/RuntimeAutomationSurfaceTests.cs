@@ -435,12 +435,17 @@ public sealed class RuntimeAutomationSurfaceTests
             navigation.FaceHeading(90f));
     }
 
+    /// <summary>
+    /// The graphical surface hands out the runtime's navigation, which every host shares,
+    /// and that implementation carries out a turn rather than falling back to the default.
+    /// </summary>
     [Fact]
     public void FaceHeading_IsImplementedByTheGraphicalSurface()
     {
+        using var surface = new RuntimeAutomationSurface();
+        Type navigation = surface.Navigation.GetType();
         System.Reflection.InterfaceMapping map =
-            typeof(RuntimeAutomationSurface).GetInterfaceMap(
-                typeof(INavigationAutomation));
+            navigation.GetInterfaceMap(typeof(INavigationAutomation));
         int index = Array.FindIndex(
             map.InterfaceMethods,
             static method => method.Name
@@ -448,8 +453,9 @@ public sealed class RuntimeAutomationSurfaceTests
 
         Assert.True(index >= 0, "INavigationAutomation.FaceHeading not found.");
         Assert.Equal(
-            typeof(RuntimeAutomationSurface),
-            map.TargetMethods[index].DeclaringType);
+            typeof(AcDream.Runtime.Navigation.RuntimeNavigationAutomation),
+            navigation);
+        Assert.Equal(navigation, map.TargetMethods[index].DeclaringType);
     }
 
     [Fact]

@@ -407,7 +407,6 @@ public sealed class AppraisalUiController : IRetainedPanelController
             _interaction.AcceptAppraisalResponse(appraisal.Guid);
         if (!acceptance.Accepted)
             return false;
-
         // A plugin-originated (Automation) Identify that does not land on
         // the object already showing in this window is accepted at the
         // transaction layer (the object's properties/profiles updated, the

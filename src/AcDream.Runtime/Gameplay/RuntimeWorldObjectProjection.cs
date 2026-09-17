@@ -67,8 +67,12 @@ public static class RuntimeWorldObjectProjection
                 : default,
             HasAppraisalData = item is not null && HasPropertyData(item.Properties),
             LastIdTime = item?.LastAppraisalTimeMs ?? 0,
+            // An open door stops colliding; its Open property comes with an appraisal and
+            // does not follow the door opening and closing afterwards.
             IsDoorOpen = (publicFlags & (uint)PublicWeenieFlags.Door) != 0u
-                && (item?.Properties.GetBool((uint)AcDream.Core.Properties.PropertyBool.Open) ?? false),
+                && (record is not null
+                    ? record.FinalPhysicsState.HasFlag(PhysicsStateFlags.Ethereal)
+                    : item?.Properties.GetBool((uint)AcDream.Core.Properties.PropertyBool.Open) ?? false),
             StackSize = Math.Max(1, item?.StackSize ?? 1),
             ItemsCapacity = item?.ItemsCapacity ?? 0,
             ContainersCapacity = item?.ContainersCapacity ?? 0,

@@ -568,7 +568,7 @@ public sealed class GameRuntime
         ObjectDisposedException.ThrowIf(_disposeRequested || _disposed, this);
         return new RuntimeLocalPlayerFrameController(
             host,
-            input,
+            new RuntimeScriptedMovementInputSource(MovementOwner, input),
             () =>
             {
                 _events.EmitMovement(MovementOwner.Snapshot);

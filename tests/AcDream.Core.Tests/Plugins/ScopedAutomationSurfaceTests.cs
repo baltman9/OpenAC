@@ -13,6 +13,10 @@ namespace AcDream.Core.Tests.Plugins;
 // of the host's real one. This test walks the interface by reflection so a
 // future member cannot go unforwarded without a build-time-visible test
 // failure.
+// Navigation is forwarded as the host's own object only when that host's
+// navigation cannot tell plugins apart (as this stub's cannot); a host whose
+// navigation implements IScopedNavigationSource hands each plugin a view of
+// its own, covered by ScopedNavigationTests.
 public sealed class ScopedAutomationSurfaceTests
 {
     [Fact]

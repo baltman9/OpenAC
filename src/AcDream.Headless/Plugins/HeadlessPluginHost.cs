@@ -3,6 +3,7 @@ using AcDream.Core.Items;
 using AcDream.Headless.Hosting;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
+using AcDream.Runtime.Navigation;
 using AcDream.Runtime.Plugins;
 
 namespace AcDream.Headless.Plugins;
@@ -133,6 +134,9 @@ internal sealed class HeadlessPluginHost
     public IEvents Events => this;
     public ISelectionService Selection => _runtime.ActionOwner.Selection;
     public IAutomationSurface Automation => _automation;
+
+    /// <summary>The runtime navigation behind <see cref="Automation"/>; the session host binds its walk controller and commands to it.</summary>
+    internal RuntimeNavigationAutomation NavigationAutomation => _automation.NavigationAutomation;
 
     public IUiRegistry Ui => NoOpUiRegistry.Instance;
 

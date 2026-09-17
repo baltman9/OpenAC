@@ -3299,7 +3299,7 @@ public sealed class HeadlessSessionHostTests
             throw new NotSupportedException();
     }
 
-    private static HeadlessSessionDescriptor Descriptor(
+    internal static HeadlessSessionDescriptor Descriptor(
         HeadlessCredentialProviderKind provider =
             HeadlessCredentialProviderKind.Environment,
         string credentialReference = "BOT_PASSWORD",
@@ -4030,7 +4030,7 @@ public sealed class HeadlessSessionHostTests
         return body;
     }
 
-    private sealed class FixtureSessionOperations : ILiveSessionOperations
+    internal sealed class FixtureSessionOperations : ILiveSessionOperations
     {
         private int _enterWorldCallCount;
         private int _tickCallCount;

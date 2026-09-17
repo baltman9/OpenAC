@@ -220,6 +220,46 @@ public sealed class RuntimeInteractionTransactionStateTests
         Assert.Equal(0u, sent[^1]);
     }
 
+    /// <summary>
+    /// A walk asks whether a door is locked. The answer must reach the object without
+    /// becoming the appraisal the character is looking at, so nothing opens on screen.
+    /// </summary>
+    [Fact]
+    public void AQuietAppraisalAnswersWithoutBecomingTheCurrentOne()
+    {
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+        var sent = new List<uint>();
+
+        Assert.True(state.TryRequestAppraisal(Item, sent.Add, AppraisalRequestOrigin.Automation));
+        Assert.Equal(new[] { Item }, sent);
+        Assert.Equal(Item, state.AwaitingAppraisalId);
+
+        RuntimeAppraisalResponseAcceptance answer = state.AcceptAppraisalResponse(Item);
+
+        Assert.True(answer.Accepted);
+        Assert.True(answer.FirstResponse);
+        Assert.Equal(AppraisalRequestOrigin.Automation, answer.Origin);
+        Assert.False(answer.PresentInUi);
+        Assert.Equal(0u, state.CurrentAppraisalId);
+        Assert.Equal(0, inventory.BusyCount);
+    }
+
+    [Fact]
+    public void AnAppraisalTheCharacterAskedForBecomesTheCurrentOne()
+    {
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+        var sent = new List<uint>();
+
+        Assert.True(state.TryRequestAppraisal(Item, sent.Add));
+        RuntimeAppraisalResponseAcceptance answer = state.AcceptAppraisalResponse(Item);
+
+        Assert.True(answer.FirstResponse);
+        Assert.True(answer.PresentInUi);
+        Assert.Equal(Item, state.CurrentAppraisalId);
+    }
+
     [Fact]
     public void AppraisalReceivedFiresOnBothTheFirstResponseAndARefresh()
     {
