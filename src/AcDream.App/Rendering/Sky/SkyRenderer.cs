@@ -225,14 +225,20 @@ public sealed partial class SkyRenderer : IDisposable
     {
         if (group is null)
             return;
-        foreach (SkyObjectData obj in group.SkyObjects)
-            EnsureMeshUploaded(obj.GfxObjId);
-        foreach (DatSkyKeyframeData time in group.SkyTimes)
+        // Indexed, not enumerated: these are interface-typed lists, so a
+        // foreach boxes an enumerator per list, and this runs before the world
+        // pass on every frame.
+        IReadOnlyList<SkyObjectData> objects = group.SkyObjects;
+        for (int i = 0; i < objects.Count; i++)
+            EnsureMeshUploaded(objects[i].GfxObjId);
+        IReadOnlyList<DatSkyKeyframeData> times = group.SkyTimes;
+        for (int i = 0; i < times.Count; i++)
         {
-            foreach (SkyObjectReplaceData replace in time.Replaces)
+            IReadOnlyList<SkyObjectReplaceData> replaces = times[i].Replaces;
+            for (int j = 0; j < replaces.Count; j++)
             {
-                if (replace.GfxObjId != 0)
-                    EnsureMeshUploaded(replace.GfxObjId);
+                if (replaces[j].GfxObjId != 0)
+                    EnsureMeshUploaded(replaces[j].GfxObjId);
             }
         }
     }

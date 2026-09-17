@@ -306,6 +306,8 @@ public sealed class UiText : UiElement, IUiDatStateful
     private Vector4 _authoredStateLineColor;
     private Func<IReadOnlyList<Line>>? _authoredStateLineProvider;
 
+    private readonly List<(string Text, float X, float Y, Vector4 Color)> _datLineScratch = [];
+
     private IReadOnlyList<Line> AuthoredStateLines()
     {
         if (_authoredStateLine is null || _authoredStateLineColor != DefaultColor)
@@ -480,6 +482,8 @@ public sealed class UiText : UiElement, IUiDatStateful
         // Normalised selection span (start <= end), if any.
         bool hasSel = TryGetOrderedSelection(out Pos selStart, out Pos selEnd);
 
+        // One carried list, refilled per draw: this ran once per text element
+        // per frame and grew a fresh list every time.
         List<(string Text, float X, float Y, Vector4 Color)>? datLines = null;
 
         for (int i = 0; i < lines.Count; i++)
@@ -522,7 +526,11 @@ public sealed class UiText : UiElement, IUiDatStateful
 
             if (datFont is not null)
             {
-                datLines ??= new();
+                if (datLines is null)
+                {
+                    datLines = _datLineScratch;
+                    datLines.Clear();
+                }
                 if (runs is { Count: > 0 })
                 {
                     foreach (var placed in LayoutRuns(runs, lineX, datFont.MeasureWidth))
