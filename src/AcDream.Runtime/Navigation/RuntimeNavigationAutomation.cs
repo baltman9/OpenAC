@@ -38,6 +38,17 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
         _isAvailable = isAvailable ?? (static () => true);
     }
 
+    private bool _remoteBodiesUnsimulated;
+
+    /// <summary>A host that never moves a remote entity's physics body reads remote positions from the latest snapshot instead.</summary>
+    public void BindRemoteBodiesUnsimulated() => _remoteBodiesUnsimulated = true;
+
+    private Position? EntityPosition(RuntimeEntityRecord record, uint playerId) =>
+        _remoteBodiesUnsimulated && record.ServerGuid != playerId
+            ? RuntimeNavigationProjection.FromServer(record.Snapshot.Position)
+            : record.PhysicsBody?.CellPosition
+                ?? RuntimeNavigationProjection.FromServer(record.Snapshot.Position);
+
     public void Bind(GameRuntime runtime)
     {
         ArgumentNullException.ThrowIfNull(runtime);
@@ -186,8 +197,7 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
             return false;
         }
 
-        Position? position = record.PhysicsBody?.CellPosition
-            ?? RuntimeNavigationProjection.FromServer(record.Snapshot.Position);
+        Position? position = EntityPosition(record, runtime.PlayerIdentity.ServerGuid);
         if (position is not { } current)
         {
             value = default;
@@ -232,8 +242,7 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
             if (!candidateName.Equals(name, StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            Position? source = record.PhysicsBody?.CellPosition
-                ?? RuntimeNavigationProjection.FromServer(record.Snapshot.Position);
+            Position? source = EntityPosition(record, runtime.PlayerIdentity.ServerGuid);
             if (source is not { } position)
                 continue;
             PluginNavigationPosition candidate = RuntimeNavigationProjection.Position(position);
@@ -261,8 +270,7 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
         var result = new List<PluginNavigationObject>();
         foreach (RuntimeEntityRecord record in runtime.EntityObjects.Entities.ActiveRecords)
         {
-            Position? source = record.PhysicsBody?.CellPosition
-                ?? RuntimeNavigationProjection.FromServer(record.Snapshot.Position);
+            Position? source = EntityPosition(record, runtime.PlayerIdentity.ServerGuid);
             if (source is not { } position)
                 continue;
             ClientObject? item = runtime.InventoryOwner.Objects.Get(record.ServerGuid);

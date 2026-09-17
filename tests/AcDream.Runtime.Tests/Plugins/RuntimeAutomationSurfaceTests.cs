@@ -1,21 +1,25 @@
-using AcDream.App.Plugins;
+using AcDream.Runtime.Plugins;
 using AcDream.Core.Chat;
 using AcDream.Core.Items;
+using AcDream.Core.Net;
+using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
+using AcDream.Core.Properties;
 using AcDream.Core.Selection;
 using AcDream.Core.Spells;
 using AcDream.Plugin.Abstractions;
+using AcDream.Runtime.Entities;
 using AcDream.Runtime.Gameplay;
 using System.Numerics;
 
-namespace AcDream.App.Tests.Plugins;
+namespace AcDream.Runtime.Tests.Plugins;
 
-public sealed class AppAutomationSurfaceTests
+public sealed class RuntimeAutomationSurfaceTests
 {
     [Fact]
     public void ProjectileDebugSamplesAreDetachedValidatedAndClearedOnUnbind()
     {
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         PluginProjectileDebugSample[] source =
         [
             new(new Vector3(1f, 2f, 3f), true, 0.4f),
@@ -37,7 +41,7 @@ public sealed class AppAutomationSurfaceTests
     [Fact]
     public void SelectionAutomationUsesTheBoundCanonicalActionRoute()
     {
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         var actions = new List<PluginSelectionAction>();
         surface.BindSelectionActions(action =>
         {
@@ -78,14 +82,53 @@ public sealed class AppAutomationSurfaceTests
             PublicWeenieBitfield = publicFlags,
         };
 
-        Assert.Equal(expected, AppAutomationSurface.ClassifyObject(item));
+        Assert.Equal(expected, RuntimeAutomationSurface.ClassifyObject(item));
+    }
+
+    [Theory]
+    [InlineData((uint)ItemType.MeleeWeapon, 0u)]
+    [InlineData((uint)ItemType.Armor, 0u)]
+    [InlineData((uint)ItemType.Creature, 0x10u)]
+    [InlineData((uint)ItemType.Creature, 0u)]
+    [InlineData((uint)ItemType.Creature, 0x04000010u)]
+    [InlineData((uint)ItemType.Creature, 0x8u)]
+    [InlineData((uint)ItemType.Misc, 0x200u)]
+    [InlineData((uint)ItemType.Misc, 0x1000u)]
+    [InlineData((uint)ItemType.Writable, 0x2u)]
+    [InlineData((uint)ItemType.Writable, 0x4u)]
+    [InlineData((uint)ItemType.Writable, 0x1u)]
+    public void ClassifyObjectDelegatesToTheSharedClassifierPlusTheScrollRule(
+        uint itemType,
+        uint publicFlags)
+    {
+        var item = new ClientObject
+        {
+            ObjectId = 1u,
+            Type = (ItemType)itemType,
+            PublicWeenieBitfield = publicFlags,
+        };
+
+        PluginObjectClass expected = PluginObjectClassifier.Classify(itemType, publicFlags);
+        Assert.Equal(expected, RuntimeAutomationSurface.ClassifyObject(item));
+
+        // The one rule the shared classifier cannot express: a written
+        // object carrying an appraised spell id is a scroll, regardless of
+        // what the shared classifier alone would have said.
+        var scroll = new ClientObject
+        {
+            ObjectId = 2u,
+            Type = ItemType.Writable,
+            PublicWeenieBitfield = 0u,
+            SpellId = 42u,
+        };
+        Assert.Equal(PluginObjectClass.Scroll, RuntimeAutomationSurface.ClassifyObject(scroll));
     }
 
     [Fact]
     public void NavigationProjectionUsesVtankMapCoordinatesAndCompassHeading()
     {
         PluginNavigationPosition center =
-            AppAutomationSurface.ProjectNavigationPosition(new Position(
+            RuntimeAutomationSurface.ProjectNavigationPosition(new Position(
                 0x7F7F0001u,
                 new Vector3(84f, 84f, 240f),
                 Quaternion.Identity));
@@ -97,7 +140,7 @@ public sealed class AppAutomationSurfaceTests
         Assert.True(center.IsOutdoor);
 
         PluginNavigationPosition nextBlock =
-            AppAutomationSurface.ProjectNavigationPosition(new Position(
+            RuntimeAutomationSurface.ProjectNavigationPosition(new Position(
                 0x80800041u,
                 new Vector3(84f, 84f, 0f),
                 Quaternion.Identity));
@@ -112,7 +155,7 @@ public sealed class AppAutomationSurfaceTests
     {
         using var first = GameRuntimeTestFactory.Create();
         using var second = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(
             first,
             first.CharacterOwner,
@@ -140,7 +183,11 @@ public sealed class AppAutomationSurfaceTests
             surface.CaptureMessages(one.Sequence));
         Assert.True(two.Sequence > one.Sequence);
         Assert.Equal("You cast Fester Other VII on Olthoi.", two.Text);
-        Assert.Equal(1, second.CommunicationOwner.SubscriberCount);
+        // Rebinding leaves nothing behind on the session it left, while the
+        // new one carries the surface plus the runtime event bridge the
+        // surface's lifecycle subscription brings with it.
+        Assert.Equal(0, first.CommunicationOwner.SubscriberCount);
+        Assert.Equal(2, second.CommunicationOwner.SubscriberCount);
 
         surface.Dispose();
         Assert.Equal(0, second.CommunicationOwner.SubscriberCount);
@@ -150,7 +197,7 @@ public sealed class AppAutomationSurfaceTests
     public void PostSystemMessage_RoutesToChatLog_NeverSpewBox()
     {
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
 
         surface.PostSystemMessage("MossTank: buffs applied.");
@@ -167,7 +214,7 @@ public sealed class AppAutomationSurfaceTests
     public void InventoryCompletionProjectsTheCanonicalRequestReceipt()
     {
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         ClientObjectTable objects = runtime.InventoryOwner.Objects;
         const uint itemId = 0x50000123u;
@@ -197,7 +244,7 @@ public sealed class AppAutomationSurfaceTests
     public void RecoveryClearsExactlyOneCanonicalBusyReference()
     {
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         runtime.InventoryOwner.Transactions.IncrementBusyCount();
         runtime.InventoryOwner.Transactions.IncrementBusyCount();
@@ -222,7 +269,7 @@ public sealed class AppAutomationSurfaceTests
         using var runtime = GameRuntimeTestFactory.Create(spellCast: operations);
         runtime.CharacterOwner.InstallSpellMetadata(SpellTable.Create([DurationSpell()]));
         runtime.CharacterOwner.Spellbook.OnSpellLearned(42u);
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
 
         Assert.True(surface.Enchantments.ReportCast(100u, 42u, 30d));
@@ -296,7 +343,7 @@ public sealed class AppAutomationSurfaceTests
     public void ProjectWorldObject_FillsIconIdFromTheClientObject()
     {
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         var item = new ClientObject
         {
             ObjectId = 0x50000456u,
@@ -304,13 +351,13 @@ public sealed class AppAutomationSurfaceTests
             IconId = 0x06000165u,
         };
 
-        System.Reflection.MethodInfo method = typeof(AppAutomationSurface)
+        System.Reflection.MethodInfo method = typeof(RuntimeAutomationSurface)
             .GetMethod(
                 "ProjectWorldObject",
                 System.Reflection.BindingFlags.NonPublic
                     | System.Reflection.BindingFlags.Instance)
             ?? throw new InvalidOperationException(
-                "AppAutomationSurface.ProjectWorldObject was not found by reflection.");
+                "RuntimeAutomationSurface.ProjectWorldObject was not found by reflection.");
         var result = (PluginWorldObject)method.Invoke(
             surface,
             [runtime, null, item, 0u])!;
@@ -318,11 +365,55 @@ public sealed class AppAutomationSurfaceTests
         Assert.Equal(0x06000165u, result.IconId);
     }
 
+    [Fact]
+    public void ProjectWorldObject_PrefersThePhysicsBodyPositionOnTheGraphicalHost()
+    {
+        const uint remote = 0x50000321u;
+        const uint cell = 0x01010100u;
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+
+        RuntimeEntityRecord record = runtime.EntityObjects
+            .RegisterEntity(new WorldSession.EntitySpawn(
+                remote,
+                new CreateObject.ServerPosition(cell, 51f, 10f, 5f, 1f, 0f, 0f, 0f),
+                null,
+                [],
+                [],
+                [],
+                null,
+                null,
+                "Remote",
+                null,
+                null,
+                null))
+            .Canonical!;
+        var body = new PhysicsBody { Position = new Vector3(1f, 10f, 5f) };
+        body.SnapToCell(cell, body.Position, body.Position);
+        runtime.EntityObjects.Entities.SetPhysicsBody(record, body);
+
+        System.Reflection.MethodInfo method = typeof(RuntimeAutomationSurface)
+            .GetMethod(
+                "ProjectWorldObject",
+                System.Reflection.BindingFlags.NonPublic
+                    | System.Reflection.BindingFlags.Instance)
+            ?? throw new InvalidOperationException(
+                "RuntimeAutomationSurface.ProjectWorldObject was not found by reflection.");
+        var result = (PluginWorldObject)method.Invoke(
+            surface,
+            [runtime, record, null, 0u])!;
+
+        PluginNavigationPosition bodyPosition = RuntimeAutomationSurface.ProjectNavigationPosition(
+            new Position(cell, new Vector3(1f, 10f, 5f), Quaternion.Identity));
+        Assert.Equal(0d, result.Position.HorizontalDistanceMeters(bodyPosition), 3);
+    }
+
 
     [Fact]
     public void FaceHeading_IsUnavailableOnAnUnboundSurface()
     {
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
 
         Assert.Equal(
             PluginNavigationCommandStatus.Unavailable,
@@ -331,8 +422,7 @@ public sealed class AppAutomationSurfaceTests
 
     /// <summary>
     /// The inert surface every host without a live local player falls back
-    /// to — including <c>HeadlessAutomationSurface</c>, which has no
-    /// navigation surface of its own — must refuse rather than pretend.
+    /// to must refuse rather than pretend.
     /// </summary>
     [Fact]
     public void FaceHeading_IsUnavailableOnTheNoOpSurface()
@@ -352,7 +442,7 @@ public sealed class AppAutomationSurfaceTests
     [Fact]
     public void FaceHeading_IsImplementedByTheGraphicalSurface()
     {
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         Type navigation = surface.Navigation.GetType();
         System.Reflection.InterfaceMapping map =
             navigation.GetInterfaceMap(typeof(INavigationAutomation));
@@ -369,10 +459,138 @@ public sealed class AppAutomationSurfaceTests
     }
 
     [Fact]
+    public void ProjectInventoryItem_preferstTheRetainedWeaponProfileOverThePropertyTable()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new RuntimeAutomationSurface();
+        var item = new ClientObject
+        {
+            ObjectId = 903u,
+            Name = "Test Sword",
+            WeaponProfile = new ClientWeaponProfile(
+                DamageType: 4u,
+                WeaponTime: 30u,
+                WeaponSkill: 34u,
+                Damage: 25u,
+                DamageVariance: 0.3d,
+                DamageMod: 1.0d,
+                WeaponLength: 1.0d,
+                MaxVelocity: 2.0d,
+                WeaponOffense: 1.05d,
+                MaxVelocityEstimated: 1u),
+        };
+        // The property table carries a stale/never-sent value that the
+        // retained profile must take priority over.
+        item.Properties.Ints[(uint)PropertyInt.Damage] = 1;
+        item.Properties.Ints[(uint)PropertyInt.WeaponSkill] = 2;
+        item.Properties.Ints[(uint)PropertyInt.DamageType] = 3;
+        item.Properties.Floats[(uint)PropertyFloat.DamageVariance] = 0.9d;
+
+        PluginInventoryItem projected = surface.ProjectInventoryItem(runtime, item);
+
+        Assert.Equal(25, projected.Damage);
+        Assert.Equal(34, projected.WeaponSkill);
+        Assert.Equal(4, projected.DamageType);
+        Assert.Equal(0.3d, projected.DamageVariance);
+    }
+
+    [Fact]
+    public void ProjectInventoryItem_fallsBackToThePropertyTableWithoutAWeaponProfile()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new RuntimeAutomationSurface();
+        var item = new ClientObject
+        {
+            ObjectId = 904u,
+            Name = "Unappraised Sword",
+        };
+        item.Properties.Ints[(uint)PropertyInt.Damage] = 7;
+        item.Properties.Ints[(uint)PropertyInt.WeaponSkill] = 8;
+        item.Properties.Ints[(uint)PropertyInt.DamageType] = 9;
+        item.Properties.Floats[(uint)PropertyFloat.DamageVariance] = 0.1d;
+
+        PluginInventoryItem projected = surface.ProjectInventoryItem(runtime, item);
+
+        Assert.Equal(7, projected.Damage);
+        Assert.Equal(8, projected.WeaponSkill);
+        Assert.Equal(9, projected.DamageType);
+        Assert.Equal(0.1d, projected.DamageVariance);
+    }
+
+    [Fact]
+    public void RequestLogout_IsUnavailableOnAnUnboundSurface()
+    {
+        using var surface = new RuntimeAutomationSurface();
+
+        Assert.False(surface.Login.CanRequestLogout);
+        Assert.False(surface.Login.RequestLogout());
+    }
+
+    /// <summary>
+    /// A plugin compiled without the new members, or a host that never calls
+    /// BindLogout, still gets a refusal from the interface defaults.
+    /// </summary>
+    [Fact]
+    public void RequestLogout_IsUnavailableOnTheNoOpSurface()
+    {
+        ILoginAutomation login = NoOpAutomationSurface.Instance.Login;
+
+        Assert.False(login.CanRequestLogout);
+        Assert.False(login.RequestLogout());
+    }
+
+    [Fact]
+    public void RequestLogout_IsImplementedByTheGraphicalSurface()
+    {
+        System.Reflection.InterfaceMapping map =
+            typeof(RuntimeAutomationSurface).GetInterfaceMap(
+                typeof(ILoginAutomation));
+        int index = Array.FindIndex(
+            map.InterfaceMethods,
+            static method => method.Name
+                == nameof(ILoginAutomation.RequestLogout));
+
+        Assert.True(index >= 0, "ILoginAutomation.RequestLogout not found.");
+        Assert.Equal(
+            typeof(RuntimeAutomationSurface),
+            map.TargetMethods[index].DeclaringType);
+    }
+
+    [Fact]
+    public void BindLogout_RequestLogoutStaysRefusedWhileTheSurfaceIsUnavailableEvenIfBound()
+    {
+        using var surface = new RuntimeAutomationSurface();
+        bool requested = false;
+        surface.BindLogout(
+            () => { requested = true; return true; },
+            () => true);
+
+        Assert.False(surface.Login.CanRequestLogout);
+        Assert.False(surface.Login.RequestLogout());
+        Assert.False(requested);
+    }
+
+    [Fact]
+    public void DropGiveAndApplyRefuseAsUnavailableBeforeBindItems()
+    {
+        using var surface = new RuntimeAutomationSurface();
+
+        Assert.Equal(
+            PluginItemCommandStatus.Unavailable,
+            surface.Items.Drop(0x50000001u).Status);
+        Assert.Equal(
+            PluginItemCommandStatus.Unavailable,
+            surface.Items.Give(0x50000001u, 0x50000002u).Status);
+        Assert.Equal(
+            PluginItemCommandStatus.Unavailable,
+            surface.Items.Apply(0x50000001u, 0x50000002u).Status);
+    }
+
+    [Fact]
     public void OwnedItemProjectionCarriesTheSingularNameForAStack()
     {
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         var stack = new ClientObject
         {
             ObjectId = 0x50000777u,

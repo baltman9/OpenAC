@@ -2,7 +2,7 @@ using System;
 using AcDream.Core.Combat;
 using AcDream.Core.Items;
 
-namespace AcDream.App.UI;
+namespace AcDream.Runtime.Gameplay;
 
 internal sealed class AutoWieldController : IDisposable
 {
@@ -52,8 +52,8 @@ internal sealed class AutoWieldController : IDisposable
 
     private readonly ClientObjectTable _objects;
     private readonly Func<uint> _playerGuid;
-    private readonly Action<uint, uint>? _sendWield;
-    private readonly Action<uint, uint, int>? _sendPutItemInContainer;
+    private readonly Func<uint, uint, bool>? _sendWield;
+    private readonly Func<uint, uint, int, bool>? _sendPutItemInContainer;
     private readonly Action<string>? _systemMessage;
     private readonly CombatState? _combatState;
     private readonly Action<CombatMode>? _sendChangeCombatMode;
@@ -69,8 +69,8 @@ internal sealed class AutoWieldController : IDisposable
     public AutoWieldController(
         ClientObjectTable objects,
         Func<uint> playerGuid,
-        Action<uint, uint>? sendWield,
-        Action<uint, uint, int>? sendPutItemInContainer,
+        Func<uint, uint, bool>? sendWield,
+        Func<uint, uint, int, bool>? sendPutItemInContainer,
         Action<string>? systemMessage = null,
         CombatState? combatState = null,
         Action<CombatMode>? sendChangeCombatMode = null,
@@ -242,11 +242,7 @@ internal sealed class AutoWieldController : IDisposable
         bool dispatched = DispatchInventoryRequest(
             InventoryRequestKind.PutInContainer,
             blockingItem.ObjectId,
-            () =>
-            {
-                _sendPutItemInContainer(blockingItem.ObjectId, player, 0);
-                return true;
-            });
+            () => _sendPutItemInContainer(blockingItem.ObjectId, player, 0));
         if (!dispatched)
             _pendingSwitch = null;
         return dispatched;
@@ -267,11 +263,7 @@ internal sealed class AutoWieldController : IDisposable
         bool dispatched = DispatchInventoryRequest(
             InventoryRequestKind.Wield,
             item.ObjectId,
-            () =>
-            {
-                _sendWield(item.ObjectId, (uint)mask);
-                return true;
-            });
+            () => _sendWield(item.ObjectId, (uint)mask));
         if (!dispatched)
             _pendingSwitch = null;
         return dispatched;

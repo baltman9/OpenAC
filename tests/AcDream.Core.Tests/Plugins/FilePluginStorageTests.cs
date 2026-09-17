@@ -1,6 +1,6 @@
-using AcDream.App.Plugins;
+using AcDream.Core.Plugins;
 
-namespace AcDream.App.Tests.Plugins;
+namespace AcDream.Core.Tests.Plugins;
 
 public sealed class FilePluginStorageTests
 {
@@ -25,6 +25,28 @@ public sealed class FilePluginStorageTests
             Assert.Null(storage.ReadText("plugin/profile.json"));
             Assert.Throws<ArgumentException>(() =>
                 storage.WriteText("../escape.json", "bad"));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TheReportedRootIsTheAbsoluteDirectoryKeysResolveAgainst()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-plugin-storage-{Guid.NewGuid():N}");
+        try
+        {
+            var storage = new FilePluginStorage(root);
+            storage.WriteText("profile.json", "one");
+
+            Assert.Equal(Path.GetFullPath(root), storage.RootPath);
+            Assert.True(File.Exists(
+                Path.Combine(storage.RootPath!, "profile.json")));
         }
         finally
         {

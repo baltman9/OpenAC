@@ -381,7 +381,8 @@ public sealed class ItemInteractionControllerTests
 
         Assert.True(acceptance.Accepted);
         Assert.True(acceptance.FirstResponse);
-        Assert.True(acceptance.Quiet);
+        Assert.Equal(AppraisalRequestOrigin.Automation, acceptance.Origin);
+        Assert.False(acceptance.PresentInUi);
     }
 
     [Fact]
