@@ -263,7 +263,7 @@ public sealed class GameWindow :
     private AcDream.App.World.LiveEntityRuntime? _liveEntities;
     private AcDream.App.World.LiveEntityLivenessController? _liveEntityLiveness;
 
-    private readonly AcDream.App.Plugins.AppAutomationSurface? _automation;
+    private readonly AcDream.Runtime.Plugins.RuntimeAutomationSurface? _automation;
     private readonly GameRuntime _runtime;
     private readonly IDisposable _runtimeHostLease;
     private RuntimeCommunicationState _runtimeCommunication =>
@@ -452,7 +452,7 @@ public sealed class GameWindow :
         WorldEvents worldEvents,
         AcDream.App.Plugins.BufferedUiRegistry? uiRegistry,
         GraphicalHostPlatformServices platformServices,
-        AcDream.App.Plugins.AppAutomationSurface? automation = null,
+        AcDream.Runtime.Plugins.RuntimeAutomationSurface? automation = null,
         AcDream.App.Plugins.BufferedRenderPackRegistry? renderPackRegistry = null)
     {
         _options = options ?? throw new System.ArgumentNullException(nameof(options));
@@ -946,6 +946,13 @@ public sealed class GameWindow :
             (vendorId, itemId, amount) => result.ItemInteraction.TrySell(
                 vendorId,
                 [(amount, itemId)]));
+        _automation?.BindLogout(
+            () => _localPlayerTeleport?.TryRequestLogout() == true,
+            () => _localPlayerTeleport is not null
+                && _runtime.Session.IsInWorld
+                && !_runtime.TransitOwner.IsLogoutActive
+                && !_runtime.TransitOwner.IsTeleportActive
+                && !_runtime.TransitOwner.HasPendingTeleportStart);
         _interactionUiLateBindings = result.LateBindings;
         _magicRuntime = result.Magic;
         if (result.RetainedUi is { } retained)
@@ -1095,6 +1102,7 @@ public sealed class GameWindow :
         _localPlayerTeleport = result.LocalTeleport;
         _liveSessionHost = result.SessionHost;
         _automation?.BindSessionCommands(result.GameRuntime);
+        _automation?.BindSubmit(result.GameRuntime.SubmitChatText);
         _gameplayInputActions = result.GameplayActions;
         _sessionPlayerBindings = result.RuntimeBindings;
     }

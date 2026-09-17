@@ -1,5 +1,8 @@
+using AcDream.Content;
+using AcDream.Headless.Hosting;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
+using AcDream.Runtime.Plugins;
 
 namespace AcDream.Headless.Plugins;
 
@@ -19,7 +22,7 @@ internal sealed class HeadlessPluginHost
     private readonly object _eventGate = new();
     private readonly List<Subscription> _subscriptions = [];
     private Subscription[] _liveSnapshot = [];
-    private readonly HeadlessAutomationSurface _automation;
+    private readonly RuntimeAutomationSurface _automation;
     private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>
         _sessionSettingsByPlugin;
     private readonly object _tickGate = new();
@@ -43,16 +46,45 @@ internal sealed class HeadlessPluginHost
         GameRuntime runtime,
         IPluginLogger logger,
         IPluginCommandRegistry? commands = null,
+        IPluginStorage? storage = null,
         IPluginStorage? vtankProfiles = null,
         IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
-        Func<string, bool>? submitChatText = null)
+        Func<string, bool>? submitChatText = null,
+        HeadlessItemAutomation? items = null,
+        MagicCatalog? magicCatalog = null,
+        HeadlessLogoutAutomation? logout = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         Log = logger ?? throw new ArgumentNullException(nameof(logger));
         Commands = commands ?? NoOpPluginCommandRegistry.Instance;
+        Storage = storage ?? NoOpPluginStorage.Instance;
         VtankProfiles = vtankProfiles ?? NoOpPluginStorage.Instance;
         _sessionSettingsByPlugin = CopySessionSettings(sessionSettings);
-        _automation = new HeadlessAutomationSurface(runtime, submitChatText);
+        _automation = new RuntimeAutomationSurface();
+        _automation.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        _automation.BindRemoteBodiesUnsimulated();
+        _automation.BindSubmit(submitChatText);
+        if (magicCatalog is not null)
+            _automation.BindMagicCatalog(magicCatalog);
+        if (items is not null)
+        {
+            _automation.BindItems(
+                items.TryUse,
+                items.TryApply,
+                items.TryMove,
+                items.TryMerge,
+                items.TryDrop,
+                items.TryGive,
+                HeadlessItemAutomation.RefusePickup,
+                HeadlessItemAutomation.RefuseIdentify);
+            _automation.BindEquipment(items.TryEquip, () => items.EquipmentBusy);
+        }
+        if (logout is not null)
+        {
+            _automation.BindLogout(
+                logout.TryRequestLogout,
+                () => logout.CanRequestLogout);
+        }
         _eventSubscription = runtime.Subscribe(this);
     }
 
@@ -77,6 +109,7 @@ internal sealed class HeadlessPluginHost
     public bool HasUi => false;
     public IPluginLogger Log { get; }
     public IPluginCommandRegistry Commands { get; }
+    public IPluginStorage Storage { get; }
     public IPluginStorage VtankProfiles { get; }
     public IGameState State => this;
     public IEvents Events => this;
@@ -262,6 +295,7 @@ internal sealed class HeadlessPluginHost
         lock (_tickGate)
             _tick = null;
         _eventSubscription.Dispose();
+        _automation.Dispose();
     }
 
     public void OnEntity(in RuntimeEntityDelta delta)

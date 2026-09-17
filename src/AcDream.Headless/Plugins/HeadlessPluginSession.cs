@@ -1,5 +1,7 @@
+using AcDream.Content;
 using AcDream.Core.Plugins;
 using AcDream.Headless.Diagnostics;
+using AcDream.Headless.Hosting;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
 using AcDream.Runtime.Session;
@@ -42,9 +44,13 @@ internal sealed class HeadlessPluginSession : IDisposable
         IEnumerable<string> roots,
         IReadOnlyList<string>? allowList,
         IPluginCommandRegistry? commands = null,
+        IPluginStorage? storage = null,
         IPluginStorage? vtankProfiles = null,
         IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
-        Func<string, bool>? submitChatText = null)
+        Func<string, bool>? submitChatText = null,
+        HeadlessItemAutomation? items = null,
+        MagicCatalog? magicCatalog = null,
+        HeadlessLogoutAutomation? logout = null)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(diagnostics);
@@ -59,9 +65,13 @@ internal sealed class HeadlessPluginSession : IDisposable
                 sessionId,
                 () => runtime.Generation.Value),
             commands,
+            storage,
             vtankProfiles,
             sessionSettings,
-            submitChatText);
+            submitChatText,
+            items,
+            magicCatalog,
+            logout);
         var plugins = new PluginSession(
             host,
             status => Report(statusWriter, sessionId, status),

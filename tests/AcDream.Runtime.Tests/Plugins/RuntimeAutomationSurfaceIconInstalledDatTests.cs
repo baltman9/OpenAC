@@ -1,5 +1,4 @@
-using AcDream.App.Plugins;
-using AcDream.App.Tests.Rendering;
+using AcDream.Runtime.Plugins;
 using AcDream.Content;
 using AcDream.Core.Spells;
 using AcDream.Plugin.Abstractions;
@@ -7,10 +6,10 @@ using DatReaderWriter;
 using DatReaderWriter.Options;
 using Xunit;
 
-namespace AcDream.App.Tests.Plugins;
+namespace AcDream.Runtime.Tests.Plugins;
 
 [Trait("Lane", "InstalledDat")]
-public sealed class AppAutomationSurfaceIconInstalledDatTests
+public sealed class RuntimeAutomationSurfaceIconInstalledDatTests
 {
     private const uint KnownSpellId = 1u;
 
@@ -40,7 +39,7 @@ public sealed class AppAutomationSurfaceIconInstalledDatTests
         using var runtime = GameRuntimeTestFactory.Create();
         runtime.CharacterOwner.InstallSpellMetadata(catalog.SpellTable);
         runtime.CharacterOwner.Spellbook.OnSpellLearned(KnownSpellId);
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
 
         Assert.True(surface.Spells.TryGet(KnownSpellId, out PluginSpellInfo info));

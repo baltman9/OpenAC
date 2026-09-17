@@ -1,6 +1,6 @@
 using AcDream.Core.Items;
 
-namespace AcDream.App.UI;
+namespace AcDream.Runtime.Gameplay;
 
 internal static class ItemEquipRules
 {

@@ -513,7 +513,7 @@ public sealed class HeadlessConsoleTests
             "hello" + Environment.NewLine + "/quit" + Environment.NewLine);
         using var host = new HeadlessProcessHost(
             configuration,
-            HeadlessPathSet.Resolve(new HeadlessPathOverrides()),
+            IsolatedHeadlessPaths.Create(),
             input,
             diagnostics,
             operations,
@@ -546,7 +546,7 @@ public sealed class HeadlessConsoleTests
         using var input = new System.IO.StringReader("/quit" + Environment.NewLine);
         using var host = new HeadlessProcessHost(
             configuration,
-            HeadlessPathSet.Resolve(new HeadlessPathOverrides()),
+            IsolatedHeadlessPaths.Create(),
             input,
             diagnostics,
             operations,
@@ -591,7 +591,7 @@ public sealed class HeadlessConsoleTests
             + "password-two" + Environment.NewLine);
         using var host = new HeadlessProcessHost(
             configuration,
-            HeadlessPathSet.Resolve(new HeadlessPathOverrides()),
+            IsolatedHeadlessPaths.Create(),
             input,
             diagnostics,
             operations,

@@ -1,7 +1,7 @@
 using System.Text.Json;
 using AcDream.Plugin.Abstractions;
 
-namespace AcDream.App.Plugins;
+namespace AcDream.Runtime.Plugins;
 
 internal sealed class LocalPluginPeerRegistry : IDisposable
 {

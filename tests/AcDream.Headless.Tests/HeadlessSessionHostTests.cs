@@ -383,6 +383,254 @@ public sealed class HeadlessSessionHostTests
     }
 
     [Fact]
+    public void LoginAutomationRefusesLogoutOutsideTheWorld()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            operations);
+
+        Assert.False(host.Plugins.Host.Automation.Login.CanRequestLogout);
+        Assert.False(host.Plugins.Host.Automation.Login.RequestLogout());
+        Assert.Equal(0, operations.RequestCharacterLogOffCount);
+    }
+
+    [Fact]
+    public void TransitGuardRefusesLogoutDuringAPendingTeleport()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            operations);
+        host.Start();
+        host.Runtime.TransitOwner.TryQueueTeleportStart(1);
+
+        Assert.False(host.Plugins.Host.Automation.Login.CanRequestLogout);
+        Assert.False(host.Plugins.Host.Automation.Login.RequestLogout());
+        Assert.Equal(0, operations.RequestCharacterLogOffCount);
+    }
+
+    [Fact]
+    public void RequestLogoutSendsOneLogoffAndCanRequestLogoutGoesFalseWhilePending()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            operations);
+        host.Start();
+
+        Assert.True(host.Plugins.Host.Automation.Login.CanRequestLogout);
+        Assert.True(host.Plugins.Host.Automation.Login.RequestLogout());
+
+        Assert.Equal(1, operations.RequestCharacterLogOffCount);
+        Assert.False(host.Plugins.Host.Automation.Login.CanRequestLogout);
+        Assert.False(host.IsPolicyComplete);
+    }
+
+    [Fact]
+    public void SecondRequestLogoutSendsNothing()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            operations);
+        host.Start();
+        Assert.True(host.Plugins.Host.Automation.Login.RequestLogout());
+
+        Assert.False(host.Plugins.Host.Automation.Login.RequestLogout());
+
+        Assert.Equal(1, operations.RequestCharacterLogOffCount);
+    }
+
+    [Fact]
+    public void RequestLogoutAfterAReconnectSendsAFreshLogoff()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            operations);
+        host.Start();
+        Assert.True(host.Plugins.Host.Automation.Login.RequestLogout());
+        Assert.Equal(1, operations.RequestCharacterLogOffCount);
+
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Reconnect().Status);
+
+        Assert.True(host.Plugins.Host.Automation.Login.RequestLogout());
+        Assert.Equal(2, operations.RequestCharacterLogOffCount);
+    }
+
+    [Fact]
+    public void ConfirmationCompletesTheLogoffOnceAndEndsTheSessionSuccessfully()
+    {
+        string statusPath = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-headless-logout-confirmed-{Guid.NewGuid():N}.jsonl");
+        try
+        {
+            var operations = new FixtureSessionOperations();
+            using var credential = new HeadlessCredentialSecret(
+                "fixture",
+                "password");
+            bool confirmed = false;
+            using var host = new HeadlessSessionHost(
+                Descriptor(statusFile: statusPath),
+                credential,
+                new HeadlessDiagnosticWriter(new StringWriter()),
+                operations,
+                logoutConfirmedOverride: () => confirmed);
+            host.Start();
+            Assert.True(host.Plugins.Host.Automation.Login.RequestLogout());
+
+            confirmed = true;
+            host.Tick(0.015d);
+
+            Assert.Equal(1, operations.ReturnToCharacterSelectCount);
+            Assert.True(host.IsPolicyComplete);
+            Assert.False(host.IsFaulted);
+
+            // CompleteCharacterLogOff fires exactly once, even if the scheduler ticks it again.
+            host.Tick(0.015d);
+            Assert.Equal(1, operations.ReturnToCharacterSelectCount);
+
+            // Nothing re-enters the world once the session's logout policy is complete.
+            int enterWorldCalls = operations.EnterWorldCallCount;
+            host.Tick(0.015d);
+            Assert.Equal(enterWorldCalls, operations.EnterWorldCallCount);
+            Assert.True(host.IsPolicyComplete);
+
+            host.Dispose();
+            string exitedLine = File.ReadAllLines(statusPath)
+                .Single(static line =>
+                    JsonDocument.Parse(line).RootElement.GetProperty("e").GetString()
+                        == "exited");
+            using JsonDocument exited = JsonDocument.Parse(exitedLine);
+            Assert.Equal(
+                (int)HeadlessExitCode.Success,
+                exited.RootElement.GetProperty("code").GetInt32());
+        }
+        finally
+        {
+            if (File.Exists(statusPath))
+                File.Delete(statusPath);
+        }
+    }
+
+    [Fact]
+    public void LogoutNeverConfirmedByTheDeadlineFaultsTheSessionWithARuntimeErrorExitCode()
+    {
+        string statusPath = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-headless-logout-timeout-{Guid.NewGuid():N}.jsonl");
+        try
+        {
+            var operations = new FixtureSessionOperations();
+            using var credential = new HeadlessCredentialSecret(
+                "fixture",
+                "password");
+            var time = new ManualTimeProvider();
+            using var host = new HeadlessSessionHost(
+                Descriptor(statusFile: statusPath),
+                credential,
+                new HeadlessDiagnosticWriter(new StringWriter()),
+                operations,
+                timeProvider: time,
+                logoutConfirmedOverride: () => false);
+            host.Start();
+            Assert.True(host.Plugins.Host.Automation.Login.RequestLogout());
+
+            host.Tick(0.015d);
+            Assert.False(host.IsPolicyComplete);
+
+            time.Advance(HeadlessLogoutAutomation.DefaultConfirmationDeadline
+                + TimeSpan.FromSeconds(1));
+            host.Tick(0.015d);
+
+            Assert.True(host.IsFaulted);
+            Assert.True(host.IsPolicyComplete);
+            Assert.IsType<TimeoutException>(host.Fault);
+            Assert.Equal(0, operations.ReturnToCharacterSelectCount);
+
+            host.Dispose();
+            string exitedLine = File.ReadAllLines(statusPath)
+                .Single(static line =>
+                    JsonDocument.Parse(line).RootElement.GetProperty("e").GetString()
+                        == "exited");
+            using JsonDocument exited = JsonDocument.Parse(exitedLine);
+            Assert.Equal(
+                (int)HeadlessExitCode.RuntimeError,
+                exited.RootElement.GetProperty("code").GetInt32());
+        }
+        finally
+        {
+            if (File.Exists(statusPath))
+                File.Delete(statusPath);
+        }
+    }
+
+    [Fact]
+    public void RequestLogoutFromANestedTickHandlerIsRetriedLaterInTheSameTick()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            operations);
+        host.Start();
+
+        bool requested = false;
+        bool? acceptedDuringNestedCall = null;
+        int? sentCountDuringNestedCall = null;
+        operations.OnTick = () =>
+        {
+            if (requested)
+                return;
+            requested = true;
+            acceptedDuringNestedCall =
+                host.Plugins.Host.Automation.Login.RequestLogout();
+            sentCountDuringNestedCall = operations.RequestCharacterLogOffCount;
+        };
+
+        host.Tick(0.015d);
+
+        Assert.True(acceptedDuringNestedCall);
+        // Refused inside the nested operations.Tick call (operation depth != 0); not sent yet.
+        Assert.Equal(0, sentCountDuringNestedCall);
+        // The sequencer's own Tick, later in the same host.Tick, retried it at depth 0.
+        Assert.Equal(1, operations.RequestCharacterLogOffCount);
+    }
+
+    [Fact]
     public void ReconnectPublishesDisconnectedBeforeTheSecondConnectedEdge()
     {
         string statusPath = Path.Combine(
@@ -593,8 +841,7 @@ public sealed class HeadlessSessionHostTests
                     credentialReference: "probe-password"),
             ],
         };
-        HeadlessPathSet paths = HeadlessPathSet.Resolve(
-            new HeadlessPathOverrides());
+        HeadlessPathSet paths = IsolatedHeadlessPaths.Create();
         using var diagnostics = new StringWriter();
         var operations = new FixtureSessionOperations();
         using var host = new HeadlessProcessHost(
@@ -639,7 +886,7 @@ public sealed class HeadlessSessionHostTests
             using var diagnostics = new StringWriter();
             using var host = new HeadlessProcessHost(
                 configuration,
-                HeadlessPathSet.Resolve(new HeadlessPathOverrides()),
+                IsolatedHeadlessPaths.Create(),
                 new System.IO.StringReader(
                     "probe-password" + Environment.NewLine),
                 diagnostics,
@@ -702,8 +949,7 @@ public sealed class HeadlessSessionHostTests
                     "play-password"),
             ],
         };
-        HeadlessPathSet paths = HeadlessPathSet.Resolve(
-            new HeadlessPathOverrides());
+        HeadlessPathSet paths = IsolatedHeadlessPaths.Create();
         using var diagnostics = new StringWriter();
         var operations = new FixtureSessionOperations();
         using var host = new HeadlessProcessHost(
@@ -751,8 +997,7 @@ public sealed class HeadlessSessionHostTests
                         statusFile: statusPath),
                 ],
             };
-            HeadlessPathSet paths = HeadlessPathSet.Resolve(
-                new HeadlessPathOverrides());
+            HeadlessPathSet paths = IsolatedHeadlessPaths.Create();
             using var diagnostics = new StringWriter();
             var operations = new FixtureSessionOperations();
             using var host = new HeadlessProcessHost(
@@ -847,8 +1092,7 @@ public sealed class HeadlessSessionHostTests
             Version = 1,
             Sessions = [Descriptor()],
         };
-        HeadlessPathSet paths = HeadlessPathSet.Resolve(
-            new HeadlessPathOverrides());
+        HeadlessPathSet paths = IsolatedHeadlessPaths.Create();
         using var diagnostics = new StringWriter();
         var operations = new FixtureSessionOperations();
         using var host = new HeadlessProcessHost(
@@ -888,8 +1132,7 @@ public sealed class HeadlessSessionHostTests
                 }),
             ],
         };
-        HeadlessPathSet paths = HeadlessPathSet.Resolve(
-            new HeadlessPathOverrides());
+        HeadlessPathSet paths = IsolatedHeadlessPaths.Create();
         using var diagnostics = new StringWriter();
         var operations = new FixtureSessionOperations();
         using var host = new HeadlessProcessHost(
@@ -2432,6 +2675,141 @@ public sealed class HeadlessSessionHostTests
     }
 
     [Fact]
+    public void ProjectSpawnCommittingCollisionGenerationDoesNotCancelTheLocalPlayersOwnFreshPlacement()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        GameRuntime runtime = host.Runtime;
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+        const uint player = 0x50000014u;
+        runtime.PlayerIdentity.ServerGuid = player;
+        AcDream.Runtime.Session.RuntimeFirstEntryDriveController firstEntry =
+            CreateFirstEntryDrive(runtime);
+        RuntimeEntityRecord record = runtime.EntityObjects
+            .RegisterEntityWithInitialResidence(Spawn(player), isLocalPlayer: true)
+            .Canonical!;
+        Assert.True(runtime.EntityObjects.ApplyAcceptedSpawn(
+            record,
+            record.CreateIntegrationVersion,
+            record.Snapshot,
+            replaceGeneration: false));
+
+        var collision = new CollisionGenerationCommittingNeighborhood(runtime);
+        var projection = new HeadlessSessionWorldProjection(
+            runtime,
+            collision,
+            firstEntry);
+
+        // CenterOn commits the destination landblock's collision generation, the
+        // same as production; that commit races the local player's own just-begun
+        // placement while it is still unprepared.
+        projection.ProjectSpawn(record, isLocalPlayer: true);
+
+        Assert.NotNull(runtime.MovementOwner.Controller);
+    }
+
+    [Fact]
+    public void ProjectPositionCommittingCollisionGenerationDoesNotCancelTheLocalPlayersOwnFreshPlacement()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        GameRuntime runtime = host.Runtime;
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+        const uint player = 0x50000015u;
+        runtime.PlayerIdentity.ServerGuid = player;
+        AcDream.Runtime.Session.RuntimeFirstEntryDriveController firstEntry =
+            CreateFirstEntryDrive(runtime);
+        RuntimeEntityRecord record = runtime.EntityObjects
+            .RegisterEntityWithInitialResidence(Spawn(player), isLocalPlayer: true)
+            .Canonical!;
+        Assert.True(runtime.EntityObjects.ApplyAcceptedSpawn(
+            record,
+            record.CreateIntegrationVersion,
+            record.Snapshot,
+            replaceGeneration: false));
+
+        var collision = new CollisionGenerationCommittingNeighborhood(runtime);
+        var projection = new HeadlessSessionWorldProjection(
+            runtime,
+            collision,
+            firstEntry);
+
+        // ProjectPosition's own CenterOn call races the same still-unprepared
+        // placement while the movement controller has not yet been created.
+        projection.ProjectPosition(
+            record,
+            isLocalPlayer: true,
+            PositionTimestampDisposition.Apply);
+
+        Assert.NotNull(runtime.MovementOwner.Controller);
+    }
+
+    private sealed class CollisionGenerationCommittingNeighborhood(
+        GameRuntime runtime) : IHeadlessCollisionNeighborhood
+    {
+        public void CenterOn(uint fullCellId) =>
+            CommitSyntheticCollisionGeneration(
+                runtime,
+                (fullCellId & 0xFFFF0000u) | 0xFFFFu);
+
+        public bool IsReady(uint fullCellId) => true;
+
+        public bool IsWithinServiceWindow(uint fullCellId) => true;
+
+        public bool IsQuiescent => true;
+    }
+
+    private static void CommitSyntheticCollisionGeneration(
+        GameRuntime runtime,
+        uint landblockId)
+    {
+        HeadlessCollisionGenerationTransaction transaction =
+            HeadlessCollisionGenerationTransaction.Begin(
+                runtime.EntityObjects.Physics,
+                landblockId,
+                afterAdmission: null,
+                (admission, prepared) =>
+                {
+                    prepared.SetAssetClosure([], []);
+                    runtime.EntityObjects.Physics.StageCollisionAssets(
+                        admission,
+                        prepared,
+                        new RuntimeLandblockCollisionAssets(
+                            landblockId,
+                            new TerrainSurface(new byte[81], new float[256]),
+                            [],
+                            [],
+                            WorldOffsetX: 0f,
+                            WorldOffsetY: 0f,
+                            CurrentCellId: landblockId));
+                });
+        HeadlessCollisionGenerationAdvance advance;
+        do
+        {
+            advance = transaction.Advance();
+        } while (!advance.Completed && advance.Progressed);
+        Assert.True(advance.Completed);
+    }
+
+    [Fact]
     public void CanAdvancePlayerReflectsControllerPublicationLifecycle()
     {
         var operations = new FixtureSessionOperations();
@@ -3278,9 +3656,12 @@ public sealed class HeadlessSessionHostTests
             Interlocked.Increment(ref _enterWorldCallCount);
         }
 
+        public Action? OnTick { get; set; }
+
         public void Tick(WorldSession session)
         {
             Interlocked.Increment(ref _tickCallCount);
+            OnTick?.Invoke();
         }
 
         public void DisposeSession(WorldSession session)
@@ -3288,6 +3669,15 @@ public sealed class HeadlessSessionHostTests
             DisposedSessionCount++;
             session.Dispose();
         }
+
+        public int RequestCharacterLogOffCount { get; private set; }
+        public int ReturnToCharacterSelectCount { get; private set; }
+
+        public void RequestCharacterLogOff(WorldSession session) =>
+            RequestCharacterLogOffCount++;
+
+        public void ReturnToCharacterSelect(WorldSession session) =>
+            ReturnToCharacterSelectCount++;
     }
 
     private sealed class FailOnceTextWriter : StringWriter

@@ -151,6 +151,8 @@ internal sealed class HeadlessSessionHost : IDisposable
     private readonly IHeadlessBotPolicy _policy;
     private readonly IDisposable _policySubscription;
     private readonly HeadlessPluginSession _pluginSession;
+    private readonly AutoWieldController _autoWield;
+    private readonly HeadlessLogoutAutomation _logout;
     private readonly AcDream.Core.Plugins.PluginCommandRegistry _pluginCommands;
     private readonly LiveChatCommandSurface _chatCommandSurface;
     private readonly LiveSessionHost _liveSession;
@@ -172,6 +174,7 @@ internal sealed class HeadlessSessionHost : IDisposable
     private string _accountName = string.Empty;
     private Exception? _fault;
     private bool _faulted;
+    private bool _loggedOut;
     private bool _disposed;
 
     internal HeadlessSessionHost(
@@ -187,7 +190,9 @@ internal sealed class HeadlessSessionHost : IDisposable
         IRuntimePlacementProjectionSink? placementSinkOverride = null,
         FellowshipAllegianceGateCoordinator? gateCoordinator = null,
         IEnumerable<string>? pluginRoots = null,
-        IPluginStorage? vtankProfiles = null)
+        IPluginStorage? storage = null,
+        IPluginStorage? vtankProfiles = null,
+        Func<bool>? logoutConfirmedOverride = null)
     {
         _descriptor = descriptor
             ?? throw new ArgumentNullException(nameof(descriptor));
@@ -213,6 +218,7 @@ internal sealed class HeadlessSessionHost : IDisposable
         IHeadlessBotPolicy? policy = null;
         IDisposable? policySubscription = null;
         HeadlessPluginSession? pluginSession = null;
+        AutoWieldController? autoWield = null;
         try
         {
             var gameplay = new HeadlessGameplayOperations();
@@ -240,11 +246,36 @@ internal sealed class HeadlessSessionHost : IDisposable
                 runtime,
                 contentLease?.MagicCatalog,
                 () => _accountName);
+            var logout = new HeadlessLogoutAutomation(
+                runtime,
+                _timeProvider,
+                isConfirmed: logoutConfirmedOverride);
 
             var bridge = new SessionCommandBridge();
             var commands = new DirectGameRuntimeCommandAdapter(
                 runtime,
                 bridge);
+            autoWield = new AutoWieldController(
+                runtime.InventoryOwner.Objects,
+                () => runtime.PlayerIdentity.ServerGuid,
+                commands.TrySendGetAndWieldItem,
+                commands.TrySendPutItemInContainer,
+                combatState: runtime.ActionOwner.Combat,
+                sendChangeCombatMode: gameplay.SendChangeCombatMode,
+                transactions: runtime.InventoryOwner.Transactions);
+            gameplay.BindAutoWield(autoWield);
+            var items = new HeadlessItemAutomation(
+                runtime,
+                commands,
+                commands.TrySendPutItemInContainer,
+                commands.TrySendStackableSplitToContainer,
+                commands.TrySendStackableMerge,
+                commands.TrySendUseWithTarget,
+                commands.TrySendDropItem,
+                commands.TrySendStackableSplitTo3D,
+                commands.TrySendGiveObject,
+                contentLease is { } lease ? lease.MagicCatalog.IsComponentPack : null,
+                autoWield);
             var statusWriter = new SessionStatusWriter(descriptor.StatusFile);
             var pluginCommands = new AcDream.Core.Plugins.PluginCommandRegistry(
                 (verb, error) => diagnostics.Failure(
@@ -283,9 +314,13 @@ internal sealed class HeadlessSessionHost : IDisposable
                 pluginRoots ?? [],
                 descriptor.Plugins,
                 pluginCommands,
+                storage,
                 vtankProfiles,
                 descriptor.PluginSettings,
-                SubmitChatText);
+                SubmitChatText,
+                items,
+                contentLease?.MagicCatalog,
+                logout);
             var liveSession = new LiveSessionHost(
                 runtime.Session,
                 new LiveSessionHostBindings(
@@ -390,10 +425,13 @@ internal sealed class HeadlessSessionHost : IDisposable
             _policy = policy;
             _policySubscription = policySubscription;
             _pluginSession = pluginSession;
+            _autoWield = autoWield;
+            _logout = logout;
         }
         catch
         {
             pluginSession?.Dispose();
+            autoWield?.Dispose();
             policySubscription?.Dispose();
             policy?.Dispose();
             hostLease?.Dispose();
@@ -415,7 +453,7 @@ internal sealed class HeadlessSessionHost : IDisposable
     internal string ActiveCharacterName { get; private set; } =
         string.Empty;
     internal bool IsPolicyComplete =>
-        _faulted || _policy.IsComplete;
+        _faulted || _loggedOut || _policy.IsComplete;
     internal bool IsFaulted => _faulted;
     internal Exception? Fault => _fault;
     internal bool IsReconnectPending => _reconnectPending;
@@ -480,6 +518,16 @@ internal sealed class HeadlessSessionHost : IDisposable
         _policy.Tick(Runtime, Commands);
         _pluginSession.Host.FireTick(deltaSeconds);
         ConsolePump?.Invoke();
+        switch (_logout.Tick())
+        {
+            case HeadlessLogoutOutcome.Completed:
+                _loggedOut = true;
+                break;
+            case HeadlessLogoutOutcome.TimedOut:
+                Quarantine(new TimeoutException(
+                    "A plugin-requested logout was never confirmed by the server."));
+                break;
+        }
     }
 
     internal RuntimeTeardownAcknowledgement Stop(string reason = "stopped")
@@ -596,22 +644,26 @@ internal sealed class HeadlessSessionHost : IDisposable
                     _disposeStage++;
                     break;
                 case 5:
-                    _hostLease.Dispose();
+                    _autoWield.Dispose();
                     _disposeStage++;
                     break;
                 case 6:
-                    _credential.Dispose();
+                    _hostLease.Dispose();
                     _disposeStage++;
                     break;
                 case 7:
-                    Runtime.Dispose();
+                    _credential.Dispose();
                     _disposeStage++;
                     break;
                 case 8:
-                    _contentLease?.Dispose();
+                    Runtime.Dispose();
                     _disposeStage++;
                     break;
                 case 9:
+                    _contentLease?.Dispose();
+                    _disposeStage++;
+                    break;
+                case 10:
                     _diagnostics.Message(
                         _descriptor.Id,
                         "disposed",

@@ -16,4 +16,8 @@ public interface ILoginAutomation
 
     bool SetNextLogin(uint characterObjectId) => false;
     bool ClearNextLogin() => false;
+
+    bool CanRequestLogout => false;
+
+    bool RequestLogout() => false;
 }
