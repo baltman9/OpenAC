@@ -112,9 +112,9 @@ public sealed class HeadlessPluginApiSurfaceTests
 
     // The plugin's auto-trade-accept macro resolves the trade partner's
     // NAME through Automation.Objects.TryGet before matching its
-    // whitelist. HeadlessAutomationSurface.Objects was previously the NoOp
-    // stub (always returns false), so the whitelist check was never
-    // reachable on the headless host.
+    // whitelist. The headless host's Objects used to be the NoOp stub
+    // (always returns false), so the whitelist check was never reachable
+    // there; it now binds the shared runtime surface.
     [Fact]
     public void ObjectsTryGetResolvesAKnownObjectsNameAndClass()
     {

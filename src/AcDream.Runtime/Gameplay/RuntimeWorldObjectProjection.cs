@@ -31,13 +31,15 @@ public static class RuntimeWorldObjectProjection
         uint playerId,
         ClientObjectTable objects,
         Func<uint, IReadOnlyList<uint>>? activeSpellIdsForPlayer = null,
-        Func<RuntimeEntityRecord, Position?>? resolvePosition = null)
+        bool remoteBodiesUnsimulated = false)
     {
         uint objectId = record?.ServerGuid ?? item!.ObjectId;
+        // A host that never moves a remote entity's physics body reads that
+        // entity's position from its latest snapshot instead.
         Position? source = record is null
             ? null
-            : resolvePosition is not null
-                ? resolvePosition(record)
+            : remoteBodiesUnsimulated && record.ServerGuid != playerId
+                ? ConvertPosition(record.Snapshot.Position)
                 : record.PhysicsBody?.CellPosition
                     ?? ConvertPosition(record.Snapshot.Position);
         bool owned = item is not null && IsPlayerOwned(item, playerId, objects);

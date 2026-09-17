@@ -169,7 +169,7 @@ internal sealed class HeadlessPluginHost
 
     internal void FireTick(double elapsedSeconds)
     {
-        _automation.Tick(elapsedSeconds);
+        _automation.Poll();
         Action<double>? handlers;
         lock (_tickGate)
             handlers = _tick;

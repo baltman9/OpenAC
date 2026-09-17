@@ -385,17 +385,21 @@ if (!host.Automation.Login.Logout())
 }
 ```
 
-`Login.Logout()` runs the client's own graceful logout — the same route the
-UI's logout control uses. It returns `false` when the surface is not
-`IsAvailable` (no in-world session); it does not report the outcome of the
-logout itself beyond having sent the request.
+`Login.RequestLogout()` runs the client's own graceful logout — the same
+route the UI's logout control uses. `Login.Logout()` is an alias that
+forwards to it. Poll `Login.CanRequestLogout` first: it is `false` when the
+surface is not `IsAvailable` (no in-world session) and while a teleport,
+portal entry or earlier logout is already in flight, and `RequestLogout()`
+returns `false` in the same cases. A `true` return means the logoff request
+was sent; it does not report the outcome beyond that.
 
 On the graphical host this returns to the character-select screen with the
 process still running. On the headless host there is no character-select
-screen to return to: `Logout()` tears down the whole session (the same
-teardown a direct disconnect produces) rather than leaving it parked at a
-selection step, so a headless plugin that calls it should expect the
-session to end, not to see another character list.
+screen to return to: the session sends the logoff, waits for the server's
+confirmation, and then ends. If no confirmation arrives within 45 seconds
+the session ends with a runtime error instead. Either way a headless plugin
+that calls it should expect the session to end, not to see another
+character list.
 
 ## Loot
 
@@ -680,8 +684,9 @@ placeholders rather than wired to real state:
 - `CaptureMessages` is unimplemented; use `Received` instead, which does
   work.
 - `ContainerOpened`/`ContainerClosed`, `ConfirmationRequested`, and
-  `Login.Logout` are real and wired to the same runtime state and
-  session-command routes the graphical host uses.
+  `Login.RequestLogout` (and its `Logout` alias) are real and wired to the
+  same runtime state and session-command routes the graphical host uses;
+  see the logout note above for how a headless session ends.
 - `Dialogs.Answer` is real when the headless session was configured with a
   confirmation route; otherwise it returns `false` like any host with
   nothing bound.

@@ -18,7 +18,7 @@ using AcDream.Runtime.Session;
 
 namespace AcDream.Runtime.Plugins;
 
-internal class RuntimeAutomationSurface
+internal sealed class RuntimeAutomationSurface
     : IAutomationSurface, ICharacterInfo, ISpellCatalog, IMagicCommands, IPluginChat,
       ICombatAutomation, IEquipmentAutomation, IItemAutomation,
       ILootAutomation, IFellowshipAutomation, IEnchantmentAutomation,
@@ -137,7 +137,7 @@ internal class RuntimeAutomationSurface
             .Take(128)
             .ToArray();
         if (_events is not null)
-            _events.Tick += Tick;
+            _events.Tick += OnPeerTick;
     }
 
     internal IPluginCommandRegistry PluginCommands => _pluginCommands;
@@ -629,9 +629,10 @@ internal class RuntimeAutomationSurface
         _projectileDebugSamplesExpireAt = 0;
     }
 
-    // The graphical host drives this from its plugin event tick; the headless
-    // host, which has no event tick, calls it once per session tick.
-    internal void Tick(double elapsedSeconds)
+    // Trade/vendor event polling only. The headless host calls this once per
+    // session tick; it never publishes peer heartbeats, so a bot run with its
+    // own data directory does not write into the machine-default one.
+    internal void Poll()
     {
         AcDream.Runtime.Gameplay.RuntimeTradeAutomation? trade;
         AcDream.Runtime.Gameplay.RuntimeVendorAutomation? vendor;
@@ -642,6 +643,12 @@ internal class RuntimeAutomationSurface
         }
         trade?.Poll();
         vendor?.Poll();
+    }
+
+    // Graphical host only, driven from the plugin event tick.
+    private void OnPeerTick(double elapsedSeconds)
+    {
+        Poll();
 
         _peerHeartbeatRemaining -= Math.Max(0d, elapsedSeconds);
         if (_peerHeartbeatRemaining > 0d)
@@ -1492,6 +1499,8 @@ internal class RuntimeAutomationSurface
 
     public bool Submit(string text)
     {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
         Func<string, bool>? submitChatText;
         lock (_gate)
             submitChatText = _submitChatText;
@@ -2199,7 +2208,7 @@ internal class RuntimeAutomationSurface
             playerId,
             runtime.InventoryOwner.Objects,
             activeSpellIdsForPlayer: _activeSpellIdsForPlayer,
-            resolvePosition: entity => ResolveEntityPosition(entity, playerId));
+            remoteBodiesUnsimulated: _remoteBodiesUnsimulated);
 
     private static bool HasPropertyData(PropertyBundle properties) =>
         RuntimeWorldObjectProjection.HasPropertyData(properties);
@@ -3940,7 +3949,7 @@ internal class RuntimeAutomationSurface
     public void Dispose()
     {
         if (_events is not null)
-            _events.Tick -= Tick;
+            _events.Tick -= OnPeerTick;
         lock (_gate)
         {
             if (_disposed)
