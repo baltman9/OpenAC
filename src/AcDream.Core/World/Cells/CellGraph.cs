@@ -37,17 +37,41 @@ public sealed class CellGraph
     {
         uint prefix = landblockPrefix & 0xFFFF0000u;
         _terrain[prefix] = new CellGraphTerrain(terrain, worldOrigin);
+        // The 64 land cells of a landblock are derived from its terrain, so
+        // they are built by GetVisible the first time each one is asked for
+        // rather than up front: a resident world is thousands of landblocks
+        // wide and only the cells near the viewer are ever looked up. Drop any
+        // cell cached from the terrain this call replaces.
         for (uint low = 1u; low <= 0x40u; low++)
-        {
-            uint id = prefix | low;
-            int index = (int)(low - 1u);
-            _outdoorCells[id] = LandCell.Synthesize(
-                id,
-                terrain,
-                worldOrigin,
-                index / 8,
-                index % 8);
-        }
+            _outdoorCells.TryRemove(prefix | low, out _);
+    }
+
+    /// <summary>
+    /// The land cell for an outdoor cell id, built from the landblock's
+    /// terrain on first use and then cached. Returns null when the landblock
+    /// is not resident, which is what callers read as "not loaded".
+    /// </summary>
+    private ObjCell? GetOrCreateOutdoorCell(uint id)
+    {
+        // One read of the world state: terrain and cells must come from the
+        // same one, or a seal swapping the state between the two lookups
+        // could cache a cell built from terrain that is no longer installed.
+        CollisionWorldState world = _collisionWorld.Current;
+        if (world.OutdoorCells.TryGetValue(id, out ObjCell? cached))
+            return cached;
+        if (!world.Terrain.TryGetValue(id & 0xFFFF0000u, out CellGraphTerrain? terrain))
+            return null;
+
+        int index = (int)((id & 0xFFFFu) - 1u);
+        return world.OutdoorCells.GetOrAdd(
+            id,
+            static (key, state) => LandCell.Synthesize(
+                key,
+                state.Terrain.Terrain,
+                state.Terrain.Origin,
+                state.Index / 8,
+                state.Index % 8),
+            (Terrain: terrain, Index: index));
     }
 
     public bool TryGetTerrainOrigin(uint id, out Vector3 origin)
@@ -110,9 +134,7 @@ public sealed class CellGraph
 
         uint low = id & 0xFFFFu;
         if (low < 1u || low > 0x40u) return null;
-        return _outdoorCells.TryGetValue(id, out ObjCell? cell)
-            ? cell
-            : null;
+        return GetOrCreateOutdoorCell(id);
     }
 
     public ObjCell? Neighbor(ObjCell cell, in CellPortal portal) => GetVisible(portal.OtherCellId);
