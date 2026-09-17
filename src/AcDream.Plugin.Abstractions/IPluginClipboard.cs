@@ -13,8 +13,13 @@ public interface IPluginClipboard
     bool TrySetText(string text) => false;
 }
 
+/// <summary>
+/// The clipboard a host without a window offers: it copies nothing and
+/// always returns false.
+/// </summary>
 public sealed class NoOpPluginClipboard : IPluginClipboard
 {
+    /// <summary>The shared instance; this type holds no state.</summary>
     public static NoOpPluginClipboard Instance { get; } = new();
 
     private NoOpPluginClipboard()

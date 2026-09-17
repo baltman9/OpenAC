@@ -27,6 +27,7 @@ public readonly record struct HostWindowResult(
     HostWindowStatus Status,
     string? Notice = null)
 {
+    /// <summary>Whether the operation took effect.</summary>
     public bool Succeeded => Status == HostWindowStatus.Done;
 }
 
@@ -88,6 +89,7 @@ public interface IHostWindow
 /// <summary>Shared inert window for hosts with nothing to act on.</summary>
 public sealed class NoOpHostWindow : IHostWindow
 {
+    /// <summary>The shared instance; this type holds no state.</summary>
     public static NoOpHostWindow Instance { get; } = new();
 
     private NoOpHostWindow()

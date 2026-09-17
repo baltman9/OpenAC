@@ -1,10 +1,24 @@
 // src/AcDream.Plugin.Abstractions/IEvents.cs
 namespace AcDream.Plugin.Abstractions;
 
+/// <summary>
+/// The client's notifications to plugins. Every handler runs on the
+/// client's own update thread, and an exception thrown by one handler is
+/// swallowed so it cannot take down the client or the other handlers.
+/// </summary>
 public interface IEvents
 {
+    /// <summary>
+    /// Raised once for each new thing the client starts drawing in the
+    /// world, carrying where it appeared.
+    /// </summary>
     event Action<WorldEntitySnapshot> EntitySpawned;
 
+    /// <summary>
+    /// Raised once per client update, carrying the seconds elapsed since
+    /// the previous one. This is the thread every other event here is
+    /// raised on, and the thread a plugin should touch its own state on.
+    /// </summary>
     event Action<double> Tick;
 
     /// <summary>
