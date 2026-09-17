@@ -1,4 +1,6 @@
+using System.Numerics;
 using AcDream.App.World;
+using AcDream.Core.World.Cells;
 using AcDream.Runtime.Entities;
 
 namespace AcDream.App.Tests.World;
@@ -79,22 +81,123 @@ public sealed class LiveEntityLivenessControllerTests
     }
 
     [Fact]
-    public void VisibilityInsideADungeonIsTheDungeonsOwnLandblock()
-    {
-        const uint playerCell = 0x01D9_0102u;
-
-        Assert.True(LiveEntityLivenessController.IsWithinVisibleLandblocks(playerCell, 0x01D9_0140u));
-        Assert.True(LiveEntityLivenessController.IsWithinVisibleLandblocks(playerCell, 0x01D9_FFFFu));
-        Assert.False(LiveEntityLivenessController.IsWithinVisibleLandblocks(playerCell, 0xA9B4_0001u));
-    }
-
-    [Fact]
     public void VisibilityDoesNotDependOnDistanceInsideTheNeighbourhood()
     {
         // The far corner of a diagonal neighbour is ~543 m away and used to
         // fall outside the old 384 m sphere while the server still knew it.
         Assert.True(LiveEntityLivenessController.IsWithinVisibleLandblocks(0x3032_0001u, 0x3133_0001u));
     }
+
+    // Inside a sealed dungeon cell the loaded set is the player's cell plus
+    // the cells on its authored visible-cell list; nothing else in the
+    // dungeon's landblock stays alive. The server forgets on the same set and
+    // only announces a destroyed object to clients that still know it, so a
+    // corpse kept beyond this set is never deleted by a message.
+
+    [Fact]
+    public void SealedDungeonKeepsThePlayersCellAndItsVisibleCells()
+    {
+        var set = new LiveEntityVisibleCellSet();
+        set.Update(DungeonCell(0x01D9_0102u, 0x01D9_0103u, 0x01D9_0110u), 0x01D9_0102u);
+
+        Assert.True(set.IsSealedDungeon);
+        Assert.True(set.Contains(0x01D9_0102u));
+        Assert.True(set.Contains(0x01D9_0103u));
+        Assert.True(set.Contains(0x01D9_0110u));
+    }
+
+    [Fact]
+    public void SealedDungeonDropsCellsOfTheSameLandblockOutsideTheVisibleList()
+    {
+        var set = new LiveEntityVisibleCellSet();
+        set.Update(DungeonCell(0x01D9_0102u, 0x01D9_0103u), 0x01D9_0102u);
+
+        Assert.False(set.Contains(0x01D9_0140u));
+        Assert.False(set.Contains(0x01D9_FFFFu));
+        // The outdoor terrain above the dungeon is released as well.
+        Assert.False(set.Contains(0x01D9_0001u));
+        Assert.False(set.Contains(0x01DA_0102u));
+    }
+
+    [Fact]
+    public void MovingToAnotherDungeonCellReplacesTheVisibleList()
+    {
+        var set = new LiveEntityVisibleCellSet();
+        set.Update(DungeonCell(0x01D9_0102u, 0x01D9_0103u), 0x01D9_0102u);
+        Assert.True(set.Contains(0x01D9_0103u));
+
+        set.Update(DungeonCell(0x01D9_0120u, 0x01D9_0121u), 0x01D9_0120u);
+
+        Assert.True(set.Contains(0x01D9_0120u));
+        Assert.True(set.Contains(0x01D9_0121u));
+        Assert.False(set.Contains(0x01D9_0102u));
+        Assert.False(set.Contains(0x01D9_0103u));
+    }
+
+    [Fact]
+    public void ADungeonCellUsesItsOwnIdWhenTheRecordsCellLagsBehind()
+    {
+        var set = new LiveEntityVisibleCellSet();
+        set.Update(DungeonCell(0x01D9_0120u, 0x01D9_0121u), playerCellId: 0x01D9_0102u);
+
+        Assert.True(set.Contains(0x01D9_0120u));
+        Assert.False(set.Contains(0x01D9_0102u));
+    }
+
+    [Fact]
+    public void AnIndoorCellSeenFromOutsideKeepsTheLandblockNeighbourhood()
+    {
+        var set = new LiveEntityVisibleCellSet();
+        set.Update(
+            IndoorCell(0x3032_0102u, seenOutside: true, 0x3032_0103u),
+            0x3032_0102u);
+
+        Assert.False(set.IsSealedDungeon);
+        Assert.True(set.Contains(0x3032_0140u));
+        Assert.True(set.Contains(0x3032_0001u));
+        Assert.True(set.Contains(0x3133_00FFu));
+        Assert.False(set.Contains(0x3232_0001u));
+    }
+
+    [Fact]
+    public void AnUnknownPlayerCellKeepsTheLandblockNeighbourhood()
+    {
+        var set = new LiveEntityVisibleCellSet();
+        set.Update(playerCell: null, 0x3032_0001u);
+
+        Assert.False(set.IsSealedDungeon);
+        Assert.True(set.Contains(0x3032_00A7u));
+        Assert.True(set.Contains(0x3133_0001u));
+        Assert.False(set.Contains(0x3232_0001u));
+    }
+
+    [Fact]
+    public void LeavingTheDungeonForgetsItsVisibleList()
+    {
+        var set = new LiveEntityVisibleCellSet();
+        set.Update(DungeonCell(0x01D9_0102u, 0x01D9_0103u), 0x01D9_0102u);
+
+        set.Update(playerCell: null, 0xA9B4_0001u);
+
+        Assert.False(set.IsSealedDungeon);
+        Assert.False(set.Contains(0x01D9_0103u));
+        Assert.True(set.Contains(0xA9B4_0020u));
+    }
+
+    private static EnvCell DungeonCell(uint id, params uint[] visibleCells) =>
+        IndoorCell(id, seenOutside: false, visibleCells);
+
+    private static EnvCell IndoorCell(uint id, bool seenOutside, params uint[] visibleCells) =>
+        new(
+            id,
+            Matrix4x4.Identity,
+            Matrix4x4.Identity,
+            Vector3.Zero,
+            Vector3.One,
+            portals: [],
+            stabList: visibleCells,
+            seenOutside: seenOutside,
+            containmentBsp: null);
 
     private static LiveEntityLivenessSample Sample(
         uint guid,

@@ -1,4 +1,6 @@
 using AcDream.App.Input;
+using AcDream.Core.Physics;
+using AcDream.Core.World.Cells;
 using AcDream.Runtime.Entities;
 
 namespace AcDream.App.World;
@@ -76,13 +78,87 @@ internal sealed class LiveEntityLivenessTracker
 }
 
 /// <summary>
+/// The player's current cell as the physics engine tracks it. The original
+/// client keeps the same pointer in its cell manager and flushes cells from
+/// it on every cell change.
+/// </summary>
+internal interface ILiveEntityCurrentCellSource
+{
+    ObjCell? CurrentCell { get; }
+}
+
+internal sealed class PhysicsLiveEntityCurrentCellSource
+    : ILiveEntityCurrentCellSource
+{
+    private readonly PhysicsEngine _physics;
+
+    public PhysicsLiveEntityCurrentCellSource(PhysicsEngine physics) =>
+        _physics = physics ?? throw new ArgumentNullException(nameof(physics));
+
+    public ObjCell? CurrentCell => _physics.DataCache?.CellGraph.CurrCell;
+}
+
+/// <summary>
+/// The cells the client holds loaded around the player, which is the set
+/// whose objects stay alive. Inside a sealed dungeon cell (an indoor cell not
+/// seen from outside) the original client loads only the player's cell and
+/// the cells on its authored visible-cell list; on the next cell change every
+/// other cell is flushed and its objects start the 25-second deadline, and
+/// walking back into a cell that lists them cancels it. The server forgets
+/// an object on the same set and only announces a destroyed object to
+/// clients that still know it, so an object kept beyond this set is never
+/// deleted by a message. Outdoors, and in indoor cells seen from outside,
+/// the loaded set is the landblock neighbourhood.
+/// </summary>
+internal sealed class LiveEntityVisibleCellSet
+{
+    private readonly HashSet<uint> _sealedCells = [];
+    private uint _sealedCellId;
+    private uint _playerCellId;
+
+    public bool IsSealedDungeon { get; private set; }
+
+    public void Update(ObjCell? playerCell, uint playerCellId)
+    {
+        _playerCellId = playerCellId;
+        if (playerCell is not EnvCell { SeenOutside: false } sealedCell)
+        {
+            IsSealedDungeon = false;
+            _sealedCellId = 0u;
+            _sealedCells.Clear();
+            return;
+        }
+
+        IsSealedDungeon = true;
+        if (_sealedCellId == sealedCell.Id)
+            return;
+
+        _sealedCellId = sealedCell.Id;
+        _sealedCells.Clear();
+        _sealedCells.Add(sealedCell.Id);
+        IReadOnlyList<uint> visible = sealedCell.StabList;
+        for (int i = 0; i < visible.Count; i++)
+            _sealedCells.Add(visible[i]);
+    }
+
+    public bool Contains(uint entityCell) =>
+        IsSealedDungeon
+            ? _sealedCells.Contains(entityCell)
+            : LiveEntityLivenessController.IsWithinVisibleLandblocks(
+                _playerCellId,
+                entityCell);
+}
+
+/// <summary>
 /// Owns the 25-second destruction deadline for world objects that left
-/// visibility. Visibility is the player's landblock and its eight
-/// neighbours (a dungeon is its own landblock): the original client only
-/// ever holds those cells, releases everything outside them, and the server
-/// mirrors the same 3x3 as the player's known-object set, forgetting an
-/// object 25 s after it leaves and re-sending it on return. Objects held by
-/// a container, wielder, or parent, and attached projections, never expire.
+/// visibility. Outdoors visibility is the player's landblock and its eight
+/// neighbours: the original client only ever holds those cells, releases
+/// everything outside them, and the server mirrors the same 3x3 as the
+/// player's known-object set, forgetting an object 25 s after it leaves and
+/// re-sending it on return. Inside a sealed dungeon cell it is the player's
+/// cell and that cell's authored visible-cell list, see
+/// <see cref="LiveEntityVisibleCellSet"/>. Objects held by a container,
+/// wielder, or parent, and attached projections, never expire.
 /// </summary>
 internal sealed class LiveEntityLivenessController
 {
@@ -93,18 +169,22 @@ internal sealed class LiveEntityLivenessController
     private readonly LiveEntityRuntime _runtime;
     private readonly ILocalPlayerIdentitySource _identity;
     private readonly ILiveEntityPruneSink _prune;
+    private readonly ILiveEntityCurrentCellSource _cells;
     private readonly LiveEntityLivenessTracker _tracker = new();
+    private readonly LiveEntityVisibleCellSet _visibleCells = new();
     private readonly List<LiveEntityLivenessSample> _samples = new();
     private double _nextMaintenanceAt;
 
     public LiveEntityLivenessController(
         LiveEntityRuntime runtime,
         ILocalPlayerIdentitySource identity,
-        ILiveEntityPruneSink prune)
+        ILiveEntityPruneSink prune,
+        ILiveEntityCurrentCellSource cells)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
         _prune = prune ?? throw new ArgumentNullException(nameof(prune));
+        _cells = cells ?? throw new ArgumentNullException(nameof(cells));
     }
 
     public void Tick(double now)
@@ -122,6 +202,7 @@ internal sealed class LiveEntityLivenessController
         uint playerCell = CellOf(player);
         if (playerCell == 0u)
             return;
+        _visibleCells.Update(_cells.CurrentCell, playerCell);
 
         _samples.Clear();
         foreach (LiveEntityRecord record in _runtime.Records)
@@ -142,7 +223,7 @@ internal sealed class LiveEntityLivenessController
                         $"Materialized liveness owner 0x{record.ServerGuid:X8}/" +
                         $"{record.Generation} has no exact projection key."),
                 record.ServerGuid,
-                IsWithinVisibleLandblocks(playerCell, cell),
+                _visibleCells.Contains(cell),
                 retained));
         }
 
@@ -162,6 +243,7 @@ internal sealed class LiveEntityLivenessController
     {
         _tracker.Clear();
         _samples.Clear();
+        _visibleCells.Update(null, 0u);
         _nextMaintenanceAt = 0;
     }
 
