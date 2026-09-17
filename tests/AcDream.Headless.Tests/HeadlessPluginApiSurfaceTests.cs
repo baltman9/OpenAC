@@ -475,7 +475,7 @@ public sealed class HeadlessPluginApiSurfaceTests
     [Fact]
     public void WindowRequestCloseReportsUnavailableWhenTheRouteThrowsRatherThanEscaping()
     {
-        // M3: a throw from the wired route (a disposed dependency reached
+        // A throw from the wired route (a disposed dependency reached
         // mid-teardown, for instance) must report Unavailable rather than
         // escape into the plugin that called RequestClose.
         using GameRuntime runtime = NewRuntime();

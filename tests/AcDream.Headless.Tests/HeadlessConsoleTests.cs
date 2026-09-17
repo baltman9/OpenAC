@@ -534,7 +534,7 @@ public sealed class HeadlessConsoleTests
     [Fact]
     public async Task PluginRequestCloseEndsItsOwnSessionWhileASiblingSessionKeepsRunning()
     {
-        // H2's decision: a plugin's Window.RequestClose ends only its own
+        // A plugin's Window.RequestClose ends only its own
         // session -- not the whole process -- so a second session hosted
         // by the same process is untouched. Only the console's /quit and
         // a SIGINT/SIGTERM cancel the process-wide token that stops every
@@ -627,7 +627,6 @@ public sealed class HeadlessConsoleTests
 
             Assert.False(beta.IsPolicyComplete);
             Assert.DoesNotContain("\"exited\"", File.ReadAllText(statusPathBeta));
-
 
             cts.Cancel();
             HeadlessExitCode exitCode = await run.WaitAsync(TimeSpan.FromSeconds(10));

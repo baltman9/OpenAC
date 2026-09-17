@@ -163,7 +163,7 @@ public sealed class WindowPluginHostWindowTests
     [Fact]
     public void RestoreSucceedsWithoutWritingWhenTheWindowIsAlreadyNotMinimized()
     {
-        // H1: Restore must never force WindowState to Normal on a window
+        // Restore must never force WindowState to Normal on a window
         // that is already Maximized/Fullscreen/Normal -- doing so would
         // also desynchronize the display mode switcher's own tracking of
         // fullscreen/maximized state. A Restore call here is a no-op
@@ -186,7 +186,7 @@ public sealed class WindowPluginHostWindowTests
     [Fact]
     public void RestoringAWindowThatWasFullscreenBeforeItWasMinimizedSucceedsEvenThoughTheReadbackIsNotNormal()
     {
-        // H1's exact bug: on Silk.NET's GLFW backend, un-minimizing a
+        // On Silk.NET's GLFW backend, un-minimizing a
         // window that was fullscreen before it was minimized reads back
         // as Fullscreen again, never as Normal. A success check of
         // "WindowState == Normal" would report Unavailable here even
@@ -251,7 +251,7 @@ public sealed class WindowPluginHostWindowTests
     [Fact]
     public void MinimizeReportsUnavailableWhenTheOnThreadWriteThrows()
     {
-        // M6: a throw from the on-thread write must not escape into the
+        // A throw from the on-thread write must not escape into the
         // calling plugin -- this runs on the calling thread's own fast
         // path (already the owner thread), the case most likely to let a
         // throw propagate straight out of InvokeAndWait.

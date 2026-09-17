@@ -586,6 +586,7 @@ design sketch put overrides in `keybinds.json` itself; this was changed
 so a corrupt or hand-edited plugin override file can never touch the
 client's own binding schema). There is no in-client rebind UI yet; a
 plugin (or a future Settings panel) calls `Rebind` directly.
+
 ## Host window
 
 ```csharp

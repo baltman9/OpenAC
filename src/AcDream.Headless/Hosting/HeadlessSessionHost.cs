@@ -537,31 +537,41 @@ internal sealed class HeadlessSessionHost : IDisposable
     /// same terminal-status accounting Dispose() uses -- without disposing
     /// this session's own runtime/plugin/policy objects yet (that still
     /// happens at the process's own final disposal, exactly like a
-    /// policy-completed session already leaves them until then). Setting
-    /// the completion flag first makes IsPolicyComplete report true
-    /// immediately, so the scheduler stops ticking this session on its
-    /// own; every other session in the same process is untouched, and the
-    /// process as a whole still only ends once every session has reached
-    /// this state -- unchanged from today. Idempotent (a second call is a
-    /// no-op past the first Stop()+status write), and safe to call from
-    /// inside this session's own Tick() -- a plugin's RequestClose fires
-    /// from there, the same guarantee RequestLogout above already relies
-    /// on.
+    /// policy-completed session already leaves them until then). The
+    /// completion flag is only set, and the "exited"/graceful status only
+    /// written, once Stop() actually converges -- a non-converged
+    /// teardown is quarantined the same way any other fault is (so the
+    /// scheduler still stops retrying it, but through _faulted, and the
+    /// eventual final Dispose() reports the real "runtime-fault" status
+    /// instead of a status file that already claimed a clean exit while
+    /// process shutdown was still about to throw). Idempotent past a
+    /// successful call, and safe to call from inside this session's own
+    /// Tick() -- a plugin's RequestClose fires from there, the same
+    /// guarantee RequestLogout above already relies on.
     /// </summary>
     internal bool RequestOwnGracefulStop()
     {
         if (_disposed)
             return false;
-        bool alreadyRequested = _gracefulStopRequested;
-        _gracefulStopRequested = true;
+        if (_gracefulStopRequested)
+            return true;
+
         _reconnectPending = false;
         _reconnectDeadline = 0L;
-        Stop();
-        if (!alreadyRequested)
+        RuntimeTeardownAcknowledgement stopped = Stop();
+        if (!stopped.IsComplete)
         {
-            (int exitCode, string exitReason) = ResolveTerminalStatus();
-            _statusWriter.Exited(_descriptor.Id, exitCode, exitReason);
+            Quarantine(
+                stopped.Error
+                ?? new InvalidOperationException(
+                    $"Headless session '{_descriptor.Id}' did not "
+                        + "converge while ending its own session."));
+            return false;
         }
+
+        _gracefulStopRequested = true;
+        (int exitCode, string exitReason) = ResolveTerminalStatus();
+        _statusWriter.Exited(_descriptor.Id, exitCode, exitReason);
         return true;
     }
 

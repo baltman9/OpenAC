@@ -17,12 +17,15 @@ namespace AcDream.Headless.Plugins;
 internal sealed class HeadlessHostWindow(Func<bool>? requestGracefulStop)
     : IHostWindow
 {
+    private const string NoWindowNotice = "the host has no window";
+    private const string NotStoppedNotice = "the session could not be stopped";
+
     private readonly Func<bool>? _requestGracefulStop = requestGracefulStop;
 
     public HostWindowResult RequestClose()
     {
         if (_requestGracefulStop is null)
-            return new HostWindowResult(HostWindowStatus.Unavailable);
+            return new HostWindowResult(HostWindowStatus.Unavailable, NoWindowNotice);
 
         bool accepted;
         try
@@ -40,6 +43,6 @@ internal sealed class HeadlessHostWindow(Func<bool>? requestGracefulStop)
 
         return accepted
             ? new HostWindowResult(HostWindowStatus.Done)
-            : new HostWindowResult(HostWindowStatus.Unavailable);
+            : new HostWindowResult(HostWindowStatus.Unavailable, NotStoppedNotice);
     }
 }

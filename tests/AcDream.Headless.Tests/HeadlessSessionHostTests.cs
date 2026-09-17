@@ -675,7 +675,6 @@ public sealed class HeadlessSessionHostTests
         }
     }
 
-
     [Fact]
     public void PluginRequestCloseEndsOnlyThisSessionAndRecordsTheNormalTerminalEvent()
     {
@@ -732,6 +731,80 @@ public sealed class HeadlessSessionHostTests
                 static item => item.GetProperty("e").GetString() == "exited");
             Assert.Equal(0, exited.GetProperty("code").GetInt32());
             Assert.Equal("graceful", exited.GetProperty("reason").GetString());
+        }
+        finally
+        {
+            if (File.Exists(statusPath))
+                File.Delete(statusPath);
+        }
+    }
+
+    [Fact]
+    public void PluginRequestCloseIsUnavailableAndQuarantinesWhenTeardownDoesNotConverge()
+    {
+        // A session whose live-session teardown throws (DisposeSession
+        // failing here models a stuck transport) must not report success
+        // and must not write a "graceful" exited event: every other
+        // caller of Stop() (Dispose, Quarantine) treats a non-complete
+        // RuntimeTeardownAcknowledgement as fatal, and RequestOwnGracefulStop
+        // has to follow the same rule -- otherwise the status file would
+        // claim a clean exit while the session is still actually stuck,
+        // and the eventual real Dispose() would throw during process
+        // shutdown after that false-positive status line.
+        string statusPath = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-headless-requestclose-nonconverge-{Guid.NewGuid():N}.jsonl");
+        try
+        {
+            var operations = new FixtureSessionOperations
+            {
+                ThrowOnDisposeSession = true,
+            };
+            using var diagnosticsOutput = new StringWriter();
+            using var credential = new HeadlessCredentialSecret(
+                "fixture",
+                "password");
+            using var host = new HeadlessSessionHost(
+                Descriptor(statusFile: statusPath),
+                credential,
+                new HeadlessDiagnosticWriter(diagnosticsOutput),
+                operations);
+
+            Assert.Equal(
+                RuntimeSessionStartStatus.Connected,
+                host.Start().Status);
+
+            HostWindowResult result = host.Plugins.Host.Window.RequestClose();
+
+            Assert.Equal(HostWindowStatus.Unavailable, result.Status);
+            Assert.True(host.IsFaulted);
+            Assert.NotNull(host.Fault);
+            // IsPolicyComplete is still true here -- through _faulted, the
+            // same mechanism any other quarantined session already uses to
+            // stop the scheduler from retrying it, not through the
+            // graceful-stop flag this call failed to earn.
+            Assert.True(host.IsPolicyComplete);
+
+            if (File.Exists(statusPath))
+            {
+                JsonElement[] events = File.ReadAllLines(statusPath)
+                    .Select(static line =>
+                        JsonDocument.Parse(line).RootElement.Clone())
+                    .ToArray();
+                Assert.DoesNotContain(
+                    events,
+                    static item =>
+                        item.GetProperty("e").GetString() == "exited"
+                            && item.GetProperty("reason").GetString()
+                                == "graceful");
+            }
+
+            // Let the underlying teardown succeed once the test has
+            // observed the stuck state, so this test's own `using host`
+            // disposal at scope exit converges cleanly instead of
+            // exercising the (separately expected) Dispose()-throws path
+            // for a session that never recovers.
+            operations.ThrowOnDisposeSession = false;
         }
         finally
         {
@@ -3581,6 +3654,7 @@ public sealed class HeadlessSessionHostTests
         public string? LastUser { get; private set; }
         public string? LastPassword { get; private set; }
         public Action<byte[]>? GameActionCapture { get; init; }
+        public bool ThrowOnDisposeSession { get; set; }
         public int EnterWorldCallCount =>
             Volatile.Read(ref _enterWorldCallCount);
         public int TickCallCount => Volatile.Read(ref _tickCallCount);
@@ -3641,6 +3715,8 @@ public sealed class HeadlessSessionHostTests
         public void DisposeSession(WorldSession session)
         {
             DisposedSessionCount++;
+            if (ThrowOnDisposeSession)
+                throw new InvalidOperationException("fixture teardown failure");
             session.Dispose();
         }
     }

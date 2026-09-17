@@ -25,6 +25,10 @@ namespace AcDream.App.Plugins;
 /// succeeds whenever the window ends up anything other than minimized --
 /// including a Restore call on a window that was never minimized to begin
 /// with, which is a no-op success rather than an unnecessary write.
+/// Silk's live state check tests iconified before maximized/fullscreen,
+/// and reading WindowState resyncs its own cache from the native window,
+/// which is why writing Normal here can never actually drop a fullscreen
+/// window to windowed -- the very next read reports Fullscreen again.
 /// </summary>
 internal sealed class WindowPluginHostWindow(
     Func<IPluginHostWindowTarget?> window,
@@ -185,7 +189,6 @@ internal sealed class WindowPluginHostWindow(
                 HostWindowStatus.Unavailable,
                 reached ? DidNotLandNotice : NotConfirmedNotice);
     }
-
 
     private IPluginHostWindowTarget? Resolve()
     {
