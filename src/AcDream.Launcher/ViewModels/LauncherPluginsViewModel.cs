@@ -471,7 +471,8 @@ public sealed class LauncherPluginsViewModel : ObservableObject
             outcome.UpdatesAvailable.TryGetValue(info.Id, out PluginUpdateAvailability? availability);
             bool updateAvailable = info.Source == InstalledPluginSource.Managed && availability is not null;
             RelayCommand? updateCommand = updateAvailable
-                ? new RelayCommand(() => OpenUpdateDialog(info), () => _canInteract() && !IsBusy)
+                ? new RelayCommand(
+                    () => OpenUpdateDialog(info, availability!.Tag), () => _canInteract() && !IsBusy)
                 : null;
             RelayCommand? removeCommand = canRemove
                 ? new RelayCommand(() => OpenRemoveDialog(info), () => _canInteract() && !IsBusy)
@@ -502,7 +503,14 @@ public sealed class LauncherPluginsViewModel : ObservableObject
         foreach (PluginDiscoverEntry entry in outcome.Discover)
         {
             var install = new RelayCommand(
-                () => OpenInstallDialog(entry.Repo, entry.Id, entry.Name, isUpdate: false),
+                () => OpenInstallDialog(
+                    entry.Repo,
+                    entry.Id,
+                    entry.Name,
+                    isUpdate: false,
+                    _discoverDetailsCache.TryGetValue(entry.Id, out DiscoverDetails cachedTag)
+                        ? cachedTag.Tag
+                        : null),
                 () => _canInteract() && !IsBusy);
             var row = new PluginDiscoverRowViewModel(
                 entry.Id, entry.Name, entry.Author, entry.Description, entry.Repo, install);
@@ -536,11 +544,11 @@ public sealed class LauncherPluginsViewModel : ObservableObject
                 continue;
             }
 
-            PluginReleaseFetchResult fetch;
+            PluginReleaseResolveResult result;
             try
             {
-                fetch = await _composition.ReleaseClient
-                    .FetchDocumentAsync(GitHubReleaseLocator.LatestAsset(row.Repo, "plugin.json"))
+                result = await _composition.ReleaseResolver
+                    .ResolveAsync(row.Repo, PluginReleaseChannel.Stable)
                     .ConfigureAwait(true);
             }
             catch (LauncherUpdateException)
@@ -548,20 +556,15 @@ public sealed class LauncherPluginsViewModel : ObservableObject
                 continue;
             }
 
-            if (fetch.Status != PluginReleaseFetchStatus.Success)
+            // Rate-limited, unavailable, an invalid manifest and a prerelease latest are all
+            // skipped the same way (L-319): the row just keeps showing no details this pass.
+            if (result.Status != PluginReleaseResolveStatus.Success)
             {
                 continue;
             }
 
-            LauncherPluginManifest manifest;
-            try
-            {
-                manifest = LauncherPluginManifest.Parse(Encoding.UTF8.GetString(fetch.Document!.Content));
-            }
-            catch (LauncherPluginManifestException)
-            {
-                continue;
-            }
+            PluginReleaseResolution resolution = result.Resolution!;
+            LauncherPluginManifest manifest = resolution.Manifest;
 
             LauncherVersion? remoteVersion = LauncherVersion.TryParse(manifest.Version, out LauncherVersion? parsed)
                 ? parsed
@@ -578,7 +581,8 @@ public sealed class LauncherPluginsViewModel : ObservableObject
             LauncherVersion? clientVersion = _clientVersionResolver()?.Version;
             LauncherPluginCompatibility.CompatibilityDescription compatibility =
                 LauncherPluginCompatibility.Describe(manifest, clientVersion);
-            var details = new DiscoverDetails(manifest.Version, compatibility.Text, compatibility.IsWarning);
+            var details = new DiscoverDetails(
+                manifest.Version, resolution.Tag, compatibility.Text, compatibility.IsWarning);
             _discoverDetailsCache[row.Id] = details;
             row.LatestVersion = details.LatestVersion;
             row.Compatibility = details.Compatibility;
@@ -587,9 +591,14 @@ public sealed class LauncherPluginsViewModel : ObservableObject
     }
 
     private readonly record struct DiscoverDetails(
-        string LatestVersion, string Compatibility, bool CompatibilityIsWarning);
+        string LatestVersion, string Tag, string Compatibility, bool CompatibilityIsWarning);
 
-    private void OpenInstallDialog(string repo, string pluginId, string displayName, bool isUpdate)
+    /// <summary>Opens the install/update dialog for a repo. <paramref name="pinnedTag"/> is the
+    /// release tag whichever caller already resolved (the update check, Discover's own details, or
+    /// Add from URL); when Discover hasn't fetched details yet, it is null and Confirm resolves
+    /// latest itself instead of the install ever doing so (L-319).</summary>
+    private void OpenInstallDialog(
+        string repo, string pluginId, string displayName, bool isUpdate, string? pinnedTag)
     {
         if (_composition is null)
         {
@@ -605,28 +614,52 @@ public sealed class LauncherPluginsViewModel : ObservableObject
             isListed,
             isUpdate,
             BuildCharacterOptions(),
-            cancellationToken => InstallAsync(repo, cancellationToken),
+            cancellationToken => InstallAsync(repo, pinnedTag, cancellationToken),
             EnableForCharacters);
     }
 
-    private void OpenUpdateDialog(InstalledPluginInfo info)
+    private void OpenUpdateDialog(InstalledPluginInfo info, string tag)
     {
         if (info.Repo is { } repo)
         {
-            OpenInstallDialog(repo, info.Id, info.DisplayName, isUpdate: true);
+            OpenInstallDialog(repo, info.Id, info.DisplayName, isUpdate: true, tag);
         }
     }
 
-    private async Task<PluginInstallResult> InstallAsync(string repo, CancellationToken cancellationToken)
+    private async Task<PluginInstallResult> InstallAsync(
+        string repo, string? pinnedTag, CancellationToken cancellationToken)
     {
+        string tag = pinnedTag ?? await ResolveLatestTagAsync(repo, cancellationToken).ConfigureAwait(true);
         PluginInstallResult result = await _composition!.Installer.InstallOrUpdateAsync(
                 repo,
+                tag,
                 _composition.CurrentCatalog,
                 _clientVersionResolver(),
                 cancellationToken)
             .ConfigureAwait(true);
         _ = CheckNowAsync();
         return result;
+    }
+
+    /// <summary>Discover's own fallback when its details fetch hasn't populated a tag yet: resolved
+    /// once, right before install, never inside <see cref="PluginInstaller.InstallOrUpdateAsync"/>
+    /// itself.</summary>
+    private async Task<string> ResolveLatestTagAsync(string repo, CancellationToken cancellationToken)
+    {
+        PluginReleaseResolveResult result = await _composition!.ReleaseResolver
+            .ResolveAsync(repo, PluginReleaseChannel.Stable, cancellationToken)
+            .ConfigureAwait(true);
+        return result.Status switch
+        {
+            PluginReleaseResolveStatus.Success => result.Resolution!.Tag,
+            PluginReleaseResolveStatus.RateLimited =>
+                throw new LauncherUpdateException("GitHub is rate limiting; try later."),
+            PluginReleaseResolveStatus.Prerelease =>
+                throw new LauncherUpdateException(result.Error!),
+            PluginReleaseResolveStatus.Invalid =>
+                throw new LauncherUpdateException("That repository's plugin.json could not be read."),
+            _ => throw new LauncherUpdateException("The plugin release is unavailable."),
+        };
     }
 
     /// <summary>The install dialog's only profile write, and only for the characters chosen there
@@ -758,17 +791,17 @@ public sealed class LauncherPluginsViewModel : ObservableObject
         StatusText = null;
         try
         {
-            PluginReleaseFetchResult fetch = await _composition.ReleaseClient
-                .FetchDocumentAsync(GitHubReleaseLocator.LatestAsset(repo, "plugin.json"))
+            PluginReleaseResolveResult result = await _composition.ReleaseResolver
+                .ResolveAsync(repo, PluginReleaseChannel.Stable)
                 .ConfigureAwait(true);
-            switch (fetch.Status)
+            switch (result.Status)
             {
-                case PluginReleaseFetchStatus.Success:
-                    LauncherPluginManifest manifest = LauncherPluginManifest.Parse(
-                        Encoding.UTF8.GetString(fetch.Document!.Content));
+                case PluginReleaseResolveStatus.Success:
+                    PluginReleaseResolution resolution = result.Resolution!;
+                    LauncherPluginManifest manifest = resolution.Manifest;
                     AddFromUrlText = string.Empty;
                     // Same repo already installed (a race with another Add or Check between the
-                    // parse above and here): same neutral status as the early check above.
+                    // resolve above and here): same neutral status as the early check above.
                     InstalledPluginRecord? installedById = _composition.RecordStore.Find(manifest.Id);
                     if (installedById is not null
                         && string.Equals(installedById.Repo, repo, StringComparison.OrdinalIgnoreCase))
@@ -799,19 +832,21 @@ public sealed class LauncherPluginsViewModel : ObservableObject
                         break;
                     }
 
-                    OpenInstallDialog(repo, manifest.Id, manifest.DisplayName, isUpdate: false);
+                    OpenInstallDialog(repo, manifest.Id, manifest.DisplayName, isUpdate: false, resolution.Tag);
                     break;
-                case PluginReleaseFetchStatus.RateLimited:
+                case PluginReleaseResolveStatus.RateLimited:
                     Error = "GitHub is rate limiting; try later.";
+                    break;
+                case PluginReleaseResolveStatus.Invalid:
+                    Error = "That repository's plugin.json could not be read.";
+                    break;
+                case PluginReleaseResolveStatus.Prerelease:
+                    Error = result.Error!;
                     break;
                 default:
                     Error = "No release was found for that repository.";
                     break;
             }
-        }
-        catch (LauncherPluginManifestException)
-        {
-            Error = "That repository's plugin.json could not be read.";
         }
         catch (Exception ex)
         {

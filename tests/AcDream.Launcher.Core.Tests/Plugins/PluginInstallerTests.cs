@@ -38,7 +38,7 @@ public sealed class PluginInstallerTests
         fixture.RegisterRelease(Repo, release);
 
         await Assert.ThrowsAsync<LauncherUpdateException>(() =>
-            fixture.Installer.InstallOrUpdateAsync(Repo, null, null));
+            fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null));
     }
 
     [Fact]
@@ -50,6 +50,7 @@ public sealed class PluginInstallerTests
 
         PluginInstallResult result = await fixture.Installer.InstallOrUpdateAsync(
             Repo,
+            release.Tag,
             catalog: null,
             clientResolution: null);
 
@@ -66,13 +67,26 @@ public sealed class PluginInstallerTests
     }
 
     [Fact]
+    public async Task InstallNeverFetchesLatestAssetOnlyThePinnedTag()
+    {
+        using var fixture = new Fixture();
+        var release = fixture.BuildRelease(Id, "0.1.0");
+        fixture.RegisterRelease(Repo, release);
+
+        await fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null);
+
+        Uri latestManifestUri = GitHubReleaseLocator.LatestAsset(Repo, "plugin.json");
+        Assert.DoesNotContain(fixture.Handler.Requests, uri => uri == latestManifestUri);
+    }
+
+    [Fact]
     public async Task InstallLeavesNoEmptyStagingOrTrashFolder()
     {
         using var fixture = new Fixture();
         var release = fixture.BuildRelease(Id, "0.1.0");
         fixture.RegisterRelease(Repo, release);
 
-        await fixture.Installer.InstallOrUpdateAsync(Repo, null, null);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null);
 
         Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, ".staging")));
         Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, ".trash")));
@@ -84,11 +98,11 @@ public sealed class PluginInstallerTests
         using var fixture = new Fixture();
         var first = fixture.BuildRelease(Id, "0.1.0");
         fixture.RegisterRelease(Repo, first);
-        await fixture.Installer.InstallOrUpdateAsync(Repo, null, null);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, first.Tag, null, null);
 
         var second = fixture.BuildRelease(Id, "0.2.0");
         fixture.RegisterRelease(Repo, second);
-        await fixture.Installer.InstallOrUpdateAsync(Repo, null, null);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, second.Tag, null, null);
 
         Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, ".staging")));
         Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, ".trash")));
@@ -100,7 +114,7 @@ public sealed class PluginInstallerTests
         using var fixture = new Fixture();
         var release = fixture.BuildRelease(Id, "0.1.0");
         fixture.RegisterRelease(Repo, release);
-        await fixture.Installer.InstallOrUpdateAsync(Repo, null, null);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null);
 
         fixture.Installer.Remove(Id, deleteStorage: false);
 
@@ -133,7 +147,7 @@ public sealed class PluginInstallerTests
         var release = fixture.BuildRelease(Id, "0.1.0");
         fixture.RegisterRelease(Repo, release);
 
-        await fixture.Installer.InstallOrUpdateAsync(Repo, null, null);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null);
 
         Assert.True(Directory.Exists(strayDirectory));
         Assert.True(File.Exists(Path.Combine(strayDirectory, "in-progress.txt")));
@@ -147,7 +161,7 @@ public sealed class PluginInstallerTests
         fixture.RegisterRelease(Repo, release, shaFileSha256Override: new string('f', 64));
 
         await Assert.ThrowsAsync<LauncherUpdateException>(() =>
-            fixture.Installer.InstallOrUpdateAsync(Repo, null, null));
+            fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null));
 
         string stagingRoot = Path.Combine(fixture.Paths.PluginsDirectory, ".staging");
         Assert.True(
@@ -164,10 +178,10 @@ public sealed class PluginInstallerTests
         var release = fixture.BuildRelease(Id, "0.1.0");
         fixture.RegisterRelease(Repo, release, shaFileSha256Override: new string('f', 64));
         await Assert.ThrowsAsync<LauncherUpdateException>(() =>
-            fixture.Installer.InstallOrUpdateAsync(Repo, null, null));
+            fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null));
 
         fixture.RegisterRelease(Repo, release);
-        PluginInstallResult result = await fixture.Installer.InstallOrUpdateAsync(Repo, null, null);
+        PluginInstallResult result = await fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null);
 
         Assert.Equal(Id, result.Id);
         Assert.True(File.Exists(
@@ -196,7 +210,7 @@ public sealed class PluginInstallerTests
         fixture.RegisterRelease(Repo, release);
 
         LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(() =>
-            fixture.Installer.InstallOrUpdateAsync(Repo, null, null));
+            fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null));
 
         Assert.Contains("plugin.json", error.Message, StringComparison.Ordinal);
         Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, Id)));
@@ -211,7 +225,7 @@ public sealed class PluginInstallerTests
         fixture.RegisterRelease(Repo, release, iconAssetBytes: icon);
 
         PluginInstallResult result = await fixture.Installer.InstallOrUpdateAsync(
-            Repo, catalog: null, clientResolution: null);
+            Repo, release.Tag, catalog: null, clientResolution: null);
 
         Assert.Equal(Id, result.Id);
         Assert.True(File.Exists(
@@ -227,7 +241,7 @@ public sealed class PluginInstallerTests
         fixture.RegisterRelease(Repo, release);
 
         LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(() =>
-            fixture.Installer.InstallOrUpdateAsync(Repo, null, null));
+            fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null));
 
         Assert.Contains("missing its icon.png asset", error.Message, StringComparison.Ordinal);
         Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, Id)));
@@ -242,7 +256,7 @@ public sealed class PluginInstallerTests
         fixture.RegisterRelease(Repo, release, iconAssetBytes: PngTestData.WrongDimensions());
 
         LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(() =>
-            fixture.Installer.InstallOrUpdateAsync(Repo, null, null));
+            fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null));
 
         Assert.Contains("icon.png does not match", error.Message, StringComparison.Ordinal);
         Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, Id)));
@@ -257,7 +271,7 @@ public sealed class PluginInstallerTests
         fixture.RegisterRelease(Repo, release, iconAssetRateLimited: true);
 
         LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(() =>
-            fixture.Installer.InstallOrUpdateAsync(Repo, null, null));
+            fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null));
 
         Assert.Equal("GitHub is rate limiting; try later.", error.Message);
     }
@@ -271,7 +285,7 @@ public sealed class PluginInstallerTests
         fixture.RegisterRelease(Repo, release);
 
         await Assert.ThrowsAsync<LauncherUpdateException>(() =>
-            fixture.Installer.InstallOrUpdateAsync(Repo, null, null));
+            fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null));
 
         Uri iconUri = GitHubReleaseLocator.TaggedAsset(
             Repo, "v0.1.0", LauncherPluginIcon.FileName);
@@ -285,7 +299,7 @@ public sealed class PluginInstallerTests
         var release = fixture.BuildRelease(Id, "0.1.0");
         fixture.RegisterRelease(Repo, release);
 
-        await fixture.Installer.InstallOrUpdateAsync(Repo, null, null);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null);
 
         Uri iconUri = GitHubReleaseLocator.TaggedAsset(
             Repo, "v0.1.0", LauncherPluginIcon.FileName);
@@ -303,7 +317,7 @@ public sealed class PluginInstallerTests
         fixture.RegisterRelease(Repo, release);
 
         LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(() =>
-            fixture.Installer.InstallOrUpdateAsync(Repo, null, null));
+            fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null));
 
         Assert.Equal(
             $"A folder named {Id} is already in your plugins folder, and the launcher didn't "
@@ -331,7 +345,7 @@ public sealed class PluginInstallerTests
         fixture.RegisterRelease(Repo, release);
 
         LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(() =>
-            fixture.Installer.InstallOrUpdateAsync(Repo, null, null));
+            fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null));
 
         Assert.Contains("directly installed", error.Message, StringComparison.Ordinal);
     }
@@ -356,7 +370,7 @@ public sealed class PluginInstallerTests
         fixture.RegisterRelease(Repo, release);
 
         LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(() =>
-            fixture.Installer.InstallOrUpdateAsync(Repo, null, clientResolution));
+            fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, clientResolution));
 
         Assert.Contains("client-bundled", error.Message, StringComparison.Ordinal);
     }
@@ -379,7 +393,7 @@ public sealed class PluginInstallerTests
         fixture.RegisterRelease(Repo, release);
 
         LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(() =>
-            fixture.Installer.InstallOrUpdateAsync(Repo, null, null));
+            fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null));
 
         Assert.Contains("someoneElse/openac-plugin-hello", error.Message, StringComparison.Ordinal);
     }
@@ -397,7 +411,7 @@ public sealed class PluginInstallerTests
         fixture.RegisterRelease(Repo, release);
 
         LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(() =>
-            fixture.Installer.InstallOrUpdateAsync(Repo, null, null));
+            fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null));
 
         Assert.Contains("directly installed", error.Message, StringComparison.Ordinal);
     }
@@ -408,13 +422,13 @@ public sealed class PluginInstallerTests
         using var fixture = new Fixture();
         var first = fixture.BuildRelease(Id, "0.2.0");
         fixture.RegisterRelease(Repo, first);
-        await fixture.Installer.InstallOrUpdateAsync(Repo, null, null);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, first.Tag, null, null);
 
         var downgrade = fixture.BuildRelease(Id, "0.1.0");
         fixture.RegisterRelease(Repo, downgrade);
 
         LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(() =>
-            fixture.Installer.InstallOrUpdateAsync(Repo, null, null));
+            fixture.Installer.InstallOrUpdateAsync(Repo, downgrade.Tag, null, null));
 
         Assert.Contains("not newer", error.Message, StringComparison.Ordinal);
         Assert.Equal("0.2.0", fixture.RecordStore.Find(Id)!.Version);
@@ -450,7 +464,7 @@ public sealed class PluginInstallerTests
             await WaitForFileAsync(ready, holder);
 
             LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(() =>
-                fixture.Installer.InstallOrUpdateAsync(Repo, null, null));
+                fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null));
 
             Assert.Equal(PluginInstaller.SessionLeaseRefusal, error.Message);
         }
@@ -604,7 +618,7 @@ public sealed class PluginInstallerTests
         using var fixture = new Fixture();
         var release = fixture.BuildRelease(Id, "0.1.0");
         fixture.RegisterRelease(Repo, release);
-        await fixture.Installer.InstallOrUpdateAsync(Repo, null, null);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null);
         string storageDirectory = Path.Combine(fixture.Paths.ConfigDirectory, "plugins", Id);
         Directory.CreateDirectory(storageDirectory);
         File.WriteAllText(Path.Combine(storageDirectory, "settings.json"), "{}");
@@ -622,7 +636,7 @@ public sealed class PluginInstallerTests
         using var fixture = new Fixture();
         var release = fixture.BuildRelease(Id, "0.1.0");
         fixture.RegisterRelease(Repo, release);
-        await fixture.Installer.InstallOrUpdateAsync(Repo, null, null);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null);
         string storageDirectory = Path.Combine(fixture.Paths.ConfigDirectory, "plugins", Id);
         Directory.CreateDirectory(storageDirectory);
         File.WriteAllText(Path.Combine(storageDirectory, "settings.json"), "{}");
@@ -697,7 +711,7 @@ public sealed class PluginInstallerTests
         using var fixture = new Fixture();
         var release = fixture.BuildRelease(Id, "0.1.0");
         fixture.RegisterRelease(Repo, release);
-        await fixture.Installer.InstallOrUpdateAsync(Repo, null, null);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null);
 
         Assert.Throws<LauncherUpdateException>(() => fixture.Installer.RemoveDirect(
             Path.Combine(fixture.Paths.PluginsDirectory, Id), deleteStorage: false));
@@ -910,7 +924,10 @@ public sealed class PluginInstallerTests
             byte[] ZipBytes,
             string Sha256,
             string ZipName,
-            byte[]? IconBytes = null);
+            byte[]? IconBytes = null)
+        {
+            public string Tag => "v" + Version;
+        }
     }
 
     private sealed class RoutingHandler : HttpMessageHandler

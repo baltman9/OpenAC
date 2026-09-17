@@ -58,19 +58,23 @@ public sealed class PluginInstaller
         _barrier = new UpdateSessionBarrier(paths.DataDirectory);
     }
 
-    /// <summary>Install a new plugin or update an already-managed one from the same repo. The caller
-    /// resolves <paramref name="repo"/> itself, from the catalog or a typed
-    /// <c>github.com/owner/name</c> URL.</summary>
+    /// <summary>Install a new plugin or update an already-managed one from the same repo, at the
+    /// exact <paramref name="tag"/> the caller already resolved (the update check, Discover's
+    /// details, or Add from URL): what was offered is what installs, so this never re-resolves
+    /// latest itself. The caller resolves <paramref name="repo"/> itself, from the catalog or a
+    /// typed <c>github.com/owner/name</c> URL.</summary>
     public async Task<PluginInstallResult> InstallOrUpdateAsync(
         string repo,
+        string tag,
         PluginCatalog? catalog,
         ClientVersionResolution? clientResolution,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repo);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tag);
 
         PluginReleaseFetchResult manifestFetch = await _releaseClient.FetchDocumentAsync(
-                GitHubReleaseLocator.LatestAsset(repo, "plugin.json"),
+                GitHubReleaseLocator.TaggedAsset(repo, tag, "plugin.json"),
                 cancellationToken)
             .ConfigureAwait(false);
         RequireSuccess(manifestFetch);
@@ -88,7 +92,7 @@ public sealed class PluginInstaller
             throw new LauncherUpdateException($"The plugin manifest is invalid: {ex.Message}", ex);
         }
 
-        if (manifestDocument.Tag is not { } tag || !manifest.MatchesTag(tag))
+        if (!manifest.MatchesTag(tag))
         {
             throw new LauncherUpdateException(
                 $"The release tag does not match plugin version {manifest.Version}.");

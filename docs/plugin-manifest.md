@@ -55,8 +55,9 @@ installable through the launcher follows a stricter contract than the fields abo
 
 **Release, one per version:**
 
-- Public repository. Releases are not drafts or prereleases. The release GitHub marks *latest*
-  must be the highest version; the launcher refuses to install an older one.
+- Public repository, releases not drafts. The release GitHub marks *latest* must have no SemVer
+  prerelease part and be the highest version; the launcher refuses a prerelease latest and refuses
+  to install an older release than the one it already has.
 - **Tag:** `v<version>`, for example `v1.2.0`.
 - **Three assets, exact names, and an optional fourth:**
   - `plugin.json`, byte-identical to the one at the root of the zip

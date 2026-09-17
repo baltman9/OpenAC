@@ -117,6 +117,10 @@ public sealed partial class LauncherWindowViewModelTests
         fixture.AddRecord("edwards.managed", "shaneedwards/openac-plugin-hello", "0.1.0");
         byte[] remoteManifest = PluginPanelFixture.ManifestJson(
             "edwards.managed", "0.1.0", "0.1.0", ["headless"]);
+        Uri manifestUri = GitHubReleaseLocator.LatestAsset(
+            "shaneedwards/openac-plugin-hello", "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
+            "shaneedwards/openac-plugin-hello", "v0.1.0", "plugin.json");
         var handler = new RoutedHandler(request =>
         {
             if (request.RequestUri == PluginListUri)
@@ -124,8 +128,12 @@ public sealed partial class LauncherWindowViewModelTests
                 return Ok(fixture.ListJson());
             }
 
-            if (request.RequestUri == GitHubReleaseLocator.LatestAsset(
-                "shaneedwards/openac-plugin-hello", "plugin.json"))
+            if (request.RequestUri == manifestUri)
+            {
+                return Redirect(taggedManifestUri);
+            }
+
+            if (request.RequestUri == taggedManifestUri)
             {
                 return Ok(remoteManifest);
             }
@@ -158,6 +166,10 @@ public sealed partial class LauncherWindowViewModelTests
         fixture.AddRecord("edwards.managed", "shaneedwards/openac-plugin-hello", "0.1.0");
         byte[] remoteManifest = PluginPanelFixture.ManifestJson(
             "edwards.managed", "0.1.2", "0.1.0", ["headless"]);
+        Uri manifestUri = GitHubReleaseLocator.LatestAsset(
+            "shaneedwards/openac-plugin-hello", "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
+            "shaneedwards/openac-plugin-hello", "v0.1.2", "plugin.json");
         var handler = new RoutedHandler(request =>
         {
             if (request.RequestUri == PluginListUri)
@@ -165,8 +177,12 @@ public sealed partial class LauncherWindowViewModelTests
                 return Ok(fixture.ListJson());
             }
 
-            if (request.RequestUri == GitHubReleaseLocator.LatestAsset(
-                "shaneedwards/openac-plugin-hello", "plugin.json"))
+            if (request.RequestUri == manifestUri)
+            {
+                return Redirect(taggedManifestUri);
+            }
+
+            if (request.RequestUri == taggedManifestUri)
             {
                 return Ok(remoteManifest);
             }
@@ -197,6 +213,10 @@ public sealed partial class LauncherWindowViewModelTests
         fixture.AddRecord("edwards.managed", "shaneedwards/openac-plugin-hello", "0.1.0");
         byte[] remoteManifest = PluginPanelFixture.ManifestJson(
             "edwards.managed", "0.2.0", "0.1.0", ["headless"]);
+        Uri manifestUri = GitHubReleaseLocator.LatestAsset(
+            "shaneedwards/openac-plugin-hello", "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
+            "shaneedwards/openac-plugin-hello", "v0.2.0", "plugin.json");
         var handler = new RoutedHandler(request =>
         {
             if (request.RequestUri == PluginListUri)
@@ -216,8 +236,12 @@ public sealed partial class LauncherWindowViewModelTests
                     """));
             }
 
-            if (request.RequestUri == GitHubReleaseLocator.LatestAsset(
-                "shaneedwards/openac-plugin-hello", "plugin.json"))
+            if (request.RequestUri == manifestUri)
+            {
+                return Redirect(taggedManifestUri);
+            }
+
+            if (request.RequestUri == taggedManifestUri)
             {
                 return Ok(remoteManifest);
             }
@@ -246,6 +270,10 @@ public sealed partial class LauncherWindowViewModelTests
         using var fixture = new PluginPanelFixture();
         byte[] remoteManifest = PluginPanelFixture.ManifestJson(
             "edwards.discoverable", "0.2.0", "0.1.0", ["headless", "graphical"]);
+        Uri manifestUri = GitHubReleaseLocator.LatestAsset(
+            "shaneedwards/openac-plugin-hello", "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
+            "shaneedwards/openac-plugin-hello", "v0.2.0", "plugin.json");
         var handler = new RoutedHandler(request =>
         {
             if (request.RequestUri == PluginListUri)
@@ -253,8 +281,12 @@ public sealed partial class LauncherWindowViewModelTests
                 return Ok(fixture.ListJson());
             }
 
-            if (request.RequestUri == GitHubReleaseLocator.LatestAsset(
-                "shaneedwards/openac-plugin-hello", "plugin.json"))
+            if (request.RequestUri == manifestUri)
+            {
+                return Redirect(taggedManifestUri);
+            }
+
+            if (request.RequestUri == taggedManifestUri)
             {
                 return Ok(remoteManifest);
             }
@@ -277,8 +309,7 @@ public sealed partial class LauncherWindowViewModelTests
         Assert.Equal("0.2.0", row.LatestVersion);
         Assert.Equal("Client not installed", row.Compatibility);
         Assert.False(row.CompatibilityIsWarning);
-        int detailRequests = handler.Requests.Count(uri => uri == GitHubReleaseLocator.LatestAsset(
-            "shaneedwards/openac-plugin-hello", "plugin.json"));
+        int detailRequests = handler.Requests.Count(uri => uri == manifestUri);
         Assert.Equal(1, detailRequests);
 
         // A second Check pass and a second refresh must not re-fetch what the session already has.
@@ -286,8 +317,7 @@ public sealed partial class LauncherWindowViewModelTests
         await viewModel.Plugins.RefreshDiscoverDetailsAsync();
 
         Assert.Equal("0.2.0", Assert.Single(viewModel.Plugins.Discover).LatestVersion);
-        Assert.Equal(1, handler.Requests.Count(uri => uri == GitHubReleaseLocator.LatestAsset(
-            "shaneedwards/openac-plugin-hello", "plugin.json")));
+        Assert.Equal(1, handler.Requests.Count(uri => uri == manifestUri));
     }
 
     [Fact]
@@ -349,12 +379,28 @@ public sealed partial class LauncherWindowViewModelTests
     public async Task UnlistedInstallNoticeAddsANotOnTheListLine()
     {
         using var fixture = new PluginPanelFixture();
-        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
-            ? Ok(fixture.ListJson())
-            : request.RequestUri == GitHubReleaseLocator.LatestAsset(
-                "someone/unlisted-plugin", "plugin.json")
-                ? Ok(PluginPanelFixture.ManifestJson("someone.unlisted", "0.1.0", "0.1.0", ["headless"]))
-                : new HttpResponseMessage(HttpStatusCode.NotFound));
+        Uri manifestUri = GitHubReleaseLocator.LatestAsset("someone/unlisted-plugin", "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
+            "someone/unlisted-plugin", "v0.1.0", "plugin.json");
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(fixture.ListJson());
+            }
+
+            if (request.RequestUri == manifestUri)
+            {
+                return Redirect(taggedManifestUri);
+            }
+
+            if (request.RequestUri == taggedManifestUri)
+            {
+                return Ok(PluginPanelFixture.ManifestJson("someone.unlisted", "0.1.0", "0.1.0", ["headless"]));
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
 
         using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
             fixture.Paths, PluginListUri, handler);
@@ -384,6 +430,10 @@ public sealed partial class LauncherWindowViewModelTests
         fixture.AddRecord("edwards.managed", "shaneedwards/openac-plugin-hello", "0.1.0");
         byte[] remoteManifest = PluginPanelFixture.ManifestJson(
             "edwards.managed", "0.2.0", "0.1.0", ["headless"]);
+        Uri manifestUri = GitHubReleaseLocator.LatestAsset(
+            "shaneedwards/openac-plugin-hello", "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
+            "shaneedwards/openac-plugin-hello", "v0.2.0", "plugin.json");
         var handler = new RoutedHandler(request =>
         {
             if (request.RequestUri == PluginListUri)
@@ -391,8 +441,12 @@ public sealed partial class LauncherWindowViewModelTests
                 return Ok(fixture.ListJson());
             }
 
-            if (request.RequestUri == GitHubReleaseLocator.LatestAsset(
-                "shaneedwards/openac-plugin-hello", "plugin.json"))
+            if (request.RequestUri == manifestUri)
+            {
+                return Redirect(taggedManifestUri);
+            }
+
+            if (request.RequestUri == taggedManifestUri)
             {
                 return Ok(remoteManifest);
             }
@@ -633,6 +687,13 @@ public sealed partial class LauncherWindowViewModelTests
             if (request.RequestUri == GitHubReleaseLocator.LatestAsset(
                 "shaneedwards/openac-plugin-hello", "plugin.json"))
             {
+                return Redirect(GitHubReleaseLocator.TaggedAsset(
+                    "shaneedwards/openac-plugin-hello", "v0.2.0", "plugin.json"));
+            }
+
+            if (request.RequestUri == GitHubReleaseLocator.TaggedAsset(
+                "shaneedwards/openac-plugin-hello", "v0.2.0", "plugin.json"))
+            {
                 return Ok(remoteManifest);
             }
 
@@ -681,6 +742,13 @@ public sealed partial class LauncherWindowViewModelTests
 
             if (request.RequestUri == GitHubReleaseLocator.LatestAsset(
                 "shaneedwards/openac-plugin-hello", "plugin.json"))
+            {
+                return Redirect(GitHubReleaseLocator.TaggedAsset(
+                    "shaneedwards/openac-plugin-hello", "v0.2.0", "plugin.json"));
+            }
+
+            if (request.RequestUri == GitHubReleaseLocator.TaggedAsset(
+                "shaneedwards/openac-plugin-hello", "v0.2.0", "plugin.json"))
             {
                 return Ok(remoteManifest);
             }
@@ -741,6 +809,8 @@ public sealed partial class LauncherWindowViewModelTests
             "edwards.hello", "0.1.1", "0.1.0", ["headless"]);
         Uri manifestUri = GitHubReleaseLocator.LatestAsset(
             "shaneedwards/openac-plugin-hello", "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
+            "shaneedwards/openac-plugin-hello", "v0.1.1", "plugin.json");
         var handler = new RoutedHandler(request =>
         {
             if (request.RequestUri == PluginListUri)
@@ -751,6 +821,11 @@ public sealed partial class LauncherWindowViewModelTests
             // Check itself already fetches this manifest to evaluate updates; Add from URL must
             // resolve the repo match from the record store alone, not fetch a second time.
             if (request.RequestUri == manifestUri)
+            {
+                return Redirect(taggedManifestUri);
+            }
+
+            if (request.RequestUri == taggedManifestUri)
             {
                 return Ok(currentManifest);
             }
@@ -786,6 +861,8 @@ public sealed partial class LauncherWindowViewModelTests
             "edwards.hello", "0.1.1", "0.1.0", ["headless"]);
         Uri manifestUri = GitHubReleaseLocator.LatestAsset(
             "shaneedwards/openac-plugin-hello", "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
+            "shaneedwards/openac-plugin-hello", "v0.1.1", "plugin.json");
         var handler = new RoutedHandler(request =>
         {
             if (request.RequestUri == PluginListUri)
@@ -794,6 +871,11 @@ public sealed partial class LauncherWindowViewModelTests
             }
 
             if (request.RequestUri == manifestUri)
+            {
+                return Redirect(taggedManifestUri);
+            }
+
+            if (request.RequestUri == taggedManifestUri)
             {
                 return Ok(currentManifest);
             }
@@ -835,6 +917,13 @@ public sealed partial class LauncherWindowViewModelTests
             if (request.RequestUri == GitHubReleaseLocator.LatestAsset(
                 "someone/other-plugin", "plugin.json"))
             {
+                return Redirect(GitHubReleaseLocator.TaggedAsset(
+                    "someone/other-plugin", "v0.1.0", "plugin.json"));
+            }
+
+            if (request.RequestUri == GitHubReleaseLocator.TaggedAsset(
+                "someone/other-plugin", "v0.1.0", "plugin.json"))
+            {
                 return Ok(otherManifest);
             }
 
@@ -866,6 +955,8 @@ public sealed partial class LauncherWindowViewModelTests
             "edwards.hello", "0.1.0", "0.1.0", ["headless"]);
         Uri manifestUri = GitHubReleaseLocator.LatestAsset(
             "shaneedwards/openac-plugin-hello", "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
+            "shaneedwards/openac-plugin-hello", "v0.1.0", "plugin.json");
         var handler = new RoutedHandler(request =>
         {
             if (request.RequestUri == PluginListUri)
@@ -886,6 +977,11 @@ public sealed partial class LauncherWindowViewModelTests
             }
 
             if (request.RequestUri == manifestUri)
+            {
+                return Redirect(taggedManifestUri);
+            }
+
+            if (request.RequestUri == taggedManifestUri)
             {
                 return Ok(manifest);
             }
@@ -917,6 +1013,8 @@ public sealed partial class LauncherWindowViewModelTests
             "edwards.hello", "0.2.0", "0.1.0", ["headless"]);
         Uri manifestUri = GitHubReleaseLocator.LatestAsset(
             "shaneedwards/openac-plugin-hello", "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
+            "shaneedwards/openac-plugin-hello", "v0.2.0", "plugin.json");
         var handler = new RoutedHandler(request =>
         {
             if (request.RequestUri == PluginListUri)
@@ -937,6 +1035,11 @@ public sealed partial class LauncherWindowViewModelTests
             }
 
             if (request.RequestUri == manifestUri)
+            {
+                return Redirect(taggedManifestUri);
+            }
+
+            if (request.RequestUri == taggedManifestUri)
             {
                 return Ok(manifest);
             }
@@ -970,6 +1073,8 @@ public sealed partial class LauncherWindowViewModelTests
             "edwards.hello", "0.1.1", "0.1.0", ["headless"]);
         Uri manifestUri = GitHubReleaseLocator.LatestAsset(
             "shaneedwards/openac-plugin-hello", "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
+            "shaneedwards/openac-plugin-hello", "v0.1.1", "plugin.json");
         var handler = new RoutedHandler(request =>
         {
             if (request.RequestUri == PluginListUri)
@@ -978,6 +1083,11 @@ public sealed partial class LauncherWindowViewModelTests
             }
 
             if (request.RequestUri == manifestUri)
+            {
+                return Redirect(taggedManifestUri);
+            }
+
+            if (request.RequestUri == taggedManifestUri)
             {
                 return Ok(currentManifest);
             }
@@ -1014,6 +1124,8 @@ public sealed partial class LauncherWindowViewModelTests
             "edwards.hello", "0.1.1", "0.1.0", ["headless"]);
         Uri manifestUri = GitHubReleaseLocator.LatestAsset(
             "shaneedwards/openac-plugin-hello", "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
+            "shaneedwards/openac-plugin-hello", "v0.1.1", "plugin.json");
         var handler = new RoutedHandler(request =>
         {
             if (request.RequestUri == PluginListUri)
@@ -1022,6 +1134,11 @@ public sealed partial class LauncherWindowViewModelTests
             }
 
             if (request.RequestUri == manifestUri)
+            {
+                return Redirect(taggedManifestUri);
+            }
+
+            if (request.RequestUri == taggedManifestUri)
             {
                 return Ok(currentManifest);
             }
@@ -1466,6 +1583,13 @@ public sealed partial class LauncherWindowViewModelTests
     {
         Content = new ByteArrayContent(body),
     };
+
+    private static HttpResponseMessage Redirect(Uri location)
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.Found);
+        response.Headers.Location = location;
+        return response;
+    }
 
     private sealed class RoutedHandler(Func<HttpRequestMessage, HttpResponseMessage> respond)
         : HttpMessageHandler

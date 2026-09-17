@@ -114,6 +114,28 @@ public sealed class PluginManifestParityTests
         Assert.Equal(expectedMessage, launcherError.Message);
     }
 
+    /// <summary>Refusing a prerelease latest (L-319) is a resolver policy, not a manifest rule: both
+    /// readers still parse a plugin version with a SemVer prerelease part.</summary>
+    [Fact]
+    public void BothReadersAcceptAPrereleasePluginVersion()
+    {
+        const string json = """
+            {
+              "id": "edwards.hello",
+              "displayName": "Hello",
+              "version": "1.3.0-beta.1",
+              "entryDll": "Hello.dll",
+              "apiVersion": 1
+            }
+            """;
+
+        PluginManifest core = PluginManifest.Parse(json);
+        LauncherPluginManifest launcher = LauncherPluginManifest.Parse(json);
+
+        Assert.Equal("1.3.0-beta.1", core.Version);
+        Assert.Equal("1.3.0-beta.1", launcher.Version);
+    }
+
     [Fact]
     public void BothReadersAllowTheSamePropertyNameInSiblingObjects()
     {

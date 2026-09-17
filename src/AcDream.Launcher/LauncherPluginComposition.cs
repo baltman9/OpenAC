@@ -15,10 +15,11 @@ internal sealed record PluginDiscoverEntry(
     string Description,
     string Repo);
 
-/// <summary>An installed plugin's newer release: its version, and its compatibility note when that
+/// <summary>An installed plugin's newer release: its version and release tag (pinned through to the
+/// update dialog's install, so it never re-resolves latest), and its compatibility note when that
 /// differs from the row's own (e.g. the new release drops a host the old one supported).</summary>
 internal sealed record PluginUpdateAvailability(
-    string Version, string? CompatibilityNote, bool CompatibilityIsWarning);
+    string Version, string Tag, string? CompatibilityNote, bool CompatibilityIsWarning);
 
 /// <summary>The result of one Check pass (launcher start or Refresh list): the effective catalog,
 /// whether GitHub throttled the request, the cached list's age when a fetch could not be made, and
@@ -55,6 +56,7 @@ internal sealed class LauncherPluginComposition : IDisposable
         _httpClient = httpClient;
         ListUri = listUri;
         ReleaseClient = releaseClient;
+        ReleaseResolver = new PluginReleaseResolver(releaseClient);
         RecordStore = recordStore;
         Inventory = inventory;
         Installer = installer;
@@ -64,6 +66,8 @@ internal sealed class LauncherPluginComposition : IDisposable
     public Uri ListUri { get; }
 
     public PluginReleaseClient ReleaseClient { get; }
+
+    public PluginReleaseResolver ReleaseResolver { get; }
 
     public InstalledPluginRecordStore RecordStore { get; }
 
@@ -193,7 +197,7 @@ internal sealed class LauncherPluginComposition : IDisposable
                 if (check.Available)
                 {
                     updatesAvailable[info.Id] = new PluginUpdateAvailability(
-                        check.Version!, check.CompatibilityNote, check.CompatibilityIsWarning);
+                        check.Version!, check.Tag!, check.CompatibilityNote, check.CompatibilityIsWarning);
                 }
                 else if (check.WithheldReason is { } reason)
                 {
@@ -236,13 +240,11 @@ internal sealed class LauncherPluginComposition : IDisposable
             return PluginUpdateCheck.None;
         }
 
-        PluginReleaseFetchResult fetch;
+        PluginReleaseResolveResult result;
         try
         {
-            fetch = await ReleaseClient
-                .FetchDocumentAsync(
-                    GitHubReleaseLocator.LatestAsset(record.Repo, "plugin.json"),
-                    cancellationToken)
+            result = await ReleaseResolver
+                .ResolveAsync(record.Repo, PluginReleaseChannel.Stable, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (LauncherUpdateException)
@@ -250,26 +252,16 @@ internal sealed class LauncherPluginComposition : IDisposable
             return PluginUpdateCheck.None;
         }
 
-        if (fetch.Status != PluginReleaseFetchStatus.Success)
+        // Rate-limited, unavailable, an invalid manifest and a prerelease latest are all silent
+        // here (L-319): none of them is a newer release actually being withheld.
+        if (result.Status != PluginReleaseResolveStatus.Success)
         {
             return PluginUpdateCheck.None;
         }
 
-        LauncherPluginManifest manifest;
-        try
-        {
-            manifest = LauncherPluginManifest.Parse(
-                Encoding.UTF8.GetString(fetch.Document!.Content));
-        }
-        catch (LauncherPluginManifestException)
-        {
-            return PluginUpdateCheck.None;
-        }
-
-        if (!LauncherVersion.TryParse(manifest.Version, out LauncherVersion? remoteVersion))
-        {
-            return PluginUpdateCheck.None;
-        }
+        PluginReleaseResolution resolution = result.Resolution!;
+        LauncherPluginManifest manifest = resolution.Manifest;
+        LauncherVersion remoteVersion = LauncherVersion.Parse(manifest.Version);
 
         // Already current is not withheld: there is no newer release for anything to have held
         // back, so the badge stays silent rather than reporting "not newer".
@@ -280,18 +272,19 @@ internal sealed class LauncherPluginComposition : IDisposable
 
         if (catalog?.IsBlocked(record.Id, remoteVersion) == true)
         {
-            return new PluginUpdateCheck(false, "the plugin is blocked", null, null, false);
+            return new PluginUpdateCheck(false, "the plugin is blocked", null, null, null, false);
         }
 
         string? versionReason = VersionOnlyCompatibility(manifest, clientResolution?.Version);
         if (versionReason is not null)
         {
-            return new PluginUpdateCheck(false, versionReason, null, null, false);
+            return new PluginUpdateCheck(false, versionReason, null, null, null, false);
         }
 
         LauncherPluginCompatibility.CompatibilityDescription compatibility =
             LauncherPluginCompatibility.Describe(manifest, clientResolution?.Version);
-        return new PluginUpdateCheck(true, null, manifest.Version, compatibility.Text, compatibility.IsWarning);
+        return new PluginUpdateCheck(
+            true, null, manifest.Version, resolution.Tag, compatibility.Text, compatibility.IsWarning);
     }
 
     /// <summary>Host-independent compatibility (min/max/skip host version only): the launch-mode
@@ -306,9 +299,14 @@ internal sealed class LauncherPluginComposition : IDisposable
     }
 
     private readonly record struct PluginUpdateCheck(
-        bool Available, string? WithheldReason, string? Version, string? CompatibilityNote, bool CompatibilityIsWarning)
+        bool Available,
+        string? WithheldReason,
+        string? Version,
+        string? Tag,
+        string? CompatibilityNote,
+        bool CompatibilityIsWarning)
     {
-        public static readonly PluginUpdateCheck None = new(false, null, null, null, false);
+        public static readonly PluginUpdateCheck None = new(false, null, null, null, null, false);
     }
 
     private void WriteCache(byte[] content)
