@@ -796,6 +796,19 @@ public class DatWidgetFactoryTests
     // ── Test 5d: Type 6 → UiMenu ─────────────────────────────────────────────
 
     [Fact]
+    public void ChatTalkFocusMenu_PopupColumnStaysTheAuthoredItemRowWidth_NotTheButtonWidth()
+    {
+        // OpenAC #122: the talk-focus button is authored 46 px wide, but its
+        // popup rows are the 191 px item rows of the popup the original client
+        // builds from the layout's popup root. Sizing the popup to the button
+        // put every column on top of the previous one.
+        ImportedLayout layout = FixtureLoader.LoadChat();
+        UiMenu menu = Assert.IsType<UiMenu>(layout.FindElement(0x10000014u));
+        Assert.Equal(46f, menu.Width);
+        Assert.Equal(191f, menu.ColumnWidth);
+    }
+
+    [Fact]
     public void Type6_Menu_MakesUiMenu()
     {
         var e = DatWidgetFactory.Create(new ElementInfo { Type = 6, Width = 46, Height = 18 }, NoTex, null);
