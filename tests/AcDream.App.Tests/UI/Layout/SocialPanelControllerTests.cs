@@ -333,6 +333,110 @@ public sealed class SocialPanelControllerTests
     }
 
     [Fact]
+    public void Allegiance_MemberNames_CarryTheRankTitle_AndSelfRankLineNamesTheTitle()
+    {
+        // OpenAC #123: the page shows "<title> <name>" for the monarch, the patron
+        // and every vassal, and "Rank: <title> [<rank>]" for the player, exactly
+        // as the original client composes them from rank, heritage and gender.
+        const uint selfGuid = 100u;
+        const uint monarchGuid = 200u;
+        const uint patronGuid = 300u;
+        var monarch = new RuntimeAllegianceMemberSnapshot(
+            monarchGuid, 0u, true, "Alice", Rank: 9, 0, 0, 0, 0u, 0u, Gender: 2, HeritageGroup: 1, false);
+        var patron = new RuntimeAllegianceMemberSnapshot(
+            patronGuid, monarchGuid, true, "Bob", Rank: 7, 0, 0, 0, 0u, 0u, Gender: 1, HeritageGroup: 1, false);
+        var self = new RuntimeAllegianceMemberSnapshot(
+            selfGuid, patronGuid, true, "Carol", Rank: 2, 0, 0, 0, 0u, 0u, Gender: 2, HeritageGroup: 1, false);
+        var vassals = new List<RuntimeAllegianceMemberSnapshot>
+        {
+            new(401u, selfGuid, true, "Dave", Rank: 1, 0, 0, 0, 0u, 10u, Gender: 1, HeritageGroup: 1, true),
+            new(402u, selfGuid, true, "Eve", Rank: 0, 0, 0, 0, 0u, 20u, Gender: 2, HeritageGroup: 1, true),
+        };
+        var members = new Dictionary<uint, RuntimeAllegianceMemberSnapshot>
+        {
+            [selfGuid] = self, [patronGuid] = patron, [monarchGuid] = monarch,
+        };
+
+        static UiElement? TaggedRowResolver(uint layoutId, uint elementId)
+        {
+            var row = new UiPanel();
+            row.AddChild(new UiText { DatElementId = 0x10000268u });
+            return row;
+        }
+
+        ImportedLayout layout = FixtureLoader.LoadSocialPanelHost();
+        SocialAllegiancePageController.Bindings bindings = MakeAllegianceBindings(
+            snapshot: new RuntimeAllegianceSnapshot
+            {
+                HasProfile = true, Revision = 1, Rank = 2u, TotalMembers = 5u, MonarchGuid = monarchGuid,
+            },
+            monarch: monarch,
+            patron: guid => guid == selfGuid ? patron : null,
+            member: guid => members.TryGetValue(guid, out var m) ? m : null,
+            vassals: guid => guid == selfGuid ? vassals : [],
+            localPlayerGuid: selfGuid,
+            templateResolver: TaggedRowResolver);
+
+        SocialPanelController? controller = SocialPanelController.Bind(
+            layout, MakeCallbacks(allegianceBindings: bindings));
+        Assert.NotNull(controller);
+
+        UiElement page = UiElement.FindDescendant(controller!.TabPanel, 0x10000291u)!;
+        var monarchName = Assert.IsType<UiText>(UiElement.FindDescendant(page, 0x10000257u));
+        Assert.Equal("Queen Alice", Assert.Single(monarchName.LinesProvider()).Text);
+        var patronName = Assert.IsType<UiText>(UiElement.FindDescendant(page, 0x1000025Cu));
+        Assert.Equal("Duke Bob", Assert.Single(patronName.LinesProvider()).Text);
+        var selfRank = Assert.IsType<UiText>(UiElement.FindDescendant(page, 0x10000253u));
+        Assert.Equal("Rank: Baronet [2]", Assert.Single(selfRank.LinesProvider()).Text);
+
+        var listBox = Assert.IsType<UiTemplateListBox>(UiElement.FindDescendant(page, 0x10000260u));
+        string[] rowNames = listBox.ViewportForTest!.Children
+            .Select(row => Assert.IsType<UiText>(UiElement.FindDescendant(row, 0x10000268u)).LinesProvider()[0].Text)
+            .OrderBy(text => text)
+            .ToArray();
+        Assert.Equal(["Eve", "Yeoman Dave"], rowNames);
+    }
+
+    [Fact]
+    public void Allegiance_SelfRankLine_UsesTheAuthoredTemplates_AndTheBuffedFormWhenTheQualityIsHigher()
+    {
+        const uint selfGuid = 100u;
+        var self = new RuntimeAllegianceMemberSnapshot(
+            selfGuid, 0u, true, "Carol", Rank: 2, 0, 0, 0, 0u, 0u, Gender: 2, HeritageGroup: 1, false);
+        var seen = new List<(uint Table, uint Key, IReadOnlyDictionary<uint, string> Vars)>();
+        string? Template(uint table, uint key, IReadOnlyDictionary<uint, string> vars)
+        {
+            seen.Add((table, key, vars));
+            return key == DatStringResolver.ComputeHash("ID_Allegiance_RankBuffed")
+                ? $"R {vars[DatStringResolver.ComputeHash("TITLE")]} {vars[DatStringResolver.ComputeHash("RANK")]}+{vars[DatStringResolver.ComputeHash("RANKBUFF")]}"
+                : key == DatStringResolver.ComputeHash("ID_Allegiance_Rank")
+                    ? $"R {vars[DatStringResolver.ComputeHash("TITLE")]} {vars[DatStringResolver.ComputeHash("RANK")]}"
+                    : null;
+        }
+
+        int? quality = 2;
+        ImportedLayout layout = FixtureLoader.LoadSocialPanelHost();
+        SocialAllegiancePageController.Bindings bindings = MakeAllegianceBindings(
+            snapshot: new RuntimeAllegianceSnapshot { HasProfile = true, Revision = 1, Rank = 2u },
+            member: guid => guid == selfGuid ? self : null,
+            localPlayerGuid: selfGuid,
+            resolveTemplate: Template) with { LocalPlayerAllegianceRankQuality = () => quality };
+
+        SocialPanelController? controller = SocialPanelController.Bind(
+            layout, MakeCallbacks(allegianceBindings: bindings));
+        Assert.NotNull(controller);
+        UiElement page = UiElement.FindDescendant(controller!.TabPanel, 0x10000291u)!;
+        var selfRank = Assert.IsType<UiText>(UiElement.FindDescendant(page, 0x10000253u));
+        Assert.Equal("R Baronet 2", Assert.Single(selfRank.LinesProvider()).Text);
+        Assert.All(seen, s => Assert.Equal(0x23000001u, s.Table));
+
+        // A rank quality above the profile's rank shows the buffed form with the difference.
+        quality = 4;
+        controller.Tick();
+        Assert.Equal("R Baronet 4+2", Assert.Single(selfRank.LinesProvider()).Text);
+    }
+
+    [Fact]
     public void Allegiance_VassalList_PopulatesOneRowPerVassal()
     {
         const uint selfGuid = 100u;
@@ -569,8 +673,10 @@ public sealed class SocialPanelControllerTests
             templateResolver: TaggedVassalRowResolver,
             resolveTemplate: (table, key, variables) =>
             {
-                string value = Assert.Single(variables).Value;
-                Assert.Equal(DatStringResolver.ComputeHash("VALUE"), Assert.Single(variables).Key);
+                // Only the passed-up entry is under test; the rank line resolves its own.
+                if (!variables.TryGetValue(DatStringResolver.ComputeHash("VALUE"), out string? value))
+                    return null;
+                Assert.Single(variables);
                 resolved.Add((table, key, value));
                 return $"[{value}]";
             });
