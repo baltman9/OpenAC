@@ -72,6 +72,41 @@ public sealed class HeadlessPluginApiSurfaceTests
         Assert.Equal(1, logoffs);
     }
 
+    // Defect 13: the plugin's SessionContext only starts character-scoped
+    // macros (AutoTradeAccept among them) once ICharacterInfo.Name/WorldName/
+    // AccountName all resolve non-empty after LoginComplete. Before this
+    // fix HeadlessAutomationSurface.Character was the NoOp stub, so that
+    // edge never fired on the headless host and nothing ever subscribed.
+    [Fact]
+    public void CharacterNameIsPopulatedTheMomentLoginCompleteFires()
+    {
+        var (runtime, commands) = NewRealSession();
+        using GameRuntime runtimeDisposal = runtime;
+        using var host = NewHost(runtime);
+
+        commands.Start(runtime.Generation);
+
+        Assert.True(host.Automation.Character.IsInWorld);
+        Assert.Equal("HeadlessPluginApiFixture", host.Automation.Character.Name);
+        Assert.Equal("HeadlessPluginApi", host.Automation.Character.AccountName);
+        Assert.Equal(0x50000001u, host.Automation.Character.ObjectId);
+    }
+
+    [Fact]
+    public void CharacterNameGoesEmptyAgainAfterLogoff()
+    {
+        var (runtime, commands) = NewRealSession();
+        using GameRuntime runtimeDisposal = runtime;
+        using var host = NewHost(runtime);
+
+        commands.Start(runtime.Generation);
+        Assert.False(string.IsNullOrEmpty(host.Automation.Character.Name));
+
+        commands.Stop(runtime.Generation);
+
+        Assert.False(host.Automation.Character.IsInWorld);
+    }
+
     [Fact]
     public void TheDeathMessageReachesPlugins()
     {

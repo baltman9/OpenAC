@@ -75,6 +75,27 @@ public sealed class HeadlessTradeVendorAutomationTests
         runtime.Dispose();
     }
 
+
+    [Fact]
+    public void FireTickPollsTradePartnerAcceptSoPluginsSeeIt()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        var partners = new List<uint>();
+        host.Automation.Trade.PartnerTradeAccepted += partners.Add;
+
+        uint self = runtime.PlayerIdentity.ServerGuid;
+        const uint partnerGuid = 0x70000099u;
+        runtime.TradeOwner.ApplyRegister(
+            new GameEvents.RegisterTrade(self, partnerGuid, 0uL), self);
+        host.FireTick(1d / 30d);
+        Assert.Empty(partners);
+
+        runtime.TradeOwner.ApplyAccept(partnerGuid, self);
+        host.FireTick(1d / 30d);
+
+        Assert.Equal([partnerGuid], partners);
+    }
     private static GameRuntime NewRuntime()
     {
         var operations = new InertOperations();
