@@ -1,4 +1,3 @@
-using System.Linq;
 using AcDream.Core.Chat;
 using AcDream.Core.Combat;
 using AcDream.Headless.Plugins;

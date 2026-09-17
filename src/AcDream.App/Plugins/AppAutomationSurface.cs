@@ -109,6 +109,8 @@ internal sealed class AppAutomationSurface
     private static readonly string[] AttributeNames =
         ["Strength", "Endurance", "Quickness", "Coordination", "Focus", "Self"];
 
+    private readonly Func<uint, IReadOnlyList<uint>> _activeSpellIdsForPlayer;
+
     public AppAutomationSurface()
         : this(events: null)
     {
@@ -119,6 +121,7 @@ internal sealed class AppAutomationSurface
         LocalPluginPeerRegistry? peers = null,
         IReadOnlyList<string>? peerTags = null)
     {
+        _activeSpellIdsForPlayer = _ => _enchantments.Select(static enchantment => enchantment.SpellId).ToArray();
         _pluginCommands = new PluginCommandRegistry((verb, error) =>
             Console.WriteLine(
                 $"[PluginCommand:{verb}] {error.GetBaseException().Message}"));
@@ -2148,8 +2151,7 @@ internal sealed class AppAutomationSurface
             item,
             playerId,
             runtime.InventoryOwner.Objects,
-            activeSpellIdsForPlayer: _ =>
-                _enchantments.Select(static enchantment => enchantment.SpellId).ToArray());
+            activeSpellIdsForPlayer: _activeSpellIdsForPlayer);
 
     private static bool HasPropertyData(PropertyBundle properties) =>
         RuntimeWorldObjectProjection.HasPropertyData(properties);

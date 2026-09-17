@@ -593,12 +593,12 @@ A headless host implements this same contract, with a few members left as
 placeholders rather than wired to real state:
 
 - `Character` is real for identity: `Name`, `WorldName`, `AccountName`,
-  `ObjectId`, `CharacterIndex`, and `IsInWorld` all come from the live
-  runtime, exactly like the graphical host. Everything else on
+  `ObjectId`, `CharacterIndex`, `IsInWorld`, and `ServerPopulation` all come
+  from the live runtime, exactly like the graphical host. Everything else on
   `Character` -- vitals (`CurrentHealth`/`MaxHealth`/etc.), `Skills`,
-  `Attributes`, `ActiveEnchantments`, `Level`, `MainPackFreeSlots`,
-  `SummoningMastery`, and `ServerPopulation` -- is still the interface's
-  inert default; no headless macro reads them yet.
+  `Attributes`, `ActiveEnchantments`, `Level`, `MainPackFreeSlots`, and
+  `SummoningMastery` -- is still the interface's inert default; no headless
+  macro reads them yet.
 - `Spells` and `Magic` are entirely no-op: `Spells.All` / `TryFindByName`
   are always empty / always miss, and `Magic` never reports casting or
   accepts a cast request.
@@ -638,6 +638,6 @@ placeholders rather than wired to real state:
   without a window. `Register` always returns a handle with `IsBound`
   `false` and the handler never fires.
 - Everything else on `IAutomationSurface` not named above --
-  `Combat`/`Equipment`/`Items`/`Loot`/`Fellowship`/`Enchantment`/
+  `Combat`/`Equipment`/`Items`/`Loot`/`Fellowship`/`Enchantments`/
   `Navigation`/`WorldTime`/`Network`/`Recovery`/`Projectile`/`Selection`
   automation -- is still the interface's inert `NoOp` default on headless.
