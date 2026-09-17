@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using AcDream.App.Rendering.Scene;
 using AcDream.App.Rendering.Walk;
 using AcDream.App.Rendering.Wb;
+using AcDream.Core.Meshing;
 
 namespace AcDream.App.Tests.Rendering.Walk;
 
@@ -78,6 +79,51 @@ public sealed partial class WalkStaticStreamPopulatorTests
             dispatcher.EndWalkPartFrame();
         }
         return GC.GetAllocatedBytesForCurrentThread() - before;
+    }
+
+    [Fact]
+    public void RetainedCells_MovedTranslucentEntityRefreshesItsAlphaSortCentres()
+    {
+        using var fx = new DispatcherFixture();
+        InjectRenderData(
+            fx.Manager,
+            RetainedMesh,
+            MakeFlatMesh(MakeBatch(1, TranslucencyKind.AlphaBlend, 3, 0, 3, 1)));
+        var world = new RetainedWorld();
+        world.Set(RetainedRecord(1), RetainedRecord(9));
+        var cache = new FarLandscapeDrawCache(fx.Dispatcher, world);
+        Assert.Equal(
+            new[] { 81f, 1f },
+            AppendRetainedAlpha(fx, cache).Select(batch => batch.SortDistanceSq));
+        int regroups = cache.RegroupCount;
+
+        // Moving a translucent entity keeps the entry's grouping, so the only
+        // thing that has to be recomputed is where its alpha batches sort.
+        world.Current[1] = RetainedRecord(1) with
+        {
+            Transform = new RenderTransform(Matrix4x4.CreateTranslation(30f, 0f, 0f)),
+        };
+        List<WbDrawDispatcher.WalkClassifiedBatch> moved = AppendRetainedAlpha(fx, cache);
+        Assert.Equal(regroups, cache.RegroupCount);
+        Assert.Equal(1, cache.RebuildCount);
+        Assert.Equal(new[] { 900f, 81f }, moved.Select(batch => batch.SortDistanceSq));
+        Assert.Equal(new[] { 30f, 9f }, moved.Select(batch => batch.Transform.M41));
+    }
+
+    private static List<WbDrawDispatcher.WalkClassifiedBatch> AppendRetainedAlpha(
+        DispatcherFixture fx, FarLandscapeDrawCache cache)
+    {
+        fx.Dispatcher.BeginWalkPartFrame();
+        try
+        {
+            cache.BeginFrame();
+            var alpha = new List<WbDrawDispatcher.WalkClassifiedBatch>();
+            Assert.True(cache.TryAppend(
+                RetainedBlock, 4, 0, new OrderedDrawStream(), new RetainedViews(), 0,
+                Vector3.Zero, alpha));
+            return alpha;
+        }
+        finally { fx.Dispatcher.EndWalkPartFrame(); }
     }
 
     [Fact]
