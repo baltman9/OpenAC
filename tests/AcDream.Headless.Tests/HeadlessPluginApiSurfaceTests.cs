@@ -414,19 +414,17 @@ public sealed class HeadlessPluginApiSurfaceTests
     public void LogoutIsUnavailableWithoutAnInWorldSessionAndNeverCallsTheRoute()
     {
         using GameRuntime runtime = NewRuntime();
-        int calls = 0;
-        bool RequestLogout()
-        {
-            calls++;
-            return true;
-        }
+        var logout = new AcDream.Headless.Hosting.HeadlessLogoutAutomation(runtime);
         using var host = new HeadlessPluginHost(
             runtime,
             new InertLogger(),
-            requestLogout: RequestLogout);
+            logout: logout);
 
+        // Logout() is the contract's forwarding alias for RequestLogout();
+        // outside the world both refuse and the transit owner never begins a logoff.
+        Assert.False(((ILoginAutomation)host.Automation).CanRequestLogout);
         Assert.False(((ILoginAutomation)host.Automation).Logout());
-        Assert.Equal(0, calls);
+        Assert.False(runtime.TransitOwner.IsLogoutActive);
     }
 
     [Fact]

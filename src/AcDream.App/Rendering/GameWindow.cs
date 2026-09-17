@@ -263,7 +263,7 @@ public sealed class GameWindow :
     private AcDream.App.World.LiveEntityRuntime? _liveEntities;
     private AcDream.App.World.LiveEntityLivenessController? _liveEntityLiveness;
 
-    private readonly AcDream.App.Plugins.AppAutomationSurface? _automation;
+    private readonly AcDream.Runtime.Plugins.RuntimeAutomationSurface? _automation;
     private readonly AcDream.App.Input.AppHotkeyRegistry? _hotkeyRegistry;
     private readonly GameRuntime _runtime;
     private readonly IDisposable _runtimeHostLease;
@@ -494,7 +494,7 @@ public sealed class GameWindow :
         WorldEvents worldEvents,
         AcDream.App.Plugins.BufferedUiRegistry? uiRegistry,
         GraphicalHostPlatformServices platformServices,
-        AcDream.App.Plugins.AppAutomationSurface? automation = null,
+        AcDream.Runtime.Plugins.RuntimeAutomationSurface? automation = null,
         AcDream.App.Plugins.BufferedRenderPackRegistry? renderPackRegistry = null,
         AcDream.App.Input.AppHotkeyRegistry? hotkeyRegistry = null)
     {
@@ -521,7 +521,6 @@ public sealed class GameWindow :
             "graphical GameWindow");
         _automation?.Bind(_runtime, _runtime.CharacterOwner, _runtime.ActionOwner.SpellCast);
         _automation?.BindProjectileCollision(_physicsEngine);
-        _automation?.BindLogout(() => _localPlayerTeleportSink.TryRequestLogout());
         _localPlayerIdentity = new AcDream.App.Input.LocalPlayerIdentityState(
             _runtime.PlayerIdentity);
         _updateFrameClock = new AcDream.App.Update.UpdateFrameClock(
@@ -1006,6 +1005,13 @@ public sealed class GameWindow :
             (vendorId, itemId, amount) => result.ItemInteraction.TrySell(
                 vendorId,
                 [(amount, itemId)]));
+        _automation?.BindLogout(
+            () => _localPlayerTeleport?.TryRequestLogout() == true,
+            () => _localPlayerTeleport is not null
+                && _runtime.Session.IsInWorld
+                && !_runtime.TransitOwner.IsLogoutActive
+                && !_runtime.TransitOwner.IsTeleportActive
+                && !_runtime.TransitOwner.HasPendingTeleportStart);
         _interactionUiLateBindings = result.LateBindings;
         _magicRuntime = result.Magic;
         if (result.RetainedUi is { } retained)
@@ -1097,7 +1103,7 @@ public sealed class GameWindow :
                 _ => InputAction.None,
             }));
         _automation?.BindWorldObjectUse(objectId =>
-            AcDream.App.Plugins.AppAutomationSurface.MapWorldObjectUseOutcome(
+            AcDream.Runtime.Plugins.RuntimeAutomationSurface.MapWorldObjectUseOutcome(
                 result.SelectionInteractions.TryUseForAutomation(objectId)));
         _retainedUiGameplayBinding = result.RetainedGameplay;
         _paperdollViewportRenderer = result.PaperdollRenderer;
@@ -1164,6 +1170,7 @@ public sealed class GameWindow :
         _localPlayerTeleport = result.LocalTeleport;
         _liveSessionHost = result.SessionHost;
         _automation?.BindSessionCommands(result.GameRuntime);
+        _automation?.BindSubmit(result.GameRuntime.SubmitChatText);
         _gameplayInputActions = result.GameplayActions;
         _sessionPlayerBindings = result.RuntimeBindings;
     }

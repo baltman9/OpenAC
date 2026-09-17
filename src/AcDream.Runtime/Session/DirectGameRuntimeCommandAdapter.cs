@@ -1141,6 +1141,153 @@ public sealed class DirectGameRuntimeCommandAdapter
         }
     }
 
+    internal bool TrySendGetAndWieldItem(uint itemGuid, uint equipMask)
+    {
+        lock (_gate)
+        {
+            if (_route is null
+                || _session is null
+                || _routeGeneration != _runtime.Generation
+                || !_runtime.Session.IsInWorld)
+            {
+                return false;
+            }
+
+            _session.SendGetAndWieldItem(itemGuid, equipMask);
+            return true;
+        }
+    }
+
+    internal bool TrySendUseWithTarget(uint sourceGuid, uint targetGuid)
+    {
+        lock (_gate)
+        {
+            if (_route is null
+                || _session is null
+                || _routeGeneration != _runtime.Generation
+                || !_runtime.Session.IsInWorld)
+            {
+                return false;
+            }
+
+            _session.SendUseWithTarget(sourceGuid, targetGuid);
+            return true;
+        }
+    }
+
+    internal bool TrySendPutItemInContainer(
+        uint itemGuid,
+        uint containerGuid,
+        int placement)
+    {
+        lock (_gate)
+        {
+            if (_route is null
+                || _session is null
+                || _routeGeneration != _runtime.Generation
+                || !_runtime.Session.IsInWorld)
+            {
+                return false;
+            }
+
+            _session.SendPutItemInContainer(itemGuid, containerGuid, placement);
+            return true;
+        }
+    }
+
+    internal bool TrySendStackableSplitToContainer(
+        uint itemGuid,
+        uint containerGuid,
+        uint placement,
+        uint amount)
+    {
+        lock (_gate)
+        {
+            if (_route is null
+                || _session is null
+                || _routeGeneration != _runtime.Generation
+                || !_runtime.Session.IsInWorld)
+            {
+                return false;
+            }
+
+            _session.SendStackableSplitToContainer(
+                itemGuid, containerGuid, placement, amount);
+            return true;
+        }
+    }
+
+    internal bool TrySendStackableMerge(
+        uint sourceGuid,
+        uint targetGuid,
+        uint amount)
+    {
+        lock (_gate)
+        {
+            if (_route is null
+                || _session is null
+                || _routeGeneration != _runtime.Generation
+                || !_runtime.Session.IsInWorld)
+            {
+                return false;
+            }
+
+            _session.SendStackableMerge(sourceGuid, targetGuid, amount);
+            return true;
+        }
+    }
+
+    internal bool TrySendDropItem(uint itemGuid)
+    {
+        lock (_gate)
+        {
+            if (_route is null
+                || _session is null
+                || _routeGeneration != _runtime.Generation
+                || !_runtime.Session.IsInWorld)
+            {
+                return false;
+            }
+
+            _session.SendDropItem(itemGuid);
+            return true;
+        }
+    }
+
+    internal bool TrySendStackableSplitTo3D(uint stackGuid, uint amount)
+    {
+        lock (_gate)
+        {
+            if (_route is null
+                || _session is null
+                || _routeGeneration != _runtime.Generation
+                || !_runtime.Session.IsInWorld)
+            {
+                return false;
+            }
+
+            _session.SendStackableSplitTo3D(stackGuid, amount);
+            return true;
+        }
+    }
+
+    internal bool TrySendGiveObject(uint targetGuid, uint itemGuid, uint amount)
+    {
+        lock (_gate)
+        {
+            if (_route is null
+                || _session is null
+                || _routeGeneration != _runtime.Generation
+                || !_runtime.Session.IsInWorld)
+            {
+                return false;
+            }
+
+            _session.SendGiveObject(targetGuid, itemGuid, amount);
+            return true;
+        }
+    }
+
     private RuntimeCommandStatus UseSelected(WorldSession session)
     {
         if (_runtime.ActionOwner.Selection.SelectedObjectId

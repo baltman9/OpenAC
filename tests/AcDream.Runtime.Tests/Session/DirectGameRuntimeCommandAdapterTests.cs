@@ -786,6 +786,61 @@ public sealed class DirectGameRuntimeCommandAdapterTests
         runtime.Dispose();
     }
 
+    [Fact]
+    public void PutInContainerSplitAndMerge_RefuseWithNoRoute()
+    {
+        (GameRuntime runtime, DirectGameRuntimeCommandAdapter adapter, _) =
+            CreateHarness();
+
+        bool moved = adapter.TrySendPutItemInContainer(0x50000A01u, 0x50000010u, 0);
+        bool split = adapter.TrySendStackableSplitToContainer(
+            0x50000A01u, 0x50000010u, 0u, 1u);
+        bool merged = adapter.TrySendStackableMerge(0x50000A01u, 0x50000A02u, 1u);
+
+        Assert.False(moved);
+        Assert.False(split);
+        Assert.False(merged);
+        runtime.Dispose();
+    }
+
+    [Fact]
+    public void PutInContainerSplitAndMerge_SendWhileActiveAndRefuseAfterSessionStops()
+    {
+        (GameRuntime runtime, DirectGameRuntimeCommandAdapter adapter, FixtureSessionOperations operations) =
+            CreateStartedHarness();
+        var gameActions = new List<byte[]>();
+        operations.Sessions[^1].GameActionCapture = body => gameActions.Add(body);
+
+        bool moved = adapter.TrySendPutItemInContainer(0x50000A01u, 0x50000010u, 0);
+        bool split = adapter.TrySendStackableSplitToContainer(
+            0x50000A01u, 0x50000010u, 0u, 1u);
+        bool merged = adapter.TrySendStackableMerge(0x50000A01u, 0x50000A02u, 1u);
+
+        Assert.True(moved);
+        Assert.True(split);
+        Assert.True(merged);
+        Assert.Equal(3, gameActions.Count);
+        Assert.Equal(
+            InteractRequests.PutItemInContainerOpcode,
+            ReadOpcode(gameActions[0]));
+        Assert.Equal(
+            InventoryActions.StackableSplitToContainerOpcode,
+            ReadOpcode(gameActions[1]));
+        Assert.Equal(
+            InventoryActions.StackableMergeOpcode,
+            ReadOpcode(gameActions[2]));
+
+        adapter.Session.Stop(runtime.Generation);
+        gameActions.Clear();
+
+        Assert.False(adapter.TrySendPutItemInContainer(0x50000A01u, 0x50000010u, 0));
+        Assert.False(adapter.TrySendStackableSplitToContainer(
+            0x50000A01u, 0x50000010u, 0u, 1u));
+        Assert.False(adapter.TrySendStackableMerge(0x50000A01u, 0x50000A02u, 1u));
+        Assert.Empty(gameActions);
+        runtime.Dispose();
+    }
+
     private static void SeedFellowship(
         GameRuntime runtime,
         uint leader,
@@ -821,6 +876,15 @@ public sealed class DirectGameRuntimeCommandAdapterTests
 
     private static (GameRuntime Runtime, DirectGameRuntimeCommandAdapter Adapter, FixtureSessionOperations Operations)
         CreateStartedHarness(TimeProvider? timeProvider = null)
+    {
+        (GameRuntime runtime, DirectGameRuntimeCommandAdapter adapter, FixtureSessionOperations operations) =
+            CreateHarness(timeProvider);
+        _ = adapter.Session.Start(runtime.Generation);
+        return (runtime, adapter, operations);
+    }
+
+    private static (GameRuntime Runtime, DirectGameRuntimeCommandAdapter Adapter, FixtureSessionOperations Operations)
+        CreateHarness(TimeProvider? timeProvider = null)
     {
         var operations = new FixtureSessionOperations();
         var gameplay = new FixtureGameplayOperations();
@@ -868,7 +932,6 @@ public sealed class DirectGameRuntimeCommandAdapterTests
                 _ => { }),
             options);
         adapter = new DirectGameRuntimeCommandAdapter(runtime, live);
-        _ = adapter.Session.Start(runtime.Generation);
         return (runtime, adapter, operations);
     }
 

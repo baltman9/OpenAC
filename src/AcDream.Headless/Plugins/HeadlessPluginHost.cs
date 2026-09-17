@@ -1,6 +1,9 @@
+using AcDream.Content;
 using AcDream.Core.Items;
+using AcDream.Headless.Hosting;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
+using AcDream.Runtime.Plugins;
 
 namespace AcDream.Headless.Plugins;
 
@@ -20,7 +23,7 @@ internal sealed class HeadlessPluginHost
     private readonly object _eventGate = new();
     private readonly List<Subscription> _subscriptions = [];
     private Subscription[] _liveSnapshot = [];
-    private readonly HeadlessAutomationSurface _automation;
+    private readonly RuntimeAutomationSurface _automation;
     private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>
         _sessionSettingsByPlugin;
     private readonly object _tickGate = new();
@@ -56,7 +59,9 @@ internal sealed class HeadlessPluginHost
         IPluginStorage? vtankProfiles = null,
         IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
         Func<string, bool>? submitChatText = null,
-        Func<bool>? requestLogout = null,
+        HeadlessItemAutomation? items = null,
+        MagicCatalog? magicCatalog = null,
+        HeadlessLogoutAutomation? logout = null,
         Func<uint, bool, bool>? answerConfirmation = null,
         Func<bool>? requestGracefulStop = null)
     {
@@ -67,11 +72,33 @@ internal sealed class HeadlessPluginHost
         VtankProfiles = vtankProfiles ?? NoOpPluginStorage.Instance;
         _sessionSettingsByPlugin = CopySessionSettings(sessionSettings);
         Window = new HeadlessHostWindow(requestGracefulStop);
-        _automation = new HeadlessAutomationSurface(
-            runtime,
-            submitChatText,
-            requestLogout,
-            answerConfirmation);
+        _automation = new RuntimeAutomationSurface();
+        _automation.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        _automation.BindRemoteBodiesUnsimulated();
+        _automation.BindSubmit(submitChatText);
+        if (magicCatalog is not null)
+            _automation.BindMagicCatalog(magicCatalog);
+        if (items is not null)
+        {
+            _automation.BindItems(
+                items.TryUse,
+                items.TryApply,
+                items.TryMove,
+                items.TryMerge,
+                items.TryDrop,
+                items.TryGive,
+                HeadlessItemAutomation.RefusePickup,
+                HeadlessItemAutomation.RefuseIdentify);
+            _automation.BindEquipment(items.TryEquip, () => items.EquipmentBusy);
+        }
+        if (logout is not null)
+        {
+            _automation.BindLogout(
+                logout.TryRequestLogout,
+                () => logout.CanRequestLogout);
+        }
+        if (answerConfirmation is not null)
+            _automation.BindDialogs(answerConfirmation);
         _wasInWorld = runtime.Lifecycle.State == RuntimeLifecycleState.InWorld;
         runtime.CommunicationOwner.LocalPlayerDied += OnLocalPlayerDied;
         runtime.InventoryOwner.ExternalContainers.Changed += OnExternalContainerChanged;
@@ -142,7 +169,7 @@ internal sealed class HeadlessPluginHost
 
     internal void FireTick(double elapsedSeconds)
     {
-        _automation.Poll();
+        _automation.Tick(elapsedSeconds);
         Action<double>? handlers;
         lock (_tickGate)
             handlers = _tick;
@@ -597,8 +624,7 @@ internal sealed class HeadlessPluginHost
         }
     }
 
-    public void OnChat(in RuntimeChatDelta delta) =>
-        _automation.RaiseChatReceived(delta.Stamp.Sequence, delta.Entry);
+    public void OnChat(in RuntimeChatDelta delta) { }
     public void OnMovement(in RuntimeMovementDelta delta) { }
     public void OnPortal(in RuntimePortalDelta delta) { }
     public void OnCombat(in RuntimeCombatDelta delta) { }

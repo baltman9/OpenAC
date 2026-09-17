@@ -7,7 +7,7 @@ namespace AcDream.Core.Items;
 /// <see cref="ClientArmorProfile"/> is projected onto the public
 /// <see cref="PluginWeaponProfile"/>/<see cref="PluginArmorProfile"/>
 /// contract. Lives in Core (rather than the App or Runtime automation
-/// surfaces) so both the graphical host's <c>AppAutomationSurface</c> and
+/// surfaces) so both the graphical host's <c>RuntimeAutomationSurface</c> and
 /// the vendor automation adapter in <c>AcDream.Runtime</c> -- neither of
 /// which may depend on the other -- can share the exact same mapping
 /// instead of drifting apart.

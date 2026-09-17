@@ -1,7 +1,7 @@
-using AcDream.App.UI;
 using AcDream.Core.Items;
+using AcDream.Runtime.Gameplay;
 
-namespace AcDream.App.Tests.UI;
+namespace AcDream.Runtime.Tests.Gameplay;
 
 public sealed class AutoWieldGenerationTests
 {
@@ -35,7 +35,7 @@ public sealed class AutoWieldGenerationTests
             objects,
             () => Player,
             sendWield: null,
-            sendPutItemInContainer: (_, _, _) => { });
+            sendPutItemInContainer: (_, _, _) => true);
         Assert.True(controller.TryWield(requested));
         Assert.True(controller.IsBusy);
 

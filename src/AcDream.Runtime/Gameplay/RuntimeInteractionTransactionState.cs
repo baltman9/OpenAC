@@ -155,7 +155,7 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
     /// retargets this, plus an Automation response that happens to land on
     /// the object already current -- see AcceptAppraisalResponse. Plugin
     /// completion tracking (ILootAutomation.Appraisal.CurrentObjectId, via
-    /// AppAutomationSurface) must NOT read this -- use
+    /// RuntimeAutomationSurface) must NOT read this -- use
     /// LastCompletedAppraisalId instead, which advances for every origin.
     /// </summary>
     public uint CurrentAppraisalId => _currentAppraisalId;

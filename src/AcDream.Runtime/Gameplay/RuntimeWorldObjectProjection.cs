@@ -30,11 +30,16 @@ public static class RuntimeWorldObjectProjection
         ClientObject? item,
         uint playerId,
         ClientObjectTable objects,
-        Func<uint, IReadOnlyList<uint>>? activeSpellIdsForPlayer = null)
+        Func<uint, IReadOnlyList<uint>>? activeSpellIdsForPlayer = null,
+        Func<RuntimeEntityRecord, Position?>? resolvePosition = null)
     {
         uint objectId = record?.ServerGuid ?? item!.ObjectId;
-        Position? source = record?.PhysicsBody?.CellPosition
-            ?? (record is null ? null : ConvertPosition(record.Snapshot.Position));
+        Position? source = record is null
+            ? null
+            : resolvePosition is not null
+                ? resolvePosition(record)
+                : record.PhysicsBody?.CellPosition
+                    ?? ConvertPosition(record.Snapshot.Position);
         bool owned = item is not null && IsPlayerOwned(item, playerId, objects);
         IReadOnlyList<uint> activeSpells = objectId == playerId
             ? activeSpellIdsForPlayer?.Invoke(playerId) ?? Array.Empty<uint>()

@@ -1,5 +1,6 @@
 using AcDream.App.Interaction;
 using AcDream.App.Plugins;
+using AcDream.Runtime.Plugins;
 using AcDream.Core.Chat;
 using AcDream.Core.Combat;
 using AcDream.Core.Plugins;
@@ -15,37 +16,37 @@ using System.Net;
 
 namespace AcDream.App.Tests.Plugins;
 
-public sealed class AppAutomationSurfacePluginApiTests
+public sealed class RuntimeAutomationSurfacePluginApiTests
 {
     [Fact]
     public void MapWorldObjectUseOutcomeMapsEveryOutcomeToItsPluginStatus()
     {
         Assert.Equal(
             PluginItemCommandStatus.Started,
-            AppAutomationSurface.MapWorldObjectUseOutcome(
+            RuntimeAutomationSurface.MapWorldObjectUseOutcome(
                 AutomationUseOutcome.Started).Status);
         Assert.Equal(
             PluginItemCommandStatus.Busy,
-            AppAutomationSurface.MapWorldObjectUseOutcome(
+            RuntimeAutomationSurface.MapWorldObjectUseOutcome(
                 AutomationUseOutcome.Busy).Status);
         Assert.Equal(
             PluginItemCommandStatus.Refused,
-            AppAutomationSurface.MapWorldObjectUseOutcome(
+            RuntimeAutomationSurface.MapWorldObjectUseOutcome(
                 AutomationUseOutcome.NotUseable).Status);
         Assert.Equal(
             PluginItemCommandStatus.Unavailable,
-            AppAutomationSurface.MapWorldObjectUseOutcome(
+            RuntimeAutomationSurface.MapWorldObjectUseOutcome(
                 AutomationUseOutcome.NotInWorld).Status);
         Assert.Equal(
             PluginItemCommandStatus.Unavailable,
-            AppAutomationSurface.MapWorldObjectUseOutcome(
+            RuntimeAutomationSurface.MapWorldObjectUseOutcome(
                 AutomationUseOutcome.Unavailable).Status);
     }
 
     [Fact]
     public void MapWorldObjectUseOutcomeGivesNotUseableAHumanNotice()
     {
-        PluginItemCommandResult result = AppAutomationSurface.MapWorldObjectUseOutcome(
+        PluginItemCommandResult result = RuntimeAutomationSurface.MapWorldObjectUseOutcome(
             AutomationUseOutcome.NotUseable);
 
         Assert.Equal("That cannot be used.", result.Notice);
@@ -56,7 +57,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     {
         var (runtime, commands) = CreateRealSession();
         using var runtimeDisposal = runtime;
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         commands.Start(runtime.Generation);
         surface.BindItems(
@@ -104,7 +105,7 @@ public sealed class AppAutomationSurfacePluginApiTests
         // the caller what to do instead.
         var (runtime, commands) = CreateRealSession();
         using var runtimeDisposal = runtime;
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         commands.Start(runtime.Generation);
         surface.BindItems(
@@ -138,7 +139,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     {
         var (runtime, commands) = CreateRealSession();
         using var runtimeDisposal = runtime;
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         commands.Start(runtime.Generation);
         surface.BindItems(
@@ -167,7 +168,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     public void ChatReceivedFiresInArrivalOrderWithTheTextClassAndTime()
     {
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         var seen = new List<PluginChatMessage>();
         surface.Chat.Received += seen.Add;
@@ -192,7 +193,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     public void AFilteredLineReachesNeitherTheTranscriptNorTheEventNorTheRing()
     {
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         var seen = new List<string>();
         surface.Chat.Received += message => seen.Add(message.Text);
@@ -214,7 +215,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     [Fact]
     public void AFilterInstalledBeforeLoginStillAppliesToTheNextSession()
     {
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         using IDisposable filter = surface.Chat.RegisterFilter(static _ => true);
 
         using var runtime = GameRuntimeTestFactory.Create();
@@ -228,7 +229,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     public void UnbindingRemovesTheSurfaceFiltersFromTheSessionsLog()
     {
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         using IDisposable filter = surface.Chat.RegisterFilter(static _ => true);
 
@@ -242,7 +243,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     public void PostMessageUsesTheRequestedTextClass()
     {
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
 
         surface.Chat.PostMessage("A tinted line.", (int)RetailLogTextType.Magic);
@@ -256,7 +257,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     public void PostMessageRejectsTheStatusOnlyClientLocalClassAndFallsBackToDefault()
     {
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
 
         surface.Chat.PostMessage(
@@ -277,7 +278,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     public void PostMessageRejectsAnOutOfRangeTextClassAndFallsBackToDefault()
     {
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
 
         surface.Chat.PostMessage("out of range", -1);
@@ -289,7 +290,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     [Fact]
     public void PostSystemMessageThrowsOnNullText()
     {
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
 
         Assert.Throws<ArgumentNullException>(() => surface.Chat.PostSystemMessage(null!));
     }
@@ -298,7 +299,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     public void PostSystemMessageIgnoresAnEmptyString()
     {
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
 
         surface.Chat.PostSystemMessage(string.Empty);
@@ -312,7 +313,7 @@ public sealed class AppAutomationSurfacePluginApiTests
         var events = new WorldEvents();
         var (runtime, commands) = CreateRealSession();
         using var runtimeDisposal = runtime;
-        using var surface = new AppAutomationSurface(events);
+        using var surface = new RuntimeAutomationSurface(events);
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         int logins = 0;
         int logoffs = 0;
@@ -338,7 +339,7 @@ public sealed class AppAutomationSurfacePluginApiTests
         var events = new WorldEvents();
         var (runtime, commands) = CreateRealSession();
         using var runtimeDisposal = runtime;
-        using var surface = new AppAutomationSurface(events);
+        using var surface = new RuntimeAutomationSurface(events);
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
 
         string nameSeenInHandler = string.Empty;
@@ -367,7 +368,7 @@ public sealed class AppAutomationSurfacePluginApiTests
         var events = new WorldEvents();
         var (runtime, commands) = CreateRealSession();
         using var runtimeDisposal = runtime;
-        using var surface = new AppAutomationSurface(events);
+        using var surface = new RuntimeAutomationSurface(events);
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         int logins = 0;
         events.LoginComplete += () => logins++;
@@ -383,7 +384,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     {
         var events = new WorldEvents();
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface(events);
+        using var surface = new RuntimeAutomationSurface(events);
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         var deaths = new List<string>();
         events.LocalPlayerDied += deaths.Add;
@@ -399,7 +400,7 @@ public sealed class AppAutomationSurfacePluginApiTests
         var events = new WorldEvents();
         var (runtime, commands) = CreateRealSession();
         using var runtimeDisposal = runtime;
-        using var surface = new AppAutomationSurface(events);
+        using var surface = new RuntimeAutomationSurface(events);
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         int logins = 0;
         var deaths = new List<string>();
@@ -418,7 +419,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     public void TheSpellCatalogExposesTheWholeTableAndFindsSpellsByName()
     {
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         runtime.CharacterOwner.Spellbook.InstallMetadata(SpellTable.Create(
         [
@@ -457,7 +458,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     [Fact]
     public void ServerPopulationIsUnknownUntilTheServerReportsIt()
     {
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         Assert.Equal(-1, surface.Character.ServerPopulation);
     }
 
@@ -465,7 +466,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     public void ServerPopulationReachesTheSurfaceFromTheLoginTimeWorldNameMessage()
     {
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
 
         runtime.Session.CharacterSelectionState.ApplyWorldName(
@@ -480,7 +481,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     {
         var events = new WorldEvents();
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface(events);
+        using var surface = new RuntimeAutomationSurface(events);
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         var seen = new List<PluginObjectChange>();
         events.ObjectChanged += seen.Add;
@@ -540,7 +541,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     {
         var events = new WorldEvents();
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface(events);
+        using var surface = new RuntimeAutomationSurface(events);
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         uint? opened = null;
         uint? closed = null;
@@ -565,7 +566,7 @@ public sealed class AppAutomationSurfacePluginApiTests
         // (durability, stack count) that observers need to see.
         var events = new WorldEvents();
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface(events);
+        using var surface = new RuntimeAutomationSurface(events);
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         var seen = new List<PluginObjectChange>();
         events.ObjectChanged += seen.Add;
@@ -585,7 +586,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     [Fact]
     public void LootAppraisalCurrentObjectIdAdvancesForAnAutomationResponseThatDoesNotPresent()
     {
-        // Pins AppAutomationSurface's ILootAutomation.Appraisal mapping:
+        // Pins RuntimeAutomationSurface's ILootAutomation.Appraisal mapping:
         // PluginAppraisalState.CurrentObjectId must read
         // RuntimeInteractionTransactionState.LastCompletedAppraisalId, not
         // CurrentAppraisalId (the examination window's presentation
@@ -597,7 +598,7 @@ public sealed class AppAutomationSurfacePluginApiTests
         // fixed.
         var events = new WorldEvents();
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface(events);
+        using var surface = new RuntimeAutomationSurface(events);
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         ILootAutomation loot = surface.Loot;
 
@@ -626,7 +627,7 @@ public sealed class AppAutomationSurfacePluginApiTests
         var events = new WorldEvents();
         var (runtime, commands) = CreateRealSession();
         using var runtimeDisposal = runtime;
-        using var surface = new AppAutomationSurface(events);
+        using var surface = new RuntimeAutomationSurface(events);
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         commands.Start(runtime.Generation);
 
@@ -672,7 +673,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     {
         var (runtime, commands) = CreateRealSession();
         using var runtimeDisposal = runtime;
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         commands.Start(runtime.Generation);
         var weapon = new ClientWeaponProfile(
@@ -709,7 +710,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     {
         var (runtime, commands) = CreateRealSession();
         using var runtimeDisposal = runtime;
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         commands.Start(runtime.Generation);
         runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
@@ -736,7 +737,7 @@ public sealed class AppAutomationSurfacePluginApiTests
         // ArmorProfile blob itself.
         var (runtime, commands) = CreateRealSession();
         using var runtimeDisposal = runtime;
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         commands.Start(runtime.Generation);
         var armor = new ClientArmorProfile(
@@ -777,14 +778,16 @@ public sealed class AppAutomationSurfacePluginApiTests
     public void LogoutIsUnavailableWithoutAnInWorldSessionAndNeverCallsTheRoute()
     {
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         int calls = 0;
-        surface.BindLogout(() =>
-        {
-            calls++;
-            return true;
-        });
+        surface.BindLogout(
+            () =>
+            {
+                calls++;
+                return true;
+            },
+            () => true);
 
         // The runtime never reached RuntimeLifecycleState.InWorld in this
         // fixture (that requires a driven session), so IsAvailable is false
@@ -797,7 +800,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     [Fact]
     public void DialogsAnswerForwardsToTheBoundRoute()
     {
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         uint? seenContext = null;
         bool? seenAccept = null;
         surface.BindDialogs((contextId, accept) =>
@@ -817,7 +820,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     [Fact]
     public void DialogsAnswerReturnsFalseWithoutABoundRoute()
     {
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
 
         Assert.False(((IDialogAutomation)surface).Answer(1u, true));
     }
@@ -826,7 +829,7 @@ public sealed class AppAutomationSurfacePluginApiTests
     public void RaiseConfirmationRequestedFiresTheEvent()
     {
         var events = new WorldEvents();
-        using var surface = new AppAutomationSurface(events);
+        using var surface = new RuntimeAutomationSurface(events);
         PluginConfirmation? seen = null;
         events.ConfirmationRequested += c => seen = c;
 
