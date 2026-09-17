@@ -49,6 +49,9 @@ public sealed class JournalContractsPageController
     private readonly Dictionary<UiText, UiTextLayoutCache<string>> _detailLayouts =
         new(ReferenceEqualityComparer.Instance);
 
+    private (long Second, uint Contract, long Revision) _detailKey;
+    private bool _detailKeyValid;
+
     private readonly List<uint> _rowContractIds = [];
     private readonly List<(uint ContractId, UiText? Name, Vector4 Unselected)> _rows = [];
 
@@ -144,6 +147,7 @@ public sealed class JournalContractsPageController
         }
 
         ApplySelectionHighlight();
+        _detailKeyValid = false;
         RefreshDetail();
     }
 
@@ -159,6 +163,7 @@ public sealed class JournalContractsPageController
     {
         _selectedContractId = contractId;
         ApplySelectionHighlight();
+        _detailKeyValid = false;
         RefreshDetail();
     }
 
@@ -182,6 +187,20 @@ public sealed class JournalContractsPageController
     {
         ContractCatalog catalog = _bindings.Catalog();
         DateTime now = _bindings.Now();
+
+        // Every string below resolves to whole seconds -- the progress line
+        // and the countdown both go through the duration format, which
+        // truncates -- so inside one second, with the same contract selected
+        // and the same tracker revision, this would compose exactly the six
+        // strings it composed last frame.
+        var key = (
+            Second: now.Ticks / TimeSpan.TicksPerSecond,
+            Contract: _selectedContractId,
+            Revision: _bindings.Contracts.Snapshot.Revision);
+        if (_detailKeyValid && _detailKey == key)
+            return;
+        _detailKey = key;
+        _detailKeyValid = true;
 
         if (_selectedContractId == 0u
             || !_bindings.Contracts.TryGetContract(_selectedContractId, out ContractTracker tracker))

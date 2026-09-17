@@ -794,8 +794,11 @@ public sealed class ShadowObjectRegistry
                                     collisionType, cylHeight, scale, state, flags);
 
         var cellIds = new List<uint>(cellSet.Count);
-        foreach (uint cellId in cellSet)
+        // Indexed: the cell set arrives as an interface, so a foreach boxes an
+        // enumerator, and a moving owner runs this several times a frame.
+        for (int c = 0; c < cellSet.Count; c++)
         {
+            uint cellId = cellSet[c];
             AddEntryToCell(entry, cellId);
             cellIds.Add(cellId);
         }
@@ -895,8 +898,12 @@ public sealed class ShadowObjectRegistry
         _entityShapes[entityId] = shapes;
         var allCells = new List<uint>(cellSet.Count);
 
-        foreach (var shape in shapes)
+        // Both loops are indexed: the shapes and the cell set arrive as
+        // interfaces, and a foreach here boxed one enumerator per owner and
+        // one more per shape, several times a frame for a moving owner.
+        for (int p = 0; p < shapes.Count; p++)
         {
+            ShadowShape shape = shapes[p];
             var rotatedLocal = Vector3.Transform(shape.LocalPosition, entityWorldRot);
             var partWorldPos = entityWorldPos + rotatedLocal;
             var partWorldRot = entityWorldRot * shape.LocalRotation;
@@ -915,12 +922,12 @@ public sealed class ShadowObjectRegistry
                 LocalPosition: shape.LocalPosition,
                 LocalRotation: shape.LocalRotation);
 
-            foreach (uint cellId in cellSet)
-                AddEntryToCell(entry, cellId);
+            for (int c = 0; c < cellSet.Count; c++)
+                AddEntryToCell(entry, cellSet[c]);
         }
 
-        foreach (uint cellId in cellSet)
-            allCells.Add(cellId);
+        for (int c = 0; c < cellSet.Count; c++)
+            allCells.Add(cellSet[c]);
 
         _entityToCells[entityId] = allCells;
         _entityReg[entityId] = new RegistrationRecord(

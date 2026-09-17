@@ -141,6 +141,52 @@ public sealed class JournalContractsPageControllerTests
         return text?.LinesProvider?.Invoke().FirstOrDefault().Text ?? string.Empty;
     }
 
+    /// <summary>
+    /// The detail pane is composed once a second, not once a frame: inside one
+    /// second it shows exactly what it showed on the previous frame, and it
+    /// follows the clock across every second boundary. This fails if the
+    /// second is dropped from the recompose key (the pane would then be
+    /// composed every frame again) and if the key never expires (the countdown
+    /// would freeze).
+    /// </summary>
+    [Fact]
+    public void TheDetailPaneFollowsTheClockBySecondsNotByFrames()
+    {
+        (UiElement page, _) = BuildPage();
+        using var state = new RuntimeContractState();
+        Track(state, 0x10u, stage: 3u, whenRepeats: 600d);
+        ContractCatalog catalog = Catalog(Entry(0x10u, "First", repeatFlag: "flag"));
+
+        DateTime clock = Now;
+        var controller = new JournalContractsPageController(
+            page,
+            new JournalContractsPageController.Bindings(
+                Contracts: state.View,
+                Catalog: () => catalog,
+                Now: () => clock,
+                TemplateResolver: RowTemplate));
+
+        string atStart = TextOf(page, StatusValueId);
+        Assert.NotEqual(string.Empty, atStart);
+
+        clock = Now.AddMilliseconds(400);
+        controller.Tick();
+        Assert.Equal(atStart, TextOf(page, StatusValueId));
+
+        clock = Now.AddMilliseconds(999);
+        controller.Tick();
+        Assert.Equal(atStart, TextOf(page, StatusValueId));
+
+        clock = Now.AddSeconds(1);
+        controller.Tick();
+        string afterOne = TextOf(page, StatusValueId);
+        Assert.NotEqual(atStart, afterOne);
+
+        clock = Now.AddSeconds(2);
+        controller.Tick();
+        Assert.NotEqual(afterOne, TextOf(page, StatusValueId));
+    }
+
     [Fact]
     public void RowsCarryTheAuthoredNameAndTheRetailProgressText()
     {
