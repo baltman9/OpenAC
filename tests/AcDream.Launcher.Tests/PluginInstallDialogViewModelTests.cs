@@ -22,6 +22,7 @@ public sealed class PluginInstallDialogViewModelTests
             "Hello",
             isListed: true,
             isUpdate: false,
+            null,
             Characters,
             _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
             (id, chosen) => enableCalls.Add((id, chosen)));
@@ -47,6 +48,7 @@ public sealed class PluginInstallDialogViewModelTests
             "Hello",
             isListed: true,
             isUpdate: false,
+            null,
             Characters,
             _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
             (id, chosen) => enableCalls.Add((id, chosen)));
@@ -70,6 +72,7 @@ public sealed class PluginInstallDialogViewModelTests
             "Hello",
             isListed: true,
             isUpdate: false,
+            null,
             Characters,
             _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
             (id, chosen) => enableCalls.Add((id, chosen)));
@@ -93,6 +96,7 @@ public sealed class PluginInstallDialogViewModelTests
             "Hello",
             isListed: true,
             isUpdate: false,
+            null,
             Characters,
             _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
             (id, chosen) => enableCalls.Add((id, chosen)));
@@ -114,6 +118,7 @@ public sealed class PluginInstallDialogViewModelTests
             "Hello",
             isListed: true,
             isUpdate: false,
+            null,
             Characters,
             _ =>
             {
@@ -144,6 +149,7 @@ public sealed class PluginInstallDialogViewModelTests
             "Hello",
             isListed: true,
             isUpdate: false,
+            null,
             Characters,
             _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false)),
             (_, _) => { });
@@ -165,6 +171,7 @@ public sealed class PluginInstallDialogViewModelTests
             "Some Plugin",
             isListed: false,
             isUpdate: false,
+            null,
             [],
             _ => Task.FromResult(new PluginInstallResult("someone.plugin", "0.1.0", WasUpdate: false)),
             (_, _) => { });
@@ -178,6 +185,51 @@ public sealed class PluginInstallDialogViewModelTests
     }
 
     [Fact]
+    public void APrereleaseOfferedVersionAddsAPreReleaseSentenceToTheNotice()
+    {
+        var dialog = new PluginInstallDialogViewModel();
+        dialog.Open(
+            "shaneedwards/openac-plugin-hello",
+            "edwards.hello",
+            "Hello",
+            isListed: true,
+            isUpdate: false,
+            "0.2.0-beta.1",
+            Characters,
+            _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.2.0-beta.1", WasUpdate: false)),
+            (_, _) => { });
+
+        Assert.True(dialog.IsOfferedPrerelease);
+        Assert.Equal(
+            "Plugins are made by third parties, not OpenAC. Installing one is your choice and "
+            + "your responsibility. Only install plugins from authors you trust.\n"
+            + "This version is a pre-release.",
+            dialog.WarningText);
+    }
+
+    [Fact]
+    public void AStableOfferedVersionAddsNoPreReleaseSentence()
+    {
+        var dialog = new PluginInstallDialogViewModel();
+        dialog.Open(
+            "shaneedwards/openac-plugin-hello",
+            "edwards.hello",
+            "Hello",
+            isListed: true,
+            isUpdate: false,
+            "0.2.0",
+            Characters,
+            _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.2.0", WasUpdate: false)),
+            (_, _) => { });
+
+        Assert.False(dialog.IsOfferedPrerelease);
+        Assert.Equal(
+            "Plugins are made by third parties, not OpenAC. Installing one is your choice and "
+            + "your responsibility. Only install plugins from authors you trust.",
+            dialog.WarningText);
+    }
+
+    [Fact]
     public void UpdateOpensWithNoEnableChoiceOffered()
     {
         var dialog = new PluginInstallDialogViewModel();
@@ -187,6 +239,7 @@ public sealed class PluginInstallDialogViewModelTests
             "Hello",
             isListed: true,
             isUpdate: true,
+            null,
             Characters,
             _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.2.0", WasUpdate: true)),
             (_, _) => { });
@@ -207,6 +260,7 @@ public sealed class PluginInstallDialogViewModelTests
             "Hello",
             isListed: true,
             isUpdate: true,
+            null,
             Characters,
             _ => Task.FromResult(new PluginInstallResult("edwards.hello", "0.2.0", WasUpdate: true)),
             (id, chosen) => enableCalls.Add((id, chosen)));
@@ -229,6 +283,7 @@ public sealed class PluginInstallDialogViewModelTests
             "Hello",
             isListed: true,
             isUpdate: false,
+            null,
             Characters,
             _ =>
             {

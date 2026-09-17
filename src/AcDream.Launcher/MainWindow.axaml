@@ -200,6 +200,9 @@
                         <TextBlock Text="{Binding Summary}" Classes="muted" FontSize="12" />
                         <TextBlock Text="{Binding Compatibility}" IsVisible="{Binding ShowCompatibilityWarning}" Foreground="#DBB573" FontSize="12" TextWrapping="Wrap" />
                         <TextBlock Text="{Binding Compatibility}" IsVisible="{Binding ShowCompatibilityMuted}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                        <Border Classes="chip" IsVisible="{Binding IsPrerelease}" AutomationProperties.Name="beta">
+                          <TextBlock Text="beta" Classes="muted" TextWrapping="Wrap" />
+                        </Border>
                         <Border Classes="chip update" IsVisible="{Binding HasUpdateChip}" AutomationProperties.Name="{Binding UpdateChipText}">
                           <TextBlock Text="{Binding UpdateChipText}" TextWrapping="Wrap" />
                         </Border>
@@ -215,6 +218,7 @@
                         </Border>
                         <TextBlock Text="A newer client version bundles this plugin; it will replace this copy on update." IsVisible="{Binding Conflict}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
                         <TextBlock Text="{Binding UpdateWithheldReason, StringFormat='Update withheld: {0}'}" IsVisible="{Binding HasUpdateWithheldReason}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                        <CheckBox Content="Beta updates" IsVisible="{Binding ShowBetaToggle}" IsEnabled="{Binding IsBetaToggleEnabled}" IsChecked="{Binding IsBetaChannel, Mode=TwoWay}" AutomationProperties.Name="{Binding BetaToggleAutomationName}" />
                       </StackPanel>
                       <Button Grid.Column="1" Content="Update" IsVisible="{Binding UpdateAvailable}" Command="{Binding UpdateCommand}" AutomationProperties.Name="{Binding UpdateAutomationName}" />
                       <Button Grid.Column="2" Content="Remove" IsVisible="{Binding CanRemove}" Command="{Binding RemoveCommand}" AutomationProperties.Name="{Binding RemoveAutomationName}" />

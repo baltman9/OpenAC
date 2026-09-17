@@ -1484,6 +1484,194 @@ public sealed partial class LauncherWindowViewModelTests
         Assert.True(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, "edwards.managed")));
     }
 
+    [Fact]
+    public async Task TogglingBetaWritesTheChannelAndReChecksOnlyThatPluginNotTheWholeList()
+    {
+        using var fixture = new PluginPanelFixture();
+        fixture.WriteManifest("edwards.managed", "0.1.0", ["headless"]);
+        fixture.AddRecord("edwards.managed", "shaneedwards/openac-plugin-hello", "0.1.0");
+        const string repo = "shaneedwards/openac-plugin-hello";
+        Uri stableUri = GitHubReleaseLocator.LatestAsset(repo, "plugin.json");
+        Uri stableTaggedUri = GitHubReleaseLocator.TaggedAsset(repo, "v0.1.0", "plugin.json");
+        Uri feedUri = GitHubReleaseLocator.ReleasesFeed(repo);
+        Uri betaTaggedUri = GitHubReleaseLocator.TaggedAsset(repo, "v0.2.0-beta.1", "plugin.json");
+        byte[] feedBytes = System.Text.Encoding.UTF8.GetBytes($$"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <entry><link rel="alternate" href="https://github.com/{{repo}}/releases/tag/v0.2.0-beta.1"/></entry>
+            </feed>
+            """);
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(fixture.ListJson());
+            }
+
+            if (request.RequestUri == stableUri)
+            {
+                return Redirect(stableTaggedUri);
+            }
+
+            if (request.RequestUri == stableTaggedUri)
+            {
+                return Ok(PluginPanelFixture.ManifestJson("edwards.managed", "0.1.0", "0.1.0", ["headless"]));
+            }
+
+            if (request.RequestUri == feedUri)
+            {
+                return Ok(feedBytes);
+            }
+
+            if (request.RequestUri == betaTaggedUri)
+            {
+                return Ok(PluginPanelFixture.ManifestJson(
+                    "edwards.managed", "0.2.0-beta.1", "0.1.0", ["headless"]));
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        PluginInstalledRowViewModel managed = Assert.Single(
+            viewModel.Plugins.Installed, row => row.Id == "edwards.managed");
+        Assert.True(managed.ShowBetaToggle);
+        Assert.False(managed.IsBetaChannel);
+        Assert.False(managed.UpdateAvailable);
+
+        managed.IsBetaChannel = true;
+
+        InstalledPluginRecordStore store = InstalledPluginRecordStore.ForApplicationPaths(fixture.Paths);
+        store.Load();
+        Assert.Equal(PluginReleaseChannel.Beta, store.Find("edwards.managed")!.Channel);
+
+        PluginInstalledRowViewModel updated = Assert.Single(
+            viewModel.Plugins.Installed, row => row.Id == "edwards.managed");
+        Assert.True(updated.IsBetaChannel);
+        Assert.True(updated.UpdateAvailable);
+        Assert.Equal("0.2.0-beta.1", updated.UpdateVersion);
+
+        // A single-plugin re-check (L-319), never the full list Check the toggle would otherwise pay for.
+        Assert.Equal(1, handler.Requests.Count(uri => uri == PluginListUri));
+    }
+
+    [Fact]
+    public async Task ARefusedChannelWriteRevertsTheToggleAndShowsTheLeaseRefusalLikeRemove()
+    {
+        using var fixture = new PluginPanelFixture();
+        fixture.WriteManifest("edwards.managed", "0.1.0", ["headless"]);
+        fixture.AddRecord("edwards.managed", "shaneedwards/openac-plugin-hello", "0.1.0");
+        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
+            ? Ok(fixture.ListJson())
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        PluginInstalledRowViewModel managed = Assert.Single(
+            viewModel.Plugins.Installed, row => row.Id == "edwards.managed");
+
+        var barrier = new UpdateSessionBarrier(fixture.Paths.DataDirectory);
+        Assert.True(barrier.TryAcquireExclusive(out UpdateSessionBarrier.ExclusiveLease? lease));
+        using (lease)
+        {
+            managed.IsBetaChannel = true;
+        }
+
+        Assert.Equal(PluginInstaller.SessionLeaseRefusal, viewModel.Plugins.Error);
+        PluginInstalledRowViewModel stillManaged = Assert.Single(
+            viewModel.Plugins.Installed, row => row.Id == "edwards.managed");
+        Assert.False(stillManaged.IsBetaChannel);
+    }
+
+    [Fact]
+    public async Task BetaToggleIsDisabledWhileTheModalIsOpen()
+    {
+        using var fixture = new PluginPanelFixture();
+        fixture.WriteManifest("edwards.managed", "0.1.0", ["headless"]);
+        fixture.AddRecord("edwards.managed", "shaneedwards/openac-plugin-hello", "0.1.0");
+        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
+            ? Ok(fixture.ListJson())
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        PluginInstalledRowViewModel managed = Assert.Single(
+            viewModel.Plugins.Installed, row => row.Id == "edwards.managed");
+        Assert.True(managed.IsBetaToggleEnabled);
+
+        managed.RemoveCommand!.Execute(null);
+        Assert.True(viewModel.Plugins.IsRemoveDialogOpen);
+        Assert.False(managed.IsBetaToggleEnabled);
+
+        viewModel.CloseActiveModal();
+        Assert.True(managed.IsBetaToggleEnabled);
+    }
+
+    [Fact]
+    public async Task ABetaChipShowsOnlyForAPrereleaseInstalledVersion()
+    {
+        using var fixture = new PluginPanelFixture();
+        fixture.WriteManifest("edwards.prerelease", "0.2.0-beta.1", ["headless"]);
+        fixture.AddRecord("edwards.prerelease", "shaneedwards/openac-plugin-hello", "0.2.0-beta.1");
+        fixture.WriteManifest("edwards.stable", "0.1.0", ["headless"]);
+        fixture.AddRecord("edwards.stable", "shaneedwards/openac-plugin-other", "0.1.0");
+        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
+            ? Ok(fixture.ListJson())
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        PluginInstalledRowViewModel prerelease = Assert.Single(
+            viewModel.Plugins.Installed, row => row.Id == "edwards.prerelease");
+        PluginInstalledRowViewModel stable = Assert.Single(
+            viewModel.Plugins.Installed, row => row.Id == "edwards.stable");
+        Assert.True(prerelease.IsPrerelease);
+        Assert.False(stable.IsPrerelease);
+    }
+
+    [Fact]
+    public async Task TheBetaToggleIsHiddenForADirectInstallEvenOneOnAPrereleaseVersion()
+    {
+        using var fixture = new PluginPanelFixture();
+        fixture.WriteManifest("someone.manual", "1.0.0-beta.1", ["headless"]);
+        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
+            ? Ok(fixture.ListJson())
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        PluginInstalledRowViewModel direct = Assert.Single(
+            viewModel.Plugins.Installed, row => row.Id == "someone.manual");
+        Assert.False(direct.ShowBetaToggle);
+        Assert.True(direct.IsPrerelease);
+    }
+
     private sealed class PluginPanelFixture : IDisposable
     {
         private readonly string _root = Path.Combine(
@@ -1530,7 +1718,11 @@ public sealed partial class LauncherWindowViewModelTests
         }
 
         public void AddRecord(
-            string id, string repo, string version, PluginInstallSource source = PluginInstallSource.Listed)
+            string id,
+            string repo,
+            string version,
+            PluginInstallSource source = PluginInstallSource.Listed,
+            PluginReleaseChannel channel = PluginReleaseChannel.Stable)
         {
             InstalledPluginRecordStore store = InstalledPluginRecordStore.ForApplicationPaths(Paths);
             store.Load();
@@ -1542,7 +1734,10 @@ public sealed partial class LauncherWindowViewModelTests
                 "v" + version,
                 new string('a', 64),
                 DateTimeOffset.UtcNow,
-                null));
+                null)
+            {
+                Channel = channel,
+            });
             store.Save();
         }
 

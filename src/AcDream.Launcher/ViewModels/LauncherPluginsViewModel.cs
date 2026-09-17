@@ -91,6 +91,9 @@ public sealed class PluginInstalledRowViewModel(
     string? blocked,
     bool conflict,
     bool canRemove,
+    bool showBetaToggle,
+    bool isBetaChannel,
+    bool isPrerelease,
     bool updateAvailable,
     string? updateVersion,
     string? updateCompatibilityNote,
@@ -99,9 +102,13 @@ public sealed class PluginInstalledRowViewModel(
     RelayCommand? updateCommand,
     RelayCommand? removeCommand,
     string? refusal,
-    bool hasDuplicate)
+    bool hasDuplicate,
+    Action<bool> onBetaToggled,
+    Func<bool> canToggleBeta)
     : ObservableObject
 {
+    private bool _isBetaChannel = isBetaChannel;
+
     public string Id { get; } = id;
     public string DisplayName { get; } = displayName;
     public string Version { get; } = version;
@@ -139,6 +146,46 @@ public sealed class PluginInstalledRowViewModel(
     public string RemoveAutomationName { get; } = $"Remove {displayName}";
     public RelayCommand? UpdateCommand { get; } = updateCommand;
     public RelayCommand? RemoveCommand { get; } = removeCommand;
+
+    /// <summary>Launcher-managed only (L-319): Direct and Bundled plugins have no channel.</summary>
+    public bool ShowBetaToggle { get; } = showBetaToggle;
+
+    public string BetaToggleAutomationName { get; } = $"Beta updates for {displayName}";
+
+    /// <summary>Whether the installed release itself carries a SemVer prerelease part, regardless
+    /// of the plugin's channel (a beta-channel plugin reads stable most of the time, per L-319).</summary>
+    public bool IsPrerelease { get; } = isPrerelease;
+
+    public bool IsBetaChannel
+    {
+        get => _isBetaChannel;
+        set
+        {
+            if (!SetProperty(ref _isBetaChannel, value))
+            {
+                return;
+            }
+
+            onBetaToggled(value);
+        }
+    }
+
+    public bool IsBetaToggleEnabled => canToggleBeta();
+
+    internal void NotifyBetaToggleEnabledChanged() => OnPropertyChanged(nameof(IsBetaToggleEnabled));
+
+    /// <summary>Puts the toggle back without re-triggering <c>onBetaToggled</c>, for a refused
+    /// channel write (the barrier's lease refusal, shown the way Remove shows it).</summary>
+    internal void RevertBetaChannel(bool value)
+    {
+        if (_isBetaChannel == value)
+        {
+            return;
+        }
+
+        _isBetaChannel = value;
+        OnPropertyChanged(nameof(IsBetaChannel));
+    }
 }
 
 /// <summary>Discover/Installed, Refresh list, Add from URL, and the install and remove dialogs
@@ -467,50 +514,16 @@ public sealed class LauncherPluginsViewModel : ObservableObject
         _allInstalled.Clear();
         foreach (InstalledPluginInfo info in outcome.Installed)
         {
-            bool canRemove = info.Source is InstalledPluginSource.Managed or InstalledPluginSource.Direct;
             outcome.UpdatesAvailable.TryGetValue(info.Id, out PluginUpdateAvailability? availability);
-            bool updateAvailable = info.Source == InstalledPluginSource.Managed && availability is not null;
-            RelayCommand? updateCommand = updateAvailable
-                ? new RelayCommand(
-                    () => OpenUpdateDialog(info, availability!.Tag), () => _canInteract() && !IsBusy)
-                : null;
-            RelayCommand? removeCommand = canRemove
-                ? new RelayCommand(() => OpenRemoveDialog(info), () => _canInteract() && !IsBusy)
-                : null;
             outcome.UpdateWithheldReasons.TryGetValue(info.Id, out string? withheldReason);
-            _allInstalled.Add(new PluginInstalledRowViewModel(
-                info.Id,
-                info.DisplayName,
-                info.Version,
-                DescribeSource(info.Source, info.ListedSource),
-                info.Compatibility,
-                info.CompatibilityIsWarning,
-                info.Blocked,
-                info.Conflict,
-                canRemove,
-                updateAvailable,
-                updateAvailable ? availability!.Version : null,
-                updateAvailable ? availability!.CompatibilityNote : null,
-                updateAvailable && availability!.CompatibilityIsWarning,
-                withheldReason,
-                updateCommand,
-                removeCommand,
-                info.Refusal,
-                info.HasDuplicate));
+            _allInstalled.Add(BuildInstalledRow(info, availability, withheldReason));
         }
 
         _allDiscover.Clear();
         foreach (PluginDiscoverEntry entry in outcome.Discover)
         {
             var install = new RelayCommand(
-                () => OpenInstallDialog(
-                    entry.Repo,
-                    entry.Id,
-                    entry.Name,
-                    isUpdate: false,
-                    _discoverDetailsCache.TryGetValue(entry.Id, out DiscoverDetails cachedTag)
-                        ? cachedTag.Tag
-                        : null),
+                () => OpenDiscoverInstallDialog(entry),
                 () => _canInteract() && !IsBusy);
             var row = new PluginDiscoverRowViewModel(
                 entry.Id, entry.Name, entry.Author, entry.Description, entry.Repo, install);
@@ -525,6 +538,130 @@ public sealed class LauncherPluginsViewModel : ObservableObject
         }
 
         ApplyFilters();
+    }
+
+    /// <summary>Builds one Installed row from the inventory and its update check, reused by both a
+    /// full Check pass and a single-plugin re-check after the beta toggle (L-319).</summary>
+    private PluginInstalledRowViewModel BuildInstalledRow(
+        InstalledPluginInfo info, PluginUpdateAvailability? availability, string? withheldReason)
+    {
+        bool canRemove = info.Source is InstalledPluginSource.Managed or InstalledPluginSource.Direct;
+        bool updateAvailable = info.Source == InstalledPluginSource.Managed && availability is not null;
+        bool showBetaToggle = info.Source == InstalledPluginSource.Managed;
+        bool isBetaChannel = showBetaToggle
+            && _composition!.RecordStore.Find(info.Id)?.Channel == PluginReleaseChannel.Beta;
+        bool isPrerelease = LauncherVersion.TryParse(info.Version, out LauncherVersion? installedVersion)
+            && installedVersion.IsPreRelease;
+        RelayCommand? updateCommand = updateAvailable
+            ? new RelayCommand(
+                () => OpenUpdateDialog(info, availability!.Tag, availability!.Version),
+                () => _canInteract() && !IsBusy)
+            : null;
+        RelayCommand? removeCommand = canRemove
+            ? new RelayCommand(() => OpenRemoveDialog(info), () => _canInteract() && !IsBusy)
+            : null;
+
+        // The toggle callback needs the row it belongs to (to revert it on a lease refusal); the
+        // row doesn't exist until the constructor returns, so the closure reads it back through
+        // this local once construction has finished.
+        PluginInstalledRowViewModel? self = null;
+        var row = new PluginInstalledRowViewModel(
+            info.Id,
+            info.DisplayName,
+            info.Version,
+            DescribeSource(info.Source, info.ListedSource),
+            info.Compatibility,
+            info.CompatibilityIsWarning,
+            info.Blocked,
+            info.Conflict,
+            canRemove,
+            showBetaToggle,
+            isBetaChannel,
+            isPrerelease,
+            updateAvailable,
+            updateAvailable ? availability!.Version : null,
+            updateAvailable ? availability!.CompatibilityNote : null,
+            updateAvailable && availability!.CompatibilityIsWarning,
+            withheldReason,
+            updateCommand,
+            removeCommand,
+            info.Refusal,
+            info.HasDuplicate,
+            onBetaToggled: isBeta => _ = ToggleBetaAsync(self!, isBeta),
+            canToggleBeta: () => _canInteract() && !IsBusy);
+        self = row;
+        return row;
+    }
+
+    /// <summary>The beta toggle's own write (L-319): sets the channel under the installer's
+    /// exclusive lease, then re-checks that one plugin (never the full pass every other trigger
+    /// runs) and rebuilds its row with the fresh result. A lease refusal reverts the toggle and is
+    /// shown the way Remove shows it.</summary>
+    private async Task ToggleBetaAsync(PluginInstalledRowViewModel row, bool isBeta)
+    {
+        if (_composition is null || IsBusy)
+        {
+            row.RevertBetaChannel(!isBeta);
+            return;
+        }
+
+        IsBusy = true;
+        Error = null;
+        try
+        {
+            _composition.Installer.SetChannel(
+                row.Id, isBeta ? PluginReleaseChannel.Beta : PluginReleaseChannel.Stable);
+            PluginSingleCheckResult result = await _composition
+                .CheckSingleAsync(row.Id, _clientVersionResolver())
+                .ConfigureAwait(true);
+            ReplaceInstalledRow(row.Id, result.Available, result.WithheldReason);
+        }
+        catch (LauncherUpdateException ex)
+        {
+            row.RevertBetaChannel(!isBeta);
+            Error = string.IsNullOrWhiteSpace(ex.Message)
+                ? "The plugin's channel could not be changed."
+                : ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>Rebuilds one Installed row in place, keeping its position in both the full list and
+    /// whatever the current search filter shows.</summary>
+    private void ReplaceInstalledRow(
+        string id, PluginUpdateAvailability? availability, string? withheldReason)
+    {
+        if (_composition is null)
+        {
+            return;
+        }
+
+        InstalledPluginInfo? info = _composition.Inventory.Find(
+            id, _clientVersionResolver(), _composition.CurrentCatalog);
+        if (info is null)
+        {
+            return;
+        }
+
+        PluginInstalledRowViewModel updated = BuildInstalledRow(info, availability, withheldReason);
+        int allIndex = _allInstalled.FindIndex(
+            row => string.Equals(row.Id, id, StringComparison.OrdinalIgnoreCase));
+        if (allIndex >= 0)
+        {
+            _allInstalled[allIndex] = updated;
+        }
+
+        for (int index = 0; index < Installed.Count; index++)
+        {
+            if (string.Equals(Installed[index].Id, id, StringComparison.OrdinalIgnoreCase))
+            {
+                Installed[index] = updated;
+                break;
+            }
+        }
     }
 
     /// <summary>Opening Discover's own request (plan, "Request budget"): one <c>plugin.json</c> per
@@ -593,12 +730,28 @@ public sealed class LauncherPluginsViewModel : ObservableObject
     private readonly record struct DiscoverDetails(
         string LatestVersion, string Tag, string Compatibility, bool CompatibilityIsWarning);
 
+    /// <summary>Discover's Install button: the cache may not hold this plugin's details yet (its
+    /// own request, "Request budget"), so both the tag and version are read live, not captured when
+    /// the row was built.</summary>
+    private void OpenDiscoverInstallDialog(PluginDiscoverEntry entry)
+    {
+        _discoverDetailsCache.TryGetValue(entry.Id, out DiscoverDetails cached);
+        OpenInstallDialog(
+            entry.Repo, entry.Id, entry.Name, isUpdate: false, cached.Tag, cached.LatestVersion);
+    }
+
     /// <summary>Opens the install/update dialog for a repo. <paramref name="pinnedTag"/> is the
     /// release tag whichever caller already resolved (the update check, Discover's own details, or
     /// Add from URL); when Discover hasn't fetched details yet, it is null and Confirm resolves
-    /// latest itself instead of the install ever doing so (L-319).</summary>
+    /// latest itself instead of the install ever doing so (L-319). <paramref name="offeredVersion"/>
+    /// travels the same way, so the dialog's notice can name a pre-release offer (L-319).</summary>
     private void OpenInstallDialog(
-        string repo, string pluginId, string displayName, bool isUpdate, string? pinnedTag)
+        string repo,
+        string pluginId,
+        string displayName,
+        bool isUpdate,
+        string? pinnedTag,
+        string? offeredVersion)
     {
         if (_composition is null)
         {
@@ -613,16 +766,17 @@ public sealed class LauncherPluginsViewModel : ObservableObject
             displayName,
             isListed,
             isUpdate,
+            offeredVersion,
             BuildCharacterOptions(),
             cancellationToken => InstallAsync(repo, pinnedTag, cancellationToken),
             EnableForCharacters);
     }
 
-    private void OpenUpdateDialog(InstalledPluginInfo info, string tag)
+    private void OpenUpdateDialog(InstalledPluginInfo info, string tag, string version)
     {
         if (info.Repo is { } repo)
         {
-            OpenInstallDialog(repo, info.Id, info.DisplayName, isUpdate: true, tag);
+            OpenInstallDialog(repo, info.Id, info.DisplayName, isUpdate: true, tag, version);
         }
     }
 
@@ -832,7 +986,9 @@ public sealed class LauncherPluginsViewModel : ObservableObject
                         break;
                     }
 
-                    OpenInstallDialog(repo, manifest.Id, manifest.DisplayName, isUpdate: false, resolution.Tag);
+                    OpenInstallDialog(
+                        repo, manifest.Id, manifest.DisplayName, isUpdate: false,
+                        resolution.Tag, manifest.Version);
                     break;
                 case PluginReleaseResolveStatus.RateLimited:
                     Error = "GitHub is rate limiting; try later.";
@@ -964,6 +1120,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject
         {
             row.UpdateCommand?.NotifyCanExecuteChanged();
             row.RemoveCommand?.NotifyCanExecuteChanged();
+            row.NotifyBetaToggleEnabledChanged();
         }
     }
 

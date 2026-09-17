@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using AcDream.Launcher.Core.Plugins;
+using AcDream.Launcher.Core.Updates;
 
 namespace AcDream.Launcher.ViewModels;
 
@@ -83,14 +84,31 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
 
     public bool ShowEnableChoice => !IsUpdate;
 
+    /// <summary>The release version this dialog offers, carried from whichever caller resolved it
+    /// (the update check, Discover's own details, or Add from URL), so the notice can name a
+    /// pre-release offer (L-319).</summary>
+    public string? OfferedVersion { get; private set; }
+
+    public bool IsOfferedPrerelease =>
+        OfferedVersion is not null
+        && LauncherVersion.TryParse(OfferedVersion, out LauncherVersion? version)
+        && version.IsPreRelease;
+
     /// <summary>The responsibility notice every install and update dialog shows, every time
     /// (L-313): no wording here says or implies OpenAC reviews plugins, listed or not.</summary>
-    public string WarningText => IsListed
-        ? "Plugins are made by third parties, not OpenAC. Installing one is your choice and your "
-            + "responsibility. Only install plugins from authors you trust."
-        : "Plugins are made by third parties, not OpenAC. Installing one is your choice and your "
-            + "responsibility. Only install plugins from authors you trust.\n"
-            + "This plugin is not on the OpenAC plugin list.";
+    public string WarningText
+    {
+        get
+        {
+            string notice = IsListed
+                ? "Plugins are made by third parties, not OpenAC. Installing one is your choice and your "
+                    + "responsibility. Only install plugins from authors you trust."
+                : "Plugins are made by third parties, not OpenAC. Installing one is your choice and your "
+                    + "responsibility. Only install plugins from authors you trust.\n"
+                    + "This plugin is not on the OpenAC plugin list.";
+            return IsOfferedPrerelease ? notice + "\nThis version is a pre-release." : notice;
+        }
+    }
 
     public ObservableCollection<PluginCharacterChoiceViewModel> Characters { get; } = [];
 
@@ -182,6 +200,7 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
         string displayName,
         bool isListed,
         bool isUpdate,
+        string? offeredVersion,
         IReadOnlyList<PluginCharacterOption> characters,
         Func<CancellationToken, Task<PluginInstallResult>> installAsync,
         Action<string, IReadOnlyList<PluginCharacterOption>> enableForCharacters)
@@ -194,6 +213,7 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
         DisplayName = string.IsNullOrWhiteSpace(displayName) ? pluginId : displayName;
         IsListed = isListed;
         IsUpdate = isUpdate;
+        OfferedVersion = offeredVersion;
         _installAsync = installAsync ?? throw new ArgumentNullException(nameof(installAsync));
         _enableForCharacters = enableForCharacters
             ?? throw new ArgumentNullException(nameof(enableForCharacters));
@@ -210,6 +230,8 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(PluginId));
         OnPropertyChanged(nameof(DisplayName));
         OnPropertyChanged(nameof(IsListed));
+        OnPropertyChanged(nameof(OfferedVersion));
+        OnPropertyChanged(nameof(IsOfferedPrerelease));
         OnPropertyChanged(nameof(WarningText));
         OnPropertyChanged(nameof(HasCharacters));
         IsOpen = true;
