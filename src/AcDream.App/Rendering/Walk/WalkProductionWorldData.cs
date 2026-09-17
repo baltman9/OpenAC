@@ -81,6 +81,7 @@ internal sealed class WalkProductionWorldData : IWalkFrameWorldData
         _outdoorDynamicsMaterialized.Clear();
         _outdoorObjectsMaterialized.Clear();
         _shellMaterialized.Clear();
+        TrimArena();
         _arenaLength = 0;
         UnregisteredRenderMembershipCount = 0;
         _unregisteredEntitiesThisFrame.Clear();
@@ -244,6 +245,29 @@ internal sealed class WalkProductionWorldData : IWalkFrameWorldData
                 : WalkFrameStaticRecords.Empty with { TupleLandblockId = _tupleLandblockId };
         _shellMaterialized[anchor] = records;
         return records;
+    }
+
+    // The arena only ever grows, because the segments it hands out are alive
+    // until the frame ends. A portal arrival or a pass over a dense town can
+    // push it past thirty thousand records -- fifteen megabytes -- and it kept
+    // that for the rest of the session. At a frame boundary no segment is
+    // alive, so the peak of the last few hundred frames is enough capacity.
+    private const int ArenaTrimEveryFrames = 512;
+    private const int ArenaTrimFloor = 4096;
+    private int _arenaFramesSinceTrim;
+    private int _arenaPeakSinceTrim;
+
+    private void TrimArena()
+    {
+        _arenaPeakSinceTrim = Math.Max(_arenaPeakSinceTrim, _arenaLength);
+        if (++_arenaFramesSinceTrim < ArenaTrimEveryFrames)
+            return;
+
+        int target = Math.Max(_arenaPeakSinceTrim, ArenaTrimFloor);
+        if (_arena.Length > (long)target * 2)
+            _arena = new RenderProjectionRecord[target];
+        _arenaFramesSinceTrim = 0;
+        _arenaPeakSinceTrim = 0;
     }
 
     private ArraySegment<RenderProjectionRecord> AppendToArena(
