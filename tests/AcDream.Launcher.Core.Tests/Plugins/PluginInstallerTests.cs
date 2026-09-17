@@ -655,6 +655,49 @@ public sealed class PluginInstallerTests
     }
 
     [Fact]
+    public async Task SetChannelWritesTheChannelAndReturnsTheUpdatedRecord()
+    {
+        using var fixture = new Fixture();
+        var release = fixture.BuildRelease(Id, "0.1.0");
+        fixture.RegisterRelease(Repo, release);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null);
+
+        InstalledPluginRecord updated = fixture.Installer.SetChannel(Id, PluginReleaseChannel.Beta);
+
+        Assert.Equal(PluginReleaseChannel.Beta, updated.Channel);
+        Assert.Equal(PluginReleaseChannel.Beta, fixture.RecordStore.Find(Id)!.Channel);
+    }
+
+    [Fact]
+    public void SetChannelRefusesAnIdThatIsNotLauncherManaged()
+    {
+        using var fixture = new Fixture();
+
+        Assert.Throws<LauncherUpdateException>(
+            () => fixture.Installer.SetChannel(Id, PluginReleaseChannel.Beta));
+    }
+
+    [Fact]
+    public async Task SetChannelIsRefusedWhileASessionLeaseIsHeld()
+    {
+        using var fixture = new Fixture();
+        var release = fixture.BuildRelease(Id, "0.1.0");
+        fixture.RegisterRelease(Repo, release);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null);
+
+        var barrier = new UpdateSessionBarrier(fixture.Paths.DataDirectory);
+        Assert.True(barrier.TryAcquireExclusive(out UpdateSessionBarrier.ExclusiveLease? lease));
+        using (lease)
+        {
+            LauncherUpdateException error = Assert.Throws<LauncherUpdateException>(
+                () => fixture.Installer.SetChannel(Id, PluginReleaseChannel.Beta));
+            Assert.Equal(PluginInstaller.SessionLeaseRefusal, error.Message);
+        }
+
+        Assert.Equal(PluginReleaseChannel.Stable, fixture.RecordStore.Find(Id)!.Channel);
+    }
+
+    [Fact]
     public void RemoveDirectDeletesAPassingFolderWhoseNameDiffersFromItsId()
     {
         using var fixture = new Fixture();

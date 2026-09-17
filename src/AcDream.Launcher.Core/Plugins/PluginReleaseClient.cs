@@ -46,9 +46,12 @@ public sealed class PluginReleaseClient
     internal static PluginReleaseClient CreateForTransportTest(HttpMessageHandler handler) =>
         new(new HttpClient(handler));
 
+    /// <summary><paramref name="maximumBytes"/> defaults to <see cref="MaximumDocumentBytes"/>; the
+    /// releases Atom feed (L-319) is the one caller that passes its own, larger cap.</summary>
     public async Task<PluginReleaseFetchResult> FetchDocumentAsync(
         Uri url,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        long maximumBytes = MaximumDocumentBytes)
     {
         ArgumentNullException.ThrowIfNull(url);
         ReleaseManifestClient.RequireSecureOrLoopback(url, "plugin release");
@@ -97,10 +100,10 @@ public sealed class PluginReleaseClient
                 return PluginReleaseFetchResult.Unavailable;
 
             if (response.Content.Headers.ContentLength is long contentLength
-                && contentLength > MaximumDocumentBytes)
+                && contentLength > maximumBytes)
             {
                 throw new LauncherUpdateException(
-                    $"The plugin release document is larger than {MaximumDocumentBytes} bytes.");
+                    $"The plugin release document is larger than {maximumBytes} bytes.");
             }
 
             try
@@ -116,11 +119,10 @@ public sealed class PluginReleaseClient
                     if (read == 0)
                         break;
 
-                    if (output.Length + read > MaximumDocumentBytes)
+                    if (output.Length + read > maximumBytes)
                     {
                         throw new LauncherUpdateException(
-                            $"The plugin release document is larger than {MaximumDocumentBytes} "
-                            + "bytes.");
+                            $"The plugin release document is larger than {maximumBytes} bytes.");
                     }
 
                     output.Write(buffer, 0, read);

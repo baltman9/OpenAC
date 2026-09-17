@@ -228,4 +228,24 @@ public sealed class PluginCatalogTests
         Assert.False(catalog.IsBlocked("someone.else", LauncherVersion.Parse("0.1.0")));
         Assert.True(catalog.IsBlocked("edwards.hello", version: null));
     }
+
+    [Fact]
+    public void IsBlockedMatchesAPrereleaseVersion()
+    {
+        PluginCatalog catalog = PluginCatalog.Parse("""
+            {
+              "schemaVersion": 1,
+              "plugins": [
+                { "id": "edwards.hello", "name": "Hello", "author": "Shane Edwards",
+                  "description": "Says hello.", "repo": "shaneedwards/openac-plugin-hello" }
+              ],
+              "blocked": [
+                { "id": "edwards.hello", "versions": ["1.3.0-beta.1"], "reason": "test" }
+              ]
+            }
+            """);
+
+        Assert.True(catalog.IsBlocked("edwards.hello", LauncherVersion.Parse("1.3.0-beta.1")));
+        Assert.False(catalog.IsBlocked("edwards.hello", LauncherVersion.Parse("1.3.0-beta.2")));
+    }
 }

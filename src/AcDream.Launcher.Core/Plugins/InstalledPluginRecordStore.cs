@@ -35,6 +35,13 @@ public sealed record InstalledPluginRecord(
     /// save never carries an old value forward.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTimeOffset? WarningAcceptedAt { get; init; }
+
+    /// <summary>The channel <see cref="PluginInstaller.SetChannel"/> last wrote (L-319). Omitted
+    /// when <see cref="PluginReleaseChannel.Stable"/>, its default, so a stable record stays
+    /// byte-identical and an older build (before beta existed) still reads it; a <c>beta</c> record
+    /// is refused by one, as the caveat in L-315.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public PluginReleaseChannel Channel { get; init; }
 }
 
 /// <summary><c>DataDirectory/app/plugins-installed.json</c>: the record of every plugin the launcher

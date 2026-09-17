@@ -266,6 +266,29 @@ public sealed class PluginInstaller
         }
     }
 
+    /// <summary>Sets a launcher-managed plugin's channel (L-319), under the same exclusive lease as
+    /// every other record write. Returns the updated record so the toggle can reflect it without
+    /// waiting for the next Check pass.</summary>
+    public InstalledPluginRecord SetChannel(string id, PluginReleaseChannel channel)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        InstalledPluginRecord record = _recordStore.Find(id)
+            ?? throw new LauncherUpdateException($"'{id}' is not a launcher-managed plugin.");
+
+        if (!_barrier.TryAcquireExclusive(out UpdateSessionBarrier.ExclusiveLease? lease))
+        {
+            throw new LauncherUpdateException(SessionLeaseRefusal);
+        }
+
+        using (lease)
+        {
+            InstalledPluginRecord updated = record with { Channel = channel };
+            Upsert(updated);
+            _recordStore.Save();
+            return updated;
+        }
+    }
+
     /// <summary>Removes a launcher-managed plugin. <paramref name="deleteStorage"/> also deletes the
     /// plugin's own subtree under <c>ConfigDirectory/plugins/&lt;id&gt;</c>
     /// (<c>ScopedPluginHost</c>'s scope), never the shared root and never Vtank's own profile

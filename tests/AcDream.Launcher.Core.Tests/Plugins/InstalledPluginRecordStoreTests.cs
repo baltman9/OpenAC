@@ -228,6 +228,52 @@ public sealed class InstalledPluginRecordStoreTests : IDisposable
     }
 
     [Fact]
+    public void SaveNeverWritesChannelWhenItIsStable()
+    {
+        var store = new InstalledPluginRecordStore(
+            Path.Combine(_root, "app", "plugins-installed.json"));
+        store.Records.Add(new InstalledPluginRecord(
+            "edwards.hello",
+            "shaneedwards/openac-plugin-hello",
+            PluginInstallSource.Listed,
+            "0.1.0",
+            "v0.1.0",
+            new string('a', 64),
+            DateTimeOffset.UtcNow,
+            null));
+
+        store.Save();
+
+        Assert.DoesNotContain("channel", File.ReadAllText(store.FilePath));
+    }
+
+    [Fact]
+    public void ABetaChannelRoundTrips()
+    {
+        var store = new InstalledPluginRecordStore(
+            Path.Combine(_root, "app", "plugins-installed.json"));
+        store.Records.Add(new InstalledPluginRecord(
+            "edwards.hello",
+            "shaneedwards/openac-plugin-hello",
+            PluginInstallSource.Listed,
+            "0.1.0",
+            "v0.1.0",
+            new string('a', 64),
+            DateTimeOffset.UtcNow,
+            null)
+        {
+            Channel = PluginReleaseChannel.Beta,
+        });
+
+        store.Save();
+        Assert.Contains("\"channel\": \"beta\"", File.ReadAllText(store.FilePath));
+
+        var reloaded = new InstalledPluginRecordStore(store.FilePath);
+        reloaded.Load();
+        Assert.Equal(PluginReleaseChannel.Beta, reloaded.Records[0].Channel);
+    }
+
+    [Fact]
     public void SaveAfterLoadNeverWritesWarningAcceptedAt()
     {
         string path = Path.Combine(_root, "app", "plugins-installed.json");

@@ -21,6 +21,15 @@ internal sealed record PluginDiscoverEntry(
 internal sealed record PluginUpdateAvailability(
     string Version, string Tag, string? CompatibilityNote, bool CompatibilityIsWarning);
 
+/// <summary>The result of <see cref="LauncherPluginComposition.CheckSingleAsync"/>: either an
+/// available update or why one is withheld, mirroring <c>CheckAsync</c>'s two dictionaries for one
+/// plugin.</summary>
+internal sealed record PluginSingleCheckResult(
+    PluginUpdateAvailability? Available, string? WithheldReason)
+{
+    public static readonly PluginSingleCheckResult None = new(null, null);
+}
+
 /// <summary>The result of one Check pass (launcher start or Refresh list): the effective catalog,
 /// whether GitHub throttled the request, the cached list's age when a fetch could not be made, and
 /// the rows built from it.</summary>
@@ -224,6 +233,30 @@ internal sealed class LauncherPluginComposition : IDisposable
             catalog, rateLimited, listAge, installed, discover, updatesAvailable, updateWithheldReasons);
     }
 
+    /// <summary>Re-checks one already-installed plugin against the most recent Check's catalog,
+    /// for a user action on that plugin alone (the beta toggle, L-319) rather than the full pass
+    /// every other trigger shares.</summary>
+    public async Task<PluginSingleCheckResult> CheckSingleAsync(
+        string id,
+        ClientVersionResolution? clientResolution,
+        CancellationToken cancellationToken = default)
+    {
+        InstalledPluginRecord? record = RecordStore.Find(id);
+        if (record is null || record.Pending is not null)
+        {
+            return PluginSingleCheckResult.None;
+        }
+
+        PluginUpdateCheck check = await EvaluateUpdateAsync(
+            record, CurrentCatalog, clientResolution, cancellationToken).ConfigureAwait(false);
+        return check.Available
+            ? new PluginSingleCheckResult(
+                new PluginUpdateAvailability(
+                    check.Version!, check.Tag!, check.CompatibilityNote, check.CompatibilityIsWarning),
+                null)
+            : new PluginSingleCheckResult(null, check.WithheldReason);
+    }
+
     /// <summary>An advisory badge, not an enforcement decision: the finer min/max/skip compatibility
     /// gate lives on <see cref="PluginInstaller"/>, which refuses the update itself when the user
     /// acts on it. Names why only when a newer release exists but isn't offered; already-current
@@ -244,7 +277,7 @@ internal sealed class LauncherPluginComposition : IDisposable
         try
         {
             result = await ReleaseResolver
-                .ResolveAsync(record.Repo, PluginReleaseChannel.Stable, cancellationToken)
+                .ResolveAsync(record.Repo, record.Channel, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (LauncherUpdateException)

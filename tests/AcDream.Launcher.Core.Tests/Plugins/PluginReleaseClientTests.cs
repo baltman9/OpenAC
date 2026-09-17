@@ -116,6 +116,26 @@ public sealed class PluginReleaseClientTests
     }
 
     [Fact]
+    public async Task AMaximumBytesArgumentOverridesTheDefaultCap()
+    {
+        byte[] body = new byte[PluginReleaseClient.MaximumDocumentBytes + 1];
+        var handler = new SequenceHandler((_, _) =>
+        {
+            HttpResponseMessage response = Ok(body);
+            response.Content.Headers.ContentLength = null;
+            return response;
+        });
+        var client = PluginReleaseClient.CreateForTransportTest(handler);
+
+        PluginReleaseFetchResult result = await client.FetchDocumentAsync(
+            new Uri("https://example.test/releases.atom"),
+            maximumBytes: PluginReleaseClient.MaximumDocumentBytes + 1);
+
+        Assert.Equal(PluginReleaseFetchStatus.Success, result.Status);
+        Assert.Equal(body, result.Document!.Content);
+    }
+
+    [Fact]
     public async Task A404FinalResponseIsUnavailable()
     {
         var handler = new SequenceHandler((_, _) =>

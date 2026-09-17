@@ -86,6 +86,159 @@ public sealed class PluginReleaseResolverTests
         Assert.Equal(PluginReleaseResolveStatus.Unavailable, result.Status);
     }
 
+    [Fact]
+    public async Task BetaOffersTheHigherPrecedenceBetaOverStable()
+    {
+        var handler = BetaHandler(stableVersion: "1.3.0", betaVersion: "1.4.0-beta.1");
+        var resolver = new PluginReleaseResolver(PluginReleaseClient.CreateForTransportTest(handler));
+
+        PluginReleaseResolveResult result = await resolver.ResolveAsync(Repo, PluginReleaseChannel.Beta);
+
+        Assert.Equal(PluginReleaseResolveStatus.Success, result.Status);
+        Assert.Equal("v1.4.0-beta.1", result.Resolution!.Tag);
+    }
+
+    [Fact]
+    public async Task BetaPrefersStableWhenStableIsTheHigherPrecedence()
+    {
+        var handler = BetaHandler(stableVersion: "1.3.0", betaVersion: "1.3.0-beta.2");
+        var resolver = new PluginReleaseResolver(PluginReleaseClient.CreateForTransportTest(handler));
+
+        PluginReleaseResolveResult result = await resolver.ResolveAsync(Repo, PluginReleaseChannel.Beta);
+
+        Assert.Equal(PluginReleaseResolveStatus.Success, result.Status);
+        Assert.Equal("v1.3.0", result.Resolution!.Tag);
+    }
+
+    [Fact]
+    public async Task ABetaWhoseManifestIs404FallsBackToStable()
+    {
+        var handler = BetaHandler(
+            stableVersion: "1.3.0", betaVersion: "1.4.0-beta.1", betaManifestMissing: true);
+        var resolver = new PluginReleaseResolver(PluginReleaseClient.CreateForTransportTest(handler));
+
+        PluginReleaseResolveResult result = await resolver.ResolveAsync(Repo, PluginReleaseChannel.Beta);
+
+        Assert.Equal(PluginReleaseResolveStatus.Success, result.Status);
+        Assert.Equal("v1.3.0", result.Resolution!.Tag);
+    }
+
+    [Fact]
+    public async Task ABetaWhoseManifestVersionDoesNotMatchItsTagFallsBackToStable()
+    {
+        var handler = BetaHandler(
+            stableVersion: "1.3.0", betaVersion: "1.4.0-beta.1", betaManifestVersion: "1.5.0-beta.1");
+        var resolver = new PluginReleaseResolver(PluginReleaseClient.CreateForTransportTest(handler));
+
+        PluginReleaseResolveResult result = await resolver.ResolveAsync(Repo, PluginReleaseChannel.Beta);
+
+        Assert.Equal(PluginReleaseResolveStatus.Success, result.Status);
+        Assert.Equal("v1.3.0", result.Resolution!.Tag);
+    }
+
+    [Fact]
+    public async Task AnOversizedFeedFallsBackToStable()
+    {
+        var handler = BetaHandler(
+            stableVersion: "1.3.0", betaVersion: "1.4.0-beta.1", feedOversized: true);
+        var resolver = new PluginReleaseResolver(PluginReleaseClient.CreateForTransportTest(handler));
+
+        PluginReleaseResolveResult result = await resolver.ResolveAsync(Repo, PluginReleaseChannel.Beta);
+
+        Assert.Equal(PluginReleaseResolveStatus.Success, result.Status);
+        Assert.Equal("v1.3.0", result.Resolution!.Tag);
+    }
+
+    [Fact]
+    public async Task AMalformedFeedFallsBackToStable()
+    {
+        var handler = BetaHandler(
+            stableVersion: "1.3.0", betaVersion: "1.4.0-beta.1", feedMalformed: true);
+        var resolver = new PluginReleaseResolver(PluginReleaseClient.CreateForTransportTest(handler));
+
+        PluginReleaseResolveResult result = await resolver.ResolveAsync(Repo, PluginReleaseChannel.Beta);
+
+        Assert.Equal(PluginReleaseResolveStatus.Success, result.Status);
+        Assert.Equal("v1.3.0", result.Resolution!.Tag);
+    }
+
+    [Fact]
+    public async Task ARefusedStableLatestDoesNotMaskAResolvedBeta()
+    {
+        // The "latest" release is itself a prerelease: Stable refuses it, but a valid beta from the
+        // feed must still be offered rather than reporting nothing.
+        var handler = BetaHandler(stableVersion: "1.3.0-beta.9", betaVersion: "1.4.0-beta.1");
+        var resolver = new PluginReleaseResolver(PluginReleaseClient.CreateForTransportTest(handler));
+
+        PluginReleaseResolveResult result = await resolver.ResolveAsync(Repo, PluginReleaseChannel.Beta);
+
+        Assert.Equal(PluginReleaseResolveStatus.Success, result.Status);
+        Assert.Equal("v1.4.0-beta.1", result.Resolution!.Tag);
+    }
+
+    private static RoutedHandler BetaHandler(
+        string stableVersion,
+        string betaVersion,
+        bool betaManifestMissing = false,
+        string? betaManifestVersion = null,
+        bool feedOversized = false,
+        bool feedMalformed = false)
+    {
+        Uri latestUri = GitHubReleaseLocator.LatestAsset(Repo, "plugin.json");
+        Uri stableTaggedUri = GitHubReleaseLocator.TaggedAsset(Repo, "v" + stableVersion, "plugin.json");
+        Uri feedUri = GitHubReleaseLocator.ReleasesFeed(Repo);
+        string betaTag = "v" + betaVersion;
+        Uri betaTaggedUri = GitHubReleaseLocator.TaggedAsset(Repo, betaTag, "plugin.json");
+
+        byte[] feedBytes = Encoding.UTF8.GetBytes($$"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <entry><link rel="alternate" href="https://github.com/{{Repo}}/releases/tag/{{betaTag}}"/></entry>
+            </feed>
+            """);
+
+        return new RoutedHandler(uri =>
+        {
+            if (uri == latestUri)
+            {
+                return Redirect(stableTaggedUri);
+            }
+
+            if (uri == stableTaggedUri)
+            {
+                return Ok(ManifestJson(stableVersion));
+            }
+
+            if (uri == feedUri)
+            {
+                if (feedMalformed)
+                {
+                    return Ok(Encoding.UTF8.GetBytes("<feed xmlns=\"http://www.w3.org/2005/Atom\">"));
+                }
+
+                HttpResponseMessage response = Ok(feedBytes);
+                if (feedOversized)
+                {
+                    response.Content.Headers.ContentLength = 2 * 1024 * 1024;
+                }
+
+                return response;
+            }
+
+            if (uri == betaTaggedUri)
+            {
+                if (betaManifestMissing)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.NotFound);
+                }
+
+                return Ok(ManifestJson(betaManifestVersion ?? betaVersion));
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+    }
+
     private static byte[] ManifestJson(string version) => Encoding.UTF8.GetBytes($$"""
         {
           "id": "edwards.hello",
