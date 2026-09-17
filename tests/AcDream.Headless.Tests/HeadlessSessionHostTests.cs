@@ -244,13 +244,18 @@ public sealed class HeadlessSessionHostTests
     [Fact]
     public void RegisterTradeGameEventReachesTradeOwnerThroughTheRealWireRouter()
     {
-        // Defect 13's deepest and actual blocker: HeadlessSessionHost never
-        // passed Trade: Runtime.TradeOwner into LiveSocialSessionBindings,
-        // so LiveSessionEventRouter's onTradeRegister/onTradeAdd/onTradeAccept
-        // delegate holes were all null and every inbound trade wire message
-        // was silently dropped on the headless host -- a trade opened by a
-        // real partner never became visible to TradeOwner at all, regardless
-        // of plugin-surface identity, object lookup, or settings storage.
+        // HeadlessSessionHost never passed Trade: Runtime.TradeOwner into
+        // LiveSocialSessionBindings, so LiveSessionEventRouter's
+        // onTradeRegister/onTradeAdd/onTradeAccept delegate holes were all
+        // null and every inbound trade wire message was silently dropped
+        // on the headless host -- a trade opened by a real partner never
+        // became visible to TradeOwner at all, regardless of plugin-surface
+        // identity, object lookup, or settings storage.
+        //
+        // ACE's real wire landmine: RegisterTrade carries the partner's
+        // guid in BOTH the Initiator and Partner fields (the true
+        // initiator is never actually on the wire) -- this is that exact
+        // shape.
         var operations = new FixtureSessionOperations();
         using var host = new HeadlessSessionHost(
             Descriptor(),
@@ -275,6 +280,70 @@ public sealed class HeadlessSessionHostTests
 
         Assert.True(host.Runtime.Trade.Snapshot.IsOpen);
         Assert.Equal(partnerGuid, host.Runtime.Trade.Snapshot.PartnerGuid);
+    }
+
+    [Fact]
+    public void RegisterTradeWithDistinctInitiatorAndPartnerGuidsResolvesToTheInitiator()
+    {
+        // A non-landmine RegisterTrade (Initiator and Partner genuinely
+        // distinct, neither the bot's own guid) still routes -- RuntimeTradeState.
+        // ApplyRegister's own rule ("initiator wins unless it's the local
+        // player or zero") is exercised end to end, not just directly.
+        var operations = new FixtureSessionOperations();
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            new HeadlessCredentialSecret("fixture", "password"),
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+
+        WorldSession session = operations.Sessions[^1];
+
+        const uint initiatorGuid = 0x50000B0Bu;
+        const uint otherPartyGuid = 0x50000C0Cu;
+        session.GameEvents.Dispatch(
+            GameEventEnvelope.TryParse(
+                WrapRegisterTradeEnvelope(
+                    initiator: initiatorGuid,
+                    partner: otherPartyGuid,
+                    stamp: 0uL))!.Value);
+
+        Assert.True(host.Runtime.Trade.Snapshot.IsOpen);
+        Assert.Equal(initiatorGuid, host.Runtime.Trade.Snapshot.PartnerGuid);
+    }
+
+    [Fact]
+    public void RegisterTradeWhereTheBotIsTheInitiatorResolvesPartnerFromTheOtherField()
+    {
+        // When the headless bot itself opened the trade, ACE's Initiator
+        // field is the bot's own guid -- RuntimeTradeState.ApplyRegister
+        // must fall back to the Partner field for the actual partner
+        // rather than mistaking the bot for its own trade partner.
+        var operations = new FixtureSessionOperations();
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            new HeadlessCredentialSecret("fixture", "password"),
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+
+        WorldSession session = operations.Sessions[^1];
+        uint botGuid = host.Runtime.PlayerIdentity.ServerGuid;
+        const uint otherPartyGuid = 0x50000C0Cu;
+
+        session.GameEvents.Dispatch(
+            GameEventEnvelope.TryParse(
+                WrapRegisterTradeEnvelope(
+                    initiator: botGuid,
+                    partner: otherPartyGuid,
+                    stamp: 0uL))!.Value);
+
+        Assert.True(host.Runtime.Trade.Snapshot.IsOpen);
+        Assert.Equal(otherPartyGuid, host.Runtime.Trade.Snapshot.PartnerGuid);
     }
 
     [Fact]

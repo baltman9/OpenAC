@@ -842,20 +842,9 @@ internal sealed class AppAutomationSurface
             GameRuntime? runtime;
             lock (_gate)
                 runtime = _runtime;
-            if (runtime is null)
-                return string.Empty;
-            uint playerId = runtime.PlayerIdentity.ServerGuid;
-            string? hydratedName = runtime.InventoryOwner.Objects.Get(playerId)?.Name;
-            if (!string.IsNullOrEmpty(hydratedName))
-                return hydratedName;
-            // The player object hasn't streamed in yet at the moment
-            // login completes, but the character roster already carried
-            // the name from the selection edge -- use it until the
-            // object arrives and takes over.
-            return runtime.CharacterSelection.TryGet(
-                playerId, out RuntimeCharacterSelectionEntry entry)
-                ? entry.Name
-                : string.Empty;
+            return runtime is null
+                ? string.Empty
+                : RuntimeCharacterIdentity.Name(runtime);
         }
     }
 
@@ -866,7 +855,9 @@ internal sealed class AppAutomationSurface
             GameRuntime? runtime;
             lock (_gate)
                 runtime = _runtime;
-            return runtime?.CharacterSelection.Snapshot.WorldName ?? string.Empty;
+            return runtime is null
+                ? string.Empty
+                : RuntimeCharacterIdentity.WorldName(runtime);
         }
     }
 
@@ -883,7 +874,9 @@ internal sealed class AppAutomationSurface
             GameRuntime? runtime;
             lock (_gate)
                 runtime = _runtime;
-            return runtime?.CharacterSelection.Snapshot.ServerPopulation ?? -1;
+            return runtime is null
+                ? -1
+                : RuntimeCharacterIdentity.ServerPopulation(runtime);
         }
     }
 
@@ -894,7 +887,9 @@ internal sealed class AppAutomationSurface
             GameRuntime? runtime;
             lock (_gate)
                 runtime = _runtime;
-            return runtime?.CharacterSelection.Snapshot.AccountName ?? string.Empty;
+            return runtime is null
+                ? string.Empty
+                : RuntimeCharacterIdentity.AccountName(runtime);
         }
     }
 
@@ -905,14 +900,9 @@ internal sealed class AppAutomationSurface
             GameRuntime? runtime;
             lock (_gate)
                 runtime = _runtime;
-            if (runtime is null
-                || !runtime.CharacterSelection.TryGet(
-                    runtime.PlayerIdentity.ServerGuid,
-                    out RuntimeCharacterSelectionEntry character))
-            {
-                return -1;
-            }
-            return character.ActiveIndex;
+            return runtime is null
+                ? -1
+                : RuntimeCharacterIdentity.CharacterIndex(runtime);
         }
     }
 
@@ -2032,20 +2022,8 @@ internal sealed class AppAutomationSurface
     }
 
     internal static PluginNavigationPosition ProjectNavigationPosition(
-        Position position)
-    {
-        uint cellId = position.ObjCellId;
-        uint blockX = (cellId >> 24) & 0xFFu;
-        uint blockY = (cellId >> 16) & 0xFFu;
-        System.Numerics.Vector3 local = position.Frame.Origin;
-        return new PluginNavigationPosition(
-            cellId,
-            (((double)blockX - 127d) * 192d + local.X - 84d) / 240d,
-            (((double)blockY - 127d) * 192d + local.Y - 84d) / 240d,
-            local.Z / 240d,
-            MoveToMath.GetHeading(position.Frame.Orientation),
-            (cellId & 0xFFFFu) is >= 1u and <= 0x40u);
-    }
+        Position position) =>
+        RuntimeWorldObjectProjection.ProjectNavigationPosition(position);
 
     // ── IWorldObjectAutomation ────────────────────────────────────────────
     bool IWorldObjectAutomation.IsAvailable => IsAvailable;
@@ -2164,73 +2142,20 @@ internal sealed class AppAutomationSurface
         GameRuntime runtime,
         RuntimeEntityRecord? record,
         ClientObject? item,
-        uint playerId)
-    {
-        uint objectId = record?.ServerGuid ?? item!.ObjectId;
-        Position? source = record?.PhysicsBody?.CellPosition
-            ?? (record is null ? null : ConvertPosition(record.Snapshot.Position));
-        bool owned = item is not null
-            && IsPlayerOwned(item, playerId, runtime.InventoryOwner.Objects);
-        IReadOnlyList<uint> activeSpells = objectId == playerId
-            ? _enchantments.Select(static enchantment => enchantment.SpellId).ToArray()
-            : Array.Empty<uint>();
-        uint publicFlags = item?.PublicWeenieBitfield ?? 0u;
-        return new PluginWorldObject(
-            objectId,
-            item?.WeenieClassId ?? 0u,
-            item?.Name ?? record?.Snapshot.Name ?? $"0x{objectId:X8}",
-            ClassifyObject(item),
-            (uint)(item?.Type ?? ItemType.None),
-            item?.ContainerId ?? 0u,
-            item?.WielderId ?? 0u)
-        {
-            IsOwned = owned,
-            IsLandscape = source is not null
-                && !owned
-                && (item?.ContainerId ?? 0u) == 0u
-                && (item?.WielderId ?? 0u) == 0u,
-            HasPosition = source is not null,
-            Position = source is { } position
-                ? ProjectNavigationPosition(position)
-                : default,
-            HasAppraisalData = item is not null && HasPropertyData(item.Properties),
-            LastIdTime = item?.LastAppraisalTimeMs ?? 0,
-            IsDoorOpen = (publicFlags & (uint)PublicWeenieFlags.Door) != 0u
-                && (item?.Properties.GetBool((uint)PropertyBool.Open) ?? false),
-            StackSize = Math.Max(1, item?.StackSize ?? 1),
-            ItemsCapacity = item?.ItemsCapacity ?? 0,
-            ContainersCapacity = item?.ContainersCapacity ?? 0,
-            SpellIds = item?.AppraisedSpellIds.Count > 0
-                ? item.AppraisedSpellIds.ToArray()
-                : Array.Empty<uint>(),
-            ActiveSpellIds = activeSpells,
-            IconId = item?.IconId ?? 0u,
-        };
-    }
+        uint playerId) =>
+        RuntimeWorldObjectProjection.Project(
+            record,
+            item,
+            playerId,
+            runtime.InventoryOwner.Objects,
+            activeSpellIdsForPlayer: _ =>
+                _enchantments.Select(static enchantment => enchantment.SpellId).ToArray());
 
     private static bool HasPropertyData(PropertyBundle properties) =>
-        properties.Ints.Count != 0
-        || properties.Int64s.Count != 0
-        || properties.Bools.Count != 0
-        || properties.Floats.Count != 0
-        || properties.Strings.Count != 0
-        || properties.DataIds.Count != 0
-        || properties.InstanceIds.Count != 0;
+        RuntimeWorldObjectProjection.HasPropertyData(properties);
 
-    internal static PluginObjectClass ClassifyObject(ClientObject? item)
-    {
-        if (item is null)
-            return PluginObjectClass.Unknown;
-        uint type = (uint)item.Type;
-        uint flags = item.PublicWeenieBitfield ?? 0u;
-        PluginObjectClass result = PluginObjectClassifier.Classify(type, flags);
-        // The classifier has no notion of an appraised spell id; a written
-        // (Type Writable) object that carries one is a scroll, not a book
-        // or a plain writable.
-        if ((type & 0x00002000u) != 0u && item.SpellId is > 0u)
-            result = PluginObjectClass.Scroll;
-        return result;
-    }
+    internal static PluginObjectClass ClassifyObject(ClientObject? item) =>
+        RuntimeWorldObjectProjection.ClassifyObject(item);
 
     private static PluginNavigationObject EnrichNavigationObject(
         in PluginNavigationObject value,
@@ -2258,19 +2183,7 @@ internal sealed class AppAutomationSurface
 
     private static Position? ConvertPosition(
         AcDream.Core.Net.Messages.CreateObject.ServerPosition? position) =>
-        position is not { } value
-            ? null
-            : new Position(
-                value.LandblockId,
-                new System.Numerics.Vector3(
-                    value.PositionX,
-                    value.PositionY,
-                    value.PositionZ),
-                new System.Numerics.Quaternion(
-                    value.RotationX,
-                    value.RotationY,
-                    value.RotationZ,
-                    value.RotationW));
+        RuntimeWorldObjectProjection.ConvertPosition(position);
 
     public bool IsCasting
     {
@@ -2896,22 +2809,8 @@ internal sealed class AppAutomationSurface
     private static bool IsPlayerOwned(
         ClientObject item,
         uint playerId,
-        ClientObjectTable objects)
-    {
-        if (item.WielderId == playerId || item.ContainerId == playerId)
-            return true;
-        uint parentId = item.ContainerId;
-        for (int depth = 0; parentId != 0u && depth < 4; depth++)
-        {
-            ClientObject? parent = objects.Get(parentId);
-            if (parent is null)
-                return false;
-            if (parent.WielderId == playerId || parent.ContainerId == playerId)
-                return true;
-            parentId = parent.ContainerId;
-        }
-        return false;
-    }
+        ClientObjectTable objects) =>
+        RuntimeWorldObjectProjection.IsPlayerOwned(item, playerId, objects);
 
     private static bool TryGetOwned(
         ClientObjectTable objects,

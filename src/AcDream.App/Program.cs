@@ -170,11 +170,11 @@ var host = new AppPluginHost(
     window.Selection,
     uiRegistry,
     automation,
-    new FilePluginStorage(
+    new AcDream.Core.Plugins.FilePluginStorage(
         Path.Combine(applicationPaths.ConfigDirectory, "plugins")),
     automation.PluginCommands,
     lootClassifiers,
-    new FilePluginStorage(
+    new AcDream.Core.Plugins.FilePluginStorage(
         runtimeOptions.VtankProfileDirectoryOverride
             ?? VtankProfilesDefault.Resolve(applicationPaths.DataDirectory)),
     new AcDream.App.Plugins.WindowPluginClipboard(

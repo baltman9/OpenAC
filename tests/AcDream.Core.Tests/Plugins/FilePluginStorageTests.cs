@@ -1,6 +1,6 @@
-using AcDream.App.Plugins;
+using AcDream.Core.Plugins;
 
-namespace AcDream.App.Tests.Plugins;
+namespace AcDream.Core.Tests.Plugins;
 
 public sealed class FilePluginStorageTests
 {

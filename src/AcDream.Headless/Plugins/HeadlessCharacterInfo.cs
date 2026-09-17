@@ -27,36 +27,15 @@ internal sealed class HeadlessCharacterInfo : ICharacterInfo
     public bool IsInWorld =>
         _runtime.Lifecycle.State == RuntimeLifecycleState.InWorld;
 
-    public string Name
-    {
-        get
-        {
-            uint playerId = _runtime.PlayerIdentity.ServerGuid;
-            string? hydratedName = _runtime.InventoryOwner.Objects.Get(playerId)?.Name;
-            if (!string.IsNullOrEmpty(hydratedName))
-                return hydratedName;
-            // The player object hasn't streamed in yet at the moment login
-            // completes, but the character roster already carried the name
-            // from the selection edge -- use it until the object arrives
-            // and takes over.
-            return _runtime.CharacterSelection.TryGet(
-                playerId, out RuntimeCharacterSelectionEntry entry)
-                ? entry.Name
-                : string.Empty;
-        }
-    }
+    public string Name => RuntimeCharacterIdentity.Name(_runtime);
 
-    public string WorldName => _runtime.CharacterSelection.Snapshot.WorldName;
+    public string WorldName => RuntimeCharacterIdentity.WorldName(_runtime);
 
-    public int ServerPopulation => _runtime.CharacterSelection.Snapshot.ServerPopulation ?? -1;
+    public int ServerPopulation => RuntimeCharacterIdentity.ServerPopulation(_runtime);
 
-    public string AccountName => _runtime.CharacterSelection.Snapshot.AccountName;
+    public string AccountName => RuntimeCharacterIdentity.AccountName(_runtime);
 
-    public int CharacterIndex =>
-        _runtime.CharacterSelection.TryGet(
-            _runtime.PlayerIdentity.ServerGuid, out RuntimeCharacterSelectionEntry entry)
-            ? entry.ActiveIndex
-            : -1;
+    public int CharacterIndex => RuntimeCharacterIdentity.CharacterIndex(_runtime);
 
     public uint ObjectId => _runtime.PlayerIdentity.ServerGuid;
 

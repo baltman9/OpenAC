@@ -1,6 +1,8 @@
+using System.Linq;
 using AcDream.Core.Chat;
 using AcDream.Core.Combat;
 using AcDream.Headless.Plugins;
+using AcDream.Core.Plugins;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
 using AcDream.Runtime.Gameplay;
@@ -72,11 +74,12 @@ public sealed class HeadlessPluginApiSurfaceTests
         Assert.Equal(1, logoffs);
     }
 
-    // Defect 13: the plugin's SessionContext only starts character-scoped
-    // macros (AutoTradeAccept among them) once ICharacterInfo.Name/WorldName/
-    // AccountName all resolve non-empty after LoginComplete. Before this
-    // fix HeadlessAutomationSurface.Character was the NoOp stub, so that
-    // edge never fired on the headless host and nothing ever subscribed.
+    // The plugin's SessionContext starts several character-scoped macros
+    // (chat logger, trackers, inventory logger, on-login commands) only
+    // once ICharacterInfo.Name/WorldName/AccountName all resolve non-empty
+    // after LoginComplete. Before this fix HeadlessAutomationSurface.
+    // Character was the NoOp stub, so that edge never fired on the
+    // headless host and nothing ever subscribed.
     [Fact]
     public void CharacterNameIsPopulatedTheMomentLoginCompleteFires()
     {
@@ -105,14 +108,14 @@ public sealed class HeadlessPluginApiSurfaceTests
         commands.Stop(runtime.Generation);
 
         Assert.False(host.Automation.Character.IsInWorld);
+        Assert.Equal(string.Empty, host.Automation.Character.Name);
     }
 
-    // Defect 13's actual blocker: AutoTradeAccept.Start() subscribes at
-    // Enable() time (identity-independent), but its handler resolves the
-    // partner's NAME through Automation.Objects.TryGet before checking the
-    // whitelist. HeadlessAutomationSurface.Objects was the NoOp stub (always
-    // returns false), so the whitelist check was never reachable on the
-    // headless host regardless of Character.
+    // The plugin's auto-trade-accept macro resolves the trade partner's
+    // NAME through Automation.Objects.TryGet before matching its
+    // whitelist. HeadlessAutomationSurface.Objects was previously the NoOp
+    // stub (always returns false), so the whitelist check was never
+    // reachable on the headless host.
     [Fact]
     public void ObjectsTryGetResolvesAKnownObjectsNameAndClass()
     {
@@ -138,14 +141,43 @@ public sealed class HeadlessPluginApiSurfaceTests
         Assert.Equal(PluginObjectClass.Player, value.ObjectClass);
     }
 
-    // Defect 13's third and deepest blocker: IPluginHost.Storage has a
-    // default interface member returning NoOpPluginStorage (ReadText always
-    // null, WriteText a no-op). HeadlessPluginHost never overrode it, so
-    // ScopedPluginHost's per-plugin storage wrapper always wrapped the NoOp
-    // instance -- every headless plugin's persisted settings file (Mag-
-    // Tools.xml's AutoTradeAccept/Enabled and Whitelist among them) was
-    // silently never read from or written to disk, regardless of what the
-    // real file on disk said.
+    [Fact]
+    public void ObjectsCaptureObjectsReturnsBothEntityAndInventoryOnlyRecords()
+    {
+        var (runtime, commands) = NewRealSession();
+        using GameRuntime runtimeDisposal = runtime;
+        using var host = NewHost(runtime);
+        commands.Start(runtime.Generation);
+
+        // An inventory-table-only object (never spawned as a live entity --
+        // e.g. an unopened container's contents) must still be captured,
+        // alongside anything with a live entity record.
+        const uint inventoryOnlyGuid = 0x70000777u;
+        runtime.InventoryOwner.Objects.AddOrUpdate(new AcDream.Core.Items.ClientObject
+        {
+            ObjectId = inventoryOnlyGuid,
+            Name = "Stashed Item",
+        });
+
+        IReadOnlyList<PluginWorldObject> captured =
+            host.Automation.Objects.CaptureObjects();
+
+        Assert.Contains(captured, o => o.ObjectId == inventoryOnlyGuid);
+        Assert.Contains(captured, o => o.Name == "Stashed Item");
+        // Sorted by ObjectId, and no duplicate entries for an object that
+        // appears in both the entity directory and the inventory table.
+        Assert.Equal(
+            captured.Select(o => o.ObjectId).Distinct().OrderBy(id => id),
+            captured.Select(o => o.ObjectId));
+    }
+
+    // IPluginHost.Storage has a default interface member returning
+    // NoOpPluginStorage (ReadText always null, WriteText a no-op).
+    // HeadlessPluginHost never overrode it, so ScopedPluginHost's
+    // per-plugin storage wrapper always wrapped the NoOp instance -- every
+    // headless plugin's persisted settings file was silently never read
+    // from or written to disk, regardless of what the real file on disk
+    // said.
     [Fact]
     public void StorageIsRealWhenSuppliedAndRoundTripsAFile()
     {

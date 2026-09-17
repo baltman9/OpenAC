@@ -343,13 +343,16 @@ Units, since none of these read as plain integers or percentages:
   damage type does 20% MORE to the wearer, `0.8` means 20% less. It is not
   the flat armor-level number; `ArmorLevel` is the separate field for that.
 
-The headless host's `Objects`/`Items`/`Loot` automation surfaces are no-ops
-(see [Headless](#headless)), so `TryCaptureProperties` through any of
-those always returns `false` there, regardless of whether the object was
-ever appraised. `Vendor.TryCaptureProperties` is the one exception — the
-vendor automation adapter is shared verbatim between the graphical and
-headless hosts, so a headless vendor-shopping plugin gets the same
-`WeaponProfile`/`ArmorProfile` data a graphical one does.
+`Objects.TryGet`/`CaptureObjects` are real on the headless host (see
+[Headless](#headless)), but `Objects.TryCaptureProperties` and
+`Objects.Identify` are not -- they need appraisal-wire and
+external-container machinery no headless macro exercises yet, so they
+always return `false`/`Unavailable` there regardless of whether the
+object was ever appraised. The `Items`/`Loot` automation surfaces are
+still entirely no-op on headless. `Vendor.TryCaptureProperties` is real on
+both hosts -- the vendor automation adapter is shared verbatim between the
+graphical and headless hosts, so a headless vendor-shopping plugin gets
+the same `WeaponProfile`/`ArmorProfile` data a graphical one does.
 
 ## Confirmations
 
@@ -589,18 +592,42 @@ plugin (or a future Settings panel) calls `Rebind` directly.
 A headless host implements this same contract, with a few members left as
 placeholders rather than wired to real state:
 
-- `Character`, `Spells`, and `Magic` are entirely no-op: every member of
-  those three returns its inert default (`ServerPopulation` is always `-1`,
-  `Spells.All` / `TryFindByName` are always empty / always miss, `Magic`
-  never reports casting or accepts a cast request). A headless plugin that
-  needs character or spell state reads it from the bot policy layer, not
-  from this surface.
+- `Character` is real for identity: `Name`, `WorldName`, `AccountName`,
+  `ObjectId`, `CharacterIndex`, and `IsInWorld` all come from the live
+  runtime, exactly like the graphical host. Everything else on
+  `Character` -- vitals (`CurrentHealth`/`MaxHealth`/etc.), `Skills`,
+  `Attributes`, `ActiveEnchantments`, `Level`, `MainPackFreeSlots`,
+  `SummoningMastery`, and `ServerPopulation` -- is still the interface's
+  inert default; no headless macro reads them yet.
+- `Spells` and `Magic` are entirely no-op: `Spells.All` / `TryFindByName`
+  are always empty / always miss, and `Magic` never reports casting or
+  accepts a cast request.
+- `Objects.TryGet` and `Objects.CaptureObjects` are real, sourced from the
+  same object table and entity directory the graphical host uses, through
+  the same shared projection (name, weenie class id, item type,
+  container/wielder ids, classification, ownership, position, appraisal
+  data, capacities, stack size, door-open state, icon id all populate
+  identically on both hosts). `Objects.TryCaptureProperties`,
+  `Objects.Identify`, and `Objects.OpenContainerObjectId` remain the
+  interface's inert defaults (`false`/`Unavailable`/`0`) -- they need
+  appraisal-wire and external-container machinery no headless macro
+  exercises yet. The one field the projection cannot populate identically
+  on headless is `ActiveSpellIds` for the local player -- the graphical
+  host tracks a live active-enchantment list this one doesn't, so it is
+  always empty here.
+- `Storage` is real: a headless plugin's settings persist to
+  `<config>/plugins/<pluginId>/...`, the identical on-disk layout and root
+  the graphical host uses, so hand-editing a settings file affects
+  whichever host next loads that plugin. It is process-wide, not
+  session-scoped -- every session hosted by one headless process shares
+  the same `Storage` instance, so two bot sessions running the same
+  plugin in one process share that plugin's one settings file (exactly as
+  two plugin instances loaded into one graphical process would).
 - `CaptureMessages` is unimplemented; use `Received` instead, which does
   work.
-- `Objects`, `ContainerOpened`/`ContainerClosed`, `ConfirmationRequested`,
-  and `Login.Logout` are real and wired to the same runtime state and
-  session-command routes the graphical host uses -- these are not
-  placeholders.
+- `ContainerOpened`/`ContainerClosed`, `ConfirmationRequested`, and
+  `Login.Logout` are real and wired to the same runtime state and
+  session-command routes the graphical host uses.
 - `Dialogs.Answer` is real when the headless session was configured with a
   confirmation route; otherwise it returns `false` like any host with
   nothing bound.
@@ -610,3 +637,7 @@ placeholders rather than wired to real state:
 - `Hotkeys` is the inert no-op registry — there is no keyboard to bind to
   without a window. `Register` always returns a handle with `IsBound`
   `false` and the handler never fires.
+- Everything else on `IAutomationSurface` not named above --
+  `Combat`/`Equipment`/`Items`/`Loot`/`Fellowship`/`Enchantment`/
+  `Navigation`/`WorldTime`/`Network`/`Recovery`/`Projectile`/`Selection`
+  automation -- is still the interface's inert `NoOp` default on headless.

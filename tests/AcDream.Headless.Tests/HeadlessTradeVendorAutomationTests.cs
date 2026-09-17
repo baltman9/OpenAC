@@ -75,7 +75,14 @@ public sealed class HeadlessTradeVendorAutomationTests
         runtime.Dispose();
     }
 
-
+    // Characterization test: calls RuntimeTradeState.ApplyRegister/ApplyAccept
+    // directly rather than through the wire router, so it was already
+    // green on f868960 (before any of the A9 fixes). It documents that
+    // FireTick's per-tick Poll() delivers PartnerTradeAccepted once the
+    // shared RuntimeTradeAutomation observes the state transition -- it does
+    // NOT prove the wire message reaches TradeOwner on the headless host
+    // (see RegisterTradeGameEventReachesTradeOwnerThroughTheRealWireRouter
+    // in HeadlessSessionHostTests.cs for that).
     [Fact]
     public void FireTickPollsTradePartnerAcceptSoPluginsSeeIt()
     {
