@@ -4,6 +4,7 @@ using AcDream.Core.Items;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
+using AcDream.Core.Properties;
 using AcDream.Core.Selection;
 using AcDream.Core.Spells;
 using AcDream.Plugin.Abstractions;
@@ -84,6 +85,45 @@ public sealed class RuntimeAutomationSurfaceTests
         Assert.Equal(expected, RuntimeAutomationSurface.ClassifyObject(item));
     }
 
+    [Theory]
+    [InlineData((uint)ItemType.MeleeWeapon, 0u)]
+    [InlineData((uint)ItemType.Armor, 0u)]
+    [InlineData((uint)ItemType.Creature, 0x10u)]
+    [InlineData((uint)ItemType.Creature, 0u)]
+    [InlineData((uint)ItemType.Creature, 0x04000010u)]
+    [InlineData((uint)ItemType.Creature, 0x8u)]
+    [InlineData((uint)ItemType.Misc, 0x200u)]
+    [InlineData((uint)ItemType.Misc, 0x1000u)]
+    [InlineData((uint)ItemType.Writable, 0x2u)]
+    [InlineData((uint)ItemType.Writable, 0x4u)]
+    [InlineData((uint)ItemType.Writable, 0x1u)]
+    public void ClassifyObjectDelegatesToTheSharedClassifierPlusTheScrollRule(
+        uint itemType,
+        uint publicFlags)
+    {
+        var item = new ClientObject
+        {
+            ObjectId = 1u,
+            Type = (ItemType)itemType,
+            PublicWeenieBitfield = publicFlags,
+        };
+
+        PluginObjectClass expected = PluginObjectClassifier.Classify(itemType, publicFlags);
+        Assert.Equal(expected, RuntimeAutomationSurface.ClassifyObject(item));
+
+        // The one rule the shared classifier cannot express: a written
+        // object carrying an appraised spell id is a scroll, regardless of
+        // what the shared classifier alone would have said.
+        var scroll = new ClientObject
+        {
+            ObjectId = 2u,
+            Type = ItemType.Writable,
+            PublicWeenieBitfield = 0u,
+            SpellId = 42u,
+        };
+        Assert.Equal(PluginObjectClass.Scroll, RuntimeAutomationSurface.ClassifyObject(scroll));
+    }
+
     [Fact]
     public void NavigationProjectionUsesVtankMapCoordinatesAndCompassHeading()
     {
@@ -143,7 +183,11 @@ public sealed class RuntimeAutomationSurfaceTests
             surface.CaptureMessages(one.Sequence));
         Assert.True(two.Sequence > one.Sequence);
         Assert.Equal("You cast Fester Other VII on Olthoi.", two.Text);
-        Assert.Equal(1, second.CommunicationOwner.SubscriberCount);
+        // Rebinding leaves nothing behind on the session it left, while the
+        // new one carries the surface plus the runtime event bridge the
+        // surface's lifecycle subscription brings with it.
+        Assert.Equal(0, first.CommunicationOwner.SubscriberCount);
+        Assert.Equal(2, second.CommunicationOwner.SubscriberCount);
 
         surface.Dispose();
         Assert.Equal(0, second.CommunicationOwner.SubscriberCount);
@@ -406,6 +450,65 @@ public sealed class RuntimeAutomationSurfaceTests
         Assert.Equal(
             typeof(RuntimeAutomationSurface),
             map.TargetMethods[index].DeclaringType);
+    }
+
+    [Fact]
+    public void ProjectInventoryItem_preferstTheRetainedWeaponProfileOverThePropertyTable()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new RuntimeAutomationSurface();
+        var item = new ClientObject
+        {
+            ObjectId = 903u,
+            Name = "Test Sword",
+            WeaponProfile = new ClientWeaponProfile(
+                DamageType: 4u,
+                WeaponTime: 30u,
+                WeaponSkill: 34u,
+                Damage: 25u,
+                DamageVariance: 0.3d,
+                DamageMod: 1.0d,
+                WeaponLength: 1.0d,
+                MaxVelocity: 2.0d,
+                WeaponOffense: 1.05d,
+                MaxVelocityEstimated: 1u),
+        };
+        // The property table carries a stale/never-sent value that the
+        // retained profile must take priority over.
+        item.Properties.Ints[(uint)PropertyInt.Damage] = 1;
+        item.Properties.Ints[(uint)PropertyInt.WeaponSkill] = 2;
+        item.Properties.Ints[(uint)PropertyInt.DamageType] = 3;
+        item.Properties.Floats[(uint)PropertyFloat.DamageVariance] = 0.9d;
+
+        PluginInventoryItem projected = surface.ProjectInventoryItem(runtime, item);
+
+        Assert.Equal(25, projected.Damage);
+        Assert.Equal(34, projected.WeaponSkill);
+        Assert.Equal(4, projected.DamageType);
+        Assert.Equal(0.3d, projected.DamageVariance);
+    }
+
+    [Fact]
+    public void ProjectInventoryItem_fallsBackToThePropertyTableWithoutAWeaponProfile()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new RuntimeAutomationSurface();
+        var item = new ClientObject
+        {
+            ObjectId = 904u,
+            Name = "Unappraised Sword",
+        };
+        item.Properties.Ints[(uint)PropertyInt.Damage] = 7;
+        item.Properties.Ints[(uint)PropertyInt.WeaponSkill] = 8;
+        item.Properties.Ints[(uint)PropertyInt.DamageType] = 9;
+        item.Properties.Floats[(uint)PropertyFloat.DamageVariance] = 0.1d;
+
+        PluginInventoryItem projected = surface.ProjectInventoryItem(runtime, item);
+
+        Assert.Equal(7, projected.Damage);
+        Assert.Equal(8, projected.WeaponSkill);
+        Assert.Equal(9, projected.DamageType);
+        Assert.Equal(0.1d, projected.DamageVariance);
     }
 
     [Fact]

@@ -93,36 +93,27 @@ public sealed class DirectGameRuntimeCommandAdapter
     public RuntimeSessionStartResult Start(
         RuntimeGenerationToken expectedGeneration)
     {
-        RuntimeLifecycleState previous = _runtime.Lifecycle.State;
         RuntimeSessionStartResult result =
             _sessionCommands.Start(expectedGeneration);
-        _runtime.EventSink.EmitLifecycle(
-            previous,
-            _runtime.Lifecycle.State);
+        _runtime.SyncLifecycleEmission();
         return result;
     }
 
     public RuntimeSessionStartResult Reconnect(
         RuntimeGenerationToken expectedGeneration)
     {
-        RuntimeLifecycleState previous = _runtime.Lifecycle.State;
         RuntimeSessionStartResult result =
             _sessionCommands.Reconnect(expectedGeneration);
-        _runtime.EventSink.EmitLifecycle(
-            previous,
-            _runtime.Lifecycle.State);
+        _runtime.SyncLifecycleEmission();
         return result;
     }
 
     public RuntimeTeardownAcknowledgement Stop(
         RuntimeGenerationToken expectedGeneration)
     {
-        RuntimeLifecycleState previous = _runtime.Lifecycle.State;
         RuntimeTeardownAcknowledgement result =
             _sessionCommands.Stop(expectedGeneration);
-        _runtime.EventSink.EmitLifecycle(
-            previous,
-            _runtime.Lifecycle.State);
+        _runtime.SyncLifecycleEmission();
         return result;
     }
 

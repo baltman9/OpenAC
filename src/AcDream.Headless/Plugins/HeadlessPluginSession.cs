@@ -50,7 +50,9 @@ internal sealed class HeadlessPluginSession : IDisposable
         Func<string, bool>? submitChatText = null,
         HeadlessItemAutomation? items = null,
         MagicCatalog? magicCatalog = null,
-        HeadlessLogoutAutomation? logout = null)
+        HeadlessLogoutAutomation? logout = null,
+        Func<uint, bool, bool>? answerConfirmation = null,
+        Func<bool>? requestGracefulStop = null)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(diagnostics);
@@ -71,7 +73,9 @@ internal sealed class HeadlessPluginSession : IDisposable
             submitChatText,
             items,
             magicCatalog,
-            logout);
+            logout,
+            answerConfirmation,
+            requestGracefulStop);
         var plugins = new PluginSession(
             host,
             status => Report(statusWriter, sessionId, status),
