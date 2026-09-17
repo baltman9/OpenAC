@@ -62,7 +62,8 @@ public sealed class SocialAllegiancePageController
         Func<uint, string?> ResolveWorldObjectName,
         Func<string, Action<bool>, uint> ShowConfirmation,
         Func<string, string, string?>? ResolvePlayerTemplate = null,
-        Func<uint, uint, IReadOnlyDictionary<uint, string>, string?>? ResolveTemplate = null);
+        Func<uint, uint, IReadOnlyDictionary<uint, string>, string?>? ResolveTemplate = null,
+        Func<int?>? LocalPlayerAllegianceRankQuality = null);
 
     /// <summary>
     /// The authored "experience passed up" entry every passed-up number on
@@ -74,6 +75,20 @@ public sealed class SocialAllegiancePageController
 
     /// <summary>The entry's one variable.</summary>
     private static readonly uint ValueVariable = DatStringResolver.ComputeHash("VALUE");
+
+    /// <summary>
+    /// The self block's rank line: "Rank: {TITLE} [{RANK}]", and the buffed form
+    /// "Rank: {TITLE} [{RANK} (+{RANKBUFF})]" shown when the player's rank quality
+    /// exceeds the profile's rank (the original client compares the two and
+    /// prints the difference).
+    /// </summary>
+    private static readonly uint RankTemplateKey =
+        DatStringResolver.ComputeHash("ID_Allegiance_Rank");
+    private static readonly uint RankBuffedTemplateKey =
+        DatStringResolver.ComputeHash("ID_Allegiance_RankBuffed");
+    private static readonly uint TitleVariable = DatStringResolver.ComputeHash("TITLE");
+    private static readonly uint RankVariable = DatStringResolver.ComputeHash("RANK");
+    private static readonly uint RankBuffVariable = DatStringResolver.ComputeHash("RANKBUFF");
 
     private readonly record struct VassalRowWidgets(
         UiText? Name,
@@ -350,8 +365,58 @@ public sealed class SocialAllegiancePageController
     {
         SetLine(_selfName, ref _lastSelfName, snapshot.AllegianceName, TextColor);
         SetLine(_selfFollowers, ref _lastSelfFollowers, $"Followers: {snapshot.TotalVassals}", TextColor);
-        SetLine(_selfRank, ref _lastSelfRank, $"Rank: [{snapshot.Rank}]", TextColor);
+        SetLine(_selfRank, ref _lastSelfRank, RankLineText(snapshot), TextColor);
     }
+
+    /// <summary>
+    /// The rank line the original client builds for the self block: the rank
+    /// title resolved from the player's own allegiance record (rank, heritage,
+    /// gender), the profile rank in brackets, and the "(+n)" suffix only when
+    /// the rank quality on the player is higher than the profile's rank.
+    /// </summary>
+    private string RankLineText(RuntimeAllegianceSnapshot snapshot)
+    {
+        int profileRank = (int)snapshot.Rank;
+        RuntimeAllegianceMemberSnapshot? self = _bindings.Member(_bindings.LocalPlayerGuid());
+        string title = self is { } s
+            ? AllegianceRankTitleTable.GetTitle(s.Rank, s.HeritageGroup, s.Gender) ?? string.Empty
+            : string.Empty;
+
+        // An absent rank quality reads as 0, the way the original client's
+        // quality lookup leaves its output when the value is missing.
+        int q = _bindings.LocalPlayerAllegianceRankQuality?.Invoke() ?? 0;
+        if (q != -1 && q != profileRank)
+        {
+            string plain = q.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            string delta = (q - profileRank).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return _bindings.ResolveTemplate?.Invoke(
+                    StringTableId,
+                    RankBuffedTemplateKey,
+                    new Dictionary<uint, string>
+                    {
+                        [TitleVariable] = title,
+                        [RankVariable] = plain,
+                        [RankBuffVariable] = delta,
+                    })
+                ?? $"Rank: {title} [{plain} (+{delta})]";
+        }
+
+        string rank = profileRank.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return _bindings.ResolveTemplate?.Invoke(
+                StringTableId,
+                RankTemplateKey,
+                new Dictionary<uint, string>
+                {
+                    [TitleVariable] = title,
+                    [RankVariable] = rank,
+                })
+            ?? $"Rank: {title} [{rank}]";
+    }
+
+    /// <summary>Rank title plus name, as every member name on this page is shown.</summary>
+    private static string FullName(RuntimeAllegianceMemberSnapshot member)
+        => AllegianceRankTitleTable.ComposeFullName(
+            member.Rank, member.HeritageGroup, member.Gender, member.Name);
 
     private void RefreshMonarchBlock(
         RuntimeAllegianceSnapshot snapshot,
@@ -370,7 +435,7 @@ public sealed class SocialAllegiancePageController
         }
 
         RuntimeAllegianceMemberSnapshot monarchData = monarch!.Value;
-        SetLine(_monarchName, ref _lastMonarchName, monarchData.Name, TextColor);
+        SetLine(_monarchName, ref _lastMonarchName, FullName(monarchData), TextColor);
         SetLine(
             _monarchFollowers,
             ref _lastMonarchFollowers,
@@ -428,7 +493,7 @@ public sealed class SocialAllegiancePageController
         }
 
         RuntimeAllegianceMemberSnapshot patronData = patron!.Value;
-        SetLine(_patronName, ref _lastPatronName, patronData.Name, TextColor);
+        SetLine(_patronName, ref _lastPatronName, FullName(patronData), TextColor);
         _patronField.Enabled = patronData.IsLoggedIn;
 
         uint tithed = _bindings.Member(_bindings.LocalPlayerGuid())?.CpTithed ?? 0u;
@@ -537,7 +602,7 @@ public sealed class SocialAllegiancePageController
 
         if (widgets.Name is { } nameText)
         {
-            string name = vassal.Name;
+            string name = FullName(vassal);
             nameText.LinesProvider = () => [new UiText.Line(name, TextColor)];
         }
 

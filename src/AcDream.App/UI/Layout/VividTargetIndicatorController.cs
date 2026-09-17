@@ -9,7 +9,8 @@ public readonly record struct VividTargetInfo(
     Vector3 SelectionSphereCenter,
     float SelectionSphereRadius,
     uint ItemType,
-    uint ObjectDescriptionFlags);
+    uint ObjectDescriptionFlags,
+    byte RadarBlipColor = 0);
 
 public sealed record VividTargetRuntimeBindings(
     SelectionState Selection,
@@ -251,7 +252,7 @@ public sealed class VividTargetIndicatorController
         VividTargetInfo target, RadarRelationshipTraits relationship)
         => RadarBlipColors.For(
             RadarObjectTraits.FromPublicWeenieDescription(
-                target.ItemType, target.ObjectDescriptionFlags),
+                target.ItemType, target.ObjectDescriptionFlags, target.RadarBlipColor),
             relationship);
 
     internal static uint SelectOffScreenImageEnum(float angleDegrees)

@@ -1117,6 +1117,10 @@ public sealed class RuntimeLocalPlayerPhysicsPublicationStateTests
         Assert.Equal(0, ownership.PendingSetPositionDispatchCount);
     }
 
+    // The object blocks every placement candidate, so the placement is
+    // rejected and its collision callback still fires. An overlap at the
+    // requested spot alone no longer rejects: the placement search slides
+    // out of it (OpenAC #127).
     [Fact]
     public void CollisionCallbackNewerPositionSuppressesReciprocalAndPreservesNewLease()
     {
@@ -1154,10 +1158,11 @@ public sealed class RuntimeLocalPlayerPhysicsPublicationStateTests
         fixture.Lifetime.Physics.Engine.TransitionCellCollisionTestHook =
             (transition, phase, _, observed) =>
             {
-                if (phase is TransitionCellCollisionPhase.Environment)
+                if (phase is TransitionCellCollisionPhase.Objects)
                 {
                     transition.CollisionInfo.CollideObjectGuids.Add(
                         target.Key.Value.LocalEntityId);
+                    return TransitionState.Collided;
                 }
                 return observed;
             };

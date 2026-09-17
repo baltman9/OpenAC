@@ -2665,13 +2665,22 @@ public sealed class Transition
     }
 
 
-    private TransitionState FindObjCollisionsInCell(PhysicsEngine engine, uint cellId)
+    internal TransitionState FindObjCollisionsInCell(PhysicsEngine engine, uint cellId)
     {
         if (engine.DataCache is null) return TransitionState.OK;
 
+        var sp = SpherePath;
+
+        // The initial-placement pass tests cells, terrain and buildings only.
+        // Objects are tested by the placement search that follows it, which
+        // slides and rings out to a free spot. Testing objects here made a
+        // placement inside a stuck object (a lifestone recall lands exactly on
+        // the lifestone) fail before that search ever ran.
+        if (sp.InsertType == InsertType.InitialPlacement)
+            return TransitionState.OK;
+
         var objsInCell = engine.ShadowObjects.GetObjectsInCell(cellId);
 
-        var sp = SpherePath;
         var oi = ObjectInfo;
         var ci = CollisionInfo;
 

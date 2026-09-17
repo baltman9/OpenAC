@@ -2,6 +2,9 @@ using System.Numerics;
 using AcDream.App.Spells;
 using AcDream.Content;
 using AcDream.App.UI;
+using AcDream.App.Rendering;
+using AcDream.App.Rendering.Gpu;
+using AcDream.App.Tests.Rendering.Gpu;
 using AcDream.App.UI.Layout;
 using AcDream.Core.Combat;
 using AcDream.Core.Items;
@@ -974,6 +977,126 @@ public sealed class AppraisalUiControllerTests
     }
 
     [Fact]
+    public void CharacterResponse_ExtraListGrowsWithTheWindowAndRevealsClippedRows()
+    {
+        ImportedLayout layout = FixtureLoader.LoadExamination();
+        var objects = new ClientObjectTable();
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = ObjectId,
+            Name = "Dww",
+            Type = ItemType.Creature,
+        });
+        using var interaction = NewInteraction(objects, []);
+        var templates = new CreatureAppraisalRowTemplateFactory(
+            FixtureLoader.LoadExaminationRowTemplateInfos(),
+            NoTexture,
+            defaultFont: null);
+        using AppraisalUiController controller = Bind(
+            layout, objects, interaction, new CombatState(), [], [],
+            () => { }, () => { }, templates)!;
+
+        interaction.ExamineSelectedOrEnterMode(ObjectId);
+        var properties = new PropertyBundle();
+        properties.Strings[5u] = "Template";
+        properties.Ints[30u] = 5;                 // AllegianceRank: allegiance rows on
+        properties.Strings[21u] = "Monarch One";  // MonarchsTitle
+        properties.Strings[35u] = "Patron Two";   // PatronsTitle
+        var armorLevels = new AppraiseInfoParser.ArmorLevel(
+            Head: 100, Chest: 110, Abdomen: 120,
+            UpperArm: 130, LowerArm: 140, Hand: 150,
+            UpperLeg: 160, LowerLeg: 170, Foot: 180);
+        Assert.True(controller.Apply(Parsed(
+            properties, MinimalCreatureProfile(), armorLevels: armorLevels)));
+
+        // Monarch, Patron, spacer, three armor rows, legend: seven rows of the
+        // 20 px template against an authored 87 px list.
+        UiItemList extra = CreatureExtraList(layout);
+        Assert.Equal(7, extra.GetNumUIItems());
+        Assert.Equal(("Thigh/Shin/Foot", "AL: 160/170/180"), ExtraRow(extra, 5));
+
+        var device = new RecordingGpuDevice();
+        var renderer = new TextRenderer(device, new NullGpuFrameSource(), "unused");
+        renderer.Begin(new Vector2(800f, 600f));
+        var ctx = new UiRenderContext(renderer, new Vector2(800f, 600f));
+        layout.Root.DrawSelfAndChildren(ctx);
+        float authoredHeight = extra.Height;
+        Assert.Equal(87f, authoredHeight);
+        Assert.False(extra.GetItem(5)!.Visible);
+
+        // The list is authored anchored on all four edges: a taller window
+        // makes it taller, and the rows below the authored height come into view.
+        layout.Root.Height += 200f;
+        layout.Root.DrawSelfAndChildren(ctx);
+
+        Assert.Equal(authoredHeight + 200f, extra.Height);
+        Assert.True(extra.GetItem(5)!.Visible);
+        Assert.True(extra.GetItem(6)!.Visible);
+    }
+
+    [Fact]
+    public void CharacterResponse_ListsKeepTheirAuthoredHeightWhenAWindowRestoredTallIsShrunkBack()
+    {
+        // OpenAC #114: a saved window size is applied before the panel's first
+        // draw. The list overlays must still measure from the authored layout,
+        // so shrinking the window back to its minimum shows the first rows of
+        // both lists, exactly as the original client does at that size.
+        ImportedLayout layout = FixtureLoader.LoadExamination();
+        var objects = new ClientObjectTable();
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = ObjectId,
+            Name = "Dww",
+            Type = ItemType.Creature,
+        });
+        using var interaction = NewInteraction(objects, []);
+        var templates = new CreatureAppraisalRowTemplateFactory(
+            FixtureLoader.LoadExaminationRowTemplateInfos(),
+            NoTexture,
+            defaultFont: null);
+        using AppraisalUiController controller = Bind(
+            layout, objects, interaction, new CombatState(), [], [],
+            () => { }, () => { }, templates)!;
+
+        interaction.ExamineSelectedOrEnterMode(ObjectId);
+        var properties = new PropertyBundle();
+        properties.Strings[5u] = "Template";
+        properties.Ints[30u] = 5;
+        properties.Strings[21u] = "Monarch One";
+        properties.Strings[35u] = "Patron Two";
+        var armorLevels = new AppraiseInfoParser.ArmorLevel(
+            Head: 100, Chest: 110, Abdomen: 120,
+            UpperArm: 130, LowerArm: 140, Hand: 150,
+            UpperLeg: 160, LowerLeg: 170, Foot: 180);
+        Assert.True(controller.Apply(Parsed(
+            properties, MinimalCreatureProfile(), armorLevels: armorLevels)));
+        UiItemList extra = CreatureExtraList(layout);
+        UiElement extraHost = layout.FindElement(AppraisalUiController.CreatureExtraListId)!;
+        UiItemList extraBackground = Assert.Single(extraHost.Children.OfType<UiItemList>());
+
+        float authoredHeight = layout.Root.Height;
+        var device = new RecordingGpuDevice();
+        var renderer = new TextRenderer(device, new NullGpuFrameSource(), "unused");
+        renderer.Begin(new Vector2(800f, 600f));
+        var ctx = new UiRenderContext(renderer, new Vector2(800f, 600f));
+
+        // The saved size lands before the first draw.
+        layout.Root.Height = authoredHeight + 537f;
+        layout.Root.DrawSelfAndChildren(ctx);
+        Assert.Equal(87f + 537f, extra.Height);
+        Assert.Equal(87f + 537f, extraBackground.Height);
+
+        // Back to the minimum: the authored 87 px list with its first four rows.
+        layout.Root.Height = authoredHeight;
+        layout.Root.DrawSelfAndChildren(ctx);
+        Assert.Equal(87f, extra.Height);
+        Assert.Equal(87f, extraBackground.Height);
+        Assert.True(extra.GetItem(0)!.Visible);
+        Assert.True(extra.GetItem(3)!.Visible);
+        Assert.False(extra.GetItem(5)!.Visible);
+    }
+
+    [Fact]
     public void CharacterResponse_CombatRefreshRetainsArmorLevelRows()
     {
         ImportedLayout layout = FixtureLoader.LoadExamination();
@@ -1931,6 +2054,11 @@ public sealed class AppraisalUiControllerTests
         UiText text = Assert.IsType<UiText>(layout.FindElement(elementId));
         return string.Join(
             '\n', text.LinesProvider().Select(line => line.Text));
+    }
+
+    private sealed class NullGpuFrameSource : ICurrentGpuFrameSource
+    {
+        public IGpuFrame? CurrentFrame => null;
     }
 
     private static UiItemList CreatureExtraList(ImportedLayout layout)
