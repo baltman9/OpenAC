@@ -81,6 +81,39 @@ public sealed partial class WalkStaticStreamPopulatorTests
     }
 
     [Fact]
+    public void RetainedCells_MovedEntityKeepsTheCachedGrouping()
+    {
+        using var fx = new DispatcherFixture();
+        InstallRetainedMesh(fx);
+        InstallRetainedMesh(fx, RetainedMesh + 1, 12);
+        var world = new RetainedWorld();
+        world.Set(RetainedRecord(1), RetainedRecord(2, RetainedMesh + 1), RetainedRecord(3));
+        var cache = new FarLandscapeDrawCache(fx.Dispatcher, world);
+        Assert.Equal(
+            new[] { 3u, 3u, 12u },
+            AppendRetainedFrame(fx, cache).Keys.Select(key => key.FirstIndex));
+        int regroups = cache.RegroupCount;
+
+        // Moving the entity reclassifies it but reproduces the same batches,
+        // so the cached groups and alpha partition still describe the entry.
+        world.Current[2] = RetainedRecord(2, RetainedMesh + 1) with
+        {
+            Transform = new RenderTransform(Matrix4x4.CreateTranslation(7f, 0f, 0f)),
+        };
+        OrderedDrawStream moved = AppendRetainedFrame(fx, cache);
+        Assert.Equal(regroups, cache.RegroupCount);
+        Assert.Equal(new[] { 3u, 3u, 12u }, moved.Keys.Select(key => key.FirstIndex));
+        Assert.Equal(new[] { 1f, 3f, 7f }, moved.Transforms.Select(transform => transform.M41));
+
+        // Changing its geometry changes the shape, which does regroup.
+        world.Current[2] = RetainedRecord(2);
+        OrderedDrawStream regrouped = AppendRetainedFrame(fx, cache);
+        Assert.Equal(regroups + 1, cache.RegroupCount);
+        Assert.Equal(new[] { 3u, 3u, 3u }, regrouped.Keys.Select(key => key.FirstIndex));
+        Assert.Equal(new[] { 1f, 2f, 3f }, regrouped.Transforms.Select(transform => transform.M41));
+    }
+
+    [Fact]
     public void RetainedCells_ChangedGeometryRegroupsOnlyTheChangedEntity()
     {
         using var fx = new DispatcherFixture();
