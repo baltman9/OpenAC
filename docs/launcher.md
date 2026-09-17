@@ -58,6 +58,15 @@ repository not on the list. Right after a curated-list release publishes,
 GitHub's "latest" link can keep serving the previous release for under a
 minute; wait a moment and press **Refresh list** again.
 
+A launcher-managed plugin (Listed or Unlisted) has a **Beta updates** toggle
+on its Installed card. On, its update check also offers the newest
+pre-release on the repository's release feed, if it is newer than the latest
+stable release; installing one shows a **beta** tag. A beta player still gets
+a stable release once one passes the beta. Turning the toggle off never
+downgrades an installed beta; it just stops offering pre-releases until a
+stable release passes it. The release feed can lag a new release by up to a
+minute.
+
 Every row shows its compatibility with the installed client: compatible and
 which version, graphical-only or headless-only when the plugin restricts
 itself to one host, the incompatibility reason, or that no client is

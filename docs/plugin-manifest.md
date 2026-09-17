@@ -88,3 +88,24 @@ depth, on a hand-installed folder.
 The launcher never loads, reflects over, or runs a downloaded file. It unzips, verifies the
 `.sha256`, and stages the plugin disabled; enabling it is a separate, explicit choice the player
 makes on the Plugins tab.
+
+### Beta releases
+
+A player can opt a plugin into a beta channel that offers a pre-release build. To publish one:
+
+- Mark the release a GitHub **prerelease**, not the release GitHub marks *latest*.
+- **Tag:** `v<version>`, where `<version>` has a SemVer prerelease part, for example
+  `v1.3.0-beta.1`. No build metadata (`+...`) on a beta tag.
+- Same assets, same checks, as a stable release.
+
+```
+gh release create v1.3.0-beta.1 --prerelease \
+  plugin.json edwards.buffbot-1.3.0-beta.1.zip edwards.buffbot-1.3.0-beta.1.zip.sha256
+```
+
+In CI, the prerelease flag can follow the tag itself:
+`prerelease: ${{ contains(github.ref_name, '-') }}`.
+
+To promote a beta, publish a new stable release with the higher version; don't edit the beta
+release in place. The launcher reads prereleases from the repository's releases feed, which shows
+only the 10 newest releases.
