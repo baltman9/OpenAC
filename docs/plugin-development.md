@@ -116,7 +116,7 @@ server update).
 
 If your plugin needs something the contract does not expose, open an issue
 or a pull request against OpenAC rather than reaching past the contract.
-The rules for an API change are in [CONTRIBUTING.md](../CONTRIBUTING.md):
+The rules for an API change are in [CONTRIBUTING.md](https://github.com/eriknihlen/OpenAC/blob/main/CONTRIBUTING.md):
 one implementation per operation, bound on both hosts, documented, tested,
 and additive.
 

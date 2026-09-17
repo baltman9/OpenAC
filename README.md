@@ -134,7 +134,8 @@ setup, the manifest, where plugins install, and what the API promises.
 [docs/plugin-api.md](docs/plugin-api.md) describes every surface (game
 state, items, chat, trade, vendor, hotkeys, window, headless) and
 [docs/plugin-ui-markup.md](docs/plugin-ui-markup.md) the in-game panels.
-Every public member of the contract carries a summary that your IDE shows.
+Every public member of the contract carries a summary that your IDE shows,
+and the same summaries make up the [API reference site](https://eriknihlen.github.io/OpenAC/).
 
 Plugins live in their own repositories and install into the client's plugins
 folder; [OpenAC-MagTools](https://github.com/eriknihlen/OpenAC-MagTools) is
