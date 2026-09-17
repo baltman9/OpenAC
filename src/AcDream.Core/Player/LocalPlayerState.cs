@@ -64,6 +64,12 @@ public sealed class LocalPlayerState
 
     public event System.Action<VitalKind>? Changed;
 
+    /// <summary>
+    /// A full vital record (ranks, start, spent XP, current) landed. Raised before
+    /// <see cref="Changed"/>; current-only ticks raise <see cref="Changed"/> alone.
+    /// </summary>
+    public event System.Action<VitalKind>? VitalRecordChanged;
+
     public event System.Action<AttributeKind>? AttributeChanged;
 
     public event System.Action? CharacterChanged;
@@ -300,6 +306,7 @@ public sealed class LocalPlayerState
             case VitalKind.Stamina: _stamina = snap; break;
             case VitalKind.Mana:    _mana    = snap; break;
         }
+        VitalRecordChanged?.Invoke(kind);
         Changed?.Invoke(kind);
     }
 
