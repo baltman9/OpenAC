@@ -247,28 +247,15 @@ internal sealed class WalkProductionWorldData : IWalkFrameWorldData
         return records;
     }
 
-    // The arena only ever grows, because the segments it hands out are alive
+    // The arena only ever grew, because the segments it hands out are alive
     // until the frame ends. A portal arrival or a pass over a dense town can
     // push it past thirty thousand records -- fifteen megabytes -- and it kept
-    // that for the rest of the session. At a frame boundary no segment is
-    // alive, so the peak of the last few hundred frames is enough capacity.
-    private const int ArenaTrimEveryFrames = 512;
-    private const int ArenaTrimFloor = 4096;
-    private int _arenaFramesSinceTrim;
-    private int _arenaPeakSinceTrim;
+    // that for the rest of the session. This runs at the frame boundary, from
+    // BeginFrame, right after the caches that hold segments into the arena are
+    // cleared, so no live segment can point into the array it replaces.
+    private FrameScratchTrim _arenaTrim = new(everyFrames: 512, floor: 4096);
 
-    private void TrimArena()
-    {
-        _arenaPeakSinceTrim = Math.Max(_arenaPeakSinceTrim, _arenaLength);
-        if (++_arenaFramesSinceTrim < ArenaTrimEveryFrames)
-            return;
-
-        int target = Math.Max(_arenaPeakSinceTrim, ArenaTrimFloor);
-        if (_arena.Length > (long)target * 2)
-            _arena = new RenderProjectionRecord[target];
-        _arenaFramesSinceTrim = 0;
-        _arenaPeakSinceTrim = 0;
-    }
+    private void TrimArena() => _arenaTrim.Observe(ref _arena, _arenaLength);
 
     private ArraySegment<RenderProjectionRecord> AppendToArena(
         ReadOnlySpan<RenderProjectionRecord> source)

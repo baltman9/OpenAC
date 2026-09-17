@@ -50,6 +50,9 @@ public sealed class CellGraph
     /// The land cell for an outdoor cell id, built from the landblock's
     /// terrain on first use and then cached. Returns null when the landblock
     /// is not resident, which is what callers read as "not loaded".
+    /// This writes the cell cache, and every caller is on the main thread
+    /// today; a worker reading the graph while a terrain replace is in flight
+    /// could cache a cell built from the terrain being replaced.
     /// </summary>
     private ObjCell? GetOrCreateOutdoorCell(uint id)
     {

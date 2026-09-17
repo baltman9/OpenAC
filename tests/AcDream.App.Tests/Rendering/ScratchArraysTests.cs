@@ -58,3 +58,113 @@ public sealed class ScratchArraysTests
         Assert.Same(same, values);
     }
 }
+
+public sealed class FrameScratchTrimTests
+{
+    private static int[] Peaked(int capacity)
+    {
+        var values = new int[capacity];
+        for (int i = 0; i < capacity; i++)
+            values[i] = i + 1;
+        return values;
+    }
+
+    /// <summary>A buffer that a frame filled to its peak is left alone: the
+    /// trim must never take capacity a steady workload is using.</summary>
+    [Fact]
+    public void Observe_BufferInUse_KeepsItsCapacity()
+    {
+        int[] buffer = Peaked(8_000);
+        int[] same = buffer;
+        var trim = new FrameScratchTrim(everyFrames: 4, floor: 1_024);
+
+        for (int frame = 0; frame < 20; frame++)
+            trim.Observe(ref buffer, 6_000);
+
+        Assert.Same(same, buffer);
+    }
+
+    /// <summary>Nothing is handed back before the trim interval is up, so a
+    /// quiet frame straight after a peak cannot shrink the buffer the next
+    /// frame may still need.</summary>
+    [Fact]
+    public void Observe_BeforeTheInterval_HandsNothingBack()
+    {
+        int[] buffer = Peaked(40_000);
+        int[] same = buffer;
+        var trim = new FrameScratchTrim(everyFrames: 8, floor: 1_024);
+
+        for (int frame = 0; frame < 7; frame++)
+            trim.Observe(ref buffer, 10);
+
+        Assert.Same(same, buffer);
+        Assert.Equal(7, trim.FramesSinceTrim);
+        Assert.Equal(10, trim.PeakSinceTrim);
+    }
+
+    /// <summary>After the interval the buffer comes back to the peak the
+    /// window actually used. This is the pin on the arena that used to keep a
+    /// portal arrival's fifteen megabytes for the rest of the session.</summary>
+    [Fact]
+    public void Observe_AfterTheInterval_ComesBackToTheWindowsPeak()
+    {
+        int[] buffer = Peaked(40_000);
+        var trim = new FrameScratchTrim(everyFrames: 4, floor: 1_024);
+
+        trim.Observe(ref buffer, 9_000);
+        trim.Observe(ref buffer, 3_000);
+        trim.Observe(ref buffer, 1_000);
+        Assert.Equal(40_000, buffer.Length);
+
+        trim.Observe(ref buffer, 2_000);
+        Assert.Equal(9_000, buffer.Length);
+        Assert.Equal(0, trim.FramesSinceTrim);
+        Assert.Equal(0, trim.PeakSinceTrim);
+    }
+
+    /// <summary>The peak resets with the trim, so a window that follows a busy
+    /// one is judged on its own frames and not on an old high-water mark.</summary>
+    [Fact]
+    public void Observe_PeakIsPerWindow()
+    {
+        int[] buffer = Peaked(40_000);
+        var trim = new FrameScratchTrim(everyFrames: 2, floor: 1_024);
+
+        trim.Observe(ref buffer, 12_000);
+        trim.Observe(ref buffer, 1);
+        Assert.Equal(12_000, buffer.Length);
+
+        trim.Observe(ref buffer, 1);
+        trim.Observe(ref buffer, 1);
+        Assert.Equal(1_024, buffer.Length);
+    }
+
+    /// <summary>The floor is never crossed, so an idle stretch cannot leave a
+    /// buffer that every later frame has to grow again.</summary>
+    [Fact]
+    public void Observe_NeverShrinksBelowTheFloor()
+    {
+        int[] buffer = Peaked(100_000);
+        var trim = new FrameScratchTrim(everyFrames: 2, floor: 4_096);
+
+        trim.Observe(ref buffer, 0);
+        trim.Observe(ref buffer, 0);
+
+        Assert.Equal(4_096, buffer.Length);
+    }
+
+    /// <summary>A buffer within twice the peak is left alone rather than
+    /// reallocated for a few per cent.</summary>
+    [Fact]
+    public void Observe_WithinTwiceThePeak_DoesNotReallocate()
+    {
+        int[] buffer = Peaked(9_000);
+        int[] same = buffer;
+        var trim = new FrameScratchTrim(everyFrames: 2, floor: 1_024);
+
+        trim.Observe(ref buffer, 5_000);
+        trim.Observe(ref buffer, 5_000);
+
+        Assert.Same(same, buffer);
+    }
+}
