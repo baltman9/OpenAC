@@ -399,18 +399,18 @@ public sealed class ShadowObjectRegistry
 
         if (cylsphereRoute)
         {
-            List<DatReaderWriter.Types.Sphere> cylSpheres =
-                BuildFloodSpheres(worldPos, worldRot, collisionShapes);
+            List<DatReaderWriter.Types.Sphere> cylSpheres = _floodSphereScratch;
+            FillFloodSpheres(worldPos, worldRot, collisionShapes, cylSpheres);
             IReadOnlyList<uint> cells = CellTransit.BuildShadowCellSet(
                 FloodCache, seedCellId, cylSpheres, cylSpheres.Count, isStatic);
             return (cells, RetailCellArrayRoute.Cylsphere);
         }
         else
         {
-            List<ShadowPartBox> boxes =
-                BuildFloodPartBoxes(worldPos, worldRot, partArray);
-            List<DatReaderWriter.Types.Sphere> spheres =
-                BuildBspPartSpheres(worldPos, worldRot, partArray);
+            List<ShadowPartBox> boxes = _partBoxScratch;
+            List<DatReaderWriter.Types.Sphere> spheres = _partSphereScratch;
+            FillFloodPartBoxes(worldPos, worldRot, partArray, boxes);
+            FillBspPartSpheres(worldPos, worldRot, partArray, spheres);
             IReadOnlyList<uint> cells = CellTransit.BuildShadowCellSetFromParts(
                 FloodCache, seedCellId, boxes, spheres, isStatic);
             return (cells, RetailCellArrayRoute.BoundingBox);
@@ -874,14 +874,17 @@ public sealed class ShadowObjectRegistry
 
             if (hasBsp)
             {
-                var partBoxes = BuildFloodPartBoxes(entityWorldPos, entityWorldRot, shapes);
-                var partSpheres = BuildBspPartSpheres(entityWorldPos, entityWorldRot, shapes);
+                List<ShadowPartBox> partBoxes = _partBoxScratch;
+                List<DatReaderWriter.Types.Sphere> partSpheres = _partSphereScratch;
+                FillFloodPartBoxes(entityWorldPos, entityWorldRot, shapes, partBoxes);
+                FillBspPartSpheres(entityWorldPos, entityWorldRot, shapes, partSpheres);
                 cellSet = CellTransit.BuildShadowCellSetFromParts(
                     FloodCache, seed, partBoxes, partSpheres, isStatic);
             }
             else
             {
-                var floodSpheres = BuildFloodSpheres(entityWorldPos, entityWorldRot, shapes);
+                List<DatReaderWriter.Types.Sphere> floodSpheres = _floodSphereScratch;
+                FillFloodSpheres(entityWorldPos, entityWorldRot, shapes, floodSpheres);
                 cellSet = CellTransit.BuildShadowCellSet(
                     FloodCache, seed, floodSpheres, floodSpheres.Count, isStatic);
             }
@@ -1078,18 +1081,40 @@ public sealed class ShadowObjectRegistry
         BumpOwnerVersion(entityId);
     }
 
+    // The flood shapes are derived from a position, an orientation and the
+    // owner's parts, handed straight to the cell-set walk and dropped. Keeping
+    // the lists means a moving owner no longer allocates its whole part set
+    // every time its shadow position is refreshed, which happens several times
+    // a frame for the local player.
+    private readonly List<ShadowPartBox> _partBoxScratch = [];
+    private readonly List<DatReaderWriter.Types.Sphere> _partSphereScratch = [];
+    private readonly List<DatReaderWriter.Types.Sphere> _floodSphereScratch = [];
+
     private static List<DatReaderWriter.Types.Sphere> BuildFloodSpheres(
         Vector3 entityWorldPos,
         Quaternion entityWorldRot,
         System.Collections.Generic.IReadOnlyList<ShadowShape> shapes)
     {
+        var spheres = new List<DatReaderWriter.Types.Sphere>();
+        FillFloodSpheres(entityWorldPos, entityWorldRot, shapes, spheres);
+        return spheres;
+    }
+
+    private static void FillFloodSpheres(
+        Vector3 entityWorldPos,
+        Quaternion entityWorldRot,
+        System.Collections.Generic.IReadOnlyList<ShadowShape> shapes,
+        List<DatReaderWriter.Types.Sphere> spheres)
+    {
         const int RetailSphereCap = 10;
 
-        var spheres = new List<DatReaderWriter.Types.Sphere>();
+        spheres.Clear();
         bool anyCyl = false;
-        foreach (var s in shapes)
+        // Indexed: shapes arrives as an interface, so a foreach boxes an
+        // enumerator, and this runs per owner per refresh.
+        for (int i = 0; i < shapes.Count; i++)
         {
-            if (s.CollisionType == ShadowCollisionType.Cylinder) anyCyl = true;
+            if (shapes[i].CollisionType == ShadowCollisionType.Cylinder) anyCyl = true;
         }
 
         ShadowCollisionType only =
@@ -1097,8 +1122,9 @@ public sealed class ShadowObjectRegistry
 
         int cap = only == ShadowCollisionType.Cylinder ? RetailSphereCap : int.MaxValue;
 
-        foreach (var s in shapes)
+        for (int i = 0; i < shapes.Count; i++)
         {
+            ShadowShape s = shapes[i];
             if (s.CollisionType != only)
                 continue;
             if (spheres.Count >= cap)
@@ -1113,8 +1139,6 @@ public sealed class ShadowObjectRegistry
                 Radius = s.Radius,
             });
         }
-
-        return spheres;
     }
 
     private static List<ShadowPartBox> BuildFloodPartBoxes(
@@ -1123,13 +1147,24 @@ public sealed class ShadowObjectRegistry
         System.Collections.Generic.IReadOnlyList<ShadowShape> shapes)
     {
         var boxes = new List<ShadowPartBox>(shapes.Count);
-        foreach (var s in shapes)
+        FillFloodPartBoxes(entityWorldPos, entityWorldRot, shapes, boxes);
+        return boxes;
+    }
+
+    private static void FillFloodPartBoxes(
+        Vector3 entityWorldPos,
+        Quaternion entityWorldRot,
+        System.Collections.Generic.IReadOnlyList<ShadowShape> shapes,
+        List<ShadowPartBox> boxes)
+    {
+        boxes.Clear();
+        for (int i = 0; i < shapes.Count; i++)
         {
+            ShadowShape s = shapes[i];
             if (s.CollisionType != ShadowCollisionType.BSP)
                 continue;
             boxes.Add(ShadowPartBox.FromShape(s, entityWorldPos, entityWorldRot));
         }
-        return boxes;
     }
 
     private static List<DatReaderWriter.Types.Sphere> BuildBspPartSpheres(
@@ -1138,8 +1173,20 @@ public sealed class ShadowObjectRegistry
         System.Collections.Generic.IReadOnlyList<ShadowShape> shapes)
     {
         var spheres = new List<DatReaderWriter.Types.Sphere>(shapes.Count);
-        foreach (var s in shapes)
+        FillBspPartSpheres(entityWorldPos, entityWorldRot, shapes, spheres);
+        return spheres;
+    }
+
+    private static void FillBspPartSpheres(
+        Vector3 entityWorldPos,
+        Quaternion entityWorldRot,
+        System.Collections.Generic.IReadOnlyList<ShadowShape> shapes,
+        List<DatReaderWriter.Types.Sphere> spheres)
+    {
+        spheres.Clear();
+        for (int i = 0; i < shapes.Count; i++)
         {
+            ShadowShape s = shapes[i];
             if (s.CollisionType != ShadowCollisionType.BSP)
                 continue;
             var partWorldPos = entityWorldPos + Vector3.Transform(s.LocalPosition, entityWorldRot);
@@ -1150,7 +1197,6 @@ public sealed class ShadowObjectRegistry
                 Radius = s.Radius,
             });
         }
-        return spheres;
     }
 
     private static uint DeriveOutdoorSeed(
