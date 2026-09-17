@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     tags: ['v*']
     # Prose-only changes do not need the build and test gates. GitHub ignores
     # path filters for tag pushes, so a release always runs everything. Keep
@@ -13,7 +13,7 @@ on:
       - 'LICENSE'
       - '.github/ISSUE_TEMPLATE/**'
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -26,7 +26,7 @@ permissions:
 jobs:
   windows-gate:
     # Pull requests (which may come from forks) run on GitHub-hosted runners;
-    # pushes to main and tags run on the maintainer's machine. The label is a
+    # pushes to main, dev and tags run on the maintainer's machine. The label is a
     # plain string on both paths so runs-on needs no array juggling.
     runs-on: ${{ github.event_name == 'pull_request' && 'windows-latest' || 'openac-windows' }}
     timeout-minutes: 60
