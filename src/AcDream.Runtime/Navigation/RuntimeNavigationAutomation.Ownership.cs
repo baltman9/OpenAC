@@ -7,26 +7,26 @@ namespace AcDream.Runtime.Navigation;
 // plugin, by id, or the player through a chat command. Another plugin asking while that
 // walk is under way is refused rather than quietly taking the character; the player's own
 // commands always win. A plugin that goes away takes its walk and its pauses with it.
+//
+// Ownership is keyed on the walk controller's request sequence: the owner recorded here
+// holds the walk only while the controller's current request is the one it started. A
+// request that reached the controller any other way (a route preview from chat, say) is
+// the player's.
 internal sealed partial class RuntimeNavigationAutomation : IScopedNavigationSource
 {
     /// <summary>The owner of walks and pauses asked for through chat, which outrank every plugin's.</summary>
     internal const string PlayerOwner = "player";
 
     private string? _walkOwner;
+    private long _walkSequence;
 
     /// <summary>Who owns the walk under way, or null when no walk is.</summary>
     internal string? WalkOwner
     {
         get
         {
-            NavigationWalkController? walk;
-            string? owner;
             lock (_gate)
-            {
-                walk = _walk;
-                owner = _walkOwner;
-            }
-            return walk is { IsBusy: true } ? owner : null;
+                return _walk is { } walk ? OwnerOfLocked(walk) : null;
         }
     }
 
@@ -39,45 +39,48 @@ internal sealed partial class RuntimeNavigationAutomation : IScopedNavigationSou
     public void Release(string ownerId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
-        NavigationWalkController? walk;
-        bool ownsWalk;
         lock (_gate)
         {
             _pauses.RemoveAll(pause => pause.Owner == ownerId);
-            walk = _walk;
-            ownsWalk = _walkOwner == ownerId;
-            if (ownsWalk)
+            if (_walk is { } walk && OwnerOfLocked(walk) == ownerId)
+            {
+                walk.Stop();
                 _walkOwner = null;
+            }
         }
-        if (ownsWalk && walk is { IsBusy: true })
-            walk.Stop();
     }
 
-    // A walk request from an owner: refused while another owner's walk is under way, unless
-    // the request is the player's.
+    // The owner of the controller's current request: the recorded owner while the request
+    // is the one it started, the player for any other request, null while nothing runs.
+    private string? OwnerOfLocked(NavigationWalkController walk)
+    {
+        if (!walk.IsBusy)
+            return null;
+        return walk.Report.Sequence == _walkSequence ? _walkOwner : PlayerOwner;
+    }
+
+    // A walk request from an owner, refused while another owner's walk is under way unless
+    // the request is the player's. The request reaches the controller under the gate so the
+    // recorded owner is always the one whose request is current.
     private PluginNavigationCommandStatus BeginWalk(
         string owner,
         Func<PluginNavigationCommandStatus> validate,
-        Action<NavigationWalkController> start)
+        Func<NavigationWalkController, long> start)
     {
-        if (!TryWalk(out NavigationWalkController walk))
-            return PluginNavigationCommandStatus.Unavailable;
-        PluginNavigationCommandStatus validity = validate();
-        if (validity != PluginNavigationCommandStatus.Accepted)
-            return validity;
         lock (_gate)
         {
-            if (owner != PlayerOwner
-                && _walkOwner is { } current
-                && current != owner
-                && walk.IsBusy)
-            {
+            if (!TryWalk(out NavigationWalkController walk))
+                return PluginNavigationCommandStatus.Unavailable;
+            PluginNavigationCommandStatus validity = validate();
+            if (validity != PluginNavigationCommandStatus.Accepted)
+                return validity;
+            string? current = OwnerOfLocked(walk);
+            if (owner != PlayerOwner && current is not null && current != owner)
                 return PluginNavigationCommandStatus.Held;
-            }
+            _walkSequence = start(walk);
             _walkOwner = owner;
+            return PluginNavigationCommandStatus.Accepted;
         }
-        start(walk);
-        return PluginNavigationCommandStatus.Accepted;
     }
 
     private static PluginNavigationCommandStatus ValidateArrival(uint objectId, float arrivalMeters) =>
@@ -118,26 +121,33 @@ internal sealed partial class RuntimeNavigationAutomation : IScopedNavigationSou
     // A plugin stops only the walk it started; the player stops any.
     private PluginNavigationCommandStatus StopGoToFor(string owner)
     {
-        if (!TryWalk(out NavigationWalkController walk))
-            return PluginNavigationCommandStatus.Unavailable;
-        if (!walk.IsBusy)
-            return PluginNavigationCommandStatus.Rejected;
         lock (_gate)
         {
-            if (owner != PlayerOwner && _walkOwner is { } current && current != owner)
+            if (!TryWalk(out NavigationWalkController walk))
+                return PluginNavigationCommandStatus.Unavailable;
+            string? current = OwnerOfLocked(walk);
+            if (current is null)
+                return PluginNavigationCommandStatus.Rejected;
+            if (owner != PlayerOwner && current != owner)
                 return PluginNavigationCommandStatus.Held;
+            walk.Stop();
             _walkOwner = null;
+            return PluginNavigationCommandStatus.Accepted;
         }
-        walk.Stop();
-        return PluginNavigationCommandStatus.Accepted;
     }
 
     private PluginGoToReport GoToReportFor()
     {
-        if (!TryWalk(out NavigationWalkController walk))
-            return default;
-        PluginGoToReport report = RuntimeNavigationProjection.GoToReport(walk.Report);
-        return report with { Owner = WalkOwner };
+        lock (_gate)
+        {
+            if (!TryWalk(out NavigationWalkController walk))
+                return default;
+            NavigationWalkReport report = walk.Report;
+            string? owner = walk.IsBusy
+                ? report.Sequence == _walkSequence ? _walkOwner : PlayerOwner
+                : null;
+            return RuntimeNavigationProjection.GoToReport(report) with { Owner = owner };
+        }
     }
 
     private IDisposable PauseGoToWhileFor(string owner, Func<string?> need)

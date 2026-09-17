@@ -565,7 +565,7 @@ public interface INavigationAutomation
     /// <summary>
     /// Has walks to objects wait for a plugin that sometimes needs the character,
     /// such as a combat macro. While <paramref name="need"/> returns what the plugin
-    /// is doing, such as "MossTank is running Attack", a walk under way stops where
+    /// is doing, such as "fighting a monster", a walk under way stops where
     /// the character stands and reports that it waits on that. Once nothing has
     /// needed the character for a moment, the walk plans again from where the
     /// character stands and goes on. The client asks on the update thread, every

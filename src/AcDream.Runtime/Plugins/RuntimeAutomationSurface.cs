@@ -1991,42 +1991,6 @@ internal sealed class RuntimeAutomationSurface
     internal static PluginObjectClass ClassifyObject(ClientObject? item) =>
         RuntimeWorldObjectProjection.ClassifyObject(item);
 
-    private static PluginNavigationObject EnrichNavigationObject(
-        in PluginNavigationObject value,
-        ClientObject? item)
-    {
-        if (item is null)
-            return value;
-        bool hasOpen = item.Properties.Bools.TryGetValue(
-            (uint)PropertyBool.Open,
-            out bool isOpen);
-        bool hasLocked = item.Properties.Bools.TryGetValue(
-            (uint)PropertyBool.Locked,
-            out bool isLocked);
-        return value with
-        {
-            IsDoor = ((PublicWeenieFlags)(item.PublicWeenieBitfield ?? 0u)
-                & PublicWeenieFlags.Door) != 0,
-            IsOpen = hasOpen && isOpen,
-            IsLocked = hasLocked && isLocked,
-            HasLockState = hasOpen || hasLocked,
-            LockDifficulty = item.Properties.GetInt(
-                (uint)PropertyInt.ResistLockpick),
-        };
-    }
-
-    // The GUI keeps every remote body's position current; a host that binds
-    // BindRemoteBodiesUnsimulated hasn't, so it reads the snapshot instead.
-    private Position? ResolveEntityPosition(RuntimeEntityRecord? record, uint playerId)
-    {
-        if (record is null)
-            return null;
-        if (_remoteBodiesUnsimulated && record.ServerGuid != playerId)
-            return ConvertPosition(record.Snapshot.Position);
-        return record.PhysicsBody?.CellPosition
-            ?? ConvertPosition(record.Snapshot.Position);
-    }
-
     private static Position? ConvertPosition(
         AcDream.Core.Net.Messages.CreateObject.ServerPosition? position) =>
         RuntimeWorldObjectProjection.ConvertPosition(position);

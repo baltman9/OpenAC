@@ -186,6 +186,9 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
                 INavigationAutomation source = Inner.Navigation;
                 lock (_gate)
                 {
+                    // The plugin is gone: nothing it could drive the character with.
+                    if (_disposed)
+                        return NoOpAutomationSurface.Instance.Navigation;
                     if (!ReferenceEquals(_navigationSource, source))
                     {
                         (_navigationSource as IScopedNavigationSource)?.Release(pluginId);

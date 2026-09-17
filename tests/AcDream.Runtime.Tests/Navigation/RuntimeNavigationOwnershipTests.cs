@@ -119,9 +119,130 @@ public sealed class RuntimeNavigationOwnershipTests
         Assert.Equal(PluginNavigationCommandStatus.Rejected, second.GoTo(Goal, 0f));
     }
 
+    [Fact]
+    public void AWalkThatReachedTheControllerAnyOtherWayIsThePlayers()
+    {
+        using var h = new Harness();
+        INavigationAutomation plugin = h.Navigation.ScopeTo("some.plugin");
+        Assert.Equal(PluginNavigationCommandStatus.Accepted, plugin.GoTo(Goal, 2f));
+
+        // A route preview from chat goes to the controller without passing through the
+        // navigation API; it is the player's, and the plugin's stale record does not outrank it.
+        _ = h.Walk.RouteTo(Goal, 2f);
+
+        Assert.Equal(RuntimeNavigationAutomation.PlayerOwner, h.Navigation.WalkOwner);
+        Assert.Equal(RuntimeNavigationAutomation.PlayerOwner, plugin.GoToReport.Owner);
+        Assert.Equal(PluginNavigationCommandStatus.Held, plugin.GoTo(Goal, 2f));
+        Assert.Equal(PluginNavigationCommandStatus.Held, plugin.StopGoTo());
+        Assert.Equal(PluginNavigationCommandStatus.Accepted, h.Navigation.StopGoTo());
+    }
+
+    [Fact]
+    public void AWalkThatEndedByItselfLeavesNoOwner()
+    {
+        using var h = new Harness();
+        INavigationAutomation first = h.Navigation.ScopeTo("first.plugin");
+        INavigationAutomation second = h.Navigation.ScopeTo("second.plugin");
+        Assert.Equal(PluginNavigationCommandStatus.Accepted, first.GoTo(Goal, 2f));
+
+        // With no body to sample the walk ends on its first frame.
+        h.Walk.Tick(0.016d);
+
+        Assert.Null(h.Navigation.WalkOwner);
+        Assert.Null(first.GoToReport.Owner);
+        Assert.Equal(PluginNavigationCommandStatus.Rejected, second.StopGoTo());
+        Assert.Equal(PluginNavigationCommandStatus.Accepted, second.GoTo(Goal, 2f));
+        Assert.Equal("second.plugin", h.Navigation.WalkOwner);
+    }
+
+    [Fact]
+    public void APluginsViewForwardsEveryMemberItself()
+    {
+        using var h = new Harness();
+        Type view = h.Navigation.ScopeTo("some.plugin").GetType();
+        System.Reflection.InterfaceMapping map = view.GetInterfaceMap(typeof(INavigationAutomation));
+
+        // A member left to the interface default would silently do nothing for the plugin.
+        foreach (System.Reflection.MethodInfo target in map.TargetMethods)
+            Assert.Equal(view, target.DeclaringType);
+    }
+
+    [Fact]
+    public void ThroughTheScopedHostAPluginOwnsItsWalkAndLosesItWhenTheHostGoes()
+    {
+        using var h = new Harness();
+        var scoped = new AcDream.Core.Plugins.ScopedPluginHost(new HostOver(h.Navigation), "example.plugin", "Example");
+        INavigationAutomation navigation = scoped.Automation.Navigation;
+
+        Assert.Equal(PluginNavigationCommandStatus.Accepted, navigation.GoTo(Goal, 2f));
+        Assert.Equal("example.plugin", h.Navigation.WalkOwner);
+        Assert.Equal("example.plugin", navigation.GoToReport.Owner);
+        IDisposable pause = navigation.PauseGoToWhile(() => "the example plugin is busy");
+        Assert.Equal("the example plugin is busy", h.Navigation.PauseReason());
+
+        scoped.Dispose();
+
+        Assert.Null(h.Navigation.WalkOwner);
+        Assert.Null(h.Navigation.PauseReason());
+        // After the plugin is gone, its host hands it nothing it could drive with.
+        Assert.Equal(PluginNavigationCommandStatus.Unavailable, scoped.Automation.Navigation.GoTo(Goal, 2f));
+        Assert.Null(h.Navigation.WalkOwner);
+        pause.Dispose();
+    }
+
+    private sealed class HostOver(INavigationAutomation navigation) : IPluginHost
+    {
+        public bool HasUi => false;
+        public IPluginLogger Log { get; } = new SilentLogger();
+        public IGameState State { get; } = new EmptyGameState();
+        public IEvents Events { get; } = new AcDream.Core.Plugins.WorldEvents();
+        public ISelectionService Selection { get; } = new InertSelection();
+        public IUiRegistry Ui => NoOpUiRegistry.Instance;
+        public IPluginStorage Storage => NoOpPluginStorage.Instance;
+        public IPluginStorage VtankProfiles => NoOpPluginStorage.Instance;
+        public IPluginCommandRegistry Commands => NoOpPluginCommandRegistry.Instance;
+        public IAutomationSurface Automation { get; } = new Surface(navigation);
+
+        private sealed class Surface(INavigationAutomation navigation) : IAutomationSurface
+        {
+            public bool IsAvailable => true;
+            public ICharacterInfo Character => NoOpAutomationSurface.Instance.Character;
+            public ISpellCatalog Spells => NoOpAutomationSurface.Instance.Spells;
+            public IMagicCommands Magic => NoOpAutomationSurface.Instance.Magic;
+            public IPluginChat Chat => NoOpAutomationSurface.Instance.Chat;
+            public INavigationAutomation Navigation => navigation;
+        }
+
+        private sealed class SilentLogger : IPluginLogger
+        {
+            public void Info(string message) { }
+            public void Warn(string message) { }
+            public void Error(string message, Exception? error = null) { }
+        }
+
+        private sealed class EmptyGameState : IGameState
+        {
+            public IReadOnlyList<WorldEntitySnapshot> Entities { get; } = [];
+        }
+
+        private sealed class InertSelection : ISelectionService
+        {
+            public uint? SelectedObjectId => null;
+            public uint? PreviousObjectId => null;
+            public event Action<SelectionChangedEvent>? Changed;
+            public bool Select(uint objectId)
+            {
+                Changed?.Invoke(default);
+                return false;
+            }
+            public bool Clear() => false;
+        }
+    }
+
     private sealed class Harness : IDisposable
     {
         internal readonly RuntimeNavigationAutomation Navigation;
+        internal readonly NavigationWalkController Walk;
         private readonly GameRuntime _runtime;
 
         internal Harness()
@@ -170,7 +291,8 @@ public sealed class RuntimeNavigationOwnershipTests
 
             Navigation = new RuntimeNavigationAutomation();
             Navigation.Bind(_runtime);
-            Navigation.BindWalk(new NavigationWalkController(new PhysicsEngine(), new NoWalkBody(), new NoWalkGoals()));
+            Walk = new NavigationWalkController(new PhysicsEngine(), new NoWalkBody(), new NoWalkGoals());
+            Navigation.BindWalk(Walk);
         }
 
         public void Dispose() => _runtime.Dispose();
