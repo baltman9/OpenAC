@@ -46,6 +46,9 @@ public sealed class JournalContractsPageController
 
     private static readonly Vector4 SelectedNameColor = Vector4.One;
 
+    private readonly Dictionary<UiText, UiTextLayoutCache<string>> _detailLayouts =
+        new(ReferenceEqualityComparer.Instance);
+
     private readonly List<uint> _rowContractIds = [];
     private readonly List<(uint ContractId, UiText? Name, Vector4 Unselected)> _rows = [];
 
@@ -183,25 +186,25 @@ public sealed class JournalContractsPageController
         if (_selectedContractId == 0u
             || !_bindings.Contracts.TryGetContract(_selectedContractId, out ContractTracker tracker))
         {
-            SetText(_statusValue, string.Empty);
-            SetText(_contactValue, string.Empty);
-            SetText(_contactLocationValue, string.Empty);
-            SetText(_questLocationValue, string.Empty);
-            SetText(_description, string.Empty);
-            SetText(_timedValue, string.Empty);
+            SetDetailText(_statusValue, string.Empty);
+            SetDetailText(_contactValue, string.Empty);
+            SetDetailText(_contactLocationValue, string.Empty);
+            SetDetailText(_questLocationValue, string.Empty);
+            SetDetailText(_description, string.Empty);
+            SetDetailText(_timedValue, string.Empty);
             return;
         }
 
         ContractEntry entry = catalog.Lookup(_selectedContractId);
 
-        SetText(_statusValue, ContractProgressText.Build(
+        SetDetailText(_statusValue, ContractProgressText.Build(
             (uint)tracker.Stage, tracker.TimeWhenRepeats, tracker.ReceivedAt, entry, now));
-        SetText(_contactValue, entry.NameNpcStart);
-        SetText(_contactLocationValue, LocationText(entry.LocationNpcStartCell));
-        SetText(_questLocationValue, LocationText(entry.LocationQuestAreaCell));
-        SetText(_description, entry.Description);
+        SetDetailText(_contactValue, entry.NameNpcStart);
+        SetDetailText(_contactLocationValue, LocationText(entry.LocationNpcStartCell));
+        SetDetailText(_questLocationValue, LocationText(entry.LocationQuestAreaCell));
+        SetDetailText(_description, entry.Description);
 
-        SetText(_timedValue, tracker.TimeWhenDone > 0d
+        SetDetailText(_timedValue, tracker.TimeWhenDone > 0d
             ? RetailDurationText.Format(
                 Math.Max(0d, tracker.TimeWhenDone - (now - tracker.ReceivedAt).TotalSeconds))
             : string.Empty);
@@ -217,5 +220,29 @@ public sealed class JournalContractsPageController
     {
         if (text is null) return;
         text.LinesProvider = () => [new UiText.Line(value, text.DefaultColor)];
+    }
+
+    /// <summary>
+    /// Detail fields are rewritten on every tick, so they go through a layout
+    /// cache: the line list is rebuilt only when the text, the element's width
+    /// or its colour actually change, instead of a fresh closure and array per
+    /// field per frame.
+    /// </summary>
+    private void SetDetailText(UiText? text, string value)
+    {
+        if (text is null) return;
+        if (_detailLayouts.TryGetValue(text, out UiTextLayoutCache<string>? cache))
+        {
+            cache.SetValue(value);
+            return;
+        }
+
+        cache = new UiTextLayoutCache<string>(
+            text,
+            static (target, content) => [new UiText.Line(content, target.DefaultColor)],
+            value,
+            StringComparer.Ordinal);
+        _detailLayouts.Add(text, cache);
+        text.LinesProvider = cache.Provider;
     }
 }

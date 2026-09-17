@@ -282,7 +282,13 @@ public sealed class UiText : UiElement, IUiDatStateful
         if (_authoredStateStrings is { } stateStrings
             && stateStrings.TryGetValue(stateId, out string? authoredLine))
         {
-            LinesProvider = () => [new Line(authoredLine, DefaultColor)];
+            // One cached line, rebuilt only when the authored text or the
+            // element's colour changes. A closure here would hand the draw a
+            // freshly allocated array on every frame, for every authored
+            // label in the interface.
+            _authoredStateLineText = authoredLine;
+            _authoredStateLine = null;
+            LinesProvider = _authoredStateLineProvider ??= AuthoredStateLines;
         }
 
         if (propagate && state?.PassToChildren == true)
@@ -293,6 +299,21 @@ public sealed class UiText : UiElement, IUiDatStateful
         }
 
         return true;
+    }
+
+    private Line[]? _authoredStateLine;
+    private string _authoredStateLineText = string.Empty;
+    private Vector4 _authoredStateLineColor;
+    private Func<IReadOnlyList<Line>>? _authoredStateLineProvider;
+
+    private IReadOnlyList<Line> AuthoredStateLines()
+    {
+        if (_authoredStateLine is null || _authoredStateLineColor != DefaultColor)
+        {
+            _authoredStateLineColor = DefaultColor;
+            _authoredStateLine = [new Line(_authoredStateLineText, _authoredStateLineColor)];
+        }
+        return _authoredStateLine;
     }
 
     private static bool TryColor(UiPropertyValue property, out Vector4 color)

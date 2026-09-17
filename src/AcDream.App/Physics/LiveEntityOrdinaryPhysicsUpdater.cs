@@ -57,13 +57,13 @@ internal sealed class LiveEntityOrdinaryPhysicsUpdater
             return false;
         var (radius, height) = _getSetupCylinder(record.ServerGuid, entity);
         var shape = _getSetupMoverShape(record.ServerGuid, entity);
-        bool ExternalOwnerValid() =>
-            IsCurrent(
-                runtime,
-                record,
-                entity,
-                body,
-                objectClockEpoch);
+        // The two callbacks below are aimed at one carried state object
+        // instead of closing over the locals: this runs for every live entity
+        // on every frame, and a capture would allocate two delegates and a
+        // display class each time. Entities are ticked one at a time and the
+        // callbacks are only invoked inside this call.
+        TickCallbacks callbacks = _callbacks;
+        callbacks.Aim(runtime, record, entity, body, objectClockEpoch);
 
         if (!_runtime.TryBegin(
                 record.Canonical,
@@ -75,7 +75,7 @@ internal sealed class LiveEntityOrdinaryPhysicsUpdater
                 objectClockEpoch,
                 sequencer,
                 captureAnimationHooks,
-                ExternalOwnerValid,
+                callbacks.ExternalOwnerValid,
                 out RuntimeOrdinaryPhysicsCommit commit,
                 sphereList: shape.Spheres,
                 sphereScale: shape.Scale,
@@ -83,23 +83,84 @@ internal sealed class LiveEntityOrdinaryPhysicsUpdater
                 stepDownHeight: shape.StepDownHeight,
                 moverPvpState: _getMoverPvpState(record.ServerGuid)))
         {
+            callbacks.Release();
             return false;
         }
 
-        return _runtime.Complete(
+        bool completed = _runtime.Complete(
             commit,
             liveCenterX,
             liveCenterY,
-            snapshot =>
-            {
-                if (!ExternalOwnerValid())
-                    return false;
+            callbacks.Commit);
+        callbacks.Release();
+        return completed;
+    }
 
-                entity.SetPosition(snapshot.Position);
-                entity.Rotation = snapshot.Orientation;
-                entity.ParentCellId = snapshot.FullCellId;
-                return ExternalOwnerValid();
-            });
+    private readonly TickCallbacks _callbacks = new();
+
+    /// <summary>
+    /// Holds what the per-entity physics callbacks read, so the callbacks
+    /// themselves are created once for the updater.
+    /// </summary>
+    private sealed class TickCallbacks
+    {
+        private LiveEntityRuntime? _runtime;
+        private LiveEntityRecord? _record;
+        private WorldEntity? _entity;
+        private PhysicsBody? _body;
+        private ulong _objectClockEpoch;
+
+        public TickCallbacks()
+        {
+            ExternalOwnerValid = IsOwnerValid;
+            Commit = ApplySnapshot;
+        }
+
+        public Func<bool> ExternalOwnerValid { get; }
+
+        public Func<RuntimePhysicsFrameSnapshot, bool> Commit { get; }
+
+        public void Aim(
+            LiveEntityRuntime runtime,
+            LiveEntityRecord record,
+            WorldEntity entity,
+            PhysicsBody body,
+            ulong objectClockEpoch)
+        {
+            _runtime = runtime;
+            _record = record;
+            _entity = entity;
+            _body = body;
+            _objectClockEpoch = objectClockEpoch;
+        }
+
+        public void Release()
+        {
+            _runtime = null;
+            _record = null;
+            _entity = null;
+            _body = null;
+            _objectClockEpoch = 0ul;
+        }
+
+        private bool IsOwnerValid()
+        {
+            if (_runtime is null || _record is null || _entity is null || _body is null)
+                throw new InvalidOperationException("no entity is being ticked");
+            return IsCurrent(_runtime, _record, _entity, _body, _objectClockEpoch);
+        }
+
+        private bool ApplySnapshot(RuntimePhysicsFrameSnapshot snapshot)
+        {
+            if (!IsOwnerValid())
+                return false;
+
+            WorldEntity entity = _entity!;
+            entity.SetPosition(snapshot.Position);
+            entity.Rotation = snapshot.Orientation;
+            entity.ParentCellId = snapshot.FullCellId;
+            return IsOwnerValid();
+        }
     }
 
     private static bool IsCurrent(
