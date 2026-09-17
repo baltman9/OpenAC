@@ -291,24 +291,28 @@ public sealed class GameWindow :
 
     /// <summary>
     /// Cached copy of whether the OS window is minimized, kept current by
-    /// the window's own StateChanged callback (fired on this window's own
-    /// thread) rather than read live off Silk.NET on a plugin's calling
-    /// thread -- glfwGetWindowAttrib, like the clipboard calls
-    /// ClipboardDispatch exists for, is documented main-thread-only, so a
-    /// live read from an arbitrary thread would carry the same silent-
-    /// failure hazard.
+    /// OnPluginWindowStateChanged -- itself routed through
+    /// SilkWindowCallbackBinding's gated StateChanged fan-out, not a raw
+    /// window.StateChanged subscription -- rather than read live off
+    /// Silk.NET on a plugin's calling thread. glfwGetWindowAttrib, like the
+    /// clipboard calls ClipboardDispatch exists for, is documented
+    /// main-thread-only, so a live read from an arbitrary thread would
+    /// carry the same silent-failure hazard.
     /// </summary>
     internal volatile bool PluginWindowIsMinimized;
 
     /// <summary>
-    /// The native window, for plugin minimize/restore/close. Calls must be
-    /// marshalled through ClipboardDispatch (renamed in spirit only -- it
-    /// is this window's general main-thread dispatch queue) exactly like
-    /// the clipboard: GLFW window-state and close calls are main-thread-
-    /// only.
+    /// Adapter over the native window for plugin minimize/restore/close,
+    /// cached alongside _window itself rather than allocated fresh on
+    /// every access. Calls must be marshalled through ClipboardDispatch
+    /// (renamed in spirit only -- it is this window's general main-thread
+    /// dispatch queue) exactly like the clipboard: GLFW window-state and
+    /// close calls are main-thread-only.
     /// </summary>
     internal AcDream.App.Plugins.IPluginHostWindowTarget? PluginWindowHandle =>
-        _window is null ? null : new AcDream.App.Plugins.SilkPluginHostWindowTarget(_window);
+        _pluginWindowHandle;
+
+    private AcDream.App.Plugins.IPluginHostWindowTarget? _pluginWindowHandle;
 
     public AcDream.Core.Chat.ChatLog Chat => _runtimeCommunication.Chat;
     public AcDream.Core.Chat.TurbineChatState TurbineChat =>
@@ -640,9 +644,8 @@ public sealed class GameWindow :
 
         _window = Window.Create(options);
         IWindow window = _window;
+        _pluginWindowHandle = new AcDream.App.Plugins.SilkPluginHostWindowTarget(window);
         PluginWindowIsMinimized = window.WindowState == WindowState.Minimized;
-        window.StateChanged += state =>
-            PluginWindowIsMinimized = state == WindowState.Minimized;
         _runtimeSettings.BindDisplayWindow(
             new SilkRuntimeDisplayWindowTarget(window),
             _options.ExactAutomationFramebuffer,
@@ -665,7 +668,8 @@ public sealed class GameWindow :
                 OnRender,
                 OnClosing,
                 OnFocusChanged,
-                OnFramebufferResize),
+                OnFramebufferResize,
+                OnPluginWindowStateChanged),
             _displayFramePacing,
             _hostQuiescence);
         _windowCallbacks.Attach();
@@ -1795,10 +1799,21 @@ public sealed class GameWindow :
     private void OnFocusChanged(bool focused)
         => _windowFocus.HandleFocusChanged(focused);
 
+    /// <summary>
+    /// Keeps PluginWindowIsMinimized current. Routed through
+    /// SilkWindowCallbackBinding (WindowCallbackTargets.StateChanged) so
+    /// attach/detach and quiescence gating apply exactly like every other
+    /// native callback -- a raw window.StateChanged += subscription would
+    /// bypass both and never unsubscribe.
+    /// </summary>
+    private void OnPluginWindowStateChanged(WindowState state) =>
+        PluginWindowIsMinimized = state == WindowState.Minimized;
+
     public void Dispose()
     {
         CompleteShutdown(releaseNativeWindow: true);
         _window = null;
+        _pluginWindowHandle = null;
     }
 
 }

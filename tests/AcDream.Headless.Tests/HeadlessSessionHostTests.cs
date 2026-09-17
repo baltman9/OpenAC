@@ -675,22 +675,20 @@ public sealed class HeadlessSessionHostTests
         }
     }
 
+
     [Fact]
-    public void PluginRequestCloseReachesTheSameHookSigintUsesAndTheSessionRecordsTheNormalTerminalEvent()
+    public void PluginRequestCloseEndsOnlyThisSessionAndRecordsTheNormalTerminalEvent()
     {
-        // IHostWindow.RequestClose on a headless host never terminates
-        // anything itself -- it hands off to the process's normal
-        // terminal path. Here that hand-off is the requestProcessStop
-        // callback HeadlessProcessHost wires to its own
-        // _consoleQuitRequested.Cancel -- the exact same delegate a
-        // SIGINT/SIGTERM handler or a policy-driven stop already invokes
-        // in production (see HeadlessConsoleTests's
-        // ConsoleLineReachesTheSessionAndQuitEndsTheProcessGracefully for
-        // the console's own use of that path). This test proves the
-        // plugin-facing hand-off reaches that hook exactly once, and that
-        // the session's ensuing disposal -- what cancelling the token
-        // ultimately causes -- writes the normal "exited" terminal status
-        // event rather than anything abnormal.
+        // IHostWindow.RequestClose on a headless host never touches the
+        // process-wide quit token: it ends this session's own connection
+        // through the same Stop()+terminal-status path a policy deciding
+        // it is complete already leaves for the process's final disposal.
+        // The status file records the normal "exited"/"graceful" event
+        // right away, and IsPolicyComplete flips true immediately so the
+        // scheduler excludes this session from further ticks -- all while
+        // the session's own objects are not disposed yet (that still
+        // happens later, at the process's own final disposal, unchanged
+        // from how a policy-completed session already behaves today).
         string statusPath = Path.Combine(
             Path.GetTempPath(),
             $"acdream-headless-requestclose-status-{Guid.NewGuid():N}.jsonl");
@@ -701,29 +699,30 @@ public sealed class HeadlessSessionHostTests
             using var credential = new HeadlessCredentialSecret(
                 "fixture",
                 "password");
-            int processStopRequests = 0;
-            var host = new HeadlessSessionHost(
+            using var host = new HeadlessSessionHost(
                 Descriptor(statusFile: statusPath),
                 credential,
                 new HeadlessDiagnosticWriter(diagnosticsOutput),
-                operations,
-                requestProcessStop: () => processStopRequests++);
+                operations);
 
             Assert.Equal(
                 RuntimeSessionStartStatus.Connected,
                 host.Start().Status);
+            Assert.False(host.IsPolicyComplete);
 
             HostWindowResult result = host.Plugins.Host.Window.RequestClose();
 
             Assert.Equal(HostWindowStatus.Done, result.Status);
-            Assert.Equal(1, processStopRequests);
+            Assert.True(host.IsPolicyComplete);
+            Assert.False(host.Runtime.Session.IsInWorld);
 
-            // Cancelling the process's quit token (what the reached hook
-            // does in production) unwinds the scheduler loop and lets the
-            // process's `using` block dispose each session -- modeled
-            // here directly since this test targets the session in
-            // isolation, not the multi-threaded process host.
-            host.Dispose();
+            // A second call is a harmless no-op, not a second "exited"
+            // write (SessionStatusWriter itself latches off further
+            // writes once "exited" has landed, but this also proves the
+            // session-side idempotency guard does not throw or re-stop).
+            HostWindowResult secondResult =
+                host.Plugins.Host.Window.RequestClose();
+            Assert.Equal(HostWindowStatus.Done, secondResult.Status);
 
             JsonElement[] events = File.ReadAllLines(statusPath)
                 .Select(static line => JsonDocument.Parse(line).RootElement.Clone())
@@ -740,7 +739,6 @@ public sealed class HeadlessSessionHostTests
                 File.Delete(statusPath);
         }
     }
-
     [Fact]
     public void StatusFileReceivesThePinnedLifecycleEventsInOrder()
     {

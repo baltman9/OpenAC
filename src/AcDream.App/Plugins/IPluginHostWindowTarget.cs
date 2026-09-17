@@ -7,7 +7,10 @@ namespace AcDream.App.Plugins;
 /// operations need -- state and close. <see cref="WindowPluginHostWindow"/>
 /// depends on this instead of the much larger Silk.NET
 /// <see cref="Silk.NET.Windowing.IWindow"/>, so a test fake only needs to
-/// implement two members.
+/// implement two members. A third narrow seam, IWindowedSizeSurface in
+/// Settings/RuntimeSettingsTargets.cs, covers window Size/IsMaximized/
+/// Restore for the display-settings panel -- unrelated to plugins, do not
+/// merge the two.
 /// </summary>
 public interface IPluginHostWindowTarget
 {

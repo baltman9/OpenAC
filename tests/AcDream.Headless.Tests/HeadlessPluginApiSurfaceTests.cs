@@ -473,6 +473,25 @@ public sealed class HeadlessPluginApiSurfaceTests
     }
 
     [Fact]
+    public void WindowRequestCloseReportsUnavailableWhenTheRouteThrowsRatherThanEscaping()
+    {
+        // M3: a throw from the wired route (a disposed dependency reached
+        // mid-teardown, for instance) must report Unavailable rather than
+        // escape into the plugin that called RequestClose.
+        using GameRuntime runtime = NewRuntime();
+        bool ThrowingRequestGracefulStop() =>
+            throw new ObjectDisposedException("fixture");
+        using var host = new HeadlessPluginHost(
+            runtime,
+            new InertLogger(),
+            requestGracefulStop: ThrowingRequestGracefulStop);
+
+        HostWindowResult result = host.Window.RequestClose();
+
+        Assert.Equal(HostWindowStatus.Unavailable, result.Status);
+    }
+
+    [Fact]
     public void DialogsAnswerForwardsToTheBoundRoute()
     {
         using GameRuntime runtime = NewRuntime();

@@ -173,6 +173,7 @@ internal sealed class HeadlessSessionHost : IDisposable
     private Exception? _fault;
     private bool _faulted;
     private bool _disposed;
+    private bool _gracefulStopRequested;
 
     internal HeadlessSessionHost(
         HeadlessSessionDescriptor descriptor,
@@ -188,8 +189,7 @@ internal sealed class HeadlessSessionHost : IDisposable
         FellowshipAllegianceGateCoordinator? gateCoordinator = null,
         IPluginStorage? storage = null,
         IEnumerable<string>? pluginRoots = null,
-        IPluginStorage? vtankProfiles = null,
-        Action? requestProcessStop = null)
+        IPluginStorage? vtankProfiles = null)
     {
         _descriptor = descriptor
             ?? throw new ArgumentNullException(nameof(descriptor));
@@ -289,13 +289,6 @@ internal sealed class HeadlessSessionHost : IDisposable
                 RespondToConfirmation(accept);
                 return true;
             }
-            bool RequestGracefulStop()
-            {
-                if (requestProcessStop is null)
-                    return false;
-                requestProcessStop();
-                return true;
-            }
             pluginSession = HeadlessPluginSession.Create(
                 runtime,
                 diagnostics,
@@ -310,7 +303,7 @@ internal sealed class HeadlessSessionHost : IDisposable
                 SubmitChatText,
                 RequestLogout,
                 AnswerConfirmation,
-                RequestGracefulStop);
+                RequestOwnGracefulStop);
             var liveSession = new LiveSessionHost(
                 runtime.Session,
                 new LiveSessionHostBindings(
@@ -441,7 +434,7 @@ internal sealed class HeadlessSessionHost : IDisposable
     internal string ActiveCharacterName { get; private set; } =
         string.Empty;
     internal bool IsPolicyComplete =>
-        _faulted || _policy.IsComplete;
+        _faulted || _policy.IsComplete || _gracefulStopRequested;
     internal bool IsFaulted => _faulted;
     internal Exception? Fault => _fault;
     internal bool IsReconnectPending => _reconnectPending;
@@ -537,6 +530,39 @@ internal sealed class HeadlessSessionHost : IDisposable
             _statusWriter.Disconnected(_descriptor.Id, reason);
         }
         return result;
+    }
+
+    /// <summary>
+    /// Ends this session's own connection gracefully -- Stop() plus the
+    /// same terminal-status accounting Dispose() uses -- without disposing
+    /// this session's own runtime/plugin/policy objects yet (that still
+    /// happens at the process's own final disposal, exactly like a
+    /// policy-completed session already leaves them until then). Setting
+    /// the completion flag first makes IsPolicyComplete report true
+    /// immediately, so the scheduler stops ticking this session on its
+    /// own; every other session in the same process is untouched, and the
+    /// process as a whole still only ends once every session has reached
+    /// this state -- unchanged from today. Idempotent (a second call is a
+    /// no-op past the first Stop()+status write), and safe to call from
+    /// inside this session's own Tick() -- a plugin's RequestClose fires
+    /// from there, the same guarantee RequestLogout above already relies
+    /// on.
+    /// </summary>
+    internal bool RequestOwnGracefulStop()
+    {
+        if (_disposed)
+            return false;
+        bool alreadyRequested = _gracefulStopRequested;
+        _gracefulStopRequested = true;
+        _reconnectPending = false;
+        _reconnectDeadline = 0L;
+        Stop();
+        if (!alreadyRequested)
+        {
+            (int exitCode, string exitReason) = ResolveTerminalStatus();
+            _statusWriter.Exited(_descriptor.Id, exitCode, exitReason);
+        }
+        return true;
     }
 
     internal void Quarantine(Exception error)

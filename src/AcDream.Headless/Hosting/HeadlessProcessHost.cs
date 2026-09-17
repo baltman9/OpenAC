@@ -115,8 +115,7 @@ internal sealed class HeadlessProcessHost : IDisposable
                         gateCoordinator: gateCoordinator,
                         pluginRoots: pluginRoots,
                         storage: pluginStorage,
-                        vtankProfiles: vtankProfiles,
-                        requestProcessStop: _consoleQuitRequested.Cancel));
+                        vtankProfiles: vtankProfiles));
                 }
                 catch
                 {

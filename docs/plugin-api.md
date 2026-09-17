@@ -586,7 +586,6 @@ design sketch put overrides in `keybinds.json` itself; this was changed
 so a corrupt or hand-edited plugin override file can never touch the
 client's own binding schema). There is no in-client rebind UI yet; a
 plugin (or a future Settings panel) calls `Rebind` directly.
-
 ## Host window
 
 ```csharp
@@ -601,16 +600,31 @@ if (!result.Succeeded)
 `host.Window` is one of the client's own OS window: minimize, restore, and
 request-close, the same three controls the title bar already offers.
 
-`Minimize()`/`Restore()` act on the OS window itself (GLFW iconify/restore
--- Windows, Linux, and macOS all go through the same call). Both report
-`HostWindowStatus.Done` only once the window actually reports the new state
-back, not just because the call was made; a write that does not stick (no
-window focus, a platform that refuses it) reports `Unavailable`. `IsMinimized`
-reads a cached flag kept current by the window's own state-change callback,
-not a live read of the window's state -- the same window calls the writes
-above go through are documented main-thread-only, so a live read from
-whatever thread a plugin happens to call this from would carry the same
-silent-failure risk the write side already has to guard against.
+`Minimize()` sets the window to iconified; `Restore()` un-minimizes it if it
+is currently minimized and is a no-op success otherwise -- it never forces
+the window to a plain "Normal" state, because a window that was maximized
+or fullscreen before it was minimized should come back maximized or
+fullscreen, not windowed. Both report `HostWindowStatus.Done` only once the
+window actually reports a state consistent with the request back, not just
+because the call was made; a write that does not stick (no window focus, a
+platform that refuses it) reports `Unavailable`.
+
+That confirmation is not equally trustworthy on every platform. It is
+synchronous on Windows. On X11 it arrives asynchronously over the window
+manager's own state property, so a check immediately after `Minimize()` can
+briefly still read the old state. On macOS the minimize animation means
+there is a short window where the OS has not finished iconifying yet. On
+Wayland the compositor protocol has no way to report iconification back to
+the client at all, so `IsMinimized` never becomes `true` there and
+`Minimize()` always reports `Unavailable` even when the window did minimize
+-- treat `Unavailable` from `Minimize()` as "unknown", not as "definitely
+still shown", and do not retry it in a loop on that signal alone.
+`IsMinimized` itself reads a cached flag kept current by the window's own
+state-change callback, not a live read of the window's state -- the same
+window calls the writes above go through are documented main-thread-only,
+so a live read from whatever thread a plugin happens to call this from
+would carry the same silent-failure risk the write side already has to
+guard against.
 
 `RequestClose()` takes the exact route the window's own close button uses:
 graceful logout, then teardown, then process exit. It never terminates the
@@ -618,9 +632,13 @@ process directly -- there is no `Environment.Exit`/`Process.Kill` on this
 path, on either host. On a host with no window (headless), `Minimize`,
 `Restore`, and `IsMinimized` stay at the interface's inert defaults
 (`Unavailable`/`false`), but `RequestClose` still has somewhere real to go:
-it ends the plugin's own session through the process's normal terminal
-path -- the same one a SIGINT/SIGTERM or a policy-driven stop already uses
--- rather than terminating anything directly.
+it ends the plugin's own session -- not the whole headless process -- the
+same way a bot policy already ends its own session when it decides its job
+is done. A second session hosted by the same process is untouched; only the
+console's own `/quit` and a SIGINT/SIGTERM end every session in the process
+at once. Without `--console` there is no `/quit` to type, so
+`Window.RequestClose()` is the one graceful way a plugin has to end its own
+headless session from the inside.
 
 ## Headless
 
@@ -674,9 +692,11 @@ placeholders rather than wired to real state:
   `false` and the handler never fires.
 - `Window.Minimize`/`Restore`/`IsMinimized` stay at the interface's inert
   defaults -- there is no OS window on a headless host.
-  `Window.RequestClose` is real: it ends the plugin's own session through
-  the process's normal terminal path, the same one a SIGINT/SIGTERM or a
-  policy-driven stop already uses.
+  `Window.RequestClose` is real: it ends only this session, the same way
+  a bot policy already ends its own session when it decides it is done;
+  a second session hosted by the same process is untouched. Only the
+  console's own `/quit` and a SIGINT/SIGTERM end every session in the
+  process at once.
 - Everything else on `IAutomationSurface` not named above --
   `Combat`/`Equipment`/`Items`/`Loot`/`Fellowship`/`Enchantments`/
   `Navigation`/`WorldTime`/`Network`/`Recovery`/`Projectile`/`Selection`

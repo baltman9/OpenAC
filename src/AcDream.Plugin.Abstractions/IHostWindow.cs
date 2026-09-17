@@ -4,8 +4,11 @@ namespace AcDream.Plugin.Abstractions;
 public enum HostWindowStatus
 {
     /// <summary>
-    /// The host has no window to act on (a no-window/headless host), or the
-    /// requested change did not take.
+    /// The host has no window to act on (a no-window/headless host), the
+    /// requested change did not take, or the outcome could not be confirmed
+    /// (see the platform caveats on <see cref="IHostWindow.Minimize"/>).
+    /// Treat this as "unknown", not "definitely unchanged" -- a plugin
+    /// should not spin retrying on this signal alone.
     /// </summary>
     Unavailable = 0,
 
@@ -13,7 +16,13 @@ public enum HostWindowStatus
     Done,
 }
 
-/// <summary>One outcome from an <see cref="IHostWindow"/> call.</summary>
+/// <summary>
+/// One outcome from an <see cref="IHostWindow"/> call. <see cref="Notice"/>
+/// carries a one-line reason when the host has one worth surfacing (a
+/// logger message, a diagnostic panel) -- callers should branch on
+/// <see cref="Status"/>/<see cref="Succeeded"/> only, never on the text of
+/// Notice, which is not a stable identifier.
+/// </summary>
 public readonly record struct HostWindowResult(
     HostWindowStatus Status,
     string? Notice = null)
@@ -32,7 +41,9 @@ public interface IHostWindow
 {
     /// <summary>
     /// Whether the window is currently minimized/iconified. Always
-    /// <c>false</c> on a host with no window.
+    /// <c>false</c> on a host with no window, and also always
+    /// <c>false</c> on a platform that cannot report iconification back
+    /// at all (see the platform caveats below).
     /// </summary>
     bool IsMinimized => false;
 
@@ -42,12 +53,24 @@ public interface IHostWindow
     /// actually reports the minimized state back; a host with no window,
     /// or one that refused the change, reports <see
     /// cref="HostWindowStatus.Unavailable"/>.
+    ///
+    /// That confirmation is not equally trustworthy on every platform: it
+    /// is synchronous on Windows, arrives asynchronously on X11 (a call
+    /// immediately after Minimize can briefly still read the old state),
+    /// is animated on macOS (there is a brief window before the OS
+    /// finishes iconifying), and the Wayland compositor protocol has no
+    /// way to report iconification back to the client at all -- on
+    /// Wayland this call always reports Unavailable even when the window
+    /// did minimize. Treat Unavailable here as "not confirmed", not as
+    /// "definitely still shown"; do not retry it in a loop.
     /// </summary>
     HostWindowResult Minimize() => new(HostWindowStatus.Unavailable);
 
     /// <summary>
-    /// Restores the OS window to its normal (non-minimized) state. Same
-    /// success rule as <see cref="Minimize"/>.
+    /// Un-minimizes the OS window if it is currently minimized; a no-op
+    /// success if it was already shown, whatever its prior maximized or
+    /// fullscreen state. Same confirmation caveats as <see
+    /// cref="Minimize"/>.
     /// </summary>
     HostWindowResult Restore() => new(HostWindowStatus.Unavailable);
 
