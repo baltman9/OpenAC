@@ -12,7 +12,7 @@ namespace AcDream.App.Plugins;
 /// Restore for the display-settings panel -- unrelated to plugins, do not
 /// merge the two.
 /// </summary>
-public interface IPluginHostWindowTarget
+internal interface IPluginHostWindowTarget
 {
     WindowState WindowState { get; set; }
 

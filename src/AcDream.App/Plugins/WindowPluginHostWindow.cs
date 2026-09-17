@@ -26,7 +26,7 @@ namespace AcDream.App.Plugins;
 /// including a Restore call on a window that was never minimized to begin
 /// with, which is a no-op success rather than an unnecessary write.
 /// </summary>
-public sealed class WindowPluginHostWindow(
+internal sealed class WindowPluginHostWindow(
     Func<IPluginHostWindowTarget?> window,
     Func<bool> isMinimized,
     Func<MainThreadDispatchQueue> dispatch)
