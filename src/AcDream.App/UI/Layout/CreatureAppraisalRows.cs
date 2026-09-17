@@ -643,9 +643,40 @@ public sealed class CreatureAppraisalLayeredList
             height: backgroundHost.Height,
             zOrder: foregroundZOrder,
             scroll: scroll);
-        foreground.Anchors = AnchorEdges.Left | AnchorEdges.Top
-            | AnchorEdges.Right | AnchorEdges.Bottom;
         panel.AddChild(foreground);
+
+        // Both layers reflow from the host's AUTHORED rect and parent size, the
+        // way the imported host itself does. A baseline captured at first draw
+        // would remember whatever window size a saved layout had applied by
+        // then, and shrinking the window afterwards would drive the lists to
+        // nothing while the original client still shows their first rows.
+        if (backgroundHost.LayoutPolicy is { } hostPolicy)
+        {
+            UiPixelRect hostRect = hostPolicy.OriginalChild;
+            foreground.LayoutPolicy = new UiLayoutPolicy(
+                hostPolicy.LeftMode,
+                hostPolicy.TopMode,
+                hostPolicy.RightMode,
+                hostPolicy.BottomMode,
+                new UiPixelRect(
+                    hostRect.X0 + (int)TextInset,
+                    hostRect.Y0,
+                    hostRect.X1 + (int)TextInset,
+                    hostRect.Y1),
+                hostPolicy.OriginalParent);
+            background.LayoutPolicy = new UiLayoutPolicy(
+                leftMode: 1,
+                topMode: 1,
+                rightMode: 1,
+                bottomMode: 1,
+                UiPixelRect.FromPositionAndSize(0, 0, hostRect.Width, hostRect.Height),
+                UiPixelRect.FromPositionAndSize(0, 0, hostRect.Width, hostRect.Height));
+        }
+        else
+        {
+            foreground.Anchors = AnchorEdges.Left | AnchorEdges.Top
+                | AnchorEdges.Right | AnchorEdges.Bottom;
+        }
 
         return new CreatureAppraisalLayeredList(
             templates,

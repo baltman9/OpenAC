@@ -1035,6 +1035,68 @@ public sealed class AppraisalUiControllerTests
     }
 
     [Fact]
+    public void CharacterResponse_ListsKeepTheirAuthoredHeightWhenAWindowRestoredTallIsShrunkBack()
+    {
+        // OpenAC #114: a saved window size is applied before the panel's first
+        // draw. The list overlays must still measure from the authored layout,
+        // so shrinking the window back to its minimum shows the first rows of
+        // both lists, exactly as the original client does at that size.
+        ImportedLayout layout = FixtureLoader.LoadExamination();
+        var objects = new ClientObjectTable();
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = ObjectId,
+            Name = "Dww",
+            Type = ItemType.Creature,
+        });
+        using var interaction = NewInteraction(objects, []);
+        var templates = new CreatureAppraisalRowTemplateFactory(
+            FixtureLoader.LoadExaminationRowTemplateInfos(),
+            NoTexture,
+            defaultFont: null);
+        using AppraisalUiController controller = Bind(
+            layout, objects, interaction, new CombatState(), [], [],
+            () => { }, () => { }, templates)!;
+
+        interaction.ExamineSelectedOrEnterMode(ObjectId);
+        var properties = new PropertyBundle();
+        properties.Strings[5u] = "Template";
+        properties.Ints[30u] = 5;
+        properties.Strings[21u] = "Monarch One";
+        properties.Strings[35u] = "Patron Two";
+        var armorLevels = new AppraiseInfoParser.ArmorLevel(
+            Head: 100, Chest: 110, Abdomen: 120,
+            UpperArm: 130, LowerArm: 140, Hand: 150,
+            UpperLeg: 160, LowerLeg: 170, Foot: 180);
+        Assert.True(controller.Apply(Parsed(
+            properties, MinimalCreatureProfile(), armorLevels: armorLevels)));
+        UiItemList extra = CreatureExtraList(layout);
+        UiElement extraHost = layout.FindElement(AppraisalUiController.CreatureExtraListId)!;
+        UiItemList extraBackground = Assert.Single(extraHost.Children.OfType<UiItemList>());
+
+        float authoredHeight = layout.Root.Height;
+        var device = new RecordingGpuDevice();
+        var renderer = new TextRenderer(device, new NullGpuFrameSource(), "unused");
+        renderer.Begin(new Vector2(800f, 600f));
+        var ctx = new UiRenderContext(renderer, new Vector2(800f, 600f));
+
+        // The saved size lands before the first draw.
+        layout.Root.Height = authoredHeight + 537f;
+        layout.Root.DrawSelfAndChildren(ctx);
+        Assert.Equal(87f + 537f, extra.Height);
+        Assert.Equal(87f + 537f, extraBackground.Height);
+
+        // Back to the minimum: the authored 87 px list with its first four rows.
+        layout.Root.Height = authoredHeight;
+        layout.Root.DrawSelfAndChildren(ctx);
+        Assert.Equal(87f, extra.Height);
+        Assert.Equal(87f, extraBackground.Height);
+        Assert.True(extra.GetItem(0)!.Visible);
+        Assert.True(extra.GetItem(3)!.Visible);
+        Assert.False(extra.GetItem(5)!.Visible);
+    }
+
+    [Fact]
     public void CharacterResponse_CombatRefreshRetainsArmorLevelRows()
     {
         ImportedLayout layout = FixtureLoader.LoadExamination();
