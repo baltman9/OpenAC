@@ -337,6 +337,42 @@ public sealed class NavigationWalkControllerTests
         Assert.Equal(byCell.Z, byMap.Z, 3);
     }
 
+    /// <summary>
+    /// A grid is built before the server has placed everything around the character, as a
+    /// dungeon's is on arrival. An object placed after it is floor the next walk stands on.
+    /// </summary>
+    [Fact]
+    public void AnObjectPlacedAfterTheGridWasBuiltIsFloorTheNextWalkStandsOn()
+    {
+        const uint crate = 0x80002AB0u;
+        var body = new SimulatedBody(new Vector3(40f, 40f, 0f));
+        PhysicsEngine world = FlatWorld();
+        var goals = new Goals();
+        var walk = new NavigationWalkController(world, body, goals);
+        walk.WalkToPlace(0xA9B40001u, new Vector3(45f, 40f, 0f), 1f);
+        Assert.Equal(NavigationWalkState.Arrived, RunUntilSettled(walk, body).State);
+
+        world.ShadowObjects.Register(
+            crate,
+            gfxObjId: 0u,
+            new Vector3(60f, 40f, 0f),
+            Quaternion.Identity,
+            2f,
+            worldOffsetX: 0f,
+            worldOffsetY: 0f,
+            landblockId: 0xA9B4FFFFu,
+            collisionType: ShadowCollisionType.Cylinder,
+            cylHeight: 0.5f,
+            seedCellId: 0xA9B40001u,
+            isStatic: false);
+        goals.Standing.Add(crate);
+        walk.WalkToPlace(0xA9B40001u, new Vector3(60f, 40f, 0.5f), 1f);
+        NavigationWalkReport report = RunUntilSettled(walk, body);
+
+        Assert.Equal(NavigationWalkState.Arrived, report.State);
+        Assert.Equal(0.5f, walk.Route!.Legs[^1].Z, 1);
+    }
+
     [Fact]
     public void AWalkToAPlaceArrivesThereWithoutTurningToFaceIt()
     {
@@ -1987,6 +2023,11 @@ public sealed class NavigationWalkControllerTests
 
         /// <summary>The collision of the objects a walk may stand on.</summary>
         public Dictionary<uint, NavSurfaces> Surfaces { get; } = [];
+
+        /// <summary>The objects a grid stands on.</summary>
+        public HashSet<uint> Standing { get; } = [];
+
+        public bool StandsStill(uint entityLocalId) => Standing.Contains(entityLocalId);
 
         public bool TryGetSurfaces(uint objectId, out NavSurfaces surfaces) => Surfaces.TryGetValue(objectId, out surfaces!);
 

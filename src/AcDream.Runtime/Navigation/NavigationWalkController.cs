@@ -562,6 +562,51 @@ internal sealed partial class NavigationWalkController
 
     private static string Inv(FormattableString text)
         => text.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    /// <summary>
+    /// Where the planner's own flight puts the leap just flown down and at rest, flown from where the
+    /// body charged toward its landing at the power and pace it was flown at.
+    /// </summary>
+    private string ModelledTouchdown(RuntimeRouteDriver driver)
+    {
+        RuntimeLeapApproach approach = driver.Approach;
+        int landing = approach.Leg + 1;
+        if (_grid is not { } grid
+            || _leapAbility is not { } ability
+            || landing < 1
+            || landing >= driver.Legs.Count)
+        {
+            return string.Empty;
+        }
+        Vector3 end = driver.Legs[landing];
+        var start = new Vector3(approach.ChargedAt, driver.Legs[approach.Leg].Z);
+        bool run = approach.Aimed?.Run ?? approach.PlannedRun;
+        if (_aimFinder is not { } cached || !ReferenceEquals(cached.Grid, grid) || cached.Ability != ability)
+            _aimFinder = cached = (grid, ability, new NavLeapFinder(grid, ability));
+        return cached.Finder.Follow(start, end, Flown(approach), run, out Vector3 cameDown, out Vector3 rests)
+            ? $", where the planner's flight comes down at {Point(cameDown)} and comes to rest at {Point(rests)}"
+            : ", where the planner's flight comes down nowhere";
+    }
+
+    /// <summary>The power a leap was flown at: as aimed again where it was, else as planned.</summary>
+    private static float Flown(in RuntimeLeapApproach approach) => approach.Aimed?.Power ?? approach.PlannedPower;
+
+    /// <summary>How high the body's own jump at the power a leap was flown at lifts it, as the planner takes it, and the arc's peak with the step it rises through before gravity takes it.</summary>
+    private string PlannedRise(in RuntimeLeapApproach approach)
+    {
+        if (_leapAbility is not { } ability)
+            return "unknown";
+        float height = ability.JumpHeight(Flown(approach));
+        float launch = MathF.Sqrt(2f * NavLeapPhysics.Gravity * height);
+        float peak = height + (launch * MathF.Max(0f, ability.Physics.StepSeconds));
+        return string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{height:0.00} m, {peak:0.00} m with its first step, of {ability.FullJumpHeight:0.00} m at full power");
+    }
+
+    /// <summary>Degrees signed, clockwise positive, with nothing written as minus zero.</summary>
+    private static string Degrees(float degrees) =>
+        string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{(MathF.Abs(degrees) < 0.05f ? 0f : degrees):+0.0;-0.0;0.0}");
+
+    private static string Spot(Vector2 at) =>
+        string.Create(System.Globalization.CultureInfo.InvariantCulture, $"({at.X:0.00}, {at.Y:0.00})");
 
     private static string Point(Vector3 at) =>
         string.Create(System.Globalization.CultureInfo.InvariantCulture, $"({at.X:0.0}, {at.Y:0.0}, {at.Z:0.0})");
@@ -687,6 +732,8 @@ internal sealed partial class NavigationWalkController
         }
 
         bool inWorld = _body.TrySample(out NavigationWalkBodySample sample);
+        if (inWorld && sample.Leaps is { } ability)
+            _leapAbility = ability;
         if (inWorld && (double.IsNaN(_stillSince) || Vector3.Distance(sample.Position, _stillAt) > StillMeters))
         {
             _stillAt = sample.Position;
@@ -869,6 +916,7 @@ internal sealed partial class NavigationWalkController
             && _gridDungeon == gridDungeon
             && built.Contains(sample.Position, CoverMargin)
             && !IsStale(built, gridDungeon)
+            && !ObjectsMoved(built)
                 ? built
                 : null;
         bool staged = false;
@@ -1095,17 +1143,54 @@ internal sealed partial class NavigationWalkController
             End(active, NavigationWalkState.Stopped, "the client refused a move");
             return;
         }
-        if (driver.IsLeaping && !wasLeaping)
+        if (step.Jump is not null)
         {
+            RuntimeLeapApproach approach = driver.Approach;
+            string moves = approach.MovesBegun switch
+            {
+                0 => "from where it stood",
+                1 => $"after one {approach.Pace.ToString().ToLowerInvariant()} begun at {Spot(approach.BegunAt)}",
+                _ => $"after {approach.MovesBegun} {approach.Pace.ToString().ToLowerInvariant()} moves, the last begun at {Spot(approach.BegunAt)}",
+            };
+            string letGo = float.IsNaN(approach.LetGoMeters) ? string.Empty : $", let go {approach.LetGoMeters:0.00} m short at {Spot(approach.LetGoAt)}";
+            string turned = approach.Turns == 0 ? ", no turn" : $", {approach.Turns} turn{(approach.Turns == 1 ? string.Empty : "s")} through {approach.TurnedDegrees:0} degrees from {Spot(approach.TurnedAt)}";
+            string aimed = approach.Aimed is { } aim
+                ? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"; aimed from here at {aim.Power:0.00} power {(aim.Run ? "running" : "walking")}, planned {approach.PlannedPower:0.00} {(approach.PlannedRun ? "running" : "walking")}")
+                : string.Create(System.Globalization.CultureInfo.InvariantCulture, $"; no leap from here is kept ({_aimRefused ?? "not aimed"}), so flown as planned at {approach.PlannedPower:0.00} power");
+            string skipped = approach.WalkSkipped > 0f
+                ? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"; leapt from where it stood rather than walk {approach.WalkSkipped:0.0} m to the planned takeoff")
+                : string.Empty;
+            string adjusted = approach.Adjustments == 0 ? string.Empty
+                : $"; went back to the takeoff {approach.Adjustments} time{(approach.Adjustments == 1 ? string.Empty : "s")} first";
+            Detail(
+                $"Walk to {Label(active)}: charging the jump {approach.TakeoffError:0.00} m from its takeoff {Spot(approach.TakeoffAt)} at {Spot(approach.ChargedAt)}, {moves}{letGo}{turned}{aimed}{skipped}{adjusted}");
+        }
+        // Said once for each leap: a body sent back to its takeoff leaves the leap and takes it
+        // up again, and how often it did is in the line above.
+        if (driver.IsLeaping && !wasLeaping && active.AnnouncedLeap != driver.LegIndex)
+        {
+            active.AnnouncedLeap = driver.LegIndex;
             Vector3 takeoff = driver.Legs[driver.LegIndex - 1];
             Vector3 landing = driver.Legs[driver.LegIndex];
             Say(Inv(
                 $"Walk to {Label(active)}: leaping from {takeoff.Z:0.0} m to {landing.Z:0.0} m, {HorizontalDistance(takeoff, landing):0.0} m on"));
         }
-        else if (wasLeaping && !driver.IsLeaping && driver.State == RuntimeRouteDriveState.Driving)
+        else if (wasLeaping && !driver.IsLeaping && driver.LeapFlew && driver.State == RuntimeRouteDriveState.Driving)
         {
             Say(Inv(
                 $"Walk to {Label(active)}: the leap landed at {sample.Position.Z:0.0} m, {driver.LandingError:0.0} m from where it was planned, after sliding {driver.LandingSlide:0.0} m"));
+        }
+        if (wasLeaping && !driver.IsLeaping && driver.LeapFlew && sample.Airborne is false && driver.State != RuntimeRouteDriveState.Interrupted)
+        {
+            Detail(string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"Walk to {Label(active)}: the leap came to rest {MathF.Abs(driver.LandingLong):0.00} m {(driver.LandingLong < 0f ? "short of" : "past")} its landing and "
+                + $"{MathF.Abs(driver.LandingAside):0.00} m to its {(driver.LandingAside < 0f ? "left" : "right")}, {driver.LandingRise:+0.00;-0.00} m above it; "
+                + $"it came down {driver.LandingFlown:0.00} m from where it charged, of {driver.LandingPlanned:0.00} m to its landing, "
+                + $"flying {Degrees(driver.LandingFlightDegrees)} degrees off the line to it after charging {Degrees(driver.Approach.FacingError)} degrees off it, "
+                + $"then sliding {driver.LandingSlide:0.00} m {Degrees(driver.LandingSlideDegrees)} degrees off that line; "
+                + $"it rose {driver.LandingPeak:0.00} m at its highest, where a jump at {Flown(driver.Approach):0.00} power rises {PlannedRise(driver.Approach)}; "
+                + $"it came down at {Point(driver.LandingTouchdown)}{ModelledTouchdown(driver)}"));
         }
 
         switch (driver.State)
@@ -1916,7 +2001,7 @@ internal sealed partial class NavigationWalkController
             RuntimeRouteLeap[] leaps = [.. detour.Leaps
                 .Where(leap => leap.LegIndex - skipped >= 1)
                 .Select(leap => new RuntimeRouteLeap(leap.LegIndex - skipped, leap.Power, leap.Run))];
-            _driver = Drive(requester, new RuntimeRouteDriver(onward, leaps, takeOverMoves: true, canCutAlong: CornerCuts()));
+            _driver = Drive(requester, new RuntimeRouteDriver(onward, leaps, takeOverMoves: true, canCutAlong: CornerCuts(), aimLeapFrom: AimLeapFrom, aimOnward: AimOnward, sameFloor: SameFloor));
             if (requester.Follow)
                 Detail(Inv($"Follow {Label(requester)}: planned again toward the player on the way, {detour.Length:0.0} m"));
             else
@@ -2013,7 +2098,7 @@ internal sealed partial class NavigationWalkController
                     Inv($"a route was found for the first {route.Length:0} m; the rest is planned on the way"));
                 return;
             }
-            _driver = Drive(requester, new RuntimeRouteDriver(route.Legs, LeapsOf(route), canCutAlong: CornerCuts()));
+            _driver = Drive(requester, new RuntimeRouteDriver(route.Legs, LeapsOf(route), canCutAlong: CornerCuts(), aimLeapFrom: AimLeapFrom, aimOnward: AimOnward, sameFloor: SameFloor));
             Publish(requester, NavigationWalkState.Walking, "walking", route.Length + left);
             return;
         }
@@ -2034,7 +2119,7 @@ internal sealed partial class NavigationWalkController
         }
         requester.ArrivalReason = route.Reason == "routed" ? null : route.Reason;
         requester.EndsInSight = route.EndsInSight;
-        _driver = Drive(requester, new RuntimeRouteDriver(route.Legs, LeapsOf(route), canCutAlong: CornerCuts()));
+        _driver = Drive(requester, new RuntimeRouteDriver(route.Legs, LeapsOf(route), canCutAlong: CornerCuts(), aimLeapFrom: AimLeapFrom, aimOnward: AimOnward, sameFloor: SameFloor));
         Publish(requester, NavigationWalkState.Walking, "walking", route.Length);
     }
 
@@ -2639,6 +2724,69 @@ internal sealed partial class NavigationWalkController
     /// <summary>What a drive cuts corners along: arcs the grid lets a body brush along, or none before there is a grid.</summary>
     private Func<IReadOnlyList<Vector3>, bool>? CornerCuts() => _grid is { } grid ? grid.CanBrushAlong : null;
 
+    /// <summary>What the body could leap when it was last sampled, which a leap is aimed again with.</summary>
+    private NavLeapAbility? _leapAbility;
+
+    /// <summary>The leap finder a leap was last aimed again with, kept while the grid and the body's leaping stay the same.</summary>
+    private (NavGrid Grid, NavLeapAbility Ability, NavLeapFinder Finder)? _aimFinder;
+
+    /// <summary>
+    /// Aims a leap again from exactly where the body stands, on the grid its route was planned
+    /// over, by the same checks the route's own leaps are kept by; null where no leap from there is
+    /// kept, or where the grid does not hold where the body stands or the landing.
+    /// </summary>
+    private RuntimeLeapAim? AimLeapFrom(Vector3 standing, Vector3 landing, bool run, bool atItsTakeoff)
+    {
+        if (_grid is not { } grid
+            || _leapAbility is not { } ability
+            || !grid.Contains(standing)
+            || !grid.Contains(landing))
+        {
+            return null;
+        }
+        if (_aimFinder is not { } cached || !ReferenceEquals(cached.Grid, grid) || cached.Ability != ability)
+            _aimFinder = cached = (grid, ability, new NavLeapFinder(grid, ability));
+        NavLeapAim? aimed = cached.Finder.AimFrom(standing, landing, run, atItsTakeoff, out string? refused);
+        _aimRefused = refused;
+        return aimed is { } aim ? new RuntimeLeapAim(aim.Power, aim.Run) : null;
+    }
+
+    /// <summary>
+    /// A leap from where the body stands onto the floor a planned landing lies on, for a body that
+    /// keeps no aim at the landing itself, with the spot it comes to rest on.
+    /// </summary>
+    private (RuntimeLeapAim Aim, Vector3 Spot)? AimOnward(Vector3 standing, Vector3 landing, bool run)
+    {
+        if (_grid is not { } grid
+            || _leapAbility is not { } ability
+            || !grid.Contains(standing)
+            || !grid.Contains(landing))
+        {
+            return null;
+        }
+        if (_aimFinder is not { } cached || !ReferenceEquals(cached.Grid, grid) || cached.Ability != ability)
+            _aimFinder = cached = (grid, ability, new NavLeapFinder(grid, ability));
+        return cached.Finder.AimOnward(standing, landing, run, out Vector3 spot) is { } aimed
+            ? (new RuntimeLeapAim(aimed.Power, aimed.Run), spot)
+            : null;
+    }
+
+    /// <summary>Whether two points stand on the same piece of floor of the grid, as one roof or one rock; false where the grid holds either on none.</summary>
+    private bool SameFloor(Vector3 first, Vector3 second)
+    {
+        if (_grid is not { } grid || !grid.Contains(first) || !grid.Contains(second))
+            return false;
+        int one = grid.FindStandingNode(first, 0.5f, NavRouter.StartHeightTolerance);
+        int other = grid.FindStandingNode(second, 0.5f, NavRouter.StartHeightTolerance);
+        if (one < 0 || other < 0)
+            return false;
+        int[] pieces = NavLeapFinder.FloorPieces(grid);
+        return pieces[one] >= 0 && pieces[one] == pieces[other];
+    }
+
+    /// <summary>Why the last leap aimed again from where the body stood was not kept, for narration.</summary>
+    private string? _aimRefused;
+
     private static float HorizontalDistance(Vector3 from, Vector3 to) =>
         Vector2.Distance(new Vector2(from.X, from.Y), new Vector2(to.X, to.Y));
 
@@ -2806,6 +2954,9 @@ internal sealed partial class NavigationWalkController
 
         /// <summary>Whether the route being walked ends where the character can see the goal.</summary>
         public bool EndsInSight { get; set; } = true;
+
+        /// <summary>The leg of the leap the walk last said it was taking, so a body sent back to its takeoff is not announced again.</summary>
+        public int AnnouncedLeap { get; set; } = -1;
 
         /// <summary>The door the walk is waiting on to open, if any.</summary>
         public DoorWait? WaitingOn { get; set; }

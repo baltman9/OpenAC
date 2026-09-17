@@ -3,7 +3,7 @@ using AcDream.Runtime.Gameplay;
 
 namespace AcDream.Runtime.Tests.Gameplay;
 
-public sealed class RuntimeRouteDriverTests
+public sealed partial class RuntimeRouteDriverTests
 {
     private const float Frame = 1f / 30f;
 
@@ -324,6 +324,313 @@ public sealed class RuntimeRouteDriverTests
         Assert.DoesNotContain(steps.Take(jumped), step => step.Travel is { Pace: RuntimeMovePace.Run });
     }
 
+    /// <summary>
+    /// A takeoff farther than the shortest run-up but nearer than a run carries the body on is
+    /// walked up to too: a run begun there is let go of at once and slides past the takeoff, a
+    /// stutter step that leaves the jump from the wrong spot. Live, rocks in Deewain's jump
+    /// puzzle were approached this way.
+    /// </summary>
+    [Theory]
+    [InlineData(1.6f)]
+    [InlineData(1.9f)]
+    public void ALeapNearerThanARunCarriesTheBodyIsWalkedUpToWithoutAStutterStep(float takeoff)
+    {
+        var body = new SimulatedBody { Floor = at => at.Y < takeoff + 0.4f ? 3f : 0f, SlideSeconds = 1f, WalkStopMeters = 0.75f, RunStopMeters = 2f };
+        var driver = new RuntimeRouteDriver(
+            [new Vector3(0f, 0f, 3f), new Vector3(0f, takeoff, 3f), new Vector3(0f, takeoff + 1.8f, 0f), new Vector3(0f, takeoff + 5f, 0f)],
+            [new RuntimeRouteLeap(2, 0.1f, Run: false)]);
+
+        List<RuntimeRouteDriveStep> steps = Drive(driver, body, seconds: 30f);
+
+        Assert.Equal(RuntimeRouteDriveState.Arrived, driver.State);
+        Vector2 charged = Assert.Single(body.ChargedAt);
+        float offTakeoff = Vector2.Distance(charged, new Vector2(0f, takeoff));
+        Assert.True(offTakeoff <= 0.15f, $"the leap charged {offTakeoff:0.00} m from its takeoff");
+        int jumped = steps.FindIndex(step => step.Jump is not null);
+        Assert.DoesNotContain(steps.Take(jumped), step => step.Travel is { Pace: RuntimeMovePace.Run });
+    }
+
+    /// <summary>
+    /// A body already past the line through its takeoff, but off to its side, is not at the
+    /// takeoff: it walks back to it before it charges. Live on Doriathazaar's jump puzzle a leap
+    /// came down 1.4 m from its landing, beyond the next takeoff, and the next leap charged from
+    /// 0.91 m off and fell short of a rock 20 m on.
+    /// </summary>
+    [Fact]
+    public void ABodyPastItsTakeoffButOffToItsSideWalksToItBeforeCharging()
+    {
+        var body = new SimulatedBody { Floor = at => at.Y < 0.2f ? 3f : 0f, SlideSeconds = 1f, WalkStopMeters = 0.75f, RunStopMeters = 2f };
+        var driver = new RuntimeRouteDriver(
+            [new Vector3(-0.9f, -3f, 3f), new Vector3(-0.9f, -0.5f, 3f), new Vector3(-0.9f, 1.5f, 0f), new Vector3(-0.9f, 4f, 0f)],
+            [new RuntimeRouteLeap(2, 0.1f, Run: false)]);
+
+        Drive(driver, body, seconds: 30f);
+
+        Vector2 charged = Assert.Single(body.ChargedAt);
+        float offTakeoff = Vector2.Distance(charged, new Vector2(-0.9f, -0.5f));
+        Assert.True(offTakeoff <= RuntimeRouteDriver.TakeoffRadius, $"the leap charged {offTakeoff:0.00} m from its takeoff");
+        Assert.Equal(RuntimeRouteDriveState.Arrived, driver.State);
+    }
+
+    /// <summary>
+    /// A leap is aimed again from exactly where the body stands as it charges, and flown at the
+    /// power and pace that aim gives rather than those the route planned from its takeoff.
+    /// </summary>
+    [Fact]
+    public void ALeapIsFlownAsAimedAgainFromWhereTheBodyCharges()
+    {
+        var body = new SimulatedBody { Floor = at => at.Y < 5.5f ? 3f : 0f };
+        var asked = new List<(Vector3 Standing, Vector3 Landing, bool Run)>();
+        var driver = new RuntimeRouteDriver(
+            [new Vector3(0f, 0f, 3f), new Vector3(0f, 5f, 3f), new Vector3(0f, 6.7f, 0f), new Vector3(0f, 10f, 0f)],
+            [new RuntimeRouteLeap(2, 0.1f, Run: false)],
+            aimLeapFrom: (standing, landing, run, _) =>
+            {
+                asked.Add((standing, landing, run));
+                return new RuntimeLeapAim(0.3f, Run: true);
+            });
+
+        List<RuntimeRouteDriveStep> steps = Drive(driver, body, seconds: 30f);
+
+        RuntimeRouteDriveStep jump = Assert.Single(steps, step => step.Jump is not null);
+        Assert.Equal(0.3f, jump.Jump!.Value, 3);
+        Assert.Equal(RuntimeMovePace.Run, jump.JumpPace);
+        (Vector3 standing, Vector3 landing, bool planned) = asked[^1];
+        Assert.Equal(new Vector2(standing.X, standing.Y), Assert.Single(body.ChargedAt));
+        Assert.Equal(new Vector3(0f, 6.7f, 0f), landing);
+        Assert.False(planned);
+        Assert.Equal(new RuntimeLeapAim(0.3f, true), driver.Approach.Aimed);
+        Assert.Equal(0.1f, driver.Approach.PlannedPower, 3);
+    }
+
+    /// <summary>
+    /// A body standing a little off its takeoff, where a leap aimed from there is kept, jumps from
+    /// there: a walk begun so near is let go of before it settles and slides on past the takeoff.
+    /// </summary>
+    [Fact]
+    public void ABodyStandingNearItsTakeoffWhereALeapIsKeptJumpsWithoutWalking()
+    {
+        var body = new SimulatedBody { Floor = at => at.Y < 0.2f ? 3f : 0f, SlideSeconds = 1f, WalkStopMeters = 0.75f, RunStopMeters = 2f };
+        var driver = new RuntimeRouteDriver(
+            [new Vector3(0f, -3f, 3f), new Vector3(0f, -0.6f, 3f), new Vector3(0f, 1.5f, 0f), new Vector3(0f, 4f, 0f)],
+            [new RuntimeRouteLeap(2, 0.1f, Run: false)],
+            aimLeapFrom: static (_, _, run, _) => new RuntimeLeapAim(0.12f, run));
+
+        List<RuntimeRouteDriveStep> steps = Drive(driver, body, seconds: 30f);
+
+        Assert.Equal(Vector2.Zero, Assert.Single(body.ChargedAt));
+        int jumped = steps.FindIndex(step => step.Jump is not null);
+        Assert.DoesNotContain(steps.Take(jumped), step => step.Travel is not null);
+        Assert.Equal(0.12f, steps[jumped].Jump!.Value, 3);
+    }
+
+    /// <summary>Where no leap from where the body stands is kept, it walks to the takeoff and flies the leap the route planned.</summary>
+    [Fact]
+    public void ABodyStandingWhereNoLeapIsKeptWalksToItsTakeoffBeforeJumping()
+    {
+        var body = new SimulatedBody { Floor = at => at.Y < 0.2f ? 3f : 0f, SlideSeconds = 1f, WalkStopMeters = 0.75f, RunStopMeters = 2f };
+        var driver = new RuntimeRouteDriver(
+            [new Vector3(-0.9f, -3f, 3f), new Vector3(-0.9f, -0.5f, 3f), new Vector3(-0.9f, 1.5f, 0f), new Vector3(-0.9f, 4f, 0f)],
+            [new RuntimeRouteLeap(2, 0.1f, Run: false)],
+            // As a real aim is: kept from the takeoff and a little way off it, not from a metre off.
+            aimLeapFrom: static (standing, _, run, _) =>
+                Vector2.Distance(new Vector2(standing.X, standing.Y), new Vector2(-0.9f, -0.5f)) <= RuntimeRouteDriver.TakeoffRadius
+                    ? new RuntimeLeapAim(0.1f, run)
+                    : null);
+
+        List<RuntimeRouteDriveStep> steps = Drive(driver, body, seconds: 30f);
+
+        float offTakeoff = Vector2.Distance(Assert.Single(body.ChargedAt), new Vector2(-0.9f, -0.5f));
+        Assert.True(offTakeoff <= RuntimeRouteDriver.TakeoffRadius, $"the leap charged {offTakeoff:0.00} m from its takeoff");
+        Assert.Equal(0.1f, Assert.Single(steps, step => step.Jump is not null).Jump!.Value, 3);
+    }
+
+    /// <summary>
+    /// A body that came to rest off its takeoff, where no leap aimed from there is kept, goes back to
+    /// the takeoff before it jumps rather than fly the planned leap from the wrong spot: a walk up
+    /// to a takeoff can stutter a metre past it.
+    /// </summary>
+    [Fact]
+    public void ABodyThatStutteredPastItsTakeoffWhereNoLeapIsKeptGoesBackBeforeJumping()
+    {
+        // The walk slides on 1.4 m, well past what the driver is told it carries.
+        var body = new SimulatedBody { Floor = at => at.Y < 5.5f ? 3f : 0f, SlideSeconds = 1.9f, WalkStopMeters = 0.41f, RunStopMeters = 0.8f };
+        var driver = new RuntimeRouteDriver(
+            [new Vector3(0f, 0f, 3f), new Vector3(0f, 3.8f, 3f), new Vector3(0f, 4.6f, 3f), new Vector3(0f, 6.7f, 0f), new Vector3(0f, 10f, 0f)],
+            [new RuntimeRouteLeap(3, 0.1f, Run: false)],
+            aimLeapFrom: static (standing, _, run, _) =>
+                Vector2.Distance(new Vector2(standing.X, standing.Y), new Vector2(0f, 4.6f)) <= RuntimeRouteDriver.TakeoffRadius
+                    ? new RuntimeLeapAim(0.1f, run)
+                    : null);
+
+        Drive(driver, body, seconds: 60f);
+
+        Assert.True(driver.Approach.Adjustments >= 1, "the body never went back to its takeoff");
+        foreach (Vector2 charged in body.ChargedAt)
+        {
+            float offTakeoff = Vector2.Distance(charged, new Vector2(0f, 4.6f));
+            Assert.True(offTakeoff <= RuntimeRouteDriver.TakeoffRadius,
+                $"the leap charged {offTakeoff:0.00} m from its takeoff after {driver.Approach.Adjustments} adjustments");
+        }
+        Assert.True(
+            body.ChargedAt.Count > 0 || driver.State == RuntimeRouteDriveState.Blocked,
+            "the body neither jumped from its takeoff nor asked for the walk to plan again");
+    }
+
+    /// <summary>
+    /// Inside its takeoff radius but a step off its takeoff, a body where no leap aimed from there is
+    /// kept still goes back before it jumps: live, a leap flown from 0.29 m off where none was kept
+    /// came down beyond its rock and fell.
+    /// </summary>
+    [Fact]
+    public void ABodyAStepOffItsTakeoffWhereNoLeapIsKeptGoesBackEvenInsideTheTakeoffRadius()
+    {
+        var driver = new RuntimeRouteDriver(
+            [new Vector3(0f, 0f, 3f), new Vector3(0f, 3.8f, 3f), new Vector3(0f, 4.6f, 3f), new Vector3(0f, 6.7f, 0f), new Vector3(0f, 10f, 0f)],
+            [new RuntimeRouteLeap(3, 0.1f, Run: false)],
+            aimLeapFrom: static (_, _, _, _) => null);
+        var near = new Vector3(0.25f, 4.6f, 3f);
+        var moves = new RuntimeScriptedMoveSnapshot(default, default, default, 0, false);
+
+        // Arrived at the takeoff leg standing 0.25 m to its side, still.
+        var steps = new List<RuntimeRouteDriveStep>();
+        for (int frame = 0; frame < 5; frame++)
+            steps.Add(driver.Advance(new RuntimeRouteDriveSample(near, 0f, moves, false, Still: true)));
+
+        Assert.DoesNotContain(steps, step => step.Jump is not null);
+        Assert.Equal(1, driver.Approach.Adjustments);
+        Assert.Contains(steps, step => step.Turn is not null || step.Travel is not null);
+    }
+
+    /// <summary>
+    /// A body that keeps no leap from where it stands and cannot get back to its takeoff plans
+    /// again rather than fly the planned leap from the wrong spot: live, a body whose walk back
+    /// slid along a rock's edge each time flew from 3.13 m off its takeoff and fell.
+    /// </summary>
+    [Fact]
+    public void ABodyThatCannotGetBackToItsTakeoffPlansAgainRatherThanFlyFromWhereItStands()
+    {
+        // Every walk up to the takeoff slides 1.4 m past it, so the body never comes to rest
+        // near enough for the planned leap to hold, as one sliding along a rock's edge does.
+        var body = new SimulatedBody { Floor = at => at.Y < 5.5f ? 3f : 0f, SlideSeconds = 1.9f, WalkStopMeters = 0.41f, RunStopMeters = 0.8f };
+        var driver = new RuntimeRouteDriver(
+            [new Vector3(0f, 0f, 3f), new Vector3(0f, 3.8f, 3f), new Vector3(0f, 4.6f, 3f), new Vector3(0f, 6.7f, 0f), new Vector3(0f, 10f, 0f)],
+            [new RuntimeRouteLeap(3, 0.1f, Run: false)],
+            aimLeapFrom: static (_, _, _, _) => null);
+
+        Drive(driver, body, seconds: 60f);
+
+        Assert.Equal(RuntimeRouteDriveState.Blocked, driver.State);
+        Assert.Equal(RuntimeRouteDriver.MostTakeoffAdjustments, driver.Approach.Adjustments);
+        Assert.Empty(body.ChargedAt);
+    }
+
+    /// <summary>
+    /// A body standing still on the floor it would walk across to a leap's takeoff tries the leap
+    /// from where it stands first, and where one is kept there takes it without walking: hopping
+    /// across roofs, it walked to the spot the route planned each leap from.
+    /// </summary>
+    [Fact]
+    public void ALeapKeptFromWhereTheBodyStandsIsTakenWithoutWalkingToTheTakeoff()
+    {
+        var body = new SimulatedBody { Floor = at => at.Y < 5.5f ? 3f : 0f };
+        var driver = new RuntimeRouteDriver(
+            [new Vector3(0f, 0f, 3f), new Vector3(1f, 3f, 3f), new Vector3(0f, 5f, 3f), new Vector3(0f, 8f, 0f), new Vector3(0f, 10f, 0f)],
+            [new RuntimeRouteLeap(3, 0.1f, Run: false)],
+            aimLeapFrom: static (_, _, run, _) => new RuntimeLeapAim(0.4f, run),
+            sameFloor: static (_, _) => true);
+
+        List<RuntimeRouteDriveStep> steps = Drive(driver, body, seconds: 30f);
+
+        int jumped = steps.FindIndex(step => step.Jump is not null);
+        Assert.True(jumped >= 0);
+        Assert.DoesNotContain(steps.Take(jumped), step => step.Travel is not null);
+        Assert.Equal(Vector2.Zero, Assert.Single(body.ChargedAt));
+        Assert.InRange(driver.Approach.WalkSkipped, 5.2f, 5.5f);
+    }
+
+    /// <summary>A body standing on other floor than the takeoff, as below the roof the route climbs to first, walks the route.</summary>
+    [Fact]
+    public void ALeapIsNotTriedFromFloorOtherThanItsTakeoffs()
+    {
+        var body = new SimulatedBody { Floor = at => at.Y < 5.5f ? 3f : 0f };
+        var driver = new RuntimeRouteDriver(
+            [new Vector3(0f, 0f, 3f), new Vector3(0f, 5f, 3f), new Vector3(0f, 8f, 0f), new Vector3(0f, 10f, 0f)],
+            [new RuntimeRouteLeap(2, 0.1f, Run: false)],
+            aimLeapFrom: static (_, _, run, _) => new RuntimeLeapAim(0.4f, run),
+            sameFloor: static (_, _) => false);
+
+        List<RuntimeRouteDriveStep> steps = Drive(driver, body, seconds: 30f);
+
+        int jumped = steps.FindIndex(step => step.Jump is not null);
+        Assert.Contains(steps.Take(jumped), step => step.Travel is not null);
+    }
+
+    /// <summary>
+    /// Where a leap comes down on the next leap's takeoff, a body sent back to that takeoff walks to
+    /// it and takes the next leap; it never steps back onto the leap it already flew. Live it did,
+    /// and walked back to the leap before's own takeoff over and over.
+    /// </summary>
+    [Fact]
+    public void ABodySentBackToATakeoffTheLeapBeforeCameDownOnNeverFliesThatLeapAgain()
+    {
+        var body = new SimulatedBody { SlideSeconds = 1f, WalkStopMeters = 0.41f, RunStopMeters = 0.8f };
+        Vector2[] takeoffs = [new(0f, 3f), new(0f, 4.7f)];
+        var driver = new RuntimeRouteDriver(
+            [new Vector3(0f, 0f, 0f), new Vector3(0f, 3f, 0f), new Vector3(0f, 4.7f, 0f), new Vector3(0f, 6.4f, 0f), new Vector3(0f, 9f, 0f)],
+            [new RuntimeRouteLeap(2, 0.1f, Run: false), new RuntimeRouteLeap(3, 0.1f, Run: false)],
+            aimLeapFrom: (standing, _, run, _) => takeoffs.Any(takeoff => Vector2.Distance(new Vector2(standing.X, standing.Y), takeoff) <= 0.05f)
+                ? new RuntimeLeapAim(0.1f, run)
+                : null,
+            sameFloor: static (_, _) => true);
+        int highest = 0;
+
+        for (float time = 0f; time < 60f && driver.State == RuntimeRouteDriveState.Driving; time += Frame)
+        {
+            RuntimeRouteDriveStep step = driver.Advance(body.Sample());
+            Assert.True(driver.LegIndex >= highest, $"the drive went back from leg {highest} to leg {driver.LegIndex}");
+            highest = driver.LegIndex;
+            body.Apply(step);
+            body.Integrate(Frame);
+        }
+
+        // It either takes both leaps or asks for the walk to plan again; what it never does is
+        // step back onto the leap it already flew, which the loop above holds it to.
+        Assert.True(
+            driver.State is RuntimeRouteDriveState.Arrived or RuntimeRouteDriveState.Blocked,
+            $"the drive ended {driver.State}");
+        Assert.True(
+            body.Jumps == (driver.State == RuntimeRouteDriveState.Arrived ? 2 : 0),
+            $"the drive ended {driver.State} after {body.Jumps} jumps");
+    }
+
+    /// <summary>
+    /// A leap says how its takeoff was come up to, so narration can show a stutter step: the
+    /// pace, the moves begun on the way, how far short the last was let go, the turns that faced
+    /// the landing, and how far from the takeoff the jump charged.
+    /// </summary>
+    [Fact]
+    public void ALeapSaysHowItsTakeoffWasComeUpTo()
+    {
+        var body = new SimulatedBody { Floor = at => at.Y < 5.5f ? 3f : 0f, SlideSeconds = 1f, WalkStopMeters = 0.75f, RunStopMeters = 2f };
+        var driver = new RuntimeRouteDriver(
+            [new Vector3(0f, 0f, 3f), new Vector3(0f, 4.9f, 3f), new Vector3(1f, 6.7f, 0f), new Vector3(1f, 10f, 0f)],
+            [new RuntimeRouteLeap(2, 0.1f, Run: false)]);
+
+        List<RuntimeRouteDriveStep> steps = Drive(driver, body, seconds: 30f);
+        int jumped = steps.FindIndex(step => step.Jump is not null);
+        Assert.True(jumped >= 0);
+
+        RuntimeLeapApproach approach = driver.Approach;
+        Assert.Equal(1, approach.Leg);
+        Assert.Equal(RuntimeMovePace.Run, approach.Pace);
+        Assert.Equal(1, approach.MovesBegun);
+        Assert.InRange(approach.LetGoMeters, 1.5f, 2.6f);
+        Assert.True(approach.Turns >= 1, "the leap bends from the run up, so it turns to face its landing");
+        Assert.InRange(approach.TurnedDegrees, 25f, 35f);
+        Assert.InRange(approach.TakeoffError, 0f, 0.15f);
+    }
+
     [Fact]
     public void ALeapThatLandsAwayFromItsLandingOnTheSameLevelAsksForANewPlan()
     {
@@ -422,7 +729,9 @@ public sealed class RuntimeRouteDriverTests
     /// speeds. It stands on <see cref="Floor"/>, and a jump it charges while standing
     /// still leaves the ground at the pace of the move pressed as it leaves.
     /// </summary>
-    private sealed class SimulatedBody
+    internal sealed class SimulatedBodyProbe : SimulatedBody { }
+
+    internal class SimulatedBody
     {
         private const float RunSpeed = 4f;
         private const float WalkSpeed = 1.5f;
@@ -649,8 +958,23 @@ public sealed class RuntimeRouteDriverTests
                 return;
             float speed = _travel.Request.Pace == RuntimeMovePace.Run ? RunSpeed : WalkSpeed;
             float radians = Heading * MathF.PI / 180f;
+            // A sidestep goes square to the body's heading, and a move asked for a distance
+            // stops once it has covered it.
+            var along = _travel.Request.Direction switch
+            {
+                RuntimeMoveDirection.StrafeLeft => new Vector2(-MathF.Cos(radians), MathF.Sin(radians)),
+                RuntimeMoveDirection.StrafeRight => new Vector2(MathF.Cos(radians), -MathF.Sin(radians)),
+                RuntimeMoveDirection.Backward => new Vector2(-MathF.Sin(radians), -MathF.Cos(radians)),
+                _ => new Vector2(MathF.Sin(radians), MathF.Cos(radians)),
+            };
+            float moved = speed * seconds;
+            if (_travel.Request.Amount > 0f)
+                moved = MathF.Min(moved, _travel.Request.Amount - _travel.Covered);
             if (!Stuck)
-                Position += new Vector2(MathF.Sin(radians), MathF.Cos(radians)) * speed * seconds;
+                Position += along * moved;
+            _travel = _travel with { Covered = _travel.Covered + moved };
+            if (_travel.Request.Amount > 0f && _travel.Covered >= _travel.Request.Amount)
+                _travel = _travel with { State = RuntimeScriptedMoveState.Completed };
             _travel = _travel with { ElapsedSeconds = _travel.ElapsedSeconds + seconds };
             LongestTravelSeconds = MathF.Max(LongestTravelSeconds, _travel.ElapsedSeconds);
             if (Stuck && _travel.ElapsedSeconds > 1.5f)
