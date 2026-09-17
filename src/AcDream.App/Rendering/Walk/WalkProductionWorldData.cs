@@ -51,6 +51,9 @@ internal sealed class WalkProductionWorldData : IWalkFrameWorldData
     public ulong? GetOutdoorCellRenderRevision(uint cellId) =>
         _shadows.GetCellRenderRevision(cellId);
 
+    public ulong GetLandblockRenderRevision(uint landblockId) =>
+        _scene.GetLandblockWriteRevision(landblockId);
+
     public bool TryGetCurrentProjection(uint localEntityId, out RenderProjectionRecord record) =>
         _scene.TryGetByLocalEntityId(localEntityId, out record);
 

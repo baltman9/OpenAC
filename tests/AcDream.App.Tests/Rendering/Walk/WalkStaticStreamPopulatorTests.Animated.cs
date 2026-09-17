@@ -127,6 +127,36 @@ public sealed partial class WalkStaticStreamPopulatorTests
     }
 
     [Fact]
+    public void RetainedCells_UnchangedLandblockSkipsThePerEntityRefresh()
+    {
+        using var fx = new DispatcherFixture();
+        InstallRetainedMesh(fx);
+        var world = new RetainedWorld { LandblockRevision = 7UL };
+        world.Set(RetainedRecord(1), RetainedRecord(2), RetainedRecord(3));
+        var cache = new FarLandscapeDrawCache(fx.Dispatcher, world);
+        Assert.Equal(
+            new[] { 3u, 3u, 3u },
+            AppendRetainedFrame(fx, cache).Keys.Select(key => key.FirstIndex));
+        int reads = world.CurrentReads;
+
+        // The landblock stamp did not move, so the entry is not re-read at all.
+        world.Current[2] = RetainedRecord(2, RetainedMesh + 1);
+        Assert.Equal(
+            new[] { 3u, 3u, 3u },
+            AppendRetainedFrame(fx, cache).Keys.Select(key => key.FirstIndex));
+        Assert.Equal(reads, world.CurrentReads);
+
+        // Once the scene stamps a write to the landblock, the entry is read
+        // again and picks the change up.
+        InstallRetainedMesh(fx, RetainedMesh + 1, 12);
+        world.LandblockRevision = 8UL;
+        Assert.Equal(
+            new[] { 3u, 3u, 12u },
+            AppendRetainedFrame(fx, cache).Keys.Select(key => key.FirstIndex));
+        Assert.True(world.CurrentReads > reads);
+    }
+
+    [Fact]
     public void RetainedCells_MovedEntityKeepsTheCachedGrouping()
     {
         using var fx = new DispatcherFixture();

@@ -505,6 +505,14 @@ internal interface IRenderSceneQuerySource
     /// or unregisters, so per-frame shell lookups can keep their last copy.</summary>
     ulong GetBuildingShellRevision(RenderSceneGeneration generation);
 
+    /// <summary>Advances whenever any record belonging to a landblock is
+    /// written, so a consumer holding many records from one landblock can ask
+    /// once instead of asking every record. A write whose record names no
+    /// landblock advances the answer for every landblock.</summary>
+    ulong GetLandblockWriteRevision(
+        RenderSceneGeneration generation,
+        uint landblockId);
+
     /// <summary>Reads the identity and write revision of the projection a
     /// local entity currently owns without materializing its record.</summary>
     bool TryGetRevisionByLocalEntityId(
@@ -575,6 +583,9 @@ internal readonly struct RenderSceneQuery
 
     public ulong BuildingShellRevision =>
         Source.GetBuildingShellRevision(Generation);
+
+    public ulong GetLandblockWriteRevision(uint landblockId) =>
+        Source.GetLandblockWriteRevision(Generation, landblockId);
 
     public bool TryGetRevisionByLocalEntityId(
         uint localEntityId,

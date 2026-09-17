@@ -60,6 +60,9 @@ internal sealed class FarLandscapeDrawCache(
         /// <summary>World-space sort center of each <see cref="AlphaByCell"/> batch.</summary>
         public readonly List<Vector3> AlphaWorldCenters = new();
         public readonly int[] AlphaCellEnds = new int[cells.Length + 1];
+        /// <summary>The landblock write revision this entry was last read
+        /// at; while it holds, no record the entry owns has been written.</summary>
+        public ulong LandblockRevision;
         public readonly Dictionary<GroupKey, List<BatchRef>> Groups = new();
         public readonly List<List<BatchRef>> GroupLists = new();
         public readonly List<int> GroupOrder = new();
@@ -147,10 +150,21 @@ internal sealed class FarLandscapeDrawCache(
             _entries.Add(key, entry);
         }
 
+        // One landblock lookup answers for the whole entry what a revision
+        // lookup per entity used to: the scene stamps the landblock of every
+        // record it writes, so an unchanged stamp proves that none of the
+        // entry's dozens of records moved, changed, or went away.
+        ulong landblockRevision = world.GetLandblockRenderRevision(block);
         if (NeedsRebuild(entry))
+        {
             Rebuild(entry);
-        else
+            entry.LandblockRevision = landblockRevision;
+        }
+        else if (landblockRevision == 0 || landblockRevision != entry.LandblockRevision)
+        {
             RefreshEntities(entry);
+            entry.LandblockRevision = landblockRevision;
+        }
 
         foreach (Entity entity in entry.Entities)
         {
