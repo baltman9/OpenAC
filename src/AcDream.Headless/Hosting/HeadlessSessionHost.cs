@@ -1148,6 +1148,7 @@ internal sealed class HeadlessSessionHost : IDisposable
                 Runtime.CommunicationOwner.Friends,
                 Runtime.CommunicationOwner.Squelch,
                 (text, type) => Runtime.CommunicationOwner.AddText(text, type),
+                Trade: Runtime.TradeOwner,
                 Fellowship: Runtime.FellowshipOwner,
                 Allegiance: Runtime.AllegianceOwner,
                 House: Runtime.HouseOwner,

@@ -242,6 +242,42 @@ public sealed class HeadlessSessionHostTests
     }
 
     [Fact]
+    public void RegisterTradeGameEventReachesTradeOwnerThroughTheRealWireRouter()
+    {
+        // Defect 13's deepest and actual blocker: HeadlessSessionHost never
+        // passed Trade: Runtime.TradeOwner into LiveSocialSessionBindings,
+        // so LiveSessionEventRouter's onTradeRegister/onTradeAdd/onTradeAccept
+        // delegate holes were all null and every inbound trade wire message
+        // was silently dropped on the headless host -- a trade opened by a
+        // real partner never became visible to TradeOwner at all, regardless
+        // of plugin-surface identity, object lookup, or settings storage.
+        var operations = new FixtureSessionOperations();
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            new HeadlessCredentialSecret("fixture", "password"),
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+
+        WorldSession session = operations.Sessions[^1];
+
+        Assert.False(host.Runtime.Trade.Snapshot.IsOpen);
+
+        const uint partnerGuid = 0x50000B0Bu;
+        session.GameEvents.Dispatch(
+            GameEventEnvelope.TryParse(
+                WrapRegisterTradeEnvelope(
+                    initiator: partnerGuid,
+                    partner: partnerGuid,
+                    stamp: 0uL))!.Value);
+
+        Assert.True(host.Runtime.Trade.Snapshot.IsOpen);
+        Assert.Equal(partnerGuid, host.Runtime.Trade.Snapshot.PartnerGuid);
+    }
+
+    [Fact]
     public void LoginCommandsRouteWireOnlyClientCommandsWithExactPolarityAndOrder()
     {
         var captured = new List<byte[]>();
@@ -3335,6 +3371,23 @@ public sealed class HeadlessSessionHostTests
             _timestamp = checked(_timestamp + duration.Ticks);
     }
 
+    private static byte[] WrapRegisterTradeEnvelope(
+        uint initiator, uint partner, ulong stamp)
+    {
+        byte[] payload = new byte[16];
+        BinaryPrimitives.WriteUInt32LittleEndian(payload, initiator);
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4), partner);
+        BinaryPrimitives.WriteUInt64LittleEndian(payload.AsSpan(8), stamp);
+
+        byte[] body = new byte[GameEventEnvelope.HeaderSize + payload.Length];
+        BinaryPrimitives.WriteUInt32LittleEndian(body,            GameEventEnvelope.Opcode);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(4),  0u);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(8),  0u);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            body.AsSpan(12), (uint)GameEventType.RegisterTrade);
+        Array.Copy(payload, 0, body, GameEventEnvelope.HeaderSize, payload.Length);
+        return body;
+    }
     private static byte[] WrapCharacterConfirmationDoneEnvelope(uint type, uint contextId)
     {
         byte[] payload = new byte[8];
