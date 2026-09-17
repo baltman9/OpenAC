@@ -375,7 +375,7 @@ public sealed class SocialPanelControllerTests
             member: guid => members.TryGetValue(guid, out var m) ? m : null,
             vassals: guid => guid == selfGuid ? vassals : [],
             localPlayerGuid: selfGuid,
-            templateResolver: TaggedRowResolver);
+            templateResolver: TaggedRowResolver) with { LocalPlayerAllegianceRankQuality = () => 2 };
 
         SocialPanelController? controller = SocialPanelController.Bind(
             layout, MakeCallbacks(allegianceBindings: bindings));
@@ -434,6 +434,11 @@ public sealed class SocialPanelControllerTests
         quality = 4;
         controller.Tick();
         Assert.Equal("R Baronet 4+2", Assert.Single(selfRank.LinesProvider()).Text);
+
+        // A missing rank quality reads as 0, as the original client's lookup leaves it.
+        quality = null;
+        controller.Tick();
+        Assert.Equal("R Baronet 0+-2", Assert.Single(selfRank.LinesProvider()).Text);
     }
 
     [Fact]

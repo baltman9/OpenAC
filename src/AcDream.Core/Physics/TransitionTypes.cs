@@ -2665,7 +2665,7 @@ public sealed class Transition
     }
 
 
-    private TransitionState FindObjCollisionsInCell(PhysicsEngine engine, uint cellId)
+    internal TransitionState FindObjCollisionsInCell(PhysicsEngine engine, uint cellId)
     {
         if (engine.DataCache is null) return TransitionState.OK;
 

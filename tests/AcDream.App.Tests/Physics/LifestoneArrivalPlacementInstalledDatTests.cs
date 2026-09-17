@@ -11,7 +11,7 @@ using Xunit.Abstractions;
 namespace AcDream.App.Tests.Physics;
 
 // OpenAC #127: a lifestone recall lands the player at the position the server
-// stored for the lifestone link, which on ACE-based servers is beside or inside
+// stored for the lifestone link, which on the emulated servers is beside or inside
 // the lifestone itself. The original client's arrival placement (edge-anchored
 // placement search with sliding) resolves that to a free spot; ours must too, or
 // the login and the recall never materialize and the client sits in portal space.
@@ -24,8 +24,8 @@ public sealed class LifestoneArrivalPlacementInstalledDatTests
     private const uint HumanSetup = 0x02000001u;
     private const uint LifestoneEntityId = 0x7AA0C34Fu;
 
-    // Holtburg lifestone instance (world db landblock_instance 2056994895) and the
-    // character location ACE saved after a Lifestone Recall to it.
+    // Holtburg lifestone instance (the server's spawn record for it) and the
+    // character location the server saved after a Lifestone Recall to it.
     private static readonly Vector3 LifestonePosition = new(81.3304f, 11.7974f, 94.005f);
     private static readonly Vector3 SavedPosition = new(81.3304f, 14.0196f, 94.005f);
     private static readonly Quaternion Heading = new(0f, 0f, -0.543991f, 0.839091f);

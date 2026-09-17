@@ -163,6 +163,20 @@ public sealed class ExternalContainerControllerTests
         }
     }
 
+    // OpenAC #109: the container window applies the same meter rule as the
+    // inventory window - an empty container shows no meter, not an empty rail.
+    [Fact]
+    public void TopContainerMeter_hiddenWhileEmpty_thenReflectsLooseItems()
+    {
+        using var h = new Harness();
+        h.Open(Chest);
+        Assert.Equal(-1f, h.Top.GetItem(0)!.CapacityFill);
+
+        h.Objects.AddOrUpdate(ItemTooltipCaptionNames.Plain(Item));
+        h.Open(Chest, new ContainerContentEntry(Item, 0u));
+        Assert.Equal(1f / 24f, h.Top.GetItem(0)!.CapacityFill);
+    }
+
     // #87: the hover caption is the same name flavour the selection caption
     // shows - the composed name, material prefix included.
     [Fact]

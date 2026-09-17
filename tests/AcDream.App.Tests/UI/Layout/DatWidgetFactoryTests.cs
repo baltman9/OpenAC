@@ -806,6 +806,7 @@ public class DatWidgetFactoryTests
         UiMenu menu = Assert.IsType<UiMenu>(layout.FindElement(0x10000014u));
         Assert.Equal(46f, menu.Width);
         Assert.Equal(191f, menu.ColumnWidth);
+        Assert.NotEqual(menu.Width, menu.ColumnWidth);
     }
 
     [Fact]

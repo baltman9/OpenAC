@@ -639,6 +639,21 @@ public sealed class WorldSelectionQueryTests
         Assert.Equal(4f, radius);
     }
 
+    // OpenAC #110: the indicator's facts carry the blip color the server put
+    // on the object, read through the real query, not hand-built.
+    [Fact]
+    public void VividTargetInfoCarriesTheObjectsRadarBlipColor()
+    {
+        var h = new Harness();
+        h.Add(Target, new Vector3(3f, 4f, 0f), ItemType.Creature);
+        h.Objects.Get(Target)!.RadarBlipColor = 8;
+
+        VividTargetInfo? info = h.Query.ResolveVividTargetInfo(Target);
+
+        Assert.NotNull(info);
+        Assert.Equal((byte)8, info!.Value.RadarBlipColor);
+    }
+
     [Fact]
     public void VividTargetMarkerWaitsForFreshProjectionWhenDropMovePrecedesPosition()
     {

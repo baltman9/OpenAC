@@ -658,18 +658,18 @@ public sealed class CreatureAppraisalLayeredList
                 hostPolicy.TopMode,
                 hostPolicy.RightMode,
                 hostPolicy.BottomMode,
-                new UiPixelRect(
+                UiPixelRect.FromPositionAndSize(
                     hostRect.X0 + (int)TextInset,
                     hostRect.Y0,
-                    hostRect.X1 + (int)TextInset,
-                    hostRect.Y1),
+                    (int)templates.Width,
+                    hostRect.Height),
                 hostPolicy.OriginalParent);
             background.LayoutPolicy = new UiLayoutPolicy(
                 leftMode: 1,
                 topMode: 1,
                 rightMode: 1,
                 bottomMode: 1,
-                UiPixelRect.FromPositionAndSize(0, 0, hostRect.Width, hostRect.Height),
+                UiPixelRect.FromPositionAndSize(0, 0, (int)templates.Width, hostRect.Height),
                 UiPixelRect.FromPositionAndSize(0, 0, hostRect.Width, hostRect.Height));
         }
         else

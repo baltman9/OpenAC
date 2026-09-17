@@ -382,8 +382,10 @@ public sealed class SocialAllegiancePageController
             ? AllegianceRankTitleTable.GetTitle(s.Rank, s.HeritageGroup, s.Gender) ?? string.Empty
             : string.Empty;
 
-        int? quality = _bindings.LocalPlayerAllegianceRankQuality?.Invoke();
-        if (quality is int q && q != -1 && q != profileRank)
+        // An absent rank quality reads as 0, the way the original client's
+        // quality lookup leaves its output when the value is missing.
+        int q = _bindings.LocalPlayerAllegianceRankQuality?.Invoke() ?? 0;
+        if (q != -1 && q != profileRank)
         {
             string plain = q.ToString(System.Globalization.CultureInfo.InvariantCulture);
             string delta = (q - profileRank).ToString(System.Globalization.CultureInfo.InvariantCulture);
