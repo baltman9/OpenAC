@@ -360,6 +360,10 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
                     Indent(staged),
                     "plugin warnings and errors:",
                     Indent(problems),
+                    "rule picks over the run:",
+                    Indent(PickHistogram(chat)),
+                    "rule info, first 12 distinct:",
+                    Indent(RuleInfoLines(chat, 12)),
                     "last 6 scheduler pass lines:",
                     Indent(Tail([.. chat.Where(IsPassSpam)], 6)),
                     "last 30 other chat lines:",
@@ -2165,6 +2169,59 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
 
     private static string[] EventNames(IEnumerable<JsonElement> events) =>
         events.Select(static item => item.GetProperty("e").GetString()!).ToArray();
+
+    /// <summary>
+    /// Which rule won how many passes over the whole run, and how many passes
+    /// nobody won. The last six pass lines say where the macro ended; this
+    /// says what it did on the way, which is what a milestone that never
+    /// fired needs.
+    /// </summary>
+    private static string[] PickHistogram(string[] chat)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (string line in chat)
+        {
+            int at = line.IndexOf("Picked ", StringComparison.Ordinal);
+            if (at < 0)
+                continue;
+            string rest = line[(at + 7)..];
+            int end = rest.IndexOf(" P:", StringComparison.Ordinal);
+            string rule = end < 0 ? rest : rest[..end];
+            counts[rule] = counts.GetValueOrDefault(rule) + 1;
+        }
+        int inactive = chat.Count(static line =>
+            line.Contains("All rules inactive.", StringComparison.Ordinal));
+        if (inactive > 0)
+            counts["(all rules inactive)"] = inactive;
+        return counts.Count == 0
+            ? ["no pass lines"]
+            : [.. counts
+                .OrderByDescending(static pair => pair.Value)
+                .Select(static pair => string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{pair.Value,5} x {pair.Key}"))];
+    }
+
+    /// <summary>The distinct things the rules said about themselves, in order of first appearance.</summary>
+    private static string[] RuleInfoLines(string[] chat, int limit)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var lines = new List<string>();
+        foreach (string line in chat)
+        {
+            int at = line.IndexOf("[MossTank] (", StringComparison.Ordinal);
+            if (at < 0)
+                continue;
+            string said = line[(at + 11)..];
+            if (seen.Add(said))
+            {
+                lines.Add(said);
+                if (lines.Count == limit)
+                    break;
+            }
+        }
+        return lines.Count == 0 ? ["none"] : [.. lines];
+    }
 
     /// <summary>
     /// The plugin's own messages, lifted out of the session diagnostics.
