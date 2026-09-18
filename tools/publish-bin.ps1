@@ -94,6 +94,13 @@ function Invoke-Publish {
         '-c', 'Release',
         '-r', $Rid,
         '--self-contained', 'true',
+        # Ahead-of-time compiled payload: every path a player walks for the
+        # first time -- the first object teardown, the first portal, the first
+        # cast -- otherwise pays its compilation inside a frame, which the
+        # arrival measurements see as 1-13 ms hitches and a slow start-up.
+        # Cross-RID is fine: the self-contained restore already pulls the
+        # target runtime pack, and the compiler runs for the host.
+        '-p:PublishReadyToRun=true',
         "-p:Version=$Version",
         # No SourceLink '+<sha>' suffix: LauncherVersion parses this as SemVer.
         '-p:IncludeSourceRevisionInInformationalVersion=false',

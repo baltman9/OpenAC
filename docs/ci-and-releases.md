@@ -113,6 +113,15 @@ that checks for updates between the two steps, or after a failed attach, gets a
 failed update check until the job is re-run. A failed or skipped `macos-intel`
 leaves the release exactly as it would be without Intel support.
 
+Every payload is published ahead-of-time compiled as well as self-contained:
+the code a player reaches for the first time -- the first object torn down,
+the first portal, the first spell -- is already native machine code instead of
+being compiled inside the frame that needs it, which is what a first-minute
+hitch and a slow start-up are made of. It costs download size (the client zip
+grows about 13 MB, the launcher about 32 MB) and a couple of minutes of
+publish time. The compiler runs on the build host and targets the payload's
+runtime, so the Windows release job produces the Linux payload as well.
+
 `publish-bin.ps1` uses the repository version by default and rejects a supplied
 version that does not match it. The tag, package manifest, assembly metadata,
 and client label therefore describe the same release. Source builds may append
