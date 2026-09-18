@@ -121,7 +121,12 @@ internal sealed class LiveEntityVisibleCellSet
     public void Update(ObjCell? playerCell, uint playerCellId)
     {
         _playerCellId = playerCellId;
-        if (playerCell is not EnvCell { SeenOutside: false } sealedCell)
+        // The physics cell can lag the record by a landblock while the
+        // destination is still loading. Its visible list says nothing
+        // about the new landblock, so nothing is judged per cell until
+        // the two agree.
+        if (playerCell is not EnvCell { SeenOutside: false } sealedCell
+            || (sealedCell.Id & 0xFFFF0000u) != (playerCellId & 0xFFFF0000u))
         {
             IsSealedDungeon = false;
             _sealedCellId = 0u;

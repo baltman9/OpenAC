@@ -145,6 +145,22 @@ public sealed class LiveEntityLivenessControllerTests
     }
 
     [Fact]
+    public void ADungeonCellFromAnotherLandblockThanTheRecordIsNotJudgedPerCell()
+    {
+        // The physics cell still points into the dungeon the player left
+        // while the record already sits in the new one (its landblock is
+        // still loading): nothing in the new landblock may start a
+        // deadline on the old cell's visible list.
+        var set = new LiveEntityVisibleCellSet();
+        set.Update(DungeonCell(0x01D9_0120u, 0x01D9_0121u), playerCellId: 0x0A9B_0102u);
+
+        Assert.False(set.IsSealedDungeon);
+        Assert.True(set.Contains(0x0A9B_0140u));
+        Assert.True(set.Contains(0x0A9B_0001u));
+        Assert.False(set.Contains(0x01D9_0120u));
+    }
+
+    [Fact]
     public void AnIndoorCellSeenFromOutsideKeepsTheLandblockNeighbourhood()
     {
         var set = new LiveEntityVisibleCellSet();
