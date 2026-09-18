@@ -11,25 +11,79 @@ internal readonly record struct RuntimePhysicsFrameSnapshot(
     Quaternion Orientation,
     uint FullCellId);
 
-internal sealed class RuntimeOrdinaryPhysicsCommit
+/// <summary>Names one begun ordinary-physics step. The step's commit is
+/// reused from one step to the next, so the ticket, not the object, says
+/// which step a caller is holding.</summary>
+internal readonly record struct RuntimeOrdinaryPhysicsTicket(ulong Value);
+
+/// <summary>
+/// The ordinary-physics step an updater has begun and not yet completed.
+///
+/// One of these belongs to each updater and describes one step at a time:
+/// an entity's step is begun and completed inside a single call, and a
+/// commit object per entity per frame was the largest per-frame allocation
+/// left at the two towns. Reuse on its own would weaken the guard that a
+/// commit completes once, because a caller holding a commit from an earlier
+/// step would find an object describing the current one, so each step is
+/// stamped with a ticket and completing takes the ticket back.
+/// </summary>
+internal sealed class RuntimeOrdinaryPhysicsCommit(
+    RuntimeOrdinaryPhysicsUpdater owner)
 {
-    internal required RuntimeOrdinaryPhysicsUpdater Owner { get; init; }
-    internal required RuntimeEntityRecord Record { get; init; }
-    internal required PhysicsBody Body { get; init; }
-    internal required ulong ObjectClockEpoch { get; init; }
-    internal required bool FrameChanged { get; init; }
-    internal required Func<bool>? ExternalOwnerValid { get; init; }
+    private ulong _ticket;
+
+    internal RuntimeOrdinaryPhysicsUpdater Owner { get; } =
+        owner ?? throw new ArgumentNullException(nameof(owner));
+
+    internal RuntimeEntityRecord Record { get; private set; } = null!;
+    internal PhysicsBody Body { get; private set; } = null!;
+    internal ulong ObjectClockEpoch { get; private set; }
+    internal bool FrameChanged { get; private set; }
+    internal Func<bool>? ExternalOwnerValid { get; private set; }
     internal bool Completed { get; set; }
-    internal RuntimePhysicsFrameSnapshot Snapshot { get; init; }
+    internal RuntimePhysicsFrameSnapshot Snapshot { get; private set; }
+
+    /// <summary>Describes a newly begun step and returns its ticket. The
+    /// step this object described before is over: its ticket no longer
+    /// matches, so nothing still holding it can complete it.</summary>
+    internal RuntimeOrdinaryPhysicsTicket Begin(
+        RuntimeEntityRecord record,
+        PhysicsBody body,
+        ulong objectClockEpoch,
+        bool frameChanged,
+        Func<bool>? externalOwnerValid,
+        in RuntimePhysicsFrameSnapshot snapshot)
+    {
+        Record = record;
+        Body = body;
+        ObjectClockEpoch = objectClockEpoch;
+        FrameChanged = frameChanged;
+        ExternalOwnerValid = externalOwnerValid;
+        Snapshot = snapshot;
+        Completed = false;
+        _ticket++;
+        return new RuntimeOrdinaryPhysicsTicket(_ticket);
+    }
+
+    /// <summary>Whether <paramref name="ticket"/> is the ticket of the step
+    /// described now. A ticket of an earlier step, or of no step at all,
+    /// is not.</summary>
+    internal bool Holds(RuntimeOrdinaryPhysicsTicket ticket) =>
+        _ticket != 0ul && ticket.Value == _ticket;
 }
 
 internal sealed class RuntimeOrdinaryPhysicsUpdater
 {
     private readonly RuntimePhysicsState _physics;
 
+    // One step is begun and completed at a time, so one commit describes
+    // them all in turn; see the ticket on RuntimeOrdinaryPhysicsCommit.
+    private readonly RuntimeOrdinaryPhysicsCommit _commit;
+
     internal RuntimeOrdinaryPhysicsUpdater(RuntimePhysicsState physics)
     {
         _physics = physics ?? throw new ArgumentNullException(nameof(physics));
+        _commit = new RuntimeOrdinaryPhysicsCommit(this);
     }
 
     internal bool TryBegin(
@@ -44,6 +98,7 @@ internal sealed class RuntimeOrdinaryPhysicsUpdater
         Action<uint, AnimationSequencer> captureAnimationHooks,
         Func<bool>? externalOwnerValid,
         out RuntimeOrdinaryPhysicsCommit commit,
+        out RuntimeOrdinaryPhysicsTicket ticket,
         System.Collections.Immutable.ImmutableArray<FlatCollisionSphere>
             sphereList = default,
         float sphereScale = 1f,
@@ -62,6 +117,7 @@ internal sealed class RuntimeOrdinaryPhysicsUpdater
                 externalOwnerValid))
         {
             commit = null!;
+            ticket = default;
             return false;
         }
 
@@ -107,6 +163,7 @@ internal sealed class RuntimeOrdinaryPhysicsUpdater
                 externalOwnerValid))
         {
             commit = null!;
+            ticket = default;
             return false;
         }
 
@@ -195,27 +252,27 @@ internal sealed class RuntimeOrdinaryPhysicsUpdater
                 externalOwnerValid))
         {
             commit = null!;
+            ticket = default;
             return false;
         }
 
-        commit = new RuntimeOrdinaryPhysicsCommit
-        {
-            Owner = this,
-            Record = record,
-            Body = body,
-            ObjectClockEpoch = objectClockEpoch,
-            FrameChanged = frameChanged,
-            ExternalOwnerValid = externalOwnerValid,
-            Snapshot = new RuntimePhysicsFrameSnapshot(
+        commit = _commit;
+        ticket = _commit.Begin(
+            record,
+            body,
+            objectClockEpoch,
+            frameChanged,
+            externalOwnerValid,
+            new RuntimePhysicsFrameSnapshot(
                 body.Position,
                 body.Orientation,
-                resolvedCellId),
-        };
+                resolvedCellId));
         return true;
     }
 
     internal bool Complete(
         RuntimeOrdinaryPhysicsCommit commit,
+        RuntimeOrdinaryPhysicsTicket ticket,
         int liveCenterX,
         int liveCenterY,
         Func<RuntimePhysicsFrameSnapshot, bool> acknowledgeProjection)
@@ -226,6 +283,12 @@ internal sealed class RuntimeOrdinaryPhysicsUpdater
         {
             throw new InvalidOperationException(
                 "An ordinary-physics commit belongs to another Runtime owner.");
+        }
+        if (!commit.Holds(ticket))
+        {
+            throw new InvalidOperationException(
+                "An ordinary-physics commit has begun another step since"
+                + " this ticket was issued.");
         }
         if (commit.Completed)
         {
