@@ -262,7 +262,7 @@ public sealed class GameWindow :
 
 
     private AcDream.App.World.LiveEntityRuntime? _liveEntities;
-    private AcDream.App.World.LiveEntityLivenessController? _liveEntityLiveness;
+    private AcDream.Runtime.Entities.RuntimeEntityLivenessController? _liveEntityLiveness;
 
     private readonly AcDream.Runtime.Plugins.RuntimeAutomationSurface? _automation;
     private readonly AcDream.App.Input.AppHotkeyRegistry? _hotkeyRegistry;

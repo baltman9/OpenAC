@@ -210,11 +210,11 @@ public class UiDatElementTests
     {
         var info = new ElementInfo();
         var baseState = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        baseState.Properties.Values[0x3Bu] = new UiPropertyValue
+        baseState.Properties.Set(0x3Bu, new UiPropertyValue
         {
             Kind = UiPropertyKind.Bool,
             BoolValue = true,
-        };
+        });
         info.States[UiStateInfo.DirectStateId] = baseState;
         info.StateMedia["Normal_rollover"] = (0x06005EB6u, 1);
         var element = new UiDatElement(info, _ => (0u, 0, 0));

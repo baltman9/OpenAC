@@ -19,6 +19,15 @@ public enum FrameStage
     ImGui = 2,
     /// <summary>Software presentation deadline wait (zero under VSync or uncapped mode).</summary>
     Pacing = 3,
+    /// <summary>World scene and private presentation draw submission.</summary>
+    Render = 4,
+    /// <summary>Opening and closing the GPU frame around the draws: image
+    /// acquisition, command submission and presentation.</summary>
+    Present = 5,
+    /// <summary>Per-frame diagnostics after the frame closes: pending
+    /// screenshot capture, diagnostic publication, automation checkpoints.
+    /// Zero unless a diagnostic is switched on.</summary>
+    Diagnostics = 6,
 }
 
 internal readonly record struct FrameHistoryRecord(
@@ -30,7 +39,10 @@ internal readonly record struct FrameHistoryRecord(
     long UpdateUs,
     long UploadUs,
     long ImGuiUs,
-    long PacingUs);
+    long PacingUs,
+    long RenderUs,
+    long PresentUs,
+    long DiagnosticsUs);
 
 public sealed class FrameProfiler : IDisposable
 {
@@ -133,7 +145,10 @@ public sealed class FrameProfiler : IDisposable
                     _lastStageUs[(int)FrameStage.Update],
                     _lastStageUs[(int)FrameStage.Upload],
                     _lastStageUs[(int)FrameStage.ImGui],
-                    _lastStageUs[(int)FrameStage.Pacing]));
+                    _lastStageUs[(int)FrameStage.Pacing],
+                    _lastStageUs[(int)FrameStage.Render],
+                    _lastStageUs[(int)FrameStage.Present],
+                    _lastStageUs[(int)FrameStage.Diagnostics]));
             }
             _currentFrameIndex++;
         }
@@ -173,6 +188,11 @@ public sealed class FrameProfiler : IDisposable
         }
     }
 
+    /// <summary>Microseconds the named stage took in the frame that closed at
+    /// the last boundary. Reporting and tests read it; the report line and the
+    /// history CSV are the production readers of the same numbers.</summary>
+    internal long LastStageUs(FrameStage stage) => _lastStageUs[(int)stage];
+
     public StageScope BeginStage(FrameStage stage)
         => RenderingDiagnostics.FrameProfEnabled
             ? new StageScope(this, stage, Stopwatch.GetTimestamp())
@@ -200,7 +220,7 @@ public sealed class FrameProfiler : IDisposable
             sb.Append(" | gpu=off(wbdiag)");
         sb.AppendFormat(ci, " | alloc_kb p50={0:0.0} max={1:0.0} gc={2}/{3}/{4}",
             alloc.Percentile(0.50) / 1024.0, alloc.Max() / 1024.0, gc0, gc1, gc2);
-        string[] names = { "upd", "upl", "imgui", "pace" };
+        string[] names = { "upd", "upl", "imgui", "pace", "rnd", "pres", "diag" };
         for (int i = 0; i < stages.Length && i < names.Length; i++)
             sb.AppendFormat(ci, " | {0} p50={1:0.0} p95={2:0.0}",
                 names[i], stages[i].Percentile(0.50) / 1000.0, stages[i].Percentile(0.95) / 1000.0);
@@ -216,7 +236,8 @@ public sealed class FrameProfiler : IDisposable
         DateTime startUtc = profilerStartUtc.ToUniversalTime();
         writer.WriteLine(
             "frame,timestamp_ms,timestamp_utc,cpu_us,gpu_us,alloc_bytes,"
-            + "update_us,upload_us,imgui_us,pacing_us");
+            + "update_us,upload_us,imgui_us,pacing_us,"
+            + "render_us,present_us,diagnostics_us");
         foreach (FrameHistoryRecord r in records)
         {
             writer.Write(r.FrameIndex.ToString(ci)); writer.Write(',');
@@ -229,7 +250,10 @@ public sealed class FrameProfiler : IDisposable
             writer.Write(r.UpdateUs.ToString(ci)); writer.Write(',');
             writer.Write(r.UploadUs.ToString(ci)); writer.Write(',');
             writer.Write(r.ImGuiUs.ToString(ci)); writer.Write(',');
-            writer.WriteLine(r.PacingUs.ToString(ci));
+            writer.Write(r.PacingUs.ToString(ci)); writer.Write(',');
+            writer.Write(r.RenderUs.ToString(ci)); writer.Write(',');
+            writer.Write(r.PresentUs.ToString(ci)); writer.Write(',');
+            writer.WriteLine(r.DiagnosticsUs.ToString(ci));
         }
     }
 

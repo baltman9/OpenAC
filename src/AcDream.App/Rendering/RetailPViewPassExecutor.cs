@@ -101,6 +101,7 @@ internal sealed partial class RetailPViewPassExecutor : IEnvCellImmediateDrawSin
     internal (int Width, int Height)? WalkAttachmentExtent =>
         _entities.WalkAttachmentExtent;
 
+
     public void AbortFrame()
     {
         List<Exception>? failures = null;

@@ -52,21 +52,21 @@ public class ChatWindowControllerTests
             X = 46, Y = 0, Width = 398, Height = 17,
         };
         var inputState = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        inputState.Properties.Values[0x16u] = new UiPropertyValue
+        inputState.Properties.Set(0x16u, new UiPropertyValue
         {
             Kind = UiPropertyKind.Bool,
             BoolValue = true,
-        };
-        inputState.Properties.Values[0x20u] = new UiPropertyValue
+        });
+        inputState.Properties.Set(0x20u, new UiPropertyValue
         {
             Kind = UiPropertyKind.Bool,
             BoolValue = true,
-        };
-        inputState.Properties.Values[0x27u] = new UiPropertyValue
+        });
+        inputState.Properties.Set(0x27u, new UiPropertyValue
         {
             Kind = UiPropertyKind.Bool,
             BoolValue = true,
-        };
+        });
         inputNode.States[UiStateInfo.DirectStateId] = inputState;
         var sendNode = new ElementInfo
         {
@@ -136,6 +136,38 @@ public class ChatWindowControllerTests
     }
 
     // ── CT-C1: the unseen-text indicator ────────────────────────────────
+
+
+    /// <summary>
+    /// The chat-target menu asks for its caption on every draw of the window,
+    /// and resolving one reads the interface string table. A channel's
+    /// caption does not change while the window lives, so it is resolved once
+    /// and the same one is handed back afterwards.
+    /// </summary>
+    [Fact]
+    public void ChannelButtonCaption_IsResolvedOncePerChannel()
+    {
+        var (rootInfo, layout, vm) = BuildTestTree();
+        var bus = new CaptureBus();
+        int lookups = 0;
+        ChatWindowController? ctrl = ChatWindowController.Bind(
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex,
+            chatStrings: key =>
+            {
+                lookups++;
+                return new string(key.ToCharArray());
+            });
+        Assert.NotNull(ctrl);
+        Func<string>? caption = ctrl!.Menu.ButtonLabelProvider;
+        Assert.NotNull(caption);
+
+        string first = caption!();
+        int afterFirst = lookups;
+        string second = caption();
+
+        Assert.Same(first, second);
+        Assert.Equal(afterFirst, lookups);
+    }
 
     private static ChatWindowController BindController()
     {

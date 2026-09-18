@@ -350,7 +350,8 @@ public sealed class LiveSessionEventRouter : ILiveSessionEventRouting
             SubscribeToRecompute<ClientObject>(
                 h => inventory.Objects.ObjectRemoved += h,
                 h => inventory.Objects.ObjectRemoved -= h,
-                () => RecomputePlayerQualities(inventory, character));
+                () => RecomputePlayerQualities(inventory, character),
+                removed => AffectsPlayerQualities(removed, inventory.PlayerGuid()));
             SubscribeToRecompute<ClientObjectMove>(
                 h => inventory.Objects.ObjectMoved += h,
                 h => inventory.Objects.ObjectMoved -= h,
@@ -505,8 +506,38 @@ public sealed class LiveSessionEventRouter : ILiveSessionEventRouting
     private void SubscribeToRecompute<T>(
         Action<Action<T>> attach,
         Action<Action<T>> detach,
-        Action recompute) =>
-        Subscribe(attach, detach, (T _) => recompute());
+        Action recompute,
+        Func<T, bool>? affects = null) =>
+        Subscribe(
+            attach,
+            detach,
+            (T value) =>
+            {
+                if (affects is null || affects(value))
+                    recompute();
+            });
+
+    /// <summary>
+    /// Whether removing this object can change anything the player-quality
+    /// recompute reads. It reads the player's own record and the burden of
+    /// what the player carries, so the player itself always counts, and so
+    /// does anything a container or a wielder holds. An object that neither
+    /// holds says it is out in the world, and the world is in nobody's
+    /// carried set.
+    ///
+    /// Without this, every object the client forgets -- and it forgets a
+    /// landblock's worth at a time, twenty-five seconds after the player
+    /// walks away -- recomputed the player's burden, player-killer status and
+    /// augmentation bonuses and pushed movement stats to everything watching.
+    /// That was the largest single cost of destroying an object.
+    /// </summary>
+    private static bool AffectsPlayerQualities(ClientObject removed, uint playerGuid)
+    {
+        ArgumentNullException.ThrowIfNull(removed);
+        return removed.ObjectId == playerGuid
+            || removed.ContainerId != 0u
+            || removed.WielderId != 0u;
+    }
 
     private void SubscribeParameterless(
         Action<Action> attach,

@@ -47,3 +47,45 @@ internal static class ScratchArrays
         return capacity > int.MaxValue ? int.MaxValue : (int)capacity;
     }
 }
+
+/// <summary>
+/// Hands a frame-scoped scratch array its capacity back after a peak. One
+/// pass over a dense scene can leave an append-only buffer many times larger
+/// than a normal frame needs, and it would hold that for the rest of the
+/// session.
+///
+/// <para><see cref="Observe"/> must be called at a frame boundary, where
+/// nothing points into the buffer: it can replace the array, and anything
+/// written in an earlier frame is gone.</para>
+/// </summary>
+internal struct FrameScratchTrim(int everyFrames, int floor)
+{
+    private int _framesSinceTrim;
+    private int _peakSinceTrim;
+
+    /// <summary>Elements used in the frame just finished, highest since the
+    /// last trim.</summary>
+    internal readonly int PeakSinceTrim => _peakSinceTrim;
+
+    /// <summary>Frames observed since the last trim.</summary>
+    internal readonly int FramesSinceTrim => _framesSinceTrim;
+
+    /// <summary>Records the frame's usage and, every <c>everyFrames</c>
+    /// frames, gives back anything beyond twice the peak seen since the last
+    /// trim. Never shrinks below <c>floor</c>.</summary>
+    internal void Observe<T>(ref T[] buffer, int usedThisFrame)
+    {
+        ArgumentNullException.ThrowIfNull(buffer);
+        ArgumentOutOfRangeException.ThrowIfNegative(usedThisFrame);
+        if (usedThisFrame > _peakSinceTrim)
+            _peakSinceTrim = usedThisFrame;
+        if (++_framesSinceTrim < everyFrames)
+            return;
+
+        int target = Math.Max(_peakSinceTrim, floor);
+        if (buffer.Length > (long)target * 2)
+            buffer = new T[target];
+        _framesSinceTrim = 0;
+        _peakSinceTrim = 0;
+    }
+}

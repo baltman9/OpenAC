@@ -42,8 +42,11 @@ public sealed class GpuMemoryProfileTests
             Assert.True(profile.StagingCapacityBytes > 0);
         }
 
-        // The numbers the Potato profile was measured with; a change here is a
+        // The numbers both profiles were measured with; a change here is a
         // deliberate re-measure, not a drift.
+        Assert.Equal(32UL * 1024 * 1024, standard.BlockSizeBytes);
+        Assert.Equal(16UL * 1024 * 1024, standard.DedicatedThresholdBytes);
+        Assert.Equal(48UL * 1024 * 1024, standard.StagingCapacityBytes);
         Assert.Equal(16UL * 1024 * 1024, compact.BlockSizeBytes);
         Assert.Equal(8UL * 1024 * 1024, compact.DedicatedThresholdBytes);
         Assert.Equal(8UL * 1024 * 1024, compact.StagingCapacityBytes);

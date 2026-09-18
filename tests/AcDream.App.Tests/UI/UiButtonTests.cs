@@ -432,11 +432,11 @@ public class UiButtonTests
         uint captionStringId = 333u;
         var info = new ElementInfo { Type = 1, Width = 231, Height = 28 };
         info.States[UiStateInfo.DirectStateId] = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        info.States[UiStateInfo.DirectStateId].Properties.Values[0x17u] = new UiPropertyValue
+        info.States[UiStateInfo.DirectStateId].Properties.Set(0x17u, new UiPropertyValue
         {
             Kind = UiPropertyKind.StringInfo,
             StringInfoValue = new UiStringInfoValue(0, captionStringId, 0, 0, 0, 0),
-        };
+        });
         info.StateMedia[""] = (0x06000001u, 1);
 
         var valueChild = new ElementInfo { Type = 12, X = 116, Y = 0, Width = 34, Height = 28 };
@@ -461,11 +461,11 @@ public class UiButtonTests
         uint stringId = 444u;
         var info = new ElementInfo { Type = 1, Width = 150, Height = 50 };
         info.States[UiStateInfo.DirectStateId] = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        info.States[UiStateInfo.DirectStateId].Properties.Values[0x17u] = new UiPropertyValue
+        info.States[UiStateInfo.DirectStateId].Properties.Set(0x17u, new UiPropertyValue
         {
             Kind = UiPropertyKind.StringInfo,
             StringInfoValue = new UiStringInfoValue(0, stringId, 0, 0, 0, 0),
-        };
+        });
 
         var button = Assert.IsType<UiButton>(DatWidgetFactory.Create(
             info, NoTex, null,
@@ -507,11 +507,11 @@ public class UiButtonTests
     {
         var info = new ElementInfo { Type = 3, Width = 10, Height = 10 };
         var normal = new UiStateInfo { Id = 1, Name = "Normal" };
-        normal.Properties.Values[0x3Bu] = new UiPropertyValue
-        { Kind = UiPropertyKind.Bool, BoolValue = true };
+        normal.Properties.Set(0x3Bu, new UiPropertyValue
+        { Kind = UiPropertyKind.Bool, BoolValue = true });
         var rollover = new UiStateInfo { Id = 2, Name = "Normal_rollover" };
-        rollover.Properties.Values[0x3Bu] = new UiPropertyValue
-        { Kind = UiPropertyKind.Bool, BoolValue = false };
+        rollover.Properties.Set(0x3Bu, new UiPropertyValue
+        { Kind = UiPropertyKind.Bool, BoolValue = false });
         info.States[1] = normal;
         info.States[2] = rollover;
         return new UiDatElement(info, NoTex);
@@ -612,11 +612,11 @@ public class UiButtonTests
         bool invisible)
     {
         var state = new UiStateInfo { Id = id, Name = name };
-        state.Properties.Values[0x3Bu] = new UiPropertyValue
+        state.Properties.Set(0x3Bu, new UiPropertyValue
         {
             Kind = UiPropertyKind.Bool,
             BoolValue = invisible,
-        };
+        });
         return state;
     }
 
@@ -638,11 +638,11 @@ public class UiButtonTests
             state = new UiStateInfo { Id = UiStateInfo.DirectStateId };
             info.States[UiStateInfo.DirectStateId] = state;
         }
-        state.Properties.Values[id] = new UiPropertyValue
+        state.Properties.Set(id, new UiPropertyValue
         {
             Kind = UiPropertyKind.Bool,
             BoolValue = value,
-        };
+        });
     }
 
     private static void AddFloatProperty(ElementInfo info, uint id, float value)
@@ -652,11 +652,11 @@ public class UiButtonTests
             state = new UiStateInfo { Id = UiStateInfo.DirectStateId };
             info.States[UiStateInfo.DirectStateId] = state;
         }
-        state.Properties.Values[id] = new UiPropertyValue
+        state.Properties.Set(id, new UiPropertyValue
         {
             Kind = UiPropertyKind.Float,
             FloatValue = value,
-        };
+        });
     }
 
     private static UiButton CreateButton(ElementInfo info)

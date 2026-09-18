@@ -245,6 +245,65 @@ public class ShadowObjectRegistryMultiPartTests
                     radius),
                 null));
 
+    /// <summary>
+    /// The flood shapes are built into lists the registry carries between
+    /// owners. A narrow owner registered after a wide one must flood exactly
+    /// as it would in a registry of its own; this fails if the carried lists
+    /// are not emptied before they are refilled, because the narrow owner
+    /// would then flood from the wide owner's parts as well.
+    /// </summary>
+    [Fact]
+    public void MultiPartFlood_NarrowOwnerAfterWideOwner_FloodsAsThoughAlone()
+    {
+        var shared = new ShadowObjectRegistry();
+        const uint wideId = 0xBEEF10u;
+        const uint narrowId = 0xBEEF11u;
+        var position = new Vector3(36f, 36f, 50f);
+
+        shared.RegisterMultiPart(
+            wideId, position, Quaternion.Identity,
+            [Bsp(14f), Bsp(14f, new Vector3(0f, -6f, 0f)), Bsp(14f, new Vector3(6f, 0f, 0f))],
+            0x10008u, EntityCollisionFlags.None, OffX, OffY, LbId);
+        shared.RegisterMultiPart(
+            narrowId, position, Quaternion.Identity,
+            [Bsp(0.5f)],
+            0x10008u, EntityCollisionFlags.None, OffX, OffY, LbId);
+
+        List<uint> alone = FloodCellsFor(Bsp(0.5f));
+        List<uint> afterWide = OutdoorCellsHolding(shared, narrowId);
+        List<uint> wide = OutdoorCellsHolding(shared, wideId);
+
+        Assert.Equal(alone, afterWide);
+        Assert.True(
+            wide.Count > afterWide.Count,
+            $"control failed: the wide owner covered {wide.Count} cells, the narrow one {afterWide.Count}");
+    }
+
+    /// <summary>
+    /// The same pin on the cylinder route, where a list left full would hit the
+    /// ten-sphere cap before the owner's own parts were added and flood from
+    /// the previous owner instead.
+    /// </summary>
+    [Fact]
+    public void CylinderFlood_SecondOwner_FloodsAsThoughAlone()
+    {
+        var shared = new ShadowObjectRegistry();
+        const uint firstId = 0xBEEF20u;
+        const uint secondId = 0xBEEF21u;
+        var position = new Vector3(36f, 36f, 50f);
+
+        shared.RegisterMultiPart(
+            firstId, position, Quaternion.Identity,
+            [Cyl(12f), Cyl(12f, new Vector3(0f, -8f, 0f))],
+            0x10008u, EntityCollisionFlags.None, OffX, OffY, LbId);
+        shared.RegisterMultiPart(
+            secondId, position, Quaternion.Identity,
+            [Cyl(0.5f)],
+            0x10008u, EntityCollisionFlags.None, OffX, OffY, LbId);
+
+        Assert.Equal(FloodCellsFor(Cyl(0.5f)), OutdoorCellsHolding(shared, secondId));
+    }
+
     private static List<uint> FloodCellsFor(params ShadowShape[] shapes)
     {
         var reg = new ShadowObjectRegistry();

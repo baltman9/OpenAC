@@ -1160,6 +1160,163 @@ public sealed class RuntimeAcceptedPositionDriveControllerTests
         AssertConverged(runtime);
     }
 
+    // OpenAC #127. The accepted destination is placed the moment it is
+    // accepted. When its cell is not resident the placement parks, exactly as
+    // a first entry or a remote spawn does, and the ordinary wake re-places it
+    // once the cell's collision generation is admitted.
+    [Fact]
+    public void PortalArrival_ToACellThatIsNotResident_ParksThenTheWakeCommitsIt()
+    {
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        (_, PlayerMovementController controller) = EnterLocalPlayer(runtime);
+        RuntimeAcceptedPositionDriveController drive =
+            CreateAcceptedPositionDrive(runtime, out _);
+
+        const ushort teleportSequence = 11;
+        const uint destinationCell = DestinationLandblock | 0x0001u;
+        var destinationPosition = new Vector3(10f, 10f, SpawnHeight);
+        Vector3 positionBefore = controller.Position;
+        WorldSession.EntityPositionUpdate update = PortalDestinationUpdate(
+            destinationPosition, destinationCell, teleportSequence);
+        MergeAccepted(runtime, controller, update);
+        (RuntimePortalPlacementAuthority portal, RuntimeTeleportDestination destination) =
+            BeginPortal(runtime, destinationCell, teleportSequence, update);
+        using var portalHostGuard = new PortalHostConvergenceGuard(
+            runtime, portal.RevealGeneration, portal.Projection);
+
+        Assert.Equal(
+            RuntimeAcceptedPositionExecutionStatus.DeferredCell,
+            drive.TryExecuteAcceptedPortalArrival(destination, portal));
+        Assert.Equal(1, drive.PendingCount);
+        Assert.Equal(positionBefore, controller.Position);
+
+        // Nothing converges while the destination is still missing.
+        drive.Advance();
+        Assert.Equal(1, drive.PendingCount);
+        Assert.False(drive.TryConsumePortalCommit(
+            portal.RevealGeneration, teleportSequence));
+
+        CommitLandblockCollision(runtime, DestinationLandblock);
+        DrainPlacementFifo(runtime);
+        drive.Advance();
+
+        Assert.Equal(0, drive.PendingCount);
+        Assert.Equal(destinationPosition, controller.Position);
+        Assert.True(drive.TryConsumePortalCommit(
+            portal.RevealGeneration, teleportSequence));
+        AssertConverged(runtime);
+    }
+
+    // The point of parking: an object that the server puts in the destination
+    // cell while the arrival waits is part of the world the wake places into.
+    [Fact]
+    public void PortalArrival_ParkedWhileTheCellsObjectsArrive_LandsWhereOnePlacementIntoTheFinishedCellWould()
+    {
+        var destinationPosition = new Vector3(10f, 10f, SpawnHeight);
+        Vector3 blockerWorldPosition = destinationPosition;
+
+        Vector3 unobstructed = RunPortalArrival(
+            destinationPosition,
+            registerBlockerAt: null,
+            parkFirst: false);
+        Vector3 control = RunPortalArrival(
+            destinationPosition,
+            registerBlockerAt: blockerWorldPosition,
+            parkFirst: false);
+        Vector3 parkedThenWoken = RunPortalArrival(
+            destinationPosition,
+            registerBlockerAt: blockerWorldPosition,
+            parkFirst: true);
+
+        // The blocker moves the arrival...
+        Assert.NotEqual(unobstructed, control);
+        // ...and the parked arrival lands exactly where the single placement
+        // into the finished cell does, not at the pose it parked on.
+        Assert.Equal(control, parkedThenWoken);
+        Assert.NotEqual(unobstructed, parkedThenWoken);
+    }
+
+    /// <summary>
+    /// One portal arrival into <see cref="DestinationLandblock"/>, either with
+    /// the landblock already admitted (a single placement) or parked first and
+    /// woken by the admission. Returns the resolved local-player position.
+    /// </summary>
+    private static Vector3 RunPortalArrival(
+        Vector3 destinationPosition,
+        Vector3? registerBlockerAt,
+        bool parkFirst)
+    {
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        (_, PlayerMovementController controller) = EnterLocalPlayer(runtime);
+        RuntimeAcceptedPositionDriveController drive =
+            CreateAcceptedPositionDrive(runtime, out _);
+
+        void RegisterBlocker()
+        {
+            if (registerBlockerAt is not { } center)
+                return;
+            runtime.EntityObjects.Physics.Engine.ShadowObjects.RegisterMultiPart(
+                0x70000001u,
+                center,
+                Quaternion.Identity,
+                [
+                    ShadowShape.Cylinder(
+                        0x01000001u,
+                        Vector3.Zero,
+                        Quaternion.Identity,
+                        scale: 1f,
+                        radius: 1.5f,
+                        cylHeight: 2f),
+                ],
+                state: (uint)PhysicsStateFlags.ReportCollisions,
+                flags: EntityCollisionFlags.None,
+                worldOffsetX: 0f,
+                worldOffsetY: 0f,
+                landblockId: DestinationLandblock,
+                seedCellId: DestinationLandblock | 0x0001u);
+        }
+
+        if (!parkFirst)
+        {
+            CommitLandblockCollision(runtime, DestinationLandblock);
+            RegisterBlocker();
+            DrainPlacementFifo(runtime);
+        }
+
+        const ushort teleportSequence = 12;
+        const uint destinationCell = DestinationLandblock | 0x0001u;
+        WorldSession.EntityPositionUpdate update = PortalDestinationUpdate(
+            destinationPosition, destinationCell, teleportSequence);
+        MergeAccepted(runtime, controller, update);
+        (RuntimePortalPlacementAuthority portal, RuntimeTeleportDestination destination) =
+            BeginPortal(runtime, destinationCell, teleportSequence, update);
+        using var portalHostGuard = new PortalHostConvergenceGuard(
+            runtime, portal.RevealGeneration, portal.Projection);
+
+        RuntimeAcceptedPositionExecutionStatus status =
+            drive.TryExecuteAcceptedPortalArrival(destination, portal);
+        if (parkFirst)
+        {
+            Assert.Equal(
+                RuntimeAcceptedPositionExecutionStatus.DeferredCell, status);
+            // The cell's objects arrive while the arrival is parked.
+            RegisterBlocker();
+            CommitLandblockCollision(runtime, DestinationLandblock);
+            DrainPlacementFifo(runtime);
+            drive.Advance();
+        }
+        else
+        {
+            Assert.Equal(
+                RuntimeAcceptedPositionExecutionStatus.Committed, status);
+        }
+
+        Assert.Equal(0, drive.PendingCount);
+        return controller.Position;
+    }
+
     private static WorldSession.EntityPositionUpdate PortalDestinationUpdate(
         Vector3 position,
         uint landblockId,

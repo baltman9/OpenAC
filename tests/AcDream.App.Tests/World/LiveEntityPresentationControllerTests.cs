@@ -377,6 +377,60 @@ public sealed class LiveEntityPresentationControllerTests
         Assert.False(fixture.Controller.HasDeferredShadowRestore(Fixture.Guid));
     }
 
+    // OpenAC #127. Leaving a landblock takes the collision of everything
+    // standing in it and coming back gives it back a landblock at a time; an
+    // arrival placed in between is placed into a cell whose objects are not
+    // there. The readiness term below is what holds the arrival.
+    [Fact]
+    public void ObjectWaitingForItsCollisionBack_HoldsItsOwnLandblockOnly()
+    {
+        Fixture fixture = new(PhysicsStateFlags.ReportCollisions);
+        Assert.True(fixture.Controller.OnLiveEntityReady(Fixture.Guid));
+        Assert.False(fixture.Controller.HasCollisionPendingRestore(0x01010001u));
+
+        Assert.True(fixture.Runtime.RebucketLiveEntity(
+            Fixture.Guid,
+            0x02020001u));
+        Assert.True(fixture.Controller.HasDeferredShadowRestore(Fixture.Guid));
+
+        // Its own landblock waits; a different one does not, and neither does
+        // "no destination".
+        Assert.True(fixture.Controller.HasCollisionPendingRestore(0x02020001u));
+        Assert.True(fixture.Controller.HasCollisionPendingRestore(0x0202001Au));
+        Assert.False(fixture.Controller.HasCollisionPendingRestore(0x01010001u));
+        Assert.False(fixture.Controller.HasCollisionPendingRestore(0u));
+
+        fixture.Spatial.AddLandblock(new LoadedLandblock(
+            0x0202FFFFu,
+            new LandBlock(),
+            Array.Empty<WorldEntity>()));
+
+        Assert.False(fixture.Controller.HasDeferredShadowRestore(Fixture.Guid));
+        Assert.False(fixture.Controller.HasCollisionPendingRestore(0x02020001u));
+    }
+
+    [Fact]
+    public void ObjectRetiredInsteadOfRestored_ReleasesTheHold()
+    {
+        Fixture fixture = new(PhysicsStateFlags.ReportCollisions);
+        Assert.True(fixture.Controller.OnLiveEntityReady(Fixture.Guid));
+        Assert.True(fixture.Runtime.RebucketLiveEntity(
+            Fixture.Guid,
+            0x02020001u));
+        Assert.True(fixture.Controller.HasCollisionPendingRestore(0x02020001u));
+
+        Assert.True(fixture.Runtime.TryGetRecord(
+            Fixture.Guid,
+            out LiveEntityRecord record));
+        fixture.Controller.Forget(record);
+        fixture.Shadows.Deregister(fixture.Entity.Id);
+        Assert.True(fixture.Runtime.UnregisterLiveEntity(
+            new DeleteObject.Parsed(Fixture.Guid, 1),
+            isLocalPlayer: false));
+
+        Assert.False(fixture.Controller.HasCollisionPendingRestore(0x02020001u));
+    }
+
     [Fact]
     public void PendingVisibilityCallback_GuidReuseCannotRestoreOldShadowOwner()
     {

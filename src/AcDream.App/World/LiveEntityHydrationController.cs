@@ -373,8 +373,8 @@ AppearanceSynchronization:
         return _deletion.Delete(delete);
     }
 
-    public bool OnPrune(LiveEntityPruneCandidate candidate) =>
-        _deletion.Prune(candidate);
+    public bool OnPrune(RuntimeEntityExpiryCandidate candidate) =>
+        _deletion.Expire(candidate);
 
     public int RetryPendingTeardowns() => _runtime.RetryPendingTeardowns();
 

@@ -1205,7 +1205,7 @@ namespace AcDream.App.Rendering.Wb
                 ResidencyDomain.ObjectMeshes,
                 EntryCount: checked(
                     _renderData.Count
-                    + _globalAtlases.Values.Sum(static atlases => atlases.Count)
+                    + CountAtlases(_globalAtlases.Values)
                     + _retiringAtlases.Count),
                 OwnerCount: _ownership.TotalReferenceCount,
                 Charges: new ResidencyCharges(
@@ -1222,12 +1222,16 @@ namespace AcDream.App.Rendering.Wb
                 BudgetBytes: _maxGpuMemory);
         }
 
+        // Concrete collection types, not interfaces: this runs on the render
+        // tick, and an interface parameter would box a struct enumerator per
+        // atlas family per frame.
         internal static long CalculateAtlasBytes(
-            IEnumerable<IReadOnlyCollection<TextureAtlasManager>> atlasFamilies)
+            Dictionary<(int Width, int Height, TextureFormat Format),
+                List<TextureAtlasManager>>.ValueCollection atlasFamilies)
         {
             ArgumentNullException.ThrowIfNull(atlasFamilies);
             long bytes = 0;
-            foreach (IReadOnlyCollection<TextureAtlasManager> family in atlasFamilies)
+            foreach (List<TextureAtlasManager> family in atlasFamilies)
             {
                 foreach (TextureAtlasManager atlas in family)
                     bytes = checked(bytes + atlas.AllocatedBytes);
@@ -1235,14 +1239,23 @@ namespace AcDream.App.Rendering.Wb
             return bytes;
         }
 
-        internal static long CalculateAtlasBytes(
-            IEnumerable<TextureAtlasManager> atlases)
+        internal static long CalculateAtlasBytes(List<TextureAtlasManager> atlases)
         {
             ArgumentNullException.ThrowIfNull(atlases);
             long bytes = 0;
             foreach (TextureAtlasManager atlas in atlases)
                 bytes = checked(bytes + atlas.AllocatedBytes);
             return bytes;
+        }
+
+        private static int CountAtlases(
+            Dictionary<(int Width, int Height, TextureFormat Format),
+                List<TextureAtlasManager>>.ValueCollection atlasFamilies)
+        {
+            int count = 0;
+            foreach (List<TextureAtlasManager> family in atlasFamilies)
+                count = checked(count + family.Count);
+            return count;
         }
 
         internal ResidencyDomainSnapshot CapturePreparedMeshResidency()

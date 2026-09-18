@@ -427,17 +427,14 @@ public sealed class PhysicsEngine
                             }
                             if (_index <= 0x40)
                             {
+                                // Land cells follow their landblock's terrain
+                                // and are built on first lookup; installing
+                                // terrain only has to drop what the previous
+                                // terrain left cached.
                                 uint low = (uint)_index++;
-                                CellGraphTerrain terrain = graph.Terrain!;
-                                int cellIndex = (int)(low - 1u);
-                                uint id = graph.LandblockPrefix | low;
-                                _destination.OutdoorCells[id] =
-                                    LandCell.Synthesize(
-                                        id,
-                                        terrain.Terrain,
-                                        terrain.Origin,
-                                        cellIndex / 8,
-                                        cellIndex % 8);
+                                _destination.OutdoorCells.TryRemove(
+                                    graph.LandblockPrefix | low,
+                                    out _);
                                 return Worked();
                             }
                         }

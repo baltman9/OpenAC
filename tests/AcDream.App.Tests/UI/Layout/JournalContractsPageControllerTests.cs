@@ -141,6 +141,54 @@ public sealed class JournalContractsPageControllerTests
         return text?.LinesProvider?.Invoke().FirstOrDefault().Text ?? string.Empty;
     }
 
+    /// <summary>
+    /// The detail pane's countdown turns over on the tracker's own phase, not
+    /// on the wall clock: a contract received half a second past a whole
+    /// second counts down half a second past every whole second after that.
+    /// Two ticks inside one countdown second show the same text; the tick
+    /// after it turns over shows the next. Keying the recompose on the
+    /// wall-clock second leaves the pane stale for up to a second, and this
+    /// fails on that version because the third tick shares a wall-clock second
+    /// with the second one.
+    /// </summary>
+    [Fact]
+    public void TheCountdownTurnsOverOnTheTrackersPhaseNotTheWallClock()
+    {
+        (UiElement page, _) = BuildPage();
+        using var state = new RuntimeContractState();
+        DateTime receivedAt = Now.AddMilliseconds(500);
+        state.ApplyUpdate(new ContractTrackerUpdate(
+            new ContractTracker(
+                1u, 0x10u, ContractStage.DoneOrPendingRepeat, 0d, 600d, receivedAt),
+            Delete: false,
+            SetAsDisplay: false));
+        ContractCatalog catalog = Catalog(Entry(0x10u, "First", repeatFlag: "flag"));
+
+        DateTime clock = receivedAt.AddMilliseconds(200);
+        var controller = new JournalContractsPageController(
+            page,
+            new JournalContractsPageController.Bindings(
+                Contracts: state.View,
+                Catalog: () => catalog,
+                Now: () => clock,
+                TemplateResolver: RowTemplate));
+
+        string inTheFirstSecond = TextOf(page, StatusValueId);
+        Assert.NotEqual(string.Empty, inTheFirstSecond);
+
+        // Still the same countdown second, although the wall clock has turned
+        // over since the last tick.
+        clock = receivedAt.AddMilliseconds(900);
+        controller.Tick();
+        Assert.Equal(inTheFirstSecond, TextOf(page, StatusValueId));
+
+        // The countdown second has turned over, although the wall clock has
+        // not since the previous tick: the pane has to follow.
+        clock = receivedAt.AddMilliseconds(1_200);
+        controller.Tick();
+        Assert.NotEqual(inTheFirstSecond, TextOf(page, StatusValueId));
+    }
+
     [Fact]
     public void RowsCarryTheAuthoredNameAndTheRetailProgressText()
     {
