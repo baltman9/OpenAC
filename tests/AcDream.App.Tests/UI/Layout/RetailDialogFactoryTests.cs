@@ -771,11 +771,11 @@ public sealed class RetailDialogFactoryTests
                 Height = 16f,
             };
             var direct = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-            direct.Properties.Values[0x16u] = new UiPropertyValue
+            direct.Properties.Set(0x16u, new UiPropertyValue
             {
                 Kind = UiPropertyKind.Bool,
                 BoolValue = true,
-            };
+            });
             field.States.Add(UiStateInfo.DirectStateId, direct);
             popup.Children.Add(field);
             popup.Children.Add(new ElementInfo

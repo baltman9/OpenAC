@@ -312,7 +312,7 @@ public class ElementReaderTests
     {
         var info = new ElementInfo();
         var direct = new UiStateInfo { Id = UiStateInfo.DirectStateId, Name = "" };
-        direct.Properties.Values[propertyId] = value;
+        direct.Properties.Set(propertyId, value);
         info.States[UiStateInfo.DirectStateId] = direct;
         return info;
     }
@@ -369,18 +369,18 @@ public class ElementReaderTests
     public void ReadTabTable_DecodesButtonPageDefaultInAuthoredOrder()
     {
         var entry0 = new UiPropertyValue { Kind = UiPropertyKind.Struct };
-        entry0.StructValue[0x30u] = EnumProp(0x1000AAAAu);
-        entry0.StructValue[0x31u] = EnumProp(0x1000BBBBu);
-        entry0.StructValue[0x32u] = BoolProp(true);
+        entry0.SetStructMember(0x30u, EnumProp(0x1000AAAAu));
+        entry0.SetStructMember(0x31u, EnumProp(0x1000BBBBu));
+        entry0.SetStructMember(0x32u, BoolProp(true));
 
         var entry1 = new UiPropertyValue { Kind = UiPropertyKind.Struct };
-        entry1.StructValue[0x30u] = EnumProp(0x1000CCCCu);
-        entry1.StructValue[0x31u] = EnumProp(0x1000DDDDu);
+        entry1.SetStructMember(0x30u, EnumProp(0x1000CCCCu));
+        entry1.SetStructMember(0x31u, EnumProp(0x1000DDDDu));
         // no 0x32 -> IsDefault false
 
         var array = new UiPropertyValue { Kind = UiPropertyKind.Array };
-        array.ArrayValue.Add(entry0);
-        array.ArrayValue.Add(entry1);
+        array.AddArrayItem(entry0);
+        array.AddArrayItem(entry1);
 
         ElementInfo info = WithDirectProperty(0x2Eu, array);
         ElementReader.ApplyCanonicalLegacyProjection(info);
@@ -394,21 +394,21 @@ public class ElementReaderTests
     public void ReadTabTable_SkipsEntriesMissingButtonOrPage()
     {
         var missingPage = new UiPropertyValue { Kind = UiPropertyKind.Struct };
-        missingPage.StructValue[0x30u] = EnumProp(0x1000EEEEu);
+        missingPage.SetStructMember(0x30u, EnumProp(0x1000EEEEu));
         // no 0x31
 
         var missingButton = new UiPropertyValue { Kind = UiPropertyKind.Struct };
-        missingButton.StructValue[0x31u] = EnumProp(0x1000FFFFu);
+        missingButton.SetStructMember(0x31u, EnumProp(0x1000FFFFu));
         // no 0x30
 
         var wellFormed = new UiPropertyValue { Kind = UiPropertyKind.Struct };
-        wellFormed.StructValue[0x30u] = EnumProp(0x10001111u);
-        wellFormed.StructValue[0x31u] = EnumProp(0x10002222u);
+        wellFormed.SetStructMember(0x30u, EnumProp(0x10001111u));
+        wellFormed.SetStructMember(0x31u, EnumProp(0x10002222u));
 
         var array = new UiPropertyValue { Kind = UiPropertyKind.Array };
-        array.ArrayValue.Add(missingPage);
-        array.ArrayValue.Add(missingButton);
-        array.ArrayValue.Add(wellFormed);
+        array.AddArrayItem(missingPage);
+        array.AddArrayItem(missingButton);
+        array.AddArrayItem(wellFormed);
 
         ElementInfo info = WithDirectProperty(0x2Eu, array);
         ElementReader.ApplyCanonicalLegacyProjection(info);
@@ -421,16 +421,16 @@ public class ElementReaderTests
     public void ReadTemplateList_DecodesLayoutDidAndElementIdInAuthoredOrder()
     {
         var entry0 = new UiPropertyValue { Kind = UiPropertyKind.Struct };
-        entry0.StructValue[0x63u] = EnumProp(0x21000099u);
-        entry0.StructValue[0x62u] = EnumProp(0x10003333u);
+        entry0.SetStructMember(0x63u, EnumProp(0x21000099u));
+        entry0.SetStructMember(0x62u, EnumProp(0x10003333u));
 
         var entry1 = new UiPropertyValue { Kind = UiPropertyKind.Struct };
-        entry1.StructValue[0x63u] = EnumProp(0x21000099u);
-        entry1.StructValue[0x62u] = EnumProp(0x10004444u);
+        entry1.SetStructMember(0x63u, EnumProp(0x21000099u));
+        entry1.SetStructMember(0x62u, EnumProp(0x10004444u));
 
         var array = new UiPropertyValue { Kind = UiPropertyKind.Array };
-        array.ArrayValue.Add(entry0);
-        array.ArrayValue.Add(entry1);
+        array.AddArrayItem(entry0);
+        array.AddArrayItem(entry1);
 
         ElementInfo info = WithDirectProperty(0x64u, array);
         ElementReader.ApplyCanonicalLegacyProjection(info);
@@ -563,9 +563,9 @@ public class ElementReaderTests
     public void Merge_TooltipProperties_RecomputeFromTheMergedStateBag()
     {
         var direct = new UiStateInfo { Id = UiStateInfo.DirectStateId, Name = "" };
-        direct.Properties.Values[0x47u] = EnumProp(0x10000487u);
-        direct.Properties.Values[0x48u] = DataIdProp(0x21000041u);
-        direct.Properties.Values[0x4Bu] = BoolProp(true);
+        direct.Properties.Set(0x47u, EnumProp(0x10000487u));
+        direct.Properties.Set(0x48u, DataIdProp(0x21000041u));
+        direct.Properties.Set(0x4Bu, BoolProp(true));
         var base_ = new ElementInfo();
         base_.States[UiStateInfo.DirectStateId] = direct;
         ElementReader.ApplyCanonicalLegacyProjection(base_);

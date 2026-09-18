@@ -185,10 +185,15 @@ public sealed partial class SkyRenderer : IDisposable
     private uint TextureTableSlot(uint surfaceId, bool repeat) =>
         RhiTextureTableSlot(surfaceId, repeat);
 
-    private static Dictionary<uint, SkyObjectReplaceData> PickReplaces(
+    // Refilled in place every frame: the sky pass reads this map and drops it,
+    // and a fresh dictionary per frame is pure garbage.
+    private readonly Dictionary<uint, SkyObjectReplaceData> _replaces = new();
+
+    private Dictionary<uint, SkyObjectReplaceData> PickReplaces(
         DayGroupData group, float dayFraction)
     {
-        var result = new Dictionary<uint, SkyObjectReplaceData>();
+        Dictionary<uint, SkyObjectReplaceData> result = _replaces;
+        result.Clear();
         var times = group.SkyTimes;
         if (times.Count == 0) return result;
 
@@ -202,8 +207,9 @@ public sealed partial class SkyRenderer : IDisposable
                 break;
         }
 
-        foreach (var r in k1.Replaces)
-            result[r.ObjectIndex] = r;
+        IReadOnlyList<SkyObjectReplaceData> replaces = k1.Replaces;
+        for (int i = 0; i < replaces.Count; i++)
+            result[replaces[i].ObjectIndex] = replaces[i];
 
         return result;
     }
@@ -219,14 +225,20 @@ public sealed partial class SkyRenderer : IDisposable
     {
         if (group is null)
             return;
-        foreach (SkyObjectData obj in group.SkyObjects)
-            EnsureMeshUploaded(obj.GfxObjId);
-        foreach (DatSkyKeyframeData time in group.SkyTimes)
+        // Indexed, not enumerated: these are interface-typed lists, so a
+        // foreach boxes an enumerator per list, and this runs before the world
+        // pass on every frame.
+        IReadOnlyList<SkyObjectData> objects = group.SkyObjects;
+        for (int i = 0; i < objects.Count; i++)
+            EnsureMeshUploaded(objects[i].GfxObjId);
+        IReadOnlyList<DatSkyKeyframeData> times = group.SkyTimes;
+        for (int i = 0; i < times.Count; i++)
         {
-            foreach (SkyObjectReplaceData replace in time.Replaces)
+            IReadOnlyList<SkyObjectReplaceData> replaces = times[i].Replaces;
+            for (int j = 0; j < replaces.Count; j++)
             {
-                if (replace.GfxObjId != 0)
-                    EnsureMeshUploaded(replace.GfxObjId);
+                if (replaces[j].GfxObjId != 0)
+                    EnsureMeshUploaded(replaces[j].GfxObjId);
             }
         }
     }

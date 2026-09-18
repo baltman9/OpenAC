@@ -2493,26 +2493,26 @@ public class CharacterStatControllerTests
     {
         var info = new ElementInfo();
         var direct = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        direct.Properties.Values[0x3Fu] = new UiPropertyValue
+        direct.Properties.Set(0x3Fu, new UiPropertyValue
         {
             Kind = UiPropertyKind.Integer,
             IntegerValue = 310,
-        };
-        direct.Properties.Values[0x3Eu] = new UiPropertyValue
+        });
+        direct.Properties.Set(0x3Eu, new UiPropertyValue
         {
             Kind = UiPropertyKind.Integer,
             IntegerValue = 372,
-        };
-        direct.Properties.Values[0x3Du] = new UiPropertyValue
+        });
+        direct.Properties.Set(0x3Du, new UiPropertyValue
         {
             Kind = UiPropertyKind.Integer,
             IntegerValue = 310,
-        };
-        direct.Properties.Values[0x3Cu] = new UiPropertyValue
+        });
+        direct.Properties.Set(0x3Cu, new UiPropertyValue
         {
             Kind = UiPropertyKind.Integer,
             IntegerValue = 1000,
-        };
+        });
         info.States[UiStateInfo.DirectStateId] = direct;
         return info;
     }

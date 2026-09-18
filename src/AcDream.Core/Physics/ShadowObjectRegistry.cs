@@ -399,18 +399,17 @@ public sealed class ShadowObjectRegistry
 
         if (cylsphereRoute)
         {
-            List<DatReaderWriter.Types.Sphere> cylSpheres =
-                BuildFloodSpheres(worldPos, worldRot, collisionShapes);
+            List<DatReaderWriter.Types.Sphere> cylSpheres = _floodSphereScratch;
+            FillFloodSpheres(worldPos, worldRot, collisionShapes, cylSpheres);
             IReadOnlyList<uint> cells = CellTransit.BuildShadowCellSet(
                 FloodCache, seedCellId, cylSpheres, cylSpheres.Count, isStatic);
             return (cells, RetailCellArrayRoute.Cylsphere);
         }
         else
         {
-            List<ShadowPartBox> boxes =
-                BuildFloodPartBoxes(worldPos, worldRot, partArray);
-            List<DatReaderWriter.Types.Sphere> spheres =
-                BuildBspPartSpheres(worldPos, worldRot, partArray);
+            List<ShadowPartBox> boxes = _partBoxScratch;
+            List<DatReaderWriter.Types.Sphere> spheres = _partSphereScratch;
+            FillBspParts(worldPos, worldRot, partArray, boxes, spheres);
             IReadOnlyList<uint> cells = CellTransit.BuildShadowCellSetFromParts(
                 FloodCache, seedCellId, boxes, spheres, isStatic);
             return (cells, RetailCellArrayRoute.BoundingBox);
@@ -794,8 +793,11 @@ public sealed class ShadowObjectRegistry
                                     collisionType, cylHeight, scale, state, flags);
 
         var cellIds = new List<uint>(cellSet.Count);
-        foreach (uint cellId in cellSet)
+        // Indexed: the cell set arrives as an interface, so a foreach boxes an
+        // enumerator, and a moving owner runs this several times a frame.
+        for (int c = 0; c < cellSet.Count; c++)
         {
+            uint cellId = cellSet[c];
             AddEntryToCell(entry, cellId);
             cellIds.Add(cellId);
         }
@@ -874,14 +876,17 @@ public sealed class ShadowObjectRegistry
 
             if (hasBsp)
             {
-                var partBoxes = BuildFloodPartBoxes(entityWorldPos, entityWorldRot, shapes);
-                var partSpheres = BuildBspPartSpheres(entityWorldPos, entityWorldRot, shapes);
+                List<ShadowPartBox> partBoxes = _partBoxScratch;
+                List<DatReaderWriter.Types.Sphere> partSpheres = _partSphereScratch;
+                FillBspParts(
+                    entityWorldPos, entityWorldRot, shapes, partBoxes, partSpheres);
                 cellSet = CellTransit.BuildShadowCellSetFromParts(
                     FloodCache, seed, partBoxes, partSpheres, isStatic);
             }
             else
             {
-                var floodSpheres = BuildFloodSpheres(entityWorldPos, entityWorldRot, shapes);
+                List<DatReaderWriter.Types.Sphere> floodSpheres = _floodSphereScratch;
+                FillFloodSpheres(entityWorldPos, entityWorldRot, shapes, floodSpheres);
                 cellSet = CellTransit.BuildShadowCellSet(
                     FloodCache, seed, floodSpheres, floodSpheres.Count, isStatic);
             }
@@ -892,8 +897,12 @@ public sealed class ShadowObjectRegistry
         _entityShapes[entityId] = shapes;
         var allCells = new List<uint>(cellSet.Count);
 
-        foreach (var shape in shapes)
+        // Both loops are indexed: the shapes and the cell set arrive as
+        // interfaces, and a foreach here boxed one enumerator per owner and
+        // one more per shape, several times a frame for a moving owner.
+        for (int p = 0; p < shapes.Count; p++)
         {
+            ShadowShape shape = shapes[p];
             var rotatedLocal = Vector3.Transform(shape.LocalPosition, entityWorldRot);
             var partWorldPos = entityWorldPos + rotatedLocal;
             var partWorldRot = entityWorldRot * shape.LocalRotation;
@@ -912,12 +921,12 @@ public sealed class ShadowObjectRegistry
                 LocalPosition: shape.LocalPosition,
                 LocalRotation: shape.LocalRotation);
 
-            foreach (uint cellId in cellSet)
-                AddEntryToCell(entry, cellId);
+            for (int c = 0; c < cellSet.Count; c++)
+                AddEntryToCell(entry, cellSet[c]);
         }
 
-        foreach (uint cellId in cellSet)
-            allCells.Add(cellId);
+        for (int c = 0; c < cellSet.Count; c++)
+            allCells.Add(cellSet[c]);
 
         _entityToCells[entityId] = allCells;
         _entityReg[entityId] = new RegistrationRecord(
@@ -1078,18 +1087,53 @@ public sealed class ShadowObjectRegistry
         BumpOwnerVersion(entityId);
     }
 
-    private static List<DatReaderWriter.Types.Sphere> BuildFloodSpheres(
+    // The flood shapes are derived from a position, an orientation and the
+    // owner's parts, handed straight to the cell-set walk and dropped. Keeping
+    // the lists means a moving owner no longer allocates its whole part set
+    // every time its shadow position is refreshed, which happens several times
+    // a frame for the local player.
+    private readonly List<ShadowPartBox> _partBoxScratch = [];
+    private readonly List<DatReaderWriter.Types.Sphere> _partSphereScratch = [];
+    private readonly List<DatReaderWriter.Types.Sphere> _floodSphereScratch = [];
+
+    /// <summary>
+    /// Fills an owner's BSP part boxes and part spheres into the two carried
+    /// lists. They describe the same parts and the cell-set walk pairs them by
+    /// index, so they must come back the same length; filling them together
+    /// says so out loud rather than leaving a stale tail in one of them to be
+    /// noticed by whichever consumer reads a count next.
+    /// </summary>
+    private static void FillBspParts(
         Vector3 entityWorldPos,
         Quaternion entityWorldRot,
-        System.Collections.Generic.IReadOnlyList<ShadowShape> shapes)
+        System.Collections.Generic.IReadOnlyList<ShadowShape> shapes,
+        List<ShadowPartBox> boxes,
+        List<DatReaderWriter.Types.Sphere> spheres)
+    {
+        FillFloodPartBoxes(entityWorldPos, entityWorldRot, shapes, boxes);
+        FillBspPartSpheres(entityWorldPos, entityWorldRot, shapes, spheres);
+        if (boxes.Count != spheres.Count)
+        {
+            throw new InvalidOperationException(
+                $"An owner's part boxes ({boxes.Count}) and part spheres "
+                + $"({spheres.Count}) describe different part counts.");
+        }
+    }
+
+    private static void FillFloodSpheres(
+        Vector3 entityWorldPos,
+        Quaternion entityWorldRot,
+        System.Collections.Generic.IReadOnlyList<ShadowShape> shapes,
+        List<DatReaderWriter.Types.Sphere> spheres)
     {
         const int RetailSphereCap = 10;
 
-        var spheres = new List<DatReaderWriter.Types.Sphere>();
         bool anyCyl = false;
-        foreach (var s in shapes)
+        // Indexed: shapes arrives as an interface, so a foreach boxes an
+        // enumerator, and this runs per owner per refresh.
+        for (int i = 0; i < shapes.Count; i++)
         {
-            if (s.CollisionType == ShadowCollisionType.Cylinder) anyCyl = true;
+            if (shapes[i].CollisionType == ShadowCollisionType.Cylinder) anyCyl = true;
         }
 
         ShadowCollisionType only =
@@ -1097,39 +1141,87 @@ public sealed class ShadowObjectRegistry
 
         int cap = only == ShadowCollisionType.Cylinder ? RetailSphereCap : int.MaxValue;
 
-        foreach (var s in shapes)
+        int written = 0;
+        for (int i = 0; i < shapes.Count; i++)
         {
+            ShadowShape s = shapes[i];
             if (s.CollisionType != only)
                 continue;
-            if (spheres.Count >= cap)
+            if (written >= cap)
                 break;
 
             var partWorldPos = entityWorldPos + Vector3.Transform(s.LocalPosition, entityWorldRot);
             var partWorldRot = entityWorldRot * s.LocalRotation;
             var world = partWorldPos + Vector3.Transform(s.BoundsCenter, partWorldRot);
-            spheres.Add(new DatReaderWriter.Types.Sphere
-            {
-                Origin = world,
-                Radius = s.Radius,
-            });
+            Write(spheres, written++, world, s.Radius);
         }
 
-        return spheres;
+        TrimTo(spheres, written);
     }
 
+    /// <summary>
+    /// Overwrites the sphere already at <paramref name="index"/>, or adds one
+    /// when the carried list is shorter. The sphere is a reference type, so
+    /// refilling the list alone would still allocate one object per part per
+    /// refresh; the cell-set walk only reads their origin and radius inside
+    /// the call, so carrying the objects themselves is safe.
+    /// </summary>
+    private static void Write(
+        List<DatReaderWriter.Types.Sphere> spheres,
+        int index,
+        Vector3 origin,
+        float radius)
+    {
+        if (index < spheres.Count)
+        {
+            DatReaderWriter.Types.Sphere carried = spheres[index];
+            carried.Origin = origin;
+            carried.Radius = radius;
+            return;
+        }
+
+        spheres.Add(new DatReaderWriter.Types.Sphere
+        {
+            Origin = origin,
+            Radius = radius,
+        });
+    }
+
+    private static void TrimTo(
+        List<DatReaderWriter.Types.Sphere> spheres,
+        int count)
+    {
+        if (spheres.Count > count)
+            spheres.RemoveRange(count, spheres.Count - count);
+    }
+
+    // The two allocating wrappers below have no caller in the source: the
+    // landblock membership conformance test invokes them by name, to compare a
+    // ramp's part boxes and part spheres against the dats.
     private static List<ShadowPartBox> BuildFloodPartBoxes(
         Vector3 entityWorldPos,
         Quaternion entityWorldRot,
         System.Collections.Generic.IReadOnlyList<ShadowShape> shapes)
     {
         var boxes = new List<ShadowPartBox>(shapes.Count);
-        foreach (var s in shapes)
+        FillFloodPartBoxes(entityWorldPos, entityWorldRot, shapes, boxes);
+        return boxes;
+    }
+
+    private static void FillFloodPartBoxes(
+        Vector3 entityWorldPos,
+        Quaternion entityWorldRot,
+        System.Collections.Generic.IReadOnlyList<ShadowShape> shapes,
+        List<ShadowPartBox> boxes)
+    {
+        boxes.Clear();
+        for (int i = 0; i < shapes.Count; i++)
         {
+            ShadowShape s = shapes[i];
             if (s.CollisionType != ShadowCollisionType.BSP)
                 continue;
             boxes.Add(ShadowPartBox.FromShape(s, entityWorldPos, entityWorldRot));
         }
-        return boxes;
     }
 
     private static List<DatReaderWriter.Types.Sphere> BuildBspPartSpheres(
@@ -1138,19 +1230,32 @@ public sealed class ShadowObjectRegistry
         System.Collections.Generic.IReadOnlyList<ShadowShape> shapes)
     {
         var spheres = new List<DatReaderWriter.Types.Sphere>(shapes.Count);
-        foreach (var s in shapes)
+        FillBspPartSpheres(entityWorldPos, entityWorldRot, shapes, spheres);
+        return spheres;
+    }
+
+    private static void FillBspPartSpheres(
+        Vector3 entityWorldPos,
+        Quaternion entityWorldRot,
+        System.Collections.Generic.IReadOnlyList<ShadowShape> shapes,
+        List<DatReaderWriter.Types.Sphere> spheres)
+    {
+        int written = 0;
+        for (int i = 0; i < shapes.Count; i++)
         {
+            ShadowShape s = shapes[i];
             if (s.CollisionType != ShadowCollisionType.BSP)
                 continue;
             var partWorldPos = entityWorldPos + Vector3.Transform(s.LocalPosition, entityWorldRot);
             var partWorldRot = entityWorldRot * s.LocalRotation;
-            spheres.Add(new DatReaderWriter.Types.Sphere
-            {
-                Origin = partWorldPos + Vector3.Transform(s.BoundsCenter, partWorldRot),
-                Radius = s.Radius,
-            });
+            Write(
+                spheres,
+                written++,
+                partWorldPos + Vector3.Transform(s.BoundsCenter, partWorldRot),
+                s.Radius);
         }
-        return spheres;
+
+        TrimTo(spheres, written);
     }
 
     private static uint DeriveOutdoorSeed(

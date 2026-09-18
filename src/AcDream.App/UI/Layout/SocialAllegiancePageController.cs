@@ -132,6 +132,9 @@ public sealed class SocialAllegiancePageController
     private string? _lastSelfName;
     private string? _lastSelfFollowers;
     private string? _lastSelfRank;
+    private uint _lastFollowerCount = uint.MaxValue;
+    private (uint ProfileRank, int Rank, int Heritage, int Gender, bool HasSelf, int Quality)
+        _lastRankInputs;
     private string? _lastMonarchName;
     private string? _lastMonarchFollowers;
     private string? _lastMonarchExperiencePassedUp;
@@ -364,8 +367,33 @@ public sealed class SocialAllegiancePageController
     private void RefreshSelfBlock(RuntimeAllegianceSnapshot snapshot)
     {
         SetLine(_selfName, ref _lastSelfName, snapshot.AllegianceName, TextColor);
-        SetLine(_selfFollowers, ref _lastSelfFollowers, $"Followers: {snapshot.TotalVassals}", TextColor);
-        SetLine(_selfRank, ref _lastSelfRank, RankLineText(snapshot), TextColor);
+
+        // The two lines below are composed strings, and this runs on every
+        // frame. Compare the values they are built from, so an unchanged
+        // block costs no allocation at all.
+        if (_lastFollowerCount != snapshot.TotalVassals || _lastSelfFollowers is null)
+        {
+            _lastFollowerCount = snapshot.TotalVassals;
+            SetLine(
+                _selfFollowers,
+                ref _lastSelfFollowers,
+                $"Followers: {snapshot.TotalVassals}",
+                TextColor);
+        }
+
+        RuntimeAllegianceMemberSnapshot? self = _bindings.Member(_bindings.LocalPlayerGuid());
+        var rankInputs = (
+            ProfileRank: snapshot.Rank,
+            Rank: self?.Rank ?? 0,
+            Heritage: self?.HeritageGroup ?? 0,
+            Gender: self?.Gender ?? 0,
+            HasSelf: self is not null,
+            Quality: _bindings.LocalPlayerAllegianceRankQuality?.Invoke() ?? 0);
+        if (_lastRankInputs != rankInputs || _lastSelfRank is null)
+        {
+            _lastRankInputs = rankInputs;
+            SetLine(_selfRank, ref _lastSelfRank, RankLineText(snapshot, self), TextColor);
+        }
     }
 
     /// <summary>
@@ -374,10 +402,11 @@ public sealed class SocialAllegiancePageController
     /// gender), the profile rank in brackets, and the "(+n)" suffix only when
     /// the rank quality on the player is higher than the profile's rank.
     /// </summary>
-    private string RankLineText(RuntimeAllegianceSnapshot snapshot)
+    private string RankLineText(
+        RuntimeAllegianceSnapshot snapshot,
+        RuntimeAllegianceMemberSnapshot? self)
     {
         int profileRank = (int)snapshot.Rank;
-        RuntimeAllegianceMemberSnapshot? self = _bindings.Member(_bindings.LocalPlayerGuid());
         string title = self is { } s
             ? AllegianceRankTitleTable.GetTitle(s.Rank, s.HeritageGroup, s.Gender) ?? string.Empty
             : string.Empty;

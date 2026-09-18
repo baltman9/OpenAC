@@ -7,14 +7,27 @@ namespace AcDream.App.Rendering;
 internal interface IAnimationHookCaptureSink
 {
     void Capture(uint ownerLocalId, AnimationSequencer sequencer);
+
+    /// <summary>
+    /// <see cref="Capture"/> as a callback, bound once by the sink. The
+    /// physics tick takes a callback and runs for every live entity on every
+    /// frame; handing it a method group there would build a delegate per
+    /// entity per frame.
+    /// </summary>
+    Action<uint, AnimationSequencer> CaptureCallback { get; }
 }
 
 internal sealed class AnimationHookCaptureSink : IAnimationHookCaptureSink
 {
     private readonly AnimationHookFrameQueue _queue;
 
-    public AnimationHookCaptureSink(AnimationHookFrameQueue queue) =>
+    public AnimationHookCaptureSink(AnimationHookFrameQueue queue)
+    {
         _queue = queue ?? throw new ArgumentNullException(nameof(queue));
+        CaptureCallback = Capture;
+    }
+
+    public Action<uint, AnimationSequencer> CaptureCallback { get; }
 
     public void Capture(uint ownerLocalId, AnimationSequencer sequencer) =>
         _queue.Capture(ownerLocalId, sequencer);

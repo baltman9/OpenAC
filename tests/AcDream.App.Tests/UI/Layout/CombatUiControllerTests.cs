@@ -202,8 +202,8 @@ public sealed class CombatUiControllerTests
         {
             var info = new ElementInfo { Id = id, Type = 0x10000035u, Width = 100, Height = 14 };
             var state = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-            state.Properties.Values[0x0Bu] = new UiPropertyValue
-                { Kind = UiPropertyKind.Bool, BoolValue = true };
+            state.Properties.Set(0x0Bu, new UiPropertyValue
+                { Kind = UiPropertyKind.Bool, BoolValue = true });
             info.States[UiStateInfo.DirectStateId] = state;
             return new UiButton(info, NoTex) { Width = 100, Height = 14 };
         }

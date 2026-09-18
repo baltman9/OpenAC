@@ -484,9 +484,20 @@ public sealed class UiButton : UiElement, IUiGlobalTimeListener, IUiDatStateful
         LabelAlignment align,
         float leftOffset)
     {
-        IReadOnlyList<(string Text, float X, float Y)> lines = WrapBlockLines(
-            text, font.MeasureWidth, font.LineHeight,
-            boxX, boxY, boxWidth, boxHeight, align, leftOffset);
+        // The wrap depends only on the text, the font and the box, none of
+        // which change between frames for a button that is simply on screen.
+        // Re-running it per draw split the string, built a list and bound a
+        // measure delegate every frame, for every labelled button.
+        var key = (text, font, boxX, boxY, boxWidth, boxHeight, align, leftOffset);
+        if (_blockLabelLines is null || _blockLabelKey != key)
+        {
+            _blockLabelKey = key;
+            _blockLabelLines = WrapBlockLines(
+                text, font.MeasureWidth, font.LineHeight,
+                boxX, boxY, boxWidth, boxHeight, align, leftOffset);
+        }
+
+        IReadOnlyList<(string Text, float X, float Y)> lines = _blockLabelLines;
 
         bool clip = lines.Count > 1;
         if (clip)
@@ -502,6 +513,10 @@ public sealed class UiButton : UiElement, IUiGlobalTimeListener, IUiDatStateful
                 ctx.PopClip();
         }
     }
+
+    private IReadOnlyList<(string Text, float X, float Y)>? _blockLabelLines;
+    private (string Text, UiDatFont Font, float X, float Y, float Width, float Height,
+        LabelAlignment Align, float Offset) _blockLabelKey;
 
     internal static IReadOnlyList<(string Text, float X, float Y)> WrapBlockLines(
         string text,

@@ -46,6 +46,12 @@ public sealed class JournalContractsPageController
 
     private static readonly Vector4 SelectedNameColor = Vector4.One;
 
+    private readonly Dictionary<UiText, UiTextLayoutCache<string>> _detailLayouts =
+        new(ReferenceEqualityComparer.Instance);
+
+    private (long Status, long Timed, uint Stage, uint Contract, long Revision) _detailKey;
+    private bool _detailKeyValid;
+
     private readonly List<uint> _rowContractIds = [];
     private readonly List<(uint ContractId, UiText? Name, Vector4 Unselected)> _rows = [];
 
@@ -141,6 +147,7 @@ public sealed class JournalContractsPageController
         }
 
         ApplySelectionHighlight();
+        _detailKeyValid = false;
         RefreshDetail();
     }
 
@@ -156,6 +163,7 @@ public sealed class JournalContractsPageController
     {
         _selectedContractId = contractId;
         ApplySelectionHighlight();
+        _detailKeyValid = false;
         RefreshDetail();
     }
 
@@ -180,32 +188,68 @@ public sealed class JournalContractsPageController
         ContractCatalog catalog = _bindings.Catalog();
         DateTime now = _bindings.Now();
 
-        if (_selectedContractId == 0u
-            || !_bindings.Contracts.TryGetContract(_selectedContractId, out ContractTracker tracker))
+        ContractTracker tracker = default;
+        bool hasTracker = _selectedContractId != 0u
+            && _bindings.Contracts.TryGetContract(_selectedContractId, out tracker);
+
+        // Both countdowns the pane shows go through the duration format, which
+        // truncates to whole seconds, so the text changes exactly when one of
+        // the two whole-second counts changes. They count down from the
+        // tracker's own receive time, not from the top of the wall clock, so
+        // the key is the counts themselves; keying on the wall-clock second
+        // let the pane lag a flip by up to a second.
+        double elapsed = hasTracker
+            ? (now - tracker.ReceivedAt).TotalSeconds
+            : 0d;
+        var key = (
+            Status: hasTracker && tracker.Stage == ContractStage.DoneOrPendingRepeat
+                ? Countdown(tracker.TimeWhenRepeats - elapsed)
+                : long.MinValue,
+            Timed: hasTracker && tracker.TimeWhenDone > 0d
+                ? Countdown(tracker.TimeWhenDone - elapsed)
+                : long.MinValue,
+            Stage: hasTracker ? (uint)tracker.Stage : 0u,
+            Contract: _selectedContractId,
+            Revision: _bindings.Contracts.Snapshot.Revision);
+        if (_detailKeyValid && _detailKey == key)
+            return;
+        _detailKey = key;
+        _detailKeyValid = true;
+
+        if (!hasTracker)
         {
-            SetText(_statusValue, string.Empty);
-            SetText(_contactValue, string.Empty);
-            SetText(_contactLocationValue, string.Empty);
-            SetText(_questLocationValue, string.Empty);
-            SetText(_description, string.Empty);
-            SetText(_timedValue, string.Empty);
+            SetDetailText(_statusValue, string.Empty);
+            SetDetailText(_contactValue, string.Empty);
+            SetDetailText(_contactLocationValue, string.Empty);
+            SetDetailText(_questLocationValue, string.Empty);
+            SetDetailText(_description, string.Empty);
+            SetDetailText(_timedValue, string.Empty);
             return;
         }
 
         ContractEntry entry = catalog.Lookup(_selectedContractId);
 
-        SetText(_statusValue, ContractProgressText.Build(
+        SetDetailText(_statusValue, ContractProgressText.Build(
             (uint)tracker.Stage, tracker.TimeWhenRepeats, tracker.ReceivedAt, entry, now));
-        SetText(_contactValue, entry.NameNpcStart);
-        SetText(_contactLocationValue, LocationText(entry.LocationNpcStartCell));
-        SetText(_questLocationValue, LocationText(entry.LocationQuestAreaCell));
-        SetText(_description, entry.Description);
+        SetDetailText(_contactValue, entry.NameNpcStart);
+        SetDetailText(_contactLocationValue, LocationText(entry.LocationNpcStartCell));
+        SetDetailText(_questLocationValue, LocationText(entry.LocationQuestAreaCell));
+        SetDetailText(_description, entry.Description);
 
-        SetText(_timedValue, tracker.TimeWhenDone > 0d
+        SetDetailText(_timedValue, tracker.TimeWhenDone > 0d
             ? RetailDurationText.Format(
                 Math.Max(0d, tracker.TimeWhenDone - (now - tracker.ReceivedAt).TotalSeconds))
             : string.Empty);
     }
+
+    /// <summary>
+    /// The whole second a countdown is showing, or a sentinel once it has run
+    /// out: the duration format truncates, so two remaining times with the
+    /// same whole second render the same text, and one that has reached zero
+    /// renders a different line entirely.
+    /// </summary>
+    private static long Countdown(double remainingSeconds) =>
+        remainingSeconds > 0d ? (long)remainingSeconds : long.MinValue;
 
     private static string LocationText(uint cellId)
     {
@@ -217,5 +261,29 @@ public sealed class JournalContractsPageController
     {
         if (text is null) return;
         text.LinesProvider = () => [new UiText.Line(value, text.DefaultColor)];
+    }
+
+    /// <summary>
+    /// Detail fields are rewritten on every tick, so they go through a layout
+    /// cache: the line list is rebuilt only when the text, the element's width
+    /// or its colour actually change, instead of a fresh closure and array per
+    /// field per frame.
+    /// </summary>
+    private void SetDetailText(UiText? text, string value)
+    {
+        if (text is null) return;
+        if (_detailLayouts.TryGetValue(text, out UiTextLayoutCache<string>? cache))
+        {
+            cache.SetValue(value);
+            return;
+        }
+
+        cache = new UiTextLayoutCache<string>(
+            text,
+            static (target, content) => [new UiText.Line(content, target.DefaultColor)],
+            value,
+            StringComparer.Ordinal);
+        _detailLayouts.Add(text, cache);
+        text.LinesProvider = cache.Provider;
     }
 }
