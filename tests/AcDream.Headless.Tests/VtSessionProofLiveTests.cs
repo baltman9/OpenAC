@@ -243,12 +243,12 @@ public sealed class VtSessionProofLiveTests(ITestOutputHelper output)
             new HeadlessDiagnosticWriter(diagnosticsOutput),
             sessionOperations: null, // real network
             contentLease: contentLease,
-            vtankProfiles: new FilePluginStorage(vtankRoot),
+            vtankProfiles: new AcDream.Core.Plugins.FilePluginStorage(vtankRoot),
             pluginRoots: [temporary.Path],
             // The plugin's own persisted state, which is where MossTank
             // keeps everything the .usd format has no table for — the
             // Items page among it.
-            pluginStorage: new FilePluginStorage(pluginStorageRoot));
+            storage: new AcDream.Core.Plugins.FilePluginStorage(pluginStorageRoot));
         using IDisposable subscription = session.Runtime.Subscribe(observed);
         // A proof that cannot report its own failure is worth nothing, and a
         // disposal that throws on the way out of a failed run replaces the

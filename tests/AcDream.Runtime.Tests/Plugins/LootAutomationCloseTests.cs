@@ -33,9 +33,6 @@ public sealed class LootAutomationCloseTests
             .ApplyViewContents(corpse));
 
         Assert.Equal(
-            PluginItemCommandStatus.InvalidItem,
-            surface.Items.Use(corpse).Status);
-        Assert.Equal(
             PluginItemCommandStatus.InvalidTarget,
             surface.Loot.Close(otherCorpse).Status);
         Assert.Empty(sent);

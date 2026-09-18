@@ -1634,6 +1634,11 @@ internal sealed class RuntimeSetPositionState : IDisposable
         PhysicsSetPositionResult result = _physics.Engine.SetPosition(
             canonicalRequest,
             handleCollisions: null);
+        if (Core.Physics.PhysicsDiagnostics.ProbeParkEnabled)
+        {
+            Console.WriteLine(FormattableString.Invariant(
+                $"[eval] guid=0x{record.ServerGuid:X8} cell=0x{result.CellId:X8} requested=0x{canonicalRequest.CellId:X8} error={result.Error} residence={result.Residence} pos={result.Position} flags={canonicalRequest.Flags}"));
+        }
         if (!IsExactDormantLocalActivationCurrent(
                 record,
                 body,
@@ -2052,6 +2057,11 @@ internal sealed class RuntimeSetPositionState : IDisposable
                 ? authority
                 : _physics.ExpectedCollisionGeneration(result.CellId);
             deferredCollisionGenerationReady = wakeImmediately;
+            if (Core.Physics.PhysicsDiagnostics.ProbeParkEnabled)
+            {
+                Console.WriteLine(FormattableString.Invariant(
+                    $"[park] guid=0x{record.ServerGuid:X8} cell=0x{result.CellId:X8} requested=0x{evaluation.Command.Physics.CellId:X8} pos={result.Position} authority={authority} expected={deferredCollisionGeneration} spawnReady={spawnReady} admissible={admissible} wakeNow={wakeImmediately} dormant={operation.DormantLocalActivation}"));
+            }
             _preparedMovers.EnsureCapacity(_preparedMovers.Count + 1);
             if (result.CellId != 0u && deferredCollisionGeneration != 0UL)
             {

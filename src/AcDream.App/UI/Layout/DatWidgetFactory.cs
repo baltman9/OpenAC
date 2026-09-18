@@ -128,8 +128,10 @@ public static class DatWidgetFactory
 
         if (label is { Height: > 0f })
             menu.RowHeight = label.Height;
-        if (info.Width > 0f)
-            menu.ColumnWidth = info.Width;
+        // The popup's column width is NOT the button's width: the original
+        // client builds the open list from the layout's popup root and sizes it
+        // from that list's item rows (191 px), whatever the button measures.
+        // A panel whose popup really is as wide as its button sizes it itself.
         return menu;
     }
 
