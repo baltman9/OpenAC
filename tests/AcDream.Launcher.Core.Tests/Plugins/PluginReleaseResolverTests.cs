@@ -176,6 +176,77 @@ public sealed class PluginReleaseResolverTests
         Assert.Equal("v1.4.0-beta.1", result.Resolution!.Tag);
     }
 
+    [Fact]
+    public void ForBetaReturnsStableWhenBetaIsNull()
+    {
+        PluginReleaseResolution resolution = new("v0.2.0", ManifestJson("0.2.0"), ParsedManifest("0.2.0"));
+        var candidates = new PluginReleaseCandidates(PluginReleaseResolveResult.Success(resolution), null);
+
+        Assert.Same(candidates.Stable, candidates.For(PluginReleaseChannel.Beta));
+    }
+
+    [Fact]
+    public void ForBetaReturnsBetaWhenStableFailed()
+    {
+        PluginReleaseResolution betaResolution =
+            new("v1.4.0-beta.1", ManifestJson("1.4.0-beta.1"), ParsedManifest("1.4.0-beta.1"));
+        var candidates = new PluginReleaseCandidates(
+            PluginReleaseResolveResult.Unavailable, PluginReleaseResolveResult.Success(betaResolution));
+
+        PluginReleaseResolveResult result = candidates.For(PluginReleaseChannel.Beta);
+
+        Assert.Equal(PluginReleaseResolveStatus.Success, result.Status);
+        Assert.Equal("v1.4.0-beta.1", result.Resolution!.Tag);
+    }
+
+    [Fact]
+    public void ForBetaReturnsTheHigherOfTheTwoByPrecedence()
+    {
+        PluginReleaseResolution stableResolution =
+            new("v1.3.0", ManifestJson("1.3.0"), ParsedManifest("1.3.0"));
+        PluginReleaseResolution higherBetaResolution =
+            new("v1.4.0-beta.1", ManifestJson("1.4.0-beta.1"), ParsedManifest("1.4.0-beta.1"));
+        PluginReleaseResolution lowerBetaResolution =
+            new("v1.3.0-beta.2", ManifestJson("1.3.0-beta.2"), ParsedManifest("1.3.0-beta.2"));
+        var stable = PluginReleaseResolveResult.Success(stableResolution);
+        var higherBeta = new PluginReleaseCandidates(
+            stable, PluginReleaseResolveResult.Success(higherBetaResolution));
+        var lowerBeta = new PluginReleaseCandidates(
+            stable, PluginReleaseResolveResult.Success(lowerBetaResolution));
+
+        Assert.Equal("v1.4.0-beta.1", higherBeta.For(PluginReleaseChannel.Beta).Resolution!.Tag);
+        Assert.Equal("v1.3.0", lowerBeta.For(PluginReleaseChannel.Beta).Resolution!.Tag);
+    }
+
+    [Fact]
+    public async Task ResolveCandidatesAsyncOnStableDoesNotFetchTheReleasesFeed()
+    {
+        var handler = BetaHandler(stableVersion: "1.3.0", betaVersion: "1.4.0-beta.1");
+        var resolver = new PluginReleaseResolver(PluginReleaseClient.CreateForTransportTest(handler));
+
+        PluginReleaseCandidates candidates =
+            await resolver.ResolveCandidatesAsync(Repo, PluginReleaseChannel.Stable);
+
+        Assert.Null(candidates.Beta);
+        Assert.DoesNotContain(GitHubReleaseLocator.ReleasesFeed(Repo), handler.Requests);
+    }
+
+    [Fact]
+    public async Task ResolveCandidatesAsyncOnBetaFetchesTheReleasesFeed()
+    {
+        var handler = BetaHandler(stableVersion: "1.3.0", betaVersion: "1.4.0-beta.1");
+        var resolver = new PluginReleaseResolver(PluginReleaseClient.CreateForTransportTest(handler));
+
+        PluginReleaseCandidates candidates =
+            await resolver.ResolveCandidatesAsync(Repo, PluginReleaseChannel.Beta);
+
+        Assert.NotNull(candidates.Beta);
+        Assert.Contains(GitHubReleaseLocator.ReleasesFeed(Repo), handler.Requests);
+    }
+
+    private static LauncherPluginManifest ParsedManifest(string version) =>
+        LauncherPluginManifest.Parse(Encoding.UTF8.GetString(ManifestJson(version)));
+
     private static RoutedHandler BetaHandler(
         string stableVersion,
         string betaVersion,
@@ -263,12 +334,15 @@ public sealed class PluginReleaseResolverTests
 
     private sealed class RoutedHandler(Func<Uri, HttpResponseMessage> respond) : HttpMessageHandler
     {
+        public List<Uri> Requests { get; } = [];
+
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
             Uri uri = request.RequestUri
                 ?? throw new InvalidOperationException("Test request has no URI.");
+            Requests.Add(uri);
             return Task.FromResult(respond(uri));
         }
     }

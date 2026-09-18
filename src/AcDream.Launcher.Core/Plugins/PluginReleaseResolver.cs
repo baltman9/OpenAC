@@ -45,6 +45,39 @@ public sealed record PluginReleaseResolveResult(
         new(PluginReleaseResolveStatus.Prerelease, null, error);
 }
 
+/// <summary>Both candidates one <see cref="PluginReleaseResolver.ResolveCandidatesAsync"/> pass
+/// found: the stable latest, fetched every time, and the highest feed prerelease, fetched only when
+/// the caller asked for <see cref="PluginReleaseChannel.Beta"/>. <see cref="For"/> reproduces
+/// <see cref="PluginReleaseResolver.ResolveAsync"/>'s own precedence (L-319) so a caller that already
+/// has both never needs to resolve again to change its mind about which channel it wants.</summary>
+public sealed record PluginReleaseCandidates(
+    PluginReleaseResolveResult Stable,
+    PluginReleaseResolveResult? Beta)
+{
+    public PluginReleaseResolveResult For(PluginReleaseChannel channel)
+    {
+        if (channel != PluginReleaseChannel.Beta)
+        {
+            return Stable;
+        }
+
+        if (Beta is not { } beta)
+        {
+            return Stable;
+        }
+
+        // A refused or unavailable stable latest must not mask a beta that did resolve.
+        if (Stable.Status != PluginReleaseResolveStatus.Success)
+        {
+            return beta;
+        }
+
+        LauncherVersion stableVersion = LauncherVersion.Parse(Stable.Resolution!.Manifest.Version);
+        LauncherVersion betaVersion = LauncherVersion.Parse(beta.Resolution!.Manifest.Version);
+        return betaVersion.CompareTo(stableVersion) > 0 ? beta : Stable;
+    }
+}
+
 /// <summary>Resolves a repo's release (L-308) to its tag and manifest, the one place
 /// <c>LauncherPluginComposition.EvaluateUpdateAsync</c>,
 /// <c>LauncherPluginsViewModel.RefreshDiscoverDetailsAsync</c> and <c>AddFromUrlAsync</c> agree: the
@@ -70,7 +103,12 @@ public sealed class PluginReleaseResolver
         _releaseClient = releaseClient ?? throw new ArgumentNullException(nameof(releaseClient));
     }
 
-    public async Task<PluginReleaseResolveResult> ResolveAsync(
+    /// <summary>Resolves the stable latest and, on <see cref="PluginReleaseChannel.Beta"/>, the
+    /// feed's highest prerelease too, so a caller that wants to offer both channels (Discover's
+    /// per-row picker, L-319 amendment) does so from one pass rather than resolving twice. The stable
+    /// fetch always runs; the beta fetch runs only for <see cref="PluginReleaseChannel.Beta"/>, so
+    /// request counts for either channel match <see cref="ResolveAsync"/>'s own, unchanged.</summary>
+    public async Task<PluginReleaseCandidates> ResolveCandidatesAsync(
         string repo,
         PluginReleaseChannel channel,
         CancellationToken cancellationToken = default)
@@ -81,25 +119,22 @@ public sealed class PluginReleaseResolver
             .ConfigureAwait(false);
         if (channel != PluginReleaseChannel.Beta)
         {
-            return stable;
+            return new PluginReleaseCandidates(stable, null);
         }
 
         PluginReleaseResolveResult? beta = await TryResolveBetaCandidateAsync(repo, cancellationToken)
             .ConfigureAwait(false);
-        if (beta is null)
-        {
-            return stable;
-        }
+        return new PluginReleaseCandidates(stable, beta);
+    }
 
-        // A refused or unavailable stable latest must not mask a beta that did resolve.
-        if (stable.Status != PluginReleaseResolveStatus.Success)
-        {
-            return beta;
-        }
-
-        LauncherVersion stableVersion = LauncherVersion.Parse(stable.Resolution!.Manifest.Version);
-        LauncherVersion betaVersion = LauncherVersion.Parse(beta.Resolution!.Manifest.Version);
-        return betaVersion.CompareTo(stableVersion) > 0 ? beta : stable;
+    public async Task<PluginReleaseResolveResult> ResolveAsync(
+        string repo,
+        PluginReleaseChannel channel,
+        CancellationToken cancellationToken = default)
+    {
+        PluginReleaseCandidates candidates = await ResolveCandidatesAsync(repo, channel, cancellationToken)
+            .ConfigureAwait(false);
+        return candidates.For(channel);
     }
 
     private async Task<PluginReleaseResolveResult> ResolveStableAsync(
