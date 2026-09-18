@@ -109,8 +109,7 @@ public sealed class LiveEntityPresentationController : IDisposable
         foreach (RuntimeEntityKey key in _suspendedShadowOwners)
         {
             if (!_liveEntities.TryGetProjection(key, out LiveEntityRecord record)
-                || !record.IsSpatiallyProjected
-                || record.FullCellId == 0u
+                || !CanEverRestoreShadow(record)
                 || (record.FullCellId & 0xFFFF0000u) != landblock
                 || (record.FinalPhysicsState & PhysicsStateFlags.Hidden) != 0)
             {
@@ -213,12 +212,19 @@ public sealed class LiveEntityPresentationController : IDisposable
         }
     }
 
+    /// <summary>
+    /// Whether this object's own collision can come back at all. An object
+    /// that is no longer projected, has no cell, or hangs off a parent carries
+    /// no collision of its own, so nothing is ever waiting for it.
+    /// </summary>
+    private bool CanEverRestoreShadow(LiveEntityRecord record) =>
+        record.IsSpatiallyProjected
+        && record.FullCellId != 0
+        && !_liveEntities.ParentAttachments.HasCommittedParent(record.ServerGuid);
+
     private bool RestoreShadow(LiveEntityRecord record, AcDream.Core.World.WorldEntity entity)
     {
-        if (!record.IsSpatiallyProjected
-            || !record.IsSpatiallyVisible
-            || record.FullCellId == 0
-            || _liveEntities.ParentAttachments.HasCommittedParent(record.ServerGuid))
+        if (!CanEverRestoreShadow(record) || !record.IsSpatiallyVisible)
         {
             return false;
         }
