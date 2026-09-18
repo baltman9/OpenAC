@@ -139,11 +139,14 @@ internal sealed class VulkanMemoryBlockFreeList
 
 internal sealed class VulkanMemoryTypePool
 {
-    /// <summary>Plan §4.2's block size: 128 MiB device-local blocks per memory type.</summary>
-    internal const ulong DefaultBlockSizeBytes = 128UL * 1024 * 1024;
+    /// <summary>The block size a pool falls back to when no profile names one.
+    /// The production sizes live in GpuMemoryProfile, which measured them.</summary>
+    internal const ulong DefaultBlockSizeBytes = 32UL * 1024 * 1024;
 
-    /// <summary>Plan §4.2: allocations at or above this size take a block of their own.</summary>
-    internal const ulong DefaultDedicatedThresholdBytes = 32UL * 1024 * 1024;
+    /// <summary>Allocations at or above this size take a block of their own,
+    /// sized exactly to them. Same note: the production value is the profile's.
+    /// </summary>
+    internal const ulong DefaultDedicatedThresholdBytes = 16UL * 1024 * 1024;
 
     private readonly List<VulkanMemoryBlockFreeList?> _blocks = [];
     private readonly HashSet<int> _dedicatedBlocks = [];
@@ -257,6 +260,14 @@ internal sealed class VulkanMemoryTypePool
             return total;
         }
     }
+
+    /// <summary>Bytes in use in one block, for the memory report: a block far
+    /// below its capacity is committed memory the process is paying for and
+    /// not using.</summary>
+    internal ulong BlockUsedBytes(int index) =>
+        index >= 0 && index < _blocks.Count && _blocks[index] is { } block
+            ? block.UsedBytes
+            : 0UL;
 
     private VulkanMemoryBlockFreeList BlockAt(int index) =>
         index >= 0 && index < _blocks.Count && _blocks[index] is { } block

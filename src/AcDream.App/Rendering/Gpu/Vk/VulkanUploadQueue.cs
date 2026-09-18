@@ -21,6 +21,8 @@ internal sealed unsafe class VulkanUploadQueue : IDisposable
     private readonly List<BufferCopy2> _bufferCopies = [];
     private readonly List<ImageCopy2> _imageCopies = [];
     private readonly List<TemporaryStaging> _temporaries = [];
+    private int _temporariesCreated;
+    private int _temporariesPeak;
 
     private bool _disposed;
 
@@ -86,6 +88,15 @@ internal sealed unsafe class VulkanUploadQueue : IDisposable
     internal int PendingImageCopyCount => _imageCopies.Count;
 
     internal ulong StagingLiveBytes => _ringState.LiveBytes;
+
+    /// <summary>Why the staging ring has had to give an upload a buffer of its
+    /// own, and how many of those are alive. A payload bigger than the whole
+    /// ring and a ring that was merely full at that moment are different
+    /// problems with different answers, so they are counted apart.</summary>
+    internal string DescribeStaging() =>
+        $"staging temp live {_temporaries.Count} peak {_temporariesPeak} made {_temporariesCreated} "
+        + $"(too-big {_ringState.RejectedLargerThanRing}, ring-full {_ringState.RejectedRingFull}, "
+        + $"largest {_ringState.LargestRejectedBytes / 1024} KiB of {_ringState.CapacityBytes / (1024 * 1024)} MiB ring)";
 
     internal void StageBufferWrite(
         Buffer destination,
@@ -503,6 +514,11 @@ internal sealed unsafe class VulkanUploadQueue : IDisposable
             $"vk-staging-temp-{ownerName}");
         data.CopyTo(allocation.AsSpan());
         _temporaries.Add(new TemporaryStaging(temporary, allocation));
+        _temporariesCreated++;
+        // The high-water mark is what a pool of these would have to hold: a
+        // buffer can only be handed out again once its frame has retired, so
+        // the peak outstanding is the floor on how many must exist.
+        _temporariesPeak = Math.Max(_temporariesPeak, _temporaries.Count);
 
         Buffer captured = temporary;
         VulkanAllocation capturedAllocation = allocation;

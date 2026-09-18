@@ -20,6 +20,9 @@ internal sealed class VulkanFrameGpuMeasurement : IRenderFrameGpuMeasurement
         while (_device.TryTakeFrameGpuSample(out int frameIndex, out long elapsedUs))
             _profiler.RecordGpuSample(frameIndex, elapsedUs);
 
+        GpuStageProfiler.Instance.Collect(_device.Timers);
+        GpuStageProfiler.Instance.BeginFrame();
+
         _device.BeginFrameTimerScope(_profiler.CurrentFrameIndex);
     }
 

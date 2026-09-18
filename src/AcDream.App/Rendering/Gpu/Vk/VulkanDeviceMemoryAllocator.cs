@@ -355,7 +355,7 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
 
     /// <summary>Live allocation bytes by owner name, largest first, plus each
     /// pool's committed block capacities; what the [gpu-mem] line prints.</summary>
-    internal string DescribeOwners(int maximumOwners = 12)
+    internal string DescribeOwners(int maximumOwners = 20)
     {
         lock (_sync)
         {
@@ -364,7 +364,13 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
                 parts.Add($"{owner}={bytes / (1024 * 1024)}");
             var blocks = new List<string>();
             foreach (((uint typeIndex, int blockIndex), BlockMemory block) in _blockMemory.OrderBy(pair => pair.Key))
-                blocks.Add($"t{typeIndex}b{blockIndex}:{block.CapacityBytes / (1024 * 1024)}");
+            {
+                ulong used = _pools.TryGetValue(typeIndex, out VulkanMemoryTypePool? pool)
+                    ? pool.BlockUsedBytes(blockIndex)
+                    : 0UL;
+                blocks.Add(
+                    $"t{typeIndex}b{blockIndex}:{used / (1024 * 1024)}/{block.CapacityBytes / (1024 * 1024)}");
+            }
             return $"owners(MiB) {string.Join(' ', parts)} | blocks(MiB) {string.Join(' ', blocks)}";
         }
     }

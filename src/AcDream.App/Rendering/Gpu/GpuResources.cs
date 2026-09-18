@@ -76,4 +76,16 @@ internal interface IGpuTimerPool
     bool TryResolve(string scopeName, out double milliseconds);
 
     bool TryTakeResolved(string scopeName, out double milliseconds);
+
+    /// <summary>Counts completed read-backs; a reader that wants each measured
+    /// frame once compares this against what it saw last.</summary>
+    int ResolveGeneration { get; }
+
+    /// <summary>The ranges the last read-back covered, in record order.</summary>
+    IReadOnlyList<(string Name, double Milliseconds)> LastResolved { get; }
+
+    /// <summary>Ranges this frame refused because the per-frame budget was
+    /// full. Above zero means the report is missing stages rather than showing
+    /// them as free.</summary>
+    int DroppedScopes { get; }
 }
