@@ -75,16 +75,22 @@
       <Setter Property="CornerRadius" Value="4" />
       <Setter Property="Padding" Value="10" />
     </Style>
+    <!-- The tab sits ON the rule below it: no bottom border to inset the fill, square bottom
+         corners, and the strip aligned to the bottom of its row, so the filled tab meets the line
+         the way a tab does rather than floating over it like a button. -->
     <Style Selector="ToggleButton.tab">
       <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderThickness" Value="0,0,0,2" />
+      <Setter Property="BorderThickness" Value="0" />
       <Setter Property="BorderBrush" Value="Transparent" />
-      <Setter Property="CornerRadius" Value="3,3,0,0" />
-      <Setter Property="Padding" Value="14,8,14,7" />
+      <Setter Property="CornerRadius" Value="4,4,0,0" />
+      <Setter Property="Padding" Value="14,8" />
       <Setter Property="MinHeight" Value="0" />
       <Setter Property="Foreground" Value="#A9BBC5" />
       <Setter Property="FontWeight" Value="Normal" />
       <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="ToggleButton.tab /template/ ContentPresenter">
+      <Setter Property="CornerRadius" Value="4,4,0,0" />
     </Style>
     <Style Selector="ToggleButton.tab:pointerover /template/ ContentPresenter">
       <Setter Property="Background" Value="#182027" />
@@ -94,7 +100,6 @@
     </Style>
     <Style Selector="ToggleButton.tab:checked">
       <Setter Property="Foreground" Value="#F0E4CD" />
-      <Setter Property="BorderBrush" Value="#DBB573" />
     </Style>
   </Window.Styles>
   <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
@@ -123,7 +128,7 @@
     </StackPanel>
     <Border Grid.Row="2" Margin="14,10,14,0" BorderBrush="#35434B" BorderThickness="0,0,0,1">
       <Grid ColumnDefinitions="*,Auto">
-        <StackPanel Orientation="Horizontal" Spacing="2">
+        <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Bottom">
           <ToggleButton x:Name="AccountsTabButton" Classes="tab" Content="Accounts" IsChecked="{Binding IsAccountsTabSelected, Mode=OneWay}"
                         Command="{Binding SelectAccountsTabCommand}" AutomationProperties.Name="Accounts tab" />
           <ToggleButton x:Name="PluginsTabButton" Classes="tab" Content="Plugins" IsChecked="{Binding IsPluginsTabSelected, Mode=OneWay}"
