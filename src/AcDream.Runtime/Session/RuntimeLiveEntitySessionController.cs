@@ -129,23 +129,12 @@ public sealed class RuntimeLiveEntitySessionController
 
     private void OnDeleted(DeleteObject.Parsed delete)
     {
-        if (delete.Guid == _runtime.PlayerIdentity.ServerGuid
-            || !Entities.TryAcceptDelete(
-                delete,
-                isLocalPlayer: false,
-                removeRetainedObject: true,
-                out RuntimeEntityDeleteAcceptance acceptance))
-        {
+        if (delete.Guid == _runtime.PlayerIdentity.ServerGuid)
             return;
-        }
 
-        Entities.CompleteAcceptedDelete(acceptance);
-        if (acceptance.RetiredCanonical is { } retired)
-        {
-            Exception? failure = Entities.RetireCanonicalOnly(retired);
-            if (failure is not null)
-                throw failure;
-        }
+        // The same path an expired out-of-visibility object takes on a
+        // host without presentation.
+        RuntimeCanonicalEntityExpirySink.DeleteCanonicalOnly(Entities, delete);
     }
 
     private void OnPickedUp(PickupEvent.Parsed pickup) =>

@@ -1,6 +1,7 @@
 using AcDream.App.Input;
 using AcDream.App.World;
 using AcDream.Core.Vfx;
+using AcDream.Runtime.Entities;
 
 namespace AcDream.App.Update;
 
@@ -46,11 +47,11 @@ internal sealed class StopwatchClientMonotonicTimeSource
 internal sealed class LiveEntityLivenessFramePhase
     : ILiveEntityLivenessFramePhase
 {
-    private readonly LiveEntityLivenessController _liveness;
+    private readonly RuntimeEntityLivenessController _liveness;
     private readonly IClientMonotonicTimeSource _clock;
 
     public LiveEntityLivenessFramePhase(
-        LiveEntityLivenessController liveness,
+        RuntimeEntityLivenessController liveness,
         IClientMonotonicTimeSource clock)
     {
         _liveness = liveness ?? throw new ArgumentNullException(nameof(liveness));
