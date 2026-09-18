@@ -78,13 +78,16 @@ public sealed class PluginInstaller
     /// supplied, must match the release manifest's own capabilities (name and note,
     /// order-insensitive) or the install is refused: it is the consent the player actually saw,
     /// and the release can change under them between the dialog opening and this call
-    /// running.</summary>
+    /// running. <paramref name="channel"/>, when supplied, is the channel the player chose for this
+    /// install (Discover's per-row picker) and wins over the version-inferred default below; omitted,
+    /// every existing caller keeps today's inference unchanged.</summary>
     public async Task<PluginInstallResult> InstallOrUpdateAsync(
         string repo,
         string tag,
         PluginCatalog? catalog,
         ClientVersionResolution? clientResolution,
         IReadOnlyList<LauncherPluginCapabilityDeclaration>? displayedCapabilities = null,
+        PluginReleaseChannel? channel = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repo);
@@ -281,7 +284,8 @@ public sealed class PluginInstaller
                     pluginVersion.IsPreRelease,
                     existingRecord,
                     stagingDirectory,
-                    targetDirectory);
+                    targetDirectory,
+                    channel);
             }
 
             return new PluginInstallResult(manifest.Id, manifest.Version, isUpdate);
@@ -532,15 +536,18 @@ public sealed class PluginInstaller
         bool newVersionIsPreRelease,
         InstalledPluginRecord? existingRecord,
         string stagingDirectory,
-        string targetDirectory)
+        string targetDirectory,
+        PluginReleaseChannel? explicitChannel)
     {
         var pending = new PendingPluginInstall(newVersion, newTag, newZipSha256);
         // The channel follows the version just fetched (L-319 amendment): a prerelease always lands
         // on beta; a stable release keeps whatever channel an existing record already carries, so a
-        // beta player's update to stable never downgrades them off the channel.
-        PluginReleaseChannel channel = newVersionIsPreRelease
+        // beta player's update to stable never downgrades them off the channel. A caller-supplied
+        // channel (Discover's per-row picker) wins over both: picking Beta on a plugin whose newest
+        // release is stable must still land on Beta, not be silently discarded.
+        PluginReleaseChannel channel = explicitChannel ?? (newVersionIsPreRelease
             ? PluginReleaseChannel.Beta
-            : existingRecord?.Channel ?? PluginReleaseChannel.Stable;
+            : existingRecord?.Channel ?? PluginReleaseChannel.Stable);
         InstalledPluginRecord pendingRecord = existingRecord is null
             ? new InstalledPluginRecord(
                 id,

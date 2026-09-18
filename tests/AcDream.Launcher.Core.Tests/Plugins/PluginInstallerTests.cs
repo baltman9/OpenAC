@@ -550,6 +550,20 @@ public sealed class PluginInstallerTests
     }
 
     [Fact]
+    public async Task AnExplicitBetaChannelWinsOverAStableVersionsInferredChannel()
+    {
+        using var fixture = new Fixture();
+        var release = fixture.BuildRelease(Id, "0.1.0");
+        fixture.RegisterRelease(Repo, release);
+
+        await fixture.Installer.InstallOrUpdateAsync(
+            Repo, release.Tag, catalog: null, clientResolution: null,
+            channel: PluginReleaseChannel.Beta);
+
+        Assert.Equal(PluginReleaseChannel.Beta, fixture.RecordStore.Find(Id)!.Channel);
+    }
+
+    [Fact]
     public async Task UpdatingABetaChannelPluginToAStableReleaseKeepsItOnBeta()
     {
         using var fixture = new Fixture();
