@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Numerics;
 using AcDream.App.UI.Layout;
 using DatReaderWriter.Enums;
@@ -208,6 +209,29 @@ public sealed class UiPropertyBagTests
     {
         Assert.Same(new UiPropertyValue().StructValue, new UiPropertyValue().StructValue);
         Assert.Same(new UiPropertyBag().Values, new UiPropertyBag().Values);
+    }
+
+    /// <summary>
+    /// Because that one view stands in for every empty value in the
+    /// interface, it must not be something a caller can cast back to a
+    /// mutable dictionary: one such cast would hand them a handle on all of
+    /// them at once. This fails if the shared empties go back to being plain
+    /// dictionaries.
+    /// </summary>
+    [Fact]
+    public void EmptyViewsCannotBeCastBackToAMutableDictionary()
+    {
+        object structView = new UiPropertyValue().StructValue;
+        object bagView = new UiPropertyBag().Values;
+
+        Assert.IsNotType<Dictionary<uint, UiPropertyValue>>(structView);
+        Assert.IsNotType<Dictionary<uint, UiPropertyValue>>(bagView);
+        Assert.False(structView is IDictionary<uint, UiPropertyValue> { IsReadOnly: false });
+        Assert.False(bagView is IDictionary<uint, UiPropertyValue> { IsReadOnly: false });
+
+        // The empty array a value hands out for its members has nothing to
+        // mutate, so it is safe as it is.
+        Assert.Empty(new UiPropertyValue().ArrayValue);
     }
 
     /// <summary>A write builds the storage, once, and only the storage it

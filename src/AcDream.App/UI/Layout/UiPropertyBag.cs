@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Numerics;
 using System.Text.Json.Serialization;
@@ -60,12 +61,13 @@ public sealed class UiPropertyValue
     /// <summary>Members of a struct property, empty for anything else.</summary>
     [JsonIgnore]
     public IReadOnlyDictionary<uint, UiPropertyValue> StructValue =>
-        _structValue ?? EmptyStruct;
+        _structValue ?? (IReadOnlyDictionary<uint, UiPropertyValue>)EmptyStruct;
 
     // The layout fixtures are this type serialised, so the storage keeps the
     // names the fixtures use. Reading either back gives null when nothing was
     // written, which is what keeps an untouched value free of collections.
     [JsonInclude]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("ArrayValue")]
     internal List<UiPropertyValue>? SerializedArrayValue
     {
@@ -74,6 +76,7 @@ public sealed class UiPropertyValue
     }
 
     [JsonInclude]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("StructValue")]
     internal Dictionary<uint, UiPropertyValue>? SerializedStructValue
     {
@@ -101,7 +104,12 @@ public sealed class UiPropertyValue
 
     internal bool HasStructStorage => _structValue is not null;
 
-    private static readonly Dictionary<uint, UiPropertyValue> EmptyStruct = [];
+    // Frozen, not a plain dictionary: this one instance stands in for every
+    // value that never wrote a struct member, so a cast back to a mutable
+    // dictionary would give one caller a handle on every empty value in the
+    // interface at once.
+    private static readonly FrozenDictionary<uint, UiPropertyValue> EmptyStruct =
+        FrozenDictionary<uint, UiPropertyValue>.Empty;
 
     public UiPropertyValue Clone()
     {
@@ -136,7 +144,9 @@ public sealed class UiPropertyValue
 
 public sealed class UiPropertyBag
 {
-    private static readonly Dictionary<uint, UiPropertyValue> Empty = [];
+    // Frozen for the same reason as the value's empty struct above.
+    private static readonly FrozenDictionary<uint, UiPropertyValue> Empty =
+        FrozenDictionary<uint, UiPropertyValue>.Empty;
 
     // Built on the first write, for the same reason as the value's array and
     // struct above: an element that overrides nothing carries no dictionary.
@@ -144,11 +154,13 @@ public sealed class UiPropertyBag
 
     /// <summary>The properties this bag carries, empty when it carries none.</summary>
     [JsonIgnore]
-    public IReadOnlyDictionary<uint, UiPropertyValue> Values => _values ?? Empty;
+    public IReadOnlyDictionary<uint, UiPropertyValue> Values =>
+        _values ?? (IReadOnlyDictionary<uint, UiPropertyValue>)Empty;
 
     // The layout fixtures are this type serialised; the storage keeps the name
     // they use.
     [JsonInclude]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("Values")]
     internal Dictionary<uint, UiPropertyValue>? SerializedValues
     {
