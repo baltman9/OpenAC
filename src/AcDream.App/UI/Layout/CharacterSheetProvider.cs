@@ -223,6 +223,7 @@ public sealed class CharacterSheetProvider
             owner._objects.Cleared += OnCleared;
             owner._localPlayer.AttributeChanged += OnAttributeChanged;
             owner._localPlayer.CharacterChanged += OnCharacterChanged;
+            owner._localPlayer.VitalRecordChanged += OnVitalRecordChanged;
             owner._localPlayer.Changed += OnVitalChanged;
             if (owner._localPlayer.Spellbook is { } spellbook)
                 spellbook.EnchantmentsChanged += OnCleared;
@@ -259,6 +260,17 @@ public sealed class CharacterSheetProvider
             _changed();
         }
 
+        // A vital record always refreshes the sheet, like an attribute record: the
+        // server sends the available-XP update ahead of it, and that update may have
+        // opened the gate already. Skipping the rebuild here left every later raise
+        // priced from the previous rank and spent XP.
+        private void OnVitalRecordChanged(LocalPlayerState.VitalKind _)
+        {
+            _owner?.ReleaseAwaitingRaise();
+            _changed();
+        }
+
+        // Current-only ticks: release and refresh only while a raise is in flight.
         private void OnVitalChanged(LocalPlayerState.VitalKind _)
         {
             CharacterSheetProvider? owner = _owner;
@@ -280,6 +292,7 @@ public sealed class CharacterSheetProvider
             owner._objects.Cleared -= OnCleared;
             owner._localPlayer.AttributeChanged -= OnAttributeChanged;
             owner._localPlayer.CharacterChanged -= OnCharacterChanged;
+            owner._localPlayer.VitalRecordChanged -= OnVitalRecordChanged;
             owner._localPlayer.Changed -= OnVitalChanged;
             if (owner._localPlayer.Spellbook is { } spellbook)
                 spellbook.EnchantmentsChanged -= OnCleared;

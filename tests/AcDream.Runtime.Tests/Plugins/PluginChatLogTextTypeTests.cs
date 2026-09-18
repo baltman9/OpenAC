@@ -36,7 +36,7 @@ public sealed class PluginChatLogTextTypeTests
             logTextType: 0x03u);
 
         PluginChatMessage message = Assert.Single(surface.CaptureMessages(0UL));
-        Assert.Equal(0x03u, message.LogTextType);
+        Assert.Equal(0x03, message.LogTextType);
         Assert.Equal("Aun Tanua", message.Sender);
         // The message stays bare: the plugin gets sender and text apart, and
         // the line the chat window shows is composed from the two.
@@ -61,10 +61,10 @@ public sealed class PluginChatLogTextTypeTests
 
         IReadOnlyList<PluginChatMessage> messages = surface.CaptureMessages(0UL);
         Assert.Equal(2, messages.Count);
-        Assert.Equal(0x00u, messages[0].LogTextType);
+        Assert.Equal(0x00, messages[0].LogTextType);
         Assert.Equal("Aun Tanua gives you a Token.", messages[0].Text);
         Assert.Equal(string.Empty, messages[0].Sender);
-        Assert.Equal(0x12u, messages[1].LogTextType);
+        Assert.Equal(0x12, messages[1].LogTextType);
     }
 
     private static GameRuntime Create()

@@ -20,6 +20,9 @@ public readonly record struct RuntimeHostileTargetSnapshot(
 {
     public int SpeciesId { get; init; }
 
+    /// <summary>The creature's maximum health when the client knows it; 0 until a host learns it.</summary>
+    public int MaximumHealth { get; init; }
+
     public bool HasShield { get; init; }
     public ushort Incarnation { get; init; }
     public long HealthRevision { get; init; }
@@ -163,6 +166,7 @@ public static class RuntimeHostileTargetQuery
                 health)
             {
                 SpeciesId = speciesId,
+                MaximumHealth = 0,
                 HasShield = hasShield,
                 Incarnation = record.Incarnation,
                 HealthRevision = healthRevision,

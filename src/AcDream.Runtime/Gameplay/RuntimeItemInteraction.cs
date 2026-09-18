@@ -164,8 +164,10 @@ public sealed class RuntimeItemInteraction : IDisposable
         _autoWield = new AutoWieldController(
             _objects,
             _playerGuid,
-            _sendWield,
-            sendPutItemInContainer,
+            _sendWield is { } wield ? (i, m) => { wield(i, m); return true; } : null,
+            sendPutItemInContainer is { } putInContainer
+                ? (i, c, s) => { putInContainer(i, c, s); return true; }
+                : null,
             _systemMessage,
             combatState,
             sendChangeCombatMode,
@@ -738,12 +740,6 @@ public sealed class RuntimeItemInteraction : IDisposable
         _runtimeTransactions.TryRequestAppraisal(objectId, _sendExamine);
     }
 
-    /// <summary>
-    /// A plugin's own appraisal. It is the same request the player's Assess
-    /// sends, and it is marked as the plugin's so that nothing is put in front
-    /// of the player when the answer comes back: a plugin reading an object is
-    /// not the player examining one.
-    /// </summary>
     public bool TryAppraiseForAutomation(uint objectId)
     {
         if (objectId == 0u
@@ -755,7 +751,7 @@ public sealed class RuntimeItemInteraction : IDisposable
         return _runtimeTransactions.TryRequestAppraisal(
             objectId,
             _sendExamine,
-            RuntimeAppraisalOrigin.Automation);
+            AppraisalRequestOrigin.Automation);
     }
 
     public AppraisalResponseAcceptance AcceptAppraisalResponse(uint objectId)
@@ -768,7 +764,8 @@ public sealed class RuntimeItemInteraction : IDisposable
         return new AppraisalResponseAcceptance(
             acceptance.Accepted,
             acceptance.FirstResponse,
-            acceptance.Origin);
+            acceptance.Origin,
+            acceptance.PresentInUi);
     }
 
     public bool RefreshCurrentAppraisal()
@@ -830,6 +827,56 @@ public sealed class RuntimeItemInteraction : IDisposable
             InNonCombatMode: _inNonCombatMode());
         var decision = ItemInteractionPolicy.DecideUse(input);
         return ExecuteUseActions(decision.Actions);
+    }
+
+    /// <summary>
+    /// Arms ExternalContainers.RequestOpen for objectId if -- and only if
+    /// -- the same use policy a click evaluates would itself open it as a
+    /// landscape container (a corpse, chest, or similar not-owned,
+    /// useable, non-targeted container -- the exact predicate
+    /// ItemInteractionPolicy's SetGroundObject action already encodes).
+    /// This does not send anything and does not touch the current
+    /// selection; it exists so the automation walk-then-use path
+    /// (SelectionInteractionController.TryUseForAutomation) can arm the
+    /// same seam a click's own SetGroundObject action arms before its
+    /// approach-gated Use dispatches. Without this, the automation route
+    /// dispatched the same wire Use a click does but left
+    /// RequestedContainerId at 0, so the server's ViewContents response
+    /// arrived with nothing armed to receive it and
+    /// ExternalContainerState.ApplyViewContents silently dropped it --
+    /// the plugin's Use reported Started and the container never opened.
+    /// </summary>
+    public void ArmLandscapeContainerRequest(uint objectId)
+    {
+        if (objectId == 0u || _objects.Get(objectId) is not { } item)
+            return;
+
+        // ReadyForInventoryRequest is hardcoded true here rather than
+        // read live: this is called at the point Use is already being
+        // dispatched, after the caller's own busy/reservation gate has
+        // already been satisfied (and usually while that reservation is
+        // itself held) -- re-reading the live busy state here would see
+        // that same reservation and refuse to produce any actions at
+        // all, including the one this method exists to run. This method
+        // only re-derives "is this the kind of use that opens a
+        // landscape container", not "is a request allowed right now".
+        var input = new ItemUsePolicyInput(
+            Snapshot(item),
+            _playerGuid(),
+            _groundObjectId(),
+            ReadyForInventoryRequest: true,
+            _activeVendorId(),
+            BypassClassification: false,
+            UseCurrentSelection: false,
+            SelectedTarget: null,
+            ConfirmVolatileRareUses: true,
+            InNonCombatMode: _inNonCombatMode());
+        ItemUsePolicyDecision decision = ItemInteractionPolicy.DecideUse(input);
+        foreach (ItemPolicyAction action in decision.Actions)
+        {
+            if (action.Kind == ItemPolicyActionKind.SetGroundObject)
+                _requestExternalContainer?.Invoke(action.ObjectId);
+        }
     }
 
     public bool TryUseItemForAutomation(uint itemGuid)
@@ -1355,14 +1402,27 @@ public sealed class RuntimeItemInteraction : IDisposable
         ClearTargetMode();
     }
 
-    public bool TryOpenSecureTradeWithPlayer(uint targetGuid)
+    /// <summary>
+    /// True when <paramref name="targetGuid"/> is a live, other-player
+    /// object (the "Player" weenie flag, and not this client's own
+    /// player). Shared by TryOpenSecureTradeWithPlayer and the
+    /// world-object automation path, which needs to recognize a player
+    /// target WITHOUT the side effect of opening a trade -- a plugin's
+    /// Use on another player should be refused, not silently start one.
+    /// </summary>
+    public bool IsPlayerTarget(uint targetGuid)
     {
         if (targetGuid == 0u || targetGuid == _playerGuid())
             return false;
         ClientObject? target = _objects.Get(targetGuid);
-        if (target is null
-            || ((PublicWeenieFlags)(target.PublicWeenieBitfield ?? 0u)
-                & PublicWeenieFlags.Player) == 0)
+        return target is not null
+            && ((PublicWeenieFlags)(target.PublicWeenieBitfield ?? 0u)
+                & PublicWeenieFlags.Player) != 0;
+    }
+
+    public bool TryOpenSecureTradeWithPlayer(uint targetGuid)
+    {
+        if (!IsPlayerTarget(targetGuid))
             return false;
 
         if (_inNonCombatMode())
@@ -1504,6 +1564,17 @@ public sealed class RuntimeItemInteraction : IDisposable
 
     private ItemUseRequestReservation BeginUseRequestReservation()
         => _runtimeTransactions.BeginUseRequestReservation();
+
+    /// <summary>
+    /// The same use reservation every inventory-item automation entry
+    /// point takes (TryUseItemForAutomation and friends) before dispatch,
+    /// exposed for the world-object automation path
+    /// (SelectionInteractionController.TryUseForAutomation) so a
+    /// non-owned target's busy-count/cancel-on-failure bookkeeping matches
+    /// a click exactly instead of being skipped.
+    /// </summary>
+    public ItemUseRequestReservation BeginAutomationUseReservation()
+        => BeginUseRequestReservation();
 
     private void ExecutePlacementActions(System.Collections.Generic.IReadOnlyList<ItemPolicyAction> actions)
     {
@@ -1789,10 +1860,15 @@ public sealed class RuntimeItemInteraction : IDisposable
                 failures);
     }
 
+    /// <summary>
+    /// Origin and PresentInUi are only meaningful when FirstResponse is
+    /// true -- see RuntimeAppraisalResponseAcceptance, which this mirrors.
+    /// </summary>
     public readonly record struct AppraisalResponseAcceptance(
         bool Accepted,
         bool FirstResponse,
-        RuntimeAppraisalOrigin Origin = RuntimeAppraisalOrigin.Player);
+        AppraisalRequestOrigin Origin,
+        bool PresentInUi);
 
     private static void DispatchAll(Action? listeners, List<Exception> failures)
     {
@@ -1821,6 +1897,14 @@ public sealed class RuntimeItemInteraction : IDisposable
 
     private bool ConsumeUseThrottle()
         => _runtimeTransactions.TryConsumeUseThrottle(_nowMs());
+
+    /// <summary>
+    /// The same use-throttle gate every inventory-item automation entry
+    /// point applies, exposed for the world-object automation path so a
+    /// non-owned target cannot bypass the throttle a click (or an owned
+    /// item's automation) is held to.
+    /// </summary>
+    public bool TryConsumeUseThrottleForAutomation() => ConsumeUseThrottle();
 
     private static bool IsContainer(ClientObject item)
         => item.ContainerTypeHint != 0

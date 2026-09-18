@@ -271,6 +271,11 @@ internal sealed class RuntimeLocalPlayerFirstEntryState
                 Publication.CommitActivation(
                     evalReceipt,
                     out RuntimePlacementProjectionToken projection);
+            if (Core.Physics.PhysicsDiagnostics.ProbeParkEnabled)
+            {
+                Console.WriteLine(FormattableString.Invariant(
+                    $"[first-entry] guid=0x{record.ServerGuid:X8} commitActivation={commitActivationStatus}"));
+            }
             switch (commitActivationStatus)
             {
                 case RuntimeDormantSetPositionCommitStatus.Committed:
@@ -291,6 +296,11 @@ internal sealed class RuntimeLocalPlayerFirstEntryState
             if (!_physics.SetPosition.AcknowledgeProjection(
                     progress.Projection))
             {
+                if (Core.Physics.PhysicsDiagnostics.ProbeParkEnabled)
+                {
+                    Console.WriteLine(FormattableString.Invariant(
+                        $"[first-entry] guid=0x{record.ServerGuid:X8} ack-pending seq={progress.Projection.Sequence}"));
+                }
                 if (!IsAcknowledgementStillPending(
                         record, residenceToken, progress.Projection))
                 {

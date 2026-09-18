@@ -515,13 +515,40 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
         }
     }
 
+    /// <summary>
+    /// The container fill meter on a pack cell, the same rule the inventory
+    /// window applies: shown only for a container with a positive item
+    /// capacity holding at least one loose item; side packs inside it do not
+    /// count, and an empty container hides the meter, rail included.
+    /// </summary>
     private void SetCapacity(UiItemSlot cell, uint containerId)
     {
         int capacity = _objects.Get(containerId)?.ItemsCapacity ?? 0;
-        cell.CapacityFill = capacity <= 0
-            ? -1f
-            : Math.Clamp(_objects.GetContents(containerId).Count / (float)capacity, 0f, 1f);
+        if (capacity <= 0) { cell.CapacityFill = -1f; return; }
+        int loose = CountLooseContents(containerId);
+        if (loose == 0) { cell.CapacityFill = -1f; return; }
+        cell.CapacityFill = Math.Clamp(loose / (float)capacity, 0f, 1f);
     }
+
+    private int CountLooseContents(uint containerId)
+    {
+        int count = 0;
+        foreach (uint guid in _objects.GetContents(containerId))
+        {
+            if (_objects.Get(guid) is { } item
+                && item.CurrentlyEquippedLocation == EquipMask.None
+                && !IsBag(item))
+            {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static bool IsBag(ClientObject item) =>
+        item.ContainerTypeHint != 0u
+        || item.Type.HasFlag(ItemType.Container)
+        || item.ItemsCapacity > 0;
 
     private void ClearLists()
     {
