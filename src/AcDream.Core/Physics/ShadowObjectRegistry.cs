@@ -1120,16 +1120,6 @@ public sealed class ShadowObjectRegistry
         }
     }
 
-    private static List<DatReaderWriter.Types.Sphere> BuildFloodSpheres(
-        Vector3 entityWorldPos,
-        Quaternion entityWorldRot,
-        System.Collections.Generic.IReadOnlyList<ShadowShape> shapes)
-    {
-        var spheres = new List<DatReaderWriter.Types.Sphere>();
-        FillFloodSpheres(entityWorldPos, entityWorldRot, shapes, spheres);
-        return spheres;
-    }
-
     private static void FillFloodSpheres(
         Vector3 entityWorldPos,
         Quaternion entityWorldRot,
@@ -1205,6 +1195,9 @@ public sealed class ShadowObjectRegistry
             spheres.RemoveRange(count, spheres.Count - count);
     }
 
+    // The two allocating wrappers below have no caller in the source: the
+    // landblock membership conformance test invokes them by name, to compare a
+    // ramp's part boxes and part spheres against the dats.
     private static List<ShadowPartBox> BuildFloodPartBoxes(
         Vector3 entityWorldPos,
         Quaternion entityWorldRot,

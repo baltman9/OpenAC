@@ -49,7 +49,7 @@ public sealed class JournalContractsPageController
     private readonly Dictionary<UiText, UiTextLayoutCache<string>> _detailLayouts =
         new(ReferenceEqualityComparer.Instance);
 
-    private (long Second, uint Contract, long Revision) _detailKey;
+    private (long Status, long Timed, uint Stage, uint Contract, long Revision) _detailKey;
     private bool _detailKeyValid;
 
     private readonly List<uint> _rowContractIds = [];
@@ -188,13 +188,27 @@ public sealed class JournalContractsPageController
         ContractCatalog catalog = _bindings.Catalog();
         DateTime now = _bindings.Now();
 
-        // Every string below resolves to whole seconds -- the progress line
-        // and the countdown both go through the duration format, which
-        // truncates -- so inside one second, with the same contract selected
-        // and the same tracker revision, this would compose exactly the six
-        // strings it composed last frame.
+        ContractTracker tracker = default;
+        bool hasTracker = _selectedContractId != 0u
+            && _bindings.Contracts.TryGetContract(_selectedContractId, out tracker);
+
+        // Both countdowns the pane shows go through the duration format, which
+        // truncates to whole seconds, so the text changes exactly when one of
+        // the two whole-second counts changes. They count down from the
+        // tracker's own receive time, not from the top of the wall clock, so
+        // the key is the counts themselves; keying on the wall-clock second
+        // let the pane lag a flip by up to a second.
+        double elapsed = hasTracker
+            ? (now - tracker.ReceivedAt).TotalSeconds
+            : 0d;
         var key = (
-            Second: now.Ticks / TimeSpan.TicksPerSecond,
+            Status: hasTracker && tracker.Stage == ContractStage.DoneOrPendingRepeat
+                ? Countdown(tracker.TimeWhenRepeats - elapsed)
+                : long.MinValue,
+            Timed: hasTracker && tracker.TimeWhenDone > 0d
+                ? Countdown(tracker.TimeWhenDone - elapsed)
+                : long.MinValue,
+            Stage: hasTracker ? (uint)tracker.Stage : 0u,
             Contract: _selectedContractId,
             Revision: _bindings.Contracts.Snapshot.Revision);
         if (_detailKeyValid && _detailKey == key)
@@ -202,8 +216,7 @@ public sealed class JournalContractsPageController
         _detailKey = key;
         _detailKeyValid = true;
 
-        if (_selectedContractId == 0u
-            || !_bindings.Contracts.TryGetContract(_selectedContractId, out ContractTracker tracker))
+        if (!hasTracker)
         {
             SetDetailText(_statusValue, string.Empty);
             SetDetailText(_contactValue, string.Empty);
@@ -228,6 +241,15 @@ public sealed class JournalContractsPageController
                 Math.Max(0d, tracker.TimeWhenDone - (now - tracker.ReceivedAt).TotalSeconds))
             : string.Empty);
     }
+
+    /// <summary>
+    /// The whole second a countdown is showing, or a sentinel once it has run
+    /// out: the duration format truncates, so two remaining times with the
+    /// same whole second render the same text, and one that has reached zero
+    /// renders a different line entirely.
+    /// </summary>
+    private static long Countdown(double remainingSeconds) =>
+        remainingSeconds > 0d ? (long)remainingSeconds : long.MinValue;
 
     private static string LocationText(uint cellId)
     {
