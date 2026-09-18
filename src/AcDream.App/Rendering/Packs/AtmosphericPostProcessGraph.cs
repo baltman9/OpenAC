@@ -1531,7 +1531,7 @@ internal sealed class AtmosphericPostProcessGraph :
             ? encoder.BeginTimerScope(name)
             : null;
         using IDisposable? stage = AcDream.App.Diagnostics.GpuStageProfiler.Measure(
-            encoder, PostStageName(name));
+            encoder, AcDream.App.Diagnostics.GpuStageProfiler.PassStageName(name));
         encoder.BindPipeline(pipeline);
         encoder.BindUniformBuffer(
             GpuBindingModel.UniformAtmosphericFrame,
@@ -1562,20 +1562,6 @@ internal sealed class AtmosphericPostProcessGraph :
             textureD.IsAssigned ? textureD.Index : GpuTextureSlot.Unassigned.Index);
         encoder.SetPushConstants(in constants);
         encoder.Draw(3, 1, 0, 0);
-    }
-
-    private static readonly Dictionary<string, string> PostStageNames = new(StringComparer.Ordinal);
-
-    /// <summary>A stage key distinct from the pass timer of the same name: the
-    /// two measure the same pass, the pass timer from the top of the pipeline
-    /// for the pack budget and the stage key sequentially for attribution.</summary>
-    private static string PostStageName(string passName)
-    {
-        if (PostStageNames.TryGetValue(passName, out string? stage))
-            return stage;
-        stage = "post/" + passName;
-        PostStageNames[passName] = stage;
-        return stage;
     }
 
     private static GpuRingAllocation Slice(

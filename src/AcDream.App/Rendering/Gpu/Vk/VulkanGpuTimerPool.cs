@@ -97,7 +97,12 @@ internal sealed unsafe class VulkanGpuTimerPool : IGpuTimerPool, IDisposable
 
         List<string> names = _scopeNames[_currentSlot];
         if (names.Count >= MaxScopesPerFrame)
+        {
+            // Past the budget the range is not recorded at all. Silence would
+            // read as "this stage cost nothing", so say so instead.
+            DroppedScopes++;
             return NullScope.Instance;
+        }
         if (!_scopeNameSet[_currentSlot].Add(scopeName))
         {
             throw new InvalidOperationException(
@@ -166,6 +171,8 @@ internal sealed unsafe class VulkanGpuTimerPool : IGpuTimerPool, IDisposable
     /// <summary>Counts completed read-backs. A reader that only wants each
     /// measured frame once compares this against what it saw last.</summary>
     public int ResolveGeneration { get; private set; }
+
+    public int DroppedScopes { get; private set; }
 
     /// <summary>The ranges of the one frame the last read-back covered — not
     /// the running table, which keeps a stale value for a range that frame did

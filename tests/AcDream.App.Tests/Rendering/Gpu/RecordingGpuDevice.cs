@@ -880,6 +880,8 @@ internal sealed class RecordingGpuTimerPool : IGpuTimerPool
 
     public IReadOnlyList<(string Name, double Milliseconds)> LastResolved =>
         [.. _resolved.Select(pair => (pair.Key, pair.Value))];
+
+    public int DroppedScopes { get; internal set; }
 }
 
 internal static class RecordingGpuDeviceAssertions

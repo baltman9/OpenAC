@@ -530,7 +530,8 @@ internal class DeclaredFullscreenRenderPackGraph :
         });
         using IDisposable timer = encoder.BeginTimerScope(node.TimerName);
         using IDisposable? stage = AcDream.App.Diagnostics.GpuStageProfiler.Measure(
-            encoder, node.TimerName);
+            encoder,
+            AcDream.App.Diagnostics.GpuStageProfiler.PassStageName(node.TimerName));
         encoder.BindPipeline(node.Pipeline);
         encoder.BindUniformBuffer(GpuBindingModel.UniformAtmosphericFrame,
             frameBlock.Buffer, frameBlock.OffsetBytes, AtmosphericFrameUniforms.SizeInBytes);

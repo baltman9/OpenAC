@@ -545,14 +545,7 @@ internal sealed class WalkFrameDriver : IWalkEventSink, IWalkLookInViewSource
         try
         {
             if (_stream.Count > 0)
-            {
-                using (AcDream.App.Diagnostics.GpuStageProfiler.Measure(
-                    encoder, "prepare-ordered-stream"))
-                {
-                    _dispatcher.PrepareOrderedStream(
-                        frame, _stream, _viewProjection, _markPositions);
-                }
-            }
+                _dispatcher.PrepareOrderedStream(frame, _stream, _viewProjection, _markPositions);
 
             _pendingTerrainBatch.Clear();
             _replayEncoder = encoder;
@@ -589,12 +582,7 @@ internal sealed class WalkFrameDriver : IWalkEventSink, IWalkLookInViewSource
                     case WalkFrameEventKind.Sky:
                         FlushPendingRange();
                         FlushPendingTerrainBatch();
-                        using (AcDream.App.Diagnostics.GpuStageProfiler.Measure(
-                            _replayEncoder, "sky"))
-                        {
-                            _leafRenderer.DrawSky();
-                        }
-
+                        _leafRenderer.DrawSky();
                         break;
                     case WalkFrameEventKind.LandCell:
                         _pendingTerrainBatch.Add((e.CellId, e.IntArg >> 8, e.IntArg & 0xFF));
@@ -602,73 +590,38 @@ internal sealed class WalkFrameDriver : IWalkEventSink, IWalkLookInViewSource
                     case WalkFrameEventKind.CellShell:
                         FlushPendingRange();
                         FlushPendingTerrainBatch();
-                        using (AcDream.App.Diagnostics.GpuStageProfiler.Measure(
-                            _replayEncoder, "cell-shell"))
-                        {
-                            _leafRenderer.DrawCellShell(e.CellId);
-                        }
-
+                        _leafRenderer.DrawCellShell(e.CellId);
                         break;
                     case WalkFrameEventKind.PunchFan:
                         FlushPendingRange();
                         FlushPendingTerrainBatch();
-                        using (AcDream.App.Diagnostics.GpuStageProfiler.Measure(
-                            _replayEncoder, "punch-fan"))
-                        {
-                            _leafRenderer.DrawPunchFan(e.Polygon!, e.IntArg);
-                        }
-
+                        _leafRenderer.DrawPunchFan(e.Polygon!, e.IntArg);
                         break;
                     case WalkFrameEventKind.AlphaBarrier:
                         FlushPendingRange();
                         FlushPendingTerrainBatch();
-                        using (AcDream.App.Diagnostics.GpuStageProfiler.Measure(
-                            _replayEncoder, "alpha-barrier"))
-                        {
-                            _leafRenderer.AlphaBarrier();
-                        }
-
+                        _leafRenderer.AlphaBarrier();
                         break;
                     case WalkFrameEventKind.SortCellExit:
                         if (_leafRenderer.SortCellExitWouldFlush())
                             FlushPendingRange();
                         FlushPendingTerrainBatch();
-                        using (AcDream.App.Diagnostics.GpuStageProfiler.Measure(
-                            _replayEncoder, "sort-cell-exit"))
-                        {
-                            _leafRenderer.FlushSortCellExit();
-                        }
-
+                        _leafRenderer.FlushSortCellExit();
                         break;
                     case WalkFrameEventKind.LandscapeFlush:
                         FlushPendingRange();
                         FlushPendingTerrainBatch();
-                        using (AcDream.App.Diagnostics.GpuStageProfiler.Measure(
-                            _replayEncoder, "landscape-flush"))
-                        {
-                            _leafRenderer.FlushLandscape();
-                        }
-
+                        _leafRenderer.FlushLandscape();
                         break;
                     case WalkFrameEventKind.ClearInteriorDepth:
                         FlushPendingRange();
                         FlushPendingTerrainBatch();
-                        using (AcDream.App.Diagnostics.GpuStageProfiler.Measure(
-                            _replayEncoder, "clear-interior-depth"))
-                        {
-                            _leafRenderer.ClearInteriorDepth();
-                        }
-
+                        _leafRenderer.ClearInteriorDepth();
                         break;
                     case WalkFrameEventKind.ExitSeals:
                         FlushPendingRange();
                         FlushPendingTerrainBatch();
-                        using (AcDream.App.Diagnostics.GpuStageProfiler.Measure(
-                            _replayEncoder, "exit-seals"))
-                        {
-                            PortalsDrawnCount += _leafRenderer.DrawExitSeals();
-                        }
-
+                        PortalsDrawnCount += _leafRenderer.DrawExitSeals();
                         break;
                     case WalkFrameEventKind.StaticParticles:
                         SubmitCellAlpha(
@@ -707,12 +660,8 @@ internal sealed class WalkFrameDriver : IWalkEventSink, IWalkLookInViewSource
     {
         if (_replayPendingEnd == _replayDrawCursor)
             return;
-        using (AcDream.App.Diagnostics.GpuStageProfiler.Measure(_replayEncoder, "statics"))
-        {
-            _dispatcher.DrawOrderedRange(
-                _replayEncoder!, _replayDrawCursor, _replayPendingEnd - _replayDrawCursor);
-        }
-
+        _dispatcher.DrawOrderedRange(
+            _replayEncoder!, _replayDrawCursor, _replayPendingEnd - _replayDrawCursor);
         _replayDrawCursor = _replayPendingEnd;
     }
 
@@ -730,10 +679,7 @@ internal sealed class WalkFrameDriver : IWalkEventSink, IWalkLookInViewSource
         // opaque commands before it must already be recorded.
         if (_dispatcher.WalkAlphaInstanceDrawsImmediately(in batch))
             FlushPendingRange();
-        using (AcDream.App.Diagnostics.GpuStageProfiler.Measure(_replayEncoder, "alpha"))
-        {
-            _dispatcher.SubmitWalkAlphaInstance(in batch, _viewProjection);
-        }
+        _dispatcher.SubmitWalkAlphaInstance(in batch, _viewProjection);
     }
 
     private void SubmitCellAlpha(
@@ -778,11 +724,7 @@ internal sealed class WalkFrameDriver : IWalkEventSink, IWalkLookInViewSource
     {
         if (_pendingTerrainBatch.Count == 0)
             return;
-        using (AcDream.App.Diagnostics.GpuStageProfiler.Measure(_replayEncoder, "terrain"))
-        {
-            _leafRenderer.DrawLandCellBatch(_pendingTerrainBatch);
-        }
-
+        _leafRenderer.DrawLandCellBatch(_pendingTerrainBatch);
         _pendingTerrainBatch.Clear();
     }
 

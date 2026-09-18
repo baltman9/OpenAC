@@ -49,6 +49,48 @@ public sealed class GpuStageProfilerTests
     }
 
     [Fact]
+    public void APassStageKeyNeverCollidesWithThePassTimerOfTheSameName()
+    {
+        // Both graphs measure a post-process pass twice: once as the pass timer
+        // a render pack budgets against, once as a stage range. The backend
+        // refuses two ranges under one name, so a call site that passed the
+        // pass name straight through threw on its first frame.
+        foreach (string passName in new[]
+        {
+            "atmospheric-filmic",
+            "atmospheric-sun-rays",
+            // The shape a declared (data-driven) pack gives its nodes.
+            "pack-node-0",
+            "bloom",
+        })
+        {
+            Assert.NotEqual(passName, GpuStageProfiler.PassStageName(passName));
+        }
+    }
+
+    [Fact]
+    public void PassStageKeysAreStableAndDistinctPerPass()
+    {
+        string first = GpuStageProfiler.PassStageName("atmospheric-filmic");
+
+        Assert.Same(first, GpuStageProfiler.PassStageName("atmospheric-filmic"));
+        Assert.NotEqual(first, GpuStageProfiler.PassStageName("atmospheric-sun-rays"));
+    }
+
+    [Fact]
+    public void ADroppedRangeIsNamedInTheReportRatherThanReadingAsFree()
+    {
+        var profiler = new GpuStageProfiler();
+        profiler.Record("shadow", 0.4);
+
+        Assert.DoesNotContain("DROPPED", profiler.FormatReport(), StringComparison.Ordinal);
+
+        profiler.NoteDroppedRanges(12);
+
+        Assert.Contains("DROPPED=12", profiler.FormatReport(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ResettingTheWindowEmptiesTheReport()
     {
         var profiler = new GpuStageProfiler();

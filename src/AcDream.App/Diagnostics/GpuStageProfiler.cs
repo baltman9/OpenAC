@@ -33,7 +33,10 @@ public sealed class GpuStageProfiler
 
     private const char OccurrenceMarker = '#';
 
+    private const string PassStagePrefix = "post/";
+
     private static readonly Dictionary<(string Name, int Occurrence), string> KeyCache = new();
+    private static readonly Dictionary<string, string> PassStageNames = new(StringComparer.Ordinal);
 
     private readonly List<string> _order = [];
     private readonly Dictionary<string, FrameStatsBuffer> _stages = new(StringComparer.Ordinal);
@@ -42,6 +45,7 @@ public sealed class GpuStageProfiler
     private readonly Dictionary<string, double> _snapshot = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _usedThisFrame = new(StringComparer.Ordinal);
     private int _lastGeneration = -1;
+    private int _droppedRanges;
     private long _lastReportTicks;
     private int _samplesInWindow;
 
@@ -80,6 +84,23 @@ public sealed class GpuStageProfiler
 
     internal void BeginFrame() => _usedThisFrame.Clear();
 
+    /// <summary>The stage key for a pass that already measures itself under
+    /// <paramref name="passName"/>. Both ranges cover the same pass — the pass
+    /// timer from the top of the pipeline, which is what a render pack budgets
+    /// against, and the stage range sequentially — and the backend refuses two
+    /// ranges under one name, so the keys have to differ. Every pass-level call
+    /// site derives its key here rather than spelling a prefix of its own.
+    /// </summary>
+    internal static string PassStageName(string passName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(passName);
+        if (PassStageNames.TryGetValue(passName, out string? stage))
+            return stage;
+        stage = PassStagePrefix + passName;
+        PassStageNames[passName] = stage;
+        return stage;
+    }
+
     /// <summary>A stage recorded several times in one frame reports as one
     /// total, so "terrain" is the frame's terrain time and not its last batch.</summary>
     internal static string BaseStageName(string key)
@@ -100,6 +121,7 @@ public sealed class GpuStageProfiler
         _lastGeneration = timers.ResolveGeneration;
 
         _snapshot.Clear();
+        NoteDroppedRanges(timers.DroppedScopes);
         IReadOnlyList<(string Name, double Milliseconds)> resolved = timers.LastResolved;
         for (int i = 0; i < resolved.Count; i++)
         {
@@ -139,6 +161,10 @@ public sealed class GpuStageProfiler
             buffer.Reset();
     }
 
+    /// <summary>How many ranges the backend refused this session because the
+    /// per-frame budget was full.</summary>
+    internal void NoteDroppedRanges(int dropped) => _droppedRanges = dropped;
+
     internal void Record(string stage, double milliseconds, int rangeCount = 1)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(stage);
@@ -159,6 +185,12 @@ public sealed class GpuStageProfiler
         var ci = CultureInfo.InvariantCulture;
         var sb = new StringBuilder(256);
         sb.Append("[gpu-stage] n=").Append(_samplesInWindow);
+        if (_droppedRanges > 0)
+        {
+            // The budget filled up, so some stages are missing from the line
+            // rather than reported as costing nothing.
+            sb.Append(" | DROPPED=").Append(_droppedRanges);
+        }
         foreach (string stage in _order)
         {
             FrameStatsBuffer buffer = _stages[stage];
