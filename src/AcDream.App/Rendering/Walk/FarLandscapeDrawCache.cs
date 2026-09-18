@@ -103,7 +103,36 @@ internal sealed class FarLandscapeDrawCache(
     /// them.</summary>
     internal int RegroupCount { get; private set; }
     /// <summary>How many times an entry's command block was rebuilt.</summary>
-    internal static int BlockBuildCount { get; private set; }
+    internal int BlockBuildCount { get; private set; }
+    /// <summary>How many times a block rebuild had to take new arrays. A
+    /// rebuild that fits in the arrays the entry already holds takes
+    /// none.</summary>
+    internal int BlockArrayAllocationCount { get; private set; }
+
+    /// <summary>Commands the entries' blocks can hold, and commands they
+    /// carry. Equal means the arrays are sized to their contents with no
+    /// slack.</summary>
+    internal int TotalBlockCapacity
+    {
+        get
+        {
+            int total = 0;
+            foreach (Entry entry in _entries.Values)
+                total += entry.Block.Capacity;
+            return total;
+        }
+    }
+
+    internal int TotalBlockCommands
+    {
+        get
+        {
+            int total = 0;
+            foreach (Entry entry in _entries.Values)
+                total += entry.Block.Count;
+            return total;
+        }
+    }
     internal int EntityClassificationCount { get; private set; }
     internal int EntryCount => _entries.Count;
     internal ReadOnlySpan<int> AlphaEnds => _alphaEnds;
@@ -293,9 +322,10 @@ internal sealed class FarLandscapeDrawCache(
         return false;
     }
 
-    private static void BuildBlock(Entry entry, uint firstCell)
+    private void BuildBlock(Entry entry, uint firstCell)
     {
-        entry.Block.EnsureCapacity(entry.Opaque.Count);
+        if (entry.Block.EnsureCapacity(entry.Opaque.Count))
+            BlockArrayAllocationCount++;
         for (int i = 0; i < entry.Opaque.Count; i++)
         {
             BatchRef item = entry.Opaque[i];

@@ -128,6 +128,42 @@ public sealed partial class WalkStaticStreamPopulatorTests
     }
 
     /// <summary>
+    /// The block arrays are sized to what they hold and reused across
+    /// rebuilds of the same entry. Eleven arrays per entry growing by
+    /// doubling left gen2 garbage behind every entry that came and went on a
+    /// route, which only a rare gen2 collection reclaims.
+    /// </summary>
+    [Fact]
+    public void RetainedCells_RebuildingAnEntryAtAStableCountTakesNoNewBlockArrays()
+    {
+        using var fx = new DispatcherFixture();
+        InstallRetainedMesh(fx);
+        InstallRetainedMesh(fx, RetainedMesh + 1, 12);
+        var world = new RetainedWorld();
+        world.Set(RetainedRecord(1), RetainedRecord(2), RetainedRecord(3));
+        var cache = new FarLandscapeDrawCache(fx.Dispatcher, world);
+
+        _ = AppendRetainedFrame(fx, cache);
+        Assert.Equal(1, cache.BlockArrayAllocationCount);
+        int builds = cache.BlockBuildCount;
+        Assert.Equal(3, cache.TotalBlockCommands);
+        Assert.Equal(cache.TotalBlockCommands, cache.TotalBlockCapacity);
+
+        // Reclassify the entry back and forth: the command count never moves,
+        // so no rebuild may take arrays again.
+        for (int i = 0; i < 8; i++)
+        {
+            world.Current[2] = RetainedRecord(2, (i & 1) == 0 ? RetainedMesh + 1 : RetainedMesh);
+            _ = AppendRetainedFrame(fx, cache);
+        }
+
+        Assert.True(cache.BlockBuildCount > builds, "the entry was never rebuilt.");
+        Assert.Equal(1, cache.BlockArrayAllocationCount);
+        Assert.Equal(3, cache.TotalBlockCommands);
+        Assert.Equal(cache.TotalBlockCommands, cache.TotalBlockCapacity);
+    }
+
+    /// <summary>
     /// The exactness pin for the retained command block: a cache that keeps
     /// and patches its commands must produce, every frame, the stream a cache
     /// built from scratch that frame produces -- through moves, a geometry

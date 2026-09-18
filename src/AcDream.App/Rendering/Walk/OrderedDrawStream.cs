@@ -64,24 +64,42 @@ internal sealed class OrderedDrawCommandBlock
     /// <summary>How many leading slots carry a command.</summary>
     public int Count;
 
-    public void EnsureCapacity(int capacity)
+    /// <summary>
+    /// Makes room for <paramref name="capacity"/> commands, and answers
+    /// whether that took new arrays.
+    ///
+    /// The arrays are sized to exactly what the build asks for, and a build
+    /// that fits in what the block already holds takes nothing at all. There
+    /// is deliberately no growth slack and no resize: the build overwrites
+    /// every slot it asked for, so carrying the old contents across is wasted
+    /// work, and slack is gen2 garbage that the next entry to come and go on
+    /// the route has to churn again. Eleven arrays per entry doubling their
+    /// way up left a hundred and forty to two hundred and eighty megabytes of
+    /// gen2 garbage on the measured route, which only a rare gen2 collection
+    /// reclaims and which shows up in managed heap and private bytes.
+    /// </summary>
+    public bool EnsureCapacity(int capacity)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(capacity);
         if (Keys.Length >= capacity)
-            return;
+            return false;
 
-        int grown = Math.Max(capacity, Math.Max(16, Keys.Length * 2));
-        Array.Resize(ref Keys, grown);
-        Array.Resize(ref Transforms, grown);
-        Array.Resize(ref Stages, grown);
-        Array.Resize(ref CellIds, grown);
-        Array.Resize(ref ClipSlots, grown);
-        Array.Resize(ref Lights, grown);
-        Array.Resize(ref IndoorFlags, grown);
-        Array.Resize(ref Alphas, grown);
-        Array.Resize(ref SelectionLighting, grown);
-        Array.Resize(ref DetailCategories, grown);
-        Array.Resize(ref AllowInstanceMerges, grown);
+        Keys = new GroupKey[capacity];
+        Transforms = new Matrix4x4[capacity];
+        Stages = new WalkDrawStage[capacity];
+        CellIds = new uint[capacity];
+        ClipSlots = new uint[capacity];
+        Lights = new WbDrawDispatcher.InstanceLightSet[capacity];
+        IndoorFlags = new uint[capacity];
+        Alphas = new float[capacity];
+        SelectionLighting = new Vector2[capacity];
+        DetailCategories = new uint[capacity];
+        AllowInstanceMerges = new bool[capacity];
+        return true;
     }
+
+    /// <summary>How many commands the arrays can hold.</summary>
+    public int Capacity => Keys.Length;
 
     public void Set(int index, in OrderedDrawCommand command)
     {

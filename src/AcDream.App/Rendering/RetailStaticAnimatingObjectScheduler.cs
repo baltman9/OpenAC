@@ -397,7 +397,13 @@ internal sealed class RetailStaticAnimatingObjectScheduler : ILiveStaticPartFram
             }
 
             // Everything from here writes the entity: the part poses, and the
-            // root rotation in both the body and the omega branch below.
+            // root rotation in both the body and the omega branch below. The
+            // mark goes on every advancing tick by design, not only when a
+            // pose actually moved: an owner that advances into an identical
+            // pose still has to be offered, because the scene's own
+            // reconciliation can have re-projected it as an ordinary outdoor
+            // static in the meantime, and withholding the offer would leave
+            // that projection standing for a frame.
             owner.RenderDirty = true;
             IReadOnlyList<PartTransform> frames = sequencer.Advance((float)ownerElapsed);
             owner.PreparedLivePartFrames.Clear();
