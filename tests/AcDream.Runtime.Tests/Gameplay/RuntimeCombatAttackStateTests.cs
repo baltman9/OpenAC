@@ -413,6 +413,41 @@ public sealed class RuntimeCombatAttackStateTests
         Assert.Equal(0, cancels);
     }
 
+    [Fact]
+    public void AutomationControlledAttacksAskForNoAutoTargetOnStartOrSend()
+    {
+        double now = 1d;
+        var allowed = new List<bool>();
+        var combat = new CombatState();
+        using var controller = new RuntimeCombatAttackState(
+            combat,
+            new DelegateRuntimeCombatAttackOperations(
+                allow => { allowed.Add(allow); return true; },
+                (_, _, allow) => { allowed.Add(allow); return true; },
+                prepareAttackRequest: null,
+                sendCancelAttack: null,
+                isDualWield: null,
+                playerReadyForAttack: null,
+                autoRepeatAttack: () => true),
+            () => now);
+        combat.SetCombatMode(CombatMode.Melee);
+
+        controller.AutomationControlled = true;
+        controller.PressAttack(AttackHeight.Medium);
+        now = 2d;
+        controller.ReleaseAttack();
+        Assert.NotEmpty(allowed);
+        Assert.All(allowed, Assert.False);
+
+        allowed.Clear();
+        controller.AutomationControlled = false;
+        controller.PressAttack(AttackHeight.Medium);
+        now = 3d;
+        controller.ReleaseAttack();
+        Assert.NotEmpty(allowed);
+        Assert.All(allowed, Assert.True);
+    }
+
     private static RuntimeCombatAttackState Create(
         CombatState combat,
         Func<double> now,

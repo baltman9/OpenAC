@@ -364,12 +364,12 @@ public sealed class HeadlessSessionEventRouteRetryPendingTests
           IRuntimeCombatModeOperations,
           IRuntimeSpellCastOperations
     {
-        public bool CanStartAttack() => false;
+        public bool CanStartAttack(bool allowAutoTarget) => false;
         public void PrepareAttackRequest()
         {
         }
 
-        public bool SendAttack(AttackHeight height, float power) => false;
+        public bool SendAttack(AttackHeight height, float power, bool allowAutoTarget) => false;
         public void SendCancelAttack()
         {
         }

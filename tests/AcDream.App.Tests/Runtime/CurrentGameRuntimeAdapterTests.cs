@@ -958,13 +958,14 @@ public sealed class CurrentGameRuntimeAdapterTests
         public bool PlayerReadyForAttack => true;
         public bool AutoRepeatAttack => false;
 
-        public bool CanStartAttack() => true;
+        public bool CanStartAttack(bool allowAutoTarget) => true;
 
         public void PrepareAttackRequest() => Trace.Add("prepare");
 
         public bool SendAttack(
             AcDream.Core.Combat.AttackHeight height,
-            float power)
+            float power,
+            bool allowAutoTarget)
         {
             Trace.Add($"attack:{height}:{power}");
             return true;

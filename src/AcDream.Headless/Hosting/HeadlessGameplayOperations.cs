@@ -77,7 +77,7 @@ internal sealed class HeadlessGameplayOperations
         return new SessionRoute(this, session);
     }
 
-    public bool CanStartAttack()
+    public bool CanStartAttack(bool allowAutoTarget)
     {
         GameRuntime runtime = RequireRuntime();
         if (!IsInWorld
@@ -86,7 +86,7 @@ internal sealed class HeadlessGameplayOperations
         {
             return false;
         }
-        return GetSelectedOrClosestTarget(runtime) is not null;
+        return GetSelectedOrClosestTarget(runtime, allowAutoTarget) is not null;
     }
 
     public void PrepareAttackRequest()
@@ -94,10 +94,10 @@ internal sealed class HeadlessGameplayOperations
         _ = RequireRuntime().MovementOwner.PrepareForAttackRequest();
     }
 
-    public bool SendAttack(AttackHeight height, float power)
+    public bool SendAttack(AttackHeight height, float power, bool allowAutoTarget)
     {
         GameRuntime runtime = RequireRuntime();
-        uint? target = GetSelectedOrClosestTarget(runtime);
+        uint? target = GetSelectedOrClosestTarget(runtime, allowAutoTarget);
         if (target is null || !TryGetSession(out WorldSession? session))
             return false;
 
@@ -241,7 +241,7 @@ internal sealed class HeadlessGameplayOperations
         RequireRuntime().ActionOwner.Transactions
             .IncrementBusyCount();
 
-    private uint? GetSelectedOrClosestTarget(GameRuntime runtime)
+    private uint? GetSelectedOrClosestTarget(GameRuntime runtime, bool allowAutoTarget)
     {
         uint? selected =
             runtime.ActionOwner.Selection.SelectedObjectId;
@@ -253,7 +253,7 @@ internal sealed class HeadlessGameplayOperations
         {
             return target;
         }
-        return AutoTarget ? SelectClosestTarget() : null;
+        return allowAutoTarget && AutoTarget ? SelectClosestTarget() : null;
     }
 
     private GameRuntime RequireRuntime() =>

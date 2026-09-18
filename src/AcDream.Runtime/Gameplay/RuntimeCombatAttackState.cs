@@ -25,9 +25,16 @@ public readonly record struct RuntimeCombatAttackInput(
 
 public interface IRuntimeCombatAttackOperations
 {
-    bool CanStartAttack();
+    /// <summary>
+    /// Whether an attack can start now. With <paramref name="allowAutoTarget"/>
+    /// the host may pick the closest hostile when nothing attackable is
+    /// selected, as the player option allows; without it the selected
+    /// target is the only one an attack may go to. Automation names its own
+    /// targets, so it never gets the fallback.
+    /// </summary>
+    bool CanStartAttack(bool allowAutoTarget);
     void PrepareAttackRequest();
-    bool SendAttack(AttackHeight height, float power);
+    bool SendAttack(AttackHeight height, float power, bool allowAutoTarget);
     void SendCancelAttack();
     bool IsDualWield { get; }
     bool PlayerReadyForAttack { get; }
@@ -37,17 +44,17 @@ public interface IRuntimeCombatAttackOperations
 internal sealed class DelegateRuntimeCombatAttackOperations
     : IRuntimeCombatAttackOperations
 {
-    private readonly Func<bool> _canStartAttack;
+    private readonly Func<bool, bool> _canStartAttack;
     private readonly Action _prepareAttackRequest;
-    private readonly Func<AttackHeight, float, bool> _sendAttack;
+    private readonly Func<AttackHeight, float, bool, bool> _sendAttack;
     private readonly Action _sendCancelAttack;
     private readonly Func<bool> _isDualWield;
     private readonly Func<bool> _playerReadyForAttack;
     private readonly Func<bool> _autoRepeatAttack;
 
     public DelegateRuntimeCombatAttackOperations(
-        Func<bool> canStartAttack,
-        Func<AttackHeight, float, bool> sendAttack,
+        Func<bool, bool> canStartAttack,
+        Func<AttackHeight, float, bool, bool> sendAttack,
         Action? prepareAttackRequest,
         Action? sendCancelAttack,
         Func<bool>? isDualWield,
@@ -64,10 +71,10 @@ internal sealed class DelegateRuntimeCombatAttackOperations
         _autoRepeatAttack = autoRepeatAttack ?? (() => false);
     }
 
-    public bool CanStartAttack() => _canStartAttack();
+    public bool CanStartAttack(bool allowAutoTarget) => _canStartAttack(allowAutoTarget);
     public void PrepareAttackRequest() => _prepareAttackRequest();
-    public bool SendAttack(AttackHeight height, float power) =>
-        _sendAttack(height, power);
+    public bool SendAttack(AttackHeight height, float power, bool allowAutoTarget) =>
+        _sendAttack(height, power, allowAutoTarget);
     public void SendCancelAttack() => _sendCancelAttack();
     public bool IsDualWield => _isDualWield();
     public bool PlayerReadyForAttack => _playerReadyForAttack();
@@ -111,8 +118,8 @@ public sealed class RuntimeCombatAttackState : IDisposable
         : this(
             combat,
             new DelegateRuntimeCombatAttackOperations(
-                canStartAttack,
-                sendAttack,
+                _ => canStartAttack(),
+                (height, power, _) => sendAttack(height, power),
                 prepareAttackRequest,
                 sendCancelAttack,
                 isDualWield,
@@ -137,6 +144,12 @@ public sealed class RuntimeCombatAttackState : IDisposable
     }
 
     public AttackHeight RequestedHeight { get; private set; } = AttackHeight.Medium;
+    /// <summary>
+    /// True while a plugin drives combat. Such an owner names every target
+    /// itself: no automatic repeat, and no closest-hostile fallback when the
+    /// selection is gone, or a kill would end with the character locked onto
+    /// whatever stands nearest, in range or not.
+    /// </summary>
     internal bool AutomationControlled { get; set; }
     private bool AutoRepeatAllowed => !AutomationControlled && _operations.AutoRepeatAttack;
     public float DesiredPower { get; private set; } = InitialDesiredPower;
@@ -318,7 +331,7 @@ public sealed class RuntimeCombatAttackState : IDisposable
     private void StartAttackRequest()
     {
         if (!CombatInputPlanner.SupportsTargetedAttack(_combat.CurrentMode)
-            || !_operations.CanStartAttack())
+            || !_operations.CanStartAttack(allowAutoTarget: !AutomationControlled))
             return;
 
         _attackRequestInProgress = true;
@@ -359,7 +372,8 @@ public sealed class RuntimeCombatAttackState : IDisposable
         StopBuild();
         if (!_operations.SendAttack(
                 height,
-                Math.Clamp(_requestedAttackPower, 0f, 1f)))
+                Math.Clamp(_requestedAttackPower, 0f, 1f),
+                allowAutoTarget: !AutomationControlled))
         {
             ResetPowerBar();
             return;

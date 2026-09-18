@@ -246,11 +246,11 @@ public sealed class RuntimeSimulationFixtureHostTests
             return true;
         }
 
-        public bool CanStartAttack() => true;
+        public bool CanStartAttack(bool allowAutoTarget) => true;
         public void PrepareAttackRequest() =>
             Trace.Add("attack:prepare");
 
-        public bool SendAttack(AttackHeight height, float power)
+        public bool SendAttack(AttackHeight height, float power, bool allowAutoTarget)
         {
             Trace.Add(string.Create(
                 CultureInfo.InvariantCulture,

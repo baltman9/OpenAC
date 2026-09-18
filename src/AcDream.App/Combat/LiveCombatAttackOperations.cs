@@ -112,10 +112,11 @@ internal sealed class CombatAttackOperationsSlot
             _owner = null;
     }
 
-    public bool CanStartAttack() => _owner?.CanStartAttack() == true;
+    public bool CanStartAttack(bool allowAutoTarget) =>
+        _owner?.CanStartAttack(allowAutoTarget) == true;
     public void PrepareAttackRequest() => _owner?.PrepareAttackRequest();
-    public bool SendAttack(AttackHeight height, float power) =>
-        _owner?.SendAttack(height, power) == true;
+    public bool SendAttack(AttackHeight height, float power, bool allowAutoTarget) =>
+        _owner?.SendAttack(height, power, allowAutoTarget) == true;
     public void SendCancelAttack() => _owner?.SendCancelAttack();
     public bool IsDualWield => _owner?.IsDualWield == true;
     public bool PlayerReadyForAttack => _owner?.PlayerReadyForAttack == true;
@@ -191,7 +192,7 @@ internal sealed class LiveCombatAttackOperations
 
     public bool AutoRepeatAttack => _settings.AutoRepeatAttack;
 
-    public bool CanStartAttack()
+    public bool CanStartAttack(bool allowAutoTarget)
     {
         if (!_inWorld.IsInWorld)
             return false;
@@ -203,7 +204,7 @@ internal sealed class LiveCombatAttackOperations
             return false;
         }
 
-        if (_targets.GetSelectedOrClosestCombatTarget(_settings.AutoTarget) is null)
+        if (_targets.GetSelectedOrClosestCombatTarget(allowAutoTarget && _settings.AutoTarget) is null)
         {
             _feedback.Show(AcDream.Core.Chat.ClientTextRefusals.MustSelectCombatTarget);
             Console.WriteLine("combat: attack ignored; no creature target found");
@@ -213,9 +214,9 @@ internal sealed class LiveCombatAttackOperations
         return true;
     }
 
-    public bool SendAttack(AttackHeight height, float power)
+    public bool SendAttack(AttackHeight height, float power, bool allowAutoTarget)
     {
-        if (!CanStartAttack()
+        if (!CanStartAttack(allowAutoTarget)
             || _session.CurrentSession is not { } session
             || _targets.SelectedObjectId is not { } target)
         {

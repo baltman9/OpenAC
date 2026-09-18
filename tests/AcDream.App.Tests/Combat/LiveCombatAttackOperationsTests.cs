@@ -16,8 +16,8 @@ public sealed class LiveCombatAttackOperationsTests
         var first = new FakeOperations();
         var second = new FakeOperations();
 
-        Assert.False(slot.CanStartAttack());
-        Assert.False(slot.SendAttack(AttackHeight.Medium, 0.5f));
+        Assert.False(slot.CanStartAttack(allowAutoTarget: true));
+        Assert.False(slot.SendAttack(AttackHeight.Medium, 0.5f, allowAutoTarget: true));
         Assert.False(slot.PlayerReadyForAttack);
 
         slot.Bind(first);
@@ -39,7 +39,7 @@ public sealed class LiveCombatAttackOperationsTests
         using IDisposable secondBinding = slot.BindOwned(second);
         firstBinding.Dispose();
 
-        Assert.True(slot.CanStartAttack());
+        Assert.True(slot.CanStartAttack(allowAutoTarget: true));
     }
 
     [Fact]
@@ -48,7 +48,7 @@ public sealed class LiveCombatAttackOperationsTests
         Harness harness = CreateHarness();
         harness.Targets.Acquired = 0x1234u;
 
-        Assert.False(harness.Owner.CanStartAttack());
+        Assert.False(harness.Owner.CanStartAttack(allowAutoTarget: true));
 
         Assert.Equal(0, harness.Targets.ResolveCount);
     }
@@ -58,7 +58,7 @@ public sealed class LiveCombatAttackOperationsTests
     {
         Harness harness = CreateHarness(inWorld: true);
 
-        Assert.False(harness.Owner.CanStartAttack());
+        Assert.False(harness.Owner.CanStartAttack(allowAutoTarget: true));
 
         Assert.Empty(harness.Feedback.Messages);
         Assert.Equal(0, harness.Targets.ResolveCount);
@@ -73,11 +73,28 @@ public sealed class LiveCombatAttackOperationsTests
         harness.Targets.Acquired = 0x1234u;
         harness.Targets.SelectedObjectId = 0x1234u;
 
-        Assert.True(harness.Owner.CanStartAttack());
+        Assert.True(harness.Owner.CanStartAttack(allowAutoTarget: true));
 
         Assert.True(harness.Targets.LastAutoTarget);
         Assert.Equal(1, harness.Targets.ResolveCount);
         Assert.Empty(harness.Feedback.Messages);
+    }
+
+    [Fact]
+    public void AnAutomationOwnedAttackNeverFallsBackToTheClosestHostile()
+    {
+        Harness harness = CreateHarness(inWorld: true);
+        harness.Combat.SetCombatMode(CombatMode.Melee);
+        // The player's own option is on, and nothing attackable is selected:
+        // a key press would pick the closest hostile. Automation names its
+        // targets itself and must not be handed one.
+        harness.Settings.AutoTarget = true;
+        harness.Targets.Acquired = null;
+
+        Assert.False(harness.Owner.CanStartAttack(allowAutoTarget: false));
+
+        Assert.Equal(1, harness.Targets.ResolveCount);
+        Assert.False(harness.Targets.LastAutoTarget);
     }
 
     [Fact]
@@ -86,7 +103,7 @@ public sealed class LiveCombatAttackOperationsTests
         Harness harness = CreateHarness(inWorld: true);
         harness.Combat.SetCombatMode(CombatMode.Missile);
 
-        Assert.False(harness.Owner.CanStartAttack());
+        Assert.False(harness.Owner.CanStartAttack(allowAutoTarget: true));
 
         Assert.Equal(
             [AcDream.Core.Chat.ClientTextRefusals.MustSelectCombatTarget],
@@ -158,11 +175,11 @@ public sealed class LiveCombatAttackOperationsTests
     private sealed class FakeOperations : IRuntimeCombatAttackOperations
     {
         public bool CanStartValue { get; init; } = true;
-        public bool CanStartAttack() => CanStartValue;
+        public bool CanStartAttack(bool allowAutoTarget) => CanStartValue;
         public void PrepareAttackRequest()
         {
         }
-        public bool SendAttack(AttackHeight height, float power) => true;
+        public bool SendAttack(AttackHeight height, float power, bool allowAutoTarget) => true;
         public void SendCancelAttack()
         {
         }

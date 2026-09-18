@@ -1189,12 +1189,12 @@ public sealed class DirectGameRuntimeCommandAdapterTests
         private GameRuntime? _runtime;
 
         public void Bind(GameRuntime runtime) => _runtime = runtime;
-        public bool CanStartAttack() => false;
+        public bool CanStartAttack(bool allowAutoTarget) => false;
         public void PrepareAttackRequest()
         {
         }
 
-        public bool SendAttack(AttackHeight height, float power) => false;
+        public bool SendAttack(AttackHeight height, float power, bool allowAutoTarget) => false;
         public void SendCancelAttack()
         {
         }
