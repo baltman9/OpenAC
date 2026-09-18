@@ -52,7 +52,8 @@ internal sealed class HeadlessPluginSession : IDisposable
         MagicCatalog? magicCatalog = null,
         HeadlessLogoutAutomation? logout = null,
         Func<uint, bool, bool>? answerConfirmation = null,
-        Func<bool>? requestGracefulStop = null)
+        Func<bool>? requestGracefulStop = null,
+        AcDream.Content.IDatReaderWriter? content = null)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(diagnostics);
@@ -75,7 +76,8 @@ internal sealed class HeadlessPluginSession : IDisposable
             magicCatalog,
             logout,
             answerConfirmation,
-            requestGracefulStop);
+            requestGracefulStop,
+            content);
         var plugins = new PluginSession(
             host,
             status => Report(statusWriter, sessionId, status),

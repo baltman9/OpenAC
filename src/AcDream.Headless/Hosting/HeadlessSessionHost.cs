@@ -367,7 +367,8 @@ internal sealed class HeadlessSessionHost : IDisposable
                 contentLease?.MagicCatalog,
                 logout,
                 AnswerConfirmation,
-                RequestOwnGracefulStop);
+                RequestOwnGracefulStop,
+                content: contentLease?.Dats);
             // The shared surface owns the navigation plugins see; the host binds its
             // walk controller and movement commands to that one instance.
             RuntimeNavigationAutomation navigation = pluginSession.Host.NavigationAutomation;
