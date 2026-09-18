@@ -155,17 +155,14 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
     internal void PublishSnapshotChanged()
     {
         PluginNavigationSnapshot snapshot = Snapshot;
-        lock (_gate)
-        {
-            if (!_hasPublishedSnapshot || !snapshot.Equals(_lastPublishedSnapshot))
-                _snapshotRevision++;
-            snapshot = snapshot with { Revision = _snapshotRevision };
-        }
         Action<PluginNavigationSnapshot>? handlers;
         lock (_gate)
         {
-            if (_hasPublishedSnapshot && snapshot.Equals(_lastPublishedSnapshot))
+            PluginNavigationSnapshot comparable = snapshot with { Revision = 0UL };
+            if (_hasPublishedSnapshot && comparable.Equals(_lastPublishedSnapshot with { Revision = 0UL }))
                 return;
+            _snapshotRevision++;
+            snapshot = comparable with { Revision = _snapshotRevision };
             _lastPublishedSnapshot = snapshot;
             _hasPublishedSnapshot = true;
             handlers = _snapshotChanged;
