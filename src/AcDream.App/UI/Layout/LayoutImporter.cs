@@ -425,7 +425,7 @@ public static class LayoutImporter
         if (sd.Properties is not null)
         {
             foreach (var (propertyId, property) in sd.Properties)
-                state.Properties.Values[propertyId] = ConvertProperty(property);
+                state.Properties.Set(propertyId, ConvertProperty(property));
         }
         info.States[stateId] = state;
 
@@ -506,12 +506,12 @@ public static class LayoutImporter
             case ArrayBaseProperty p:
                 value.Kind = UiPropertyKind.Array;
                 foreach (var item in p.Value)
-                    value.ArrayValue.Add(ConvertProperty(item));
+                    value.AddArrayItem(ConvertProperty(item));
                 break;
             case StructBaseProperty p:
                 value.Kind = UiPropertyKind.Struct;
                 foreach (var (key, item) in p.Value)
-                    value.StructValue[key] = ConvertProperty(item);
+                    value.SetStructMember(key, ConvertProperty(item));
                 break;
             case VectorBaseProperty p:
                 value.Kind = UiPropertyKind.Vector;

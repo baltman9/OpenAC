@@ -68,7 +68,8 @@ internal sealed class WorldRevealCoordinator
         IWorldRevealStreamingScheduler? streaming = null,
         IWorldRevealRenderResourceScheduler? renderResources = null,
         Func<int>? loadedLandblockCount = null,
-        IRenderFrameResourceDiagnosticsSource? renderResourceDiagnostics = null)
+        IRenderFrameResourceDiagnosticsSource? renderResourceDiagnostics = null,
+        Func<uint, bool>? hasLiveCollisionPendingRestore = null)
     {
         _transit = transit ?? throw new ArgumentNullException(nameof(transit));
         _readiness = new WorldRevealReadinessBarrier(
@@ -79,7 +80,8 @@ internal sealed class WorldRevealCoordinator
             areCompositeTexturesReady,
             prepareCompositeTextures,
             invalidateCompositeTextures,
-            isSpawnClaimUnhydratable);
+            isSpawnClaimUnhydratable,
+            hasLiveCollisionPendingRestore);
         _quiescence = quiescence;
         _streaming = streaming;
         _renderResources = renderResources;

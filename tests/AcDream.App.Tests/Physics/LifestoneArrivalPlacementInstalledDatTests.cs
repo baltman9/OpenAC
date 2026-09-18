@@ -24,6 +24,10 @@ public sealed class LifestoneArrivalPlacementInstalledDatTests
     private const uint HumanSetup = 0x02000001u;
     private const uint LifestoneEntityId = 0x7AA0C34Fu;
 
+    private const PhysicsSetPositionFlags TeleportFlags =
+        PhysicsSetPositionFlags.Teleport | PhysicsSetPositionFlags.Slide
+        | PhysicsSetPositionFlags.SendPositionEvent;
+
     // Holtburg lifestone instance (the server's spawn record for it) and the
     // character location the server saved after a Lifestone Recall to it.
     private static readonly Vector3 LifestonePosition = new(81.3304f, 11.7974f, 94.005f);
@@ -44,10 +48,7 @@ public sealed class LifestoneArrivalPlacementInstalledDatTests
 
     [Fact]
     public void TeleportArrivalBesideTheLifestone_Commits()
-        => AssertCommits(
-            PhysicsSetPositionFlags.Teleport | PhysicsSetPositionFlags.Slide
-                | PhysicsSetPositionFlags.SendPositionEvent,
-            "teleport");
+        => AssertCommits(TeleportFlags, "teleport");
 
     [Fact]
     public void LoginPlacementAtTheLifestoneItself_Commits()
@@ -56,6 +57,70 @@ public sealed class LifestoneArrivalPlacementInstalledDatTests
             LifestonePosition, PhysicsSetPositionFlags.Placement | PhysicsSetPositionFlags.Slide);
         _output.WriteLine($"inside requested={LifestonePosition} actual={result.Position} error={result.Error} residence={result.Residence} shapes={_scene.LifestoneShapeCount}");
         Assert.True(result.IsCommitted, $"placement at the lifestone failed: {result.Error}");
+    }
+
+    // The order a recall actually runs in. The server sends the destination
+    // first and the objects standing in that cell after it, so the arrival is
+    // placed against a cell that is not there yet, parks, and is placed again
+    // once the cell and its objects have arrived. The three below pin the whole
+    // ordering at the placement level: parked while the cell is missing, inside
+    // the lifestone if the placement runs before it arrives, beside it once the
+    // wake re-places the parked pose.
+    [Fact]
+    public void ArrivalBeforeTheCellIsResident_Parks()
+    {
+        ArrivalWorld world = _scene.CreateWorld(
+            cellResident: false, lifestonePresent: false);
+
+        PhysicsSetPositionResult parked = Place(world, LifestonePosition, TeleportFlags);
+
+        _output.WriteLine($"parked residence={parked.Residence} cell=0x{parked.CellId:X8} pos={parked.Position}");
+        Assert.Equal(PhysicsResidenceDisposition.DeferredCell, parked.Residence);
+        Assert.Equal(ArrivalCell, parked.CellId);
+        Assert.Equal(LifestonePosition, parked.Position);
+    }
+
+    [Fact]
+    public void ArrivalPlacedBeforeTheLifestoneArrives_LandsInsideIt()
+    {
+        ArrivalWorld world = _scene.CreateWorld(
+            cellResident: true, lifestonePresent: false);
+
+        PhysicsSetPositionResult early = Place(world, LifestonePosition, TeleportFlags);
+
+        _output.WriteLine($"early residence={early.Residence} pos={early.Position}");
+        Assert.True(early.IsCommitted, $"early placement failed: {early.Error}");
+        Assert.Equal(LifestonePosition.X, early.Position.X, 3);
+        Assert.Equal(LifestonePosition.Y, early.Position.Y, 3);
+    }
+
+    [Fact]
+    public void ArrivalWokenAfterTheLifestoneArrives_LandsBesideIt()
+    {
+        ArrivalWorld world = _scene.CreateWorld(
+            cellResident: false, lifestonePresent: false);
+        PhysicsSetPositionResult parked = Place(world, LifestonePosition, TeleportFlags);
+        Assert.Equal(PhysicsResidenceDisposition.DeferredCell, parked.Residence);
+
+        // The cell finishes streaming and the server's objects for it arrive.
+        _scene.AdmitCell(world);
+        _scene.RegisterLifestone(world);
+
+        // The wake re-places the parked pose against the finished cell.
+        PhysicsSetPositionResult woken = Place(
+            world, parked.Position, TeleportFlags, parked.CellId);
+
+        _output.WriteLine($"woken residence={woken.Residence} pos={woken.Position}");
+        Assert.True(woken.IsCommitted, $"woken placement failed: {woken.Error}");
+        Assert.Equal(81.3304f, woken.Position.X, 3);
+        Assert.Equal(14.019623f, woken.Position.Y, 3);
+
+        // ...and exactly where one placement against the finished cell lands.
+        ArrivalWorld finished = _scene.CreateWorld(
+            cellResident: true, lifestonePresent: true);
+        Assert.Equal(
+            Place(finished, LifestonePosition, TeleportFlags).Position,
+            woken.Position);
     }
 
     private void AssertCommits(PhysicsSetPositionFlags flags, string label)
@@ -67,8 +132,15 @@ public sealed class LifestoneArrivalPlacementInstalledDatTests
     }
 
     private PhysicsSetPositionResult Place(Vector3 position, PhysicsSetPositionFlags flags)
-        => _scene.Engine.SetPosition(new PhysicsSetPositionRequest(
-            position, Heading, ArrivalCell, position, HumanSpheres,
+        => Place(_scene.World, position, flags);
+
+    private PhysicsSetPositionResult Place(
+        ArrivalWorld world,
+        Vector3 position,
+        PhysicsSetPositionFlags flags,
+        uint cellId = ArrivalCell)
+        => world.Engine.SetPosition(new PhysicsSetPositionRequest(
+            position, Heading, cellId, position, HumanSpheres,
             Scale: 1f,
             StepUpHeight: _scene.Mover.StepUpHeight,
             StepDownHeight: _scene.Mover.StepDownHeight,
@@ -76,12 +148,27 @@ public sealed class LifestoneArrivalPlacementInstalledDatTests
             MovingEntityId: 0x000F4243u,
             Flags: flags));
 
+    /// <summary>
+    /// One collision world. Each one owns its own cache because a cache owns
+    /// the collision roots every engine attached to it shares.
+    /// </summary>
+    public sealed class ArrivalWorld
+    {
+        public required PhysicsDataCache Cache { get; init; }
+        public required PhysicsEngine Engine { get; init; }
+    }
+
     public sealed class Scene : IDisposable
     {
         private readonly BoundedTestDatCollection _dat;
         private readonly PakPreparedAssetSource _prepared;
-        public PhysicsDataCache Cache { get; }
-        public PhysicsEngine Engine { get; }
+        private readonly IDatReaderWriter _bounded;
+        private readonly LandblockBuild _build;
+        private readonly LandblockCollisionBuild _collisions;
+        private readonly TerrainSurface _terrain;
+        private readonly Setup _lifestone;
+        private readonly IReadOnlyList<ShadowShape> _lifestoneShapes;
+        public ArrivalWorld World { get; }
         public FlatSetupCollision Mover { get; }
         public int LifestoneShapeCount { get; }
 
@@ -93,59 +180,103 @@ public sealed class LifestoneArrivalPlacementInstalledDatTests
             Assert.True(Directory.Exists(directory), "An explicit installed ACDREAM_DAT_DIR is required.");
             Assert.True(File.Exists(package), "An explicit validated ACDREAM_PAK_PATH is required.");
             _dat = new BoundedTestDatCollection(directory!);
-            var bounded = (IDatReaderWriter)_dat;
-            _prepared = new PakPreparedAssetSource(package!, bounded);
+            _bounded = _dat;
+            _prepared = new PakPreparedAssetSource(package!, _bounded);
             PreparedCollisionReadResult<FlatSetupCollision> mover = _prepared.ReadSetupCollision(HumanSetup);
             Assert.Equal(PreparedAssetReadStatus.Loaded, mover.Status);
             Mover = Assert.IsType<FlatSetupCollision>(mover.Data);
 
-            float[] heights = Assert.IsType<Region>(bounded.Get<Region>(0x13000000u)).LandDefs.LandHeightTable;
-            var factory = new LandblockBuildFactory(bounded, _prepared, new object(), heights);
-            LandblockBuild build = Assert.IsType<LandblockBuild>(factory.Build(new LandblockBuildRequest(
+            float[] heights = Assert.IsType<Region>(_bounded.Get<Region>(0x13000000u)).LandDefs.LandHeightTable;
+            var factory = new LandblockBuildFactory(_bounded, _prepared, new object(), heights);
+            _build = Assert.IsType<LandblockBuild>(factory.Build(new LandblockBuildRequest(
                 0xA9B4FFFFu, LandblockStreamJobKind.LoadNear, Generation: 1,
                 new LandblockBuildOrigin(0xA9, 0xB4))));
-            LandblockCollisionBuild collisions = Assert.IsType<LandblockCollisionBuild>(build.Collisions);
-            Cache = PhysicsDataCache.CreateProduction();
-            Engine = new PhysicsEngine { DataCache = Cache };
-            TerrainSurface terrain = LandblockPhysicsContentBuilder.BuildTerrainSurface(build.Landblock, heights);
-            var surfaces = new List<CellSurface>();
-            var portals = new List<PortalPlane>();
-            LandblockPhysicsContentBuilder.PublishPreparedCells(Cache, build.Landblock, collisions,
-                Vector3.Zero, surfaces, portals);
-            LandblockPhysicsContentBuilder.CacheBuildings(Cache, build.Landblock, terrain, Vector3.Zero);
-            LandblockPhysicsContentBuilder.CachePreparedObjects(Cache, collisions);
-            Engine.AddLandblock(build.LandblockId, terrain, surfaces, portals, 0f, 0f);
-            _ = LandblockPhysicsContentBuilder.PublishStaticCollision(Engine, Cache,
-                build.Landblock, collisions, Vector3.Zero);
+            _collisions = Assert.IsType<LandblockCollisionBuild>(_build.Collisions);
+            _terrain = LandblockPhysicsContentBuilder.BuildTerrainSurface(_build.Landblock, heights);
 
             // The lifestone weenie: its setup's part collision at the instance pose,
             // with the weenie's authored physics state (Gravity | IgnoreCollisions).
-            Setup lifestone = Assert.IsType<Setup>(bounded.Get<Setup>(LifestoneSetup));
-            foreach (var part in lifestone.Parts)
+            _lifestone = Assert.IsType<Setup>(_bounded.Get<Setup>(LifestoneSetup));
+            PhysicsDataCache shapeCache = PhysicsDataCache.CreateProduction();
+            CacheLifestoneGeometry(shapeCache);
+            _lifestoneShapes = BuildLifestoneShapes(shapeCache);
+            LifestoneShapeCount = _lifestoneShapes.Count;
+
+            World = CreateWorld(cellResident: true, lifestonePresent: true);
+        }
+
+        public PhysicsDataCache Cache => World.Cache;
+        public PhysicsEngine Engine => World.Engine;
+
+        /// <summary>
+        /// A collision world in one of the states an arrival can meet: the cell
+        /// absent (the arrival has to park), present but without the objects the
+        /// server spawns in it, or finished.
+        /// </summary>
+        public ArrivalWorld CreateWorld(bool cellResident, bool lifestonePresent)
+        {
+            PhysicsDataCache cache = PhysicsDataCache.CreateProduction();
+            CacheLifestoneGeometry(cache);
+            var world = new ArrivalWorld
+            {
+                Cache = cache,
+                Engine = new PhysicsEngine { DataCache = cache },
+            };
+            if (cellResident)
+                AdmitCell(world);
+            if (lifestonePresent)
+                RegisterLifestone(world);
+            return world;
+        }
+
+        public void AdmitCell(ArrivalWorld world)
+        {
+            var surfaces = new List<CellSurface>();
+            var portals = new List<PortalPlane>();
+            LandblockPhysicsContentBuilder.PublishPreparedCells(
+                world.Cache, _build.Landblock, _collisions, Vector3.Zero, surfaces, portals);
+            LandblockPhysicsContentBuilder.CacheBuildings(
+                world.Cache, _build.Landblock, _terrain, Vector3.Zero);
+            LandblockPhysicsContentBuilder.CachePreparedObjects(world.Cache, _collisions);
+            world.Engine.AddLandblock(
+                _build.LandblockId, _terrain, surfaces, portals, 0f, 0f);
+            _ = LandblockPhysicsContentBuilder.PublishStaticCollision(
+                world.Engine, world.Cache, _build.Landblock, _collisions, Vector3.Zero);
+        }
+
+        public void RegisterLifestone(ArrivalWorld world) =>
+            world.Engine.ShadowObjects.RegisterMultiPart(
+                LifestoneEntityId, LifestonePosition, Heading, _lifestoneShapes,
+                state: 0x410u,
+                flags: EntityCollisionFlags.HasWeenie,
+                0f, 0f, _build.LandblockId,
+                seedCellId: ArrivalCell,
+                isStatic: false);
+
+        private void CacheLifestoneGeometry(PhysicsDataCache cache)
+        {
+            foreach (var part in _lifestone.Parts)
             {
                 uint gfxId = part.DataId;
-                GfxObj gfx = Assert.IsType<GfxObj>(bounded.Get<GfxObj>(gfxId));
-                PreparedCollisionReadResult<FlatGfxObjCollisionAsset> prepared = _prepared.ReadGfxObjCollision(gfxId);
-                Cache.CacheGfxObj(gfxId, gfx, prepared.Data);
+                GfxObj gfx = Assert.IsType<GfxObj>(_bounded.Get<GfxObj>(gfxId));
+                PreparedCollisionReadResult<FlatGfxObjCollisionAsset> prepared =
+                    _prepared.ReadGfxObjCollision(gfxId);
+                cache.CacheGfxObj(gfxId, gfx, prepared.Data);
             }
+        }
+
+        private IReadOnlyList<ShadowShape> BuildLifestoneShapes(PhysicsDataCache cache)
+        {
             ShadowPartGeometry? Bounds(uint id)
             {
-                FlatGfxObjCollisionAsset? asset = Cache.GetFlatGfxObj(id);
+                FlatGfxObjCollisionAsset? asset = cache.GetFlatGfxObj(id);
                 FlatPhysicsBsp? flat = asset?.PhysicsBsp;
                 return flat is { RootIndex: >= 0 }
                     ? ShadowPartGeometry.Create(flat.Nodes[flat.RootIndex].BoundingSphere, asset!.VisualBounds)
                     : null;
             }
-            IReadOnlyList<ShadowShape> shapes = ShadowShapeBuilder.FromSetup(
-                lifestone, 1f, id => Bounds(id) is not null, physicsBspBounds: Bounds);
-            LifestoneShapeCount = shapes.Count;
-            Engine.ShadowObjects.RegisterMultiPart(
-                LifestoneEntityId, LifestonePosition, Heading, shapes,
-                state: 0x410u,
-                flags: EntityCollisionFlags.HasWeenie,
-                0f, 0f, build.LandblockId,
-                seedCellId: ArrivalCell,
-                isStatic: false);
+            return ShadowShapeBuilder.FromSetup(
+                _lifestone, 1f, id => Bounds(id) is not null, physicsBspBounds: Bounds);
         }
 
         public void Dispose()

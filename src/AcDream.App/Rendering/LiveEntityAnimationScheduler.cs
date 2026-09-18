@@ -257,7 +257,7 @@ internal sealed class LiveEntityAnimationScheduler
                         entity,
                         quantum,
                         sequencer?.Manager,
-                        _animationHooks.Capture,
+                        _animationHooks.CaptureCallback,
                         sequencer,
                         runtime,
                         record,
@@ -337,7 +337,7 @@ internal sealed class LiveEntityAnimationScheduler
                     rootDelta,
                     liveCenterX,
                     liveCenterY,
-                    _animationHooks.Capture,
+                    _animationHooks.CaptureCallback,
                     runtime,
                     record,
                     objectClockEpoch))
@@ -363,7 +363,7 @@ internal sealed class LiveEntityAnimationScheduler
                             liveCenterY,
                             objectClockEpoch,
                             sequencer,
-                            _animationHooks.Capture))
+                            _animationHooks.CaptureCallback))
                     {
                         completed = false;
                         break;

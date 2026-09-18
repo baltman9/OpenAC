@@ -21,12 +21,20 @@ internal sealed record GpuMemoryProfile(
 {
     private const ulong MiB = 1024UL * 1024UL;
 
-    /// <summary>One client that may use the whole GPU: 128 MiB blocks, 48 MiB
-    /// of staging, 16 MiB per frame ring, and a 1M-vertex / 3M-index arena.</summary>
+    /// <summary>One client that may use the whole GPU: 32 MiB blocks, 48 MiB
+    /// of staging, 16 MiB per frame ring, and a 1M-vertex / 3M-index arena.
+    /// <para>A block is committed whole, and on a host-visible memory type it
+    /// is mapped whole, so it costs the process address space as well as the
+    /// device. Measured at three fixed spots, 128 MiB blocks left 328 MiB of
+    /// the 1,091 MiB committed unused, three of them under a third full.
+    /// Anything at or above the dedicated threshold takes a block sized exactly
+    /// to it instead of a share of one, so the large textures, vertex stores
+    /// and frame rings waste nothing and hand everything back when they are
+    /// released.</para></summary>
     public static GpuMemoryProfile Default { get; } = new(
         Name: "default",
-        BlockSizeBytes: 128 * MiB,
-        DedicatedThresholdBytes: 32 * MiB,
+        BlockSizeBytes: 32 * MiB,
+        DedicatedThresholdBytes: 16 * MiB,
         StagingCapacityBytes: 48 * MiB,
         RingCapacityBytesPerSlot: 16 * 1024 * 1024,
         MeshArenaInitialVertices: 1024 * 1024,

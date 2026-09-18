@@ -32,8 +32,11 @@ public sealed class BuildingRegistry
     public Building? GetById(uint buildingId) =>
         _byBuildingId.TryGetValue(buildingId, out var b) ? b : null;
 
-    /// <summary>Enumerates every registered building in unspecified order.</summary>
-    public IEnumerable<Building> All() => _byBuildingId.Values;
+    /// <summary>Enumerates every registered building in unspecified order.
+    /// The concrete collection is handed back, not an interface: the frame's
+    /// building gather walks every registry on every frame, and an interface
+    /// walk boxes the dictionary's enumerator each time.</summary>
+    public Dictionary<uint, Building>.ValueCollection All() => _byBuildingId.Values;
 
     /// <summary>Number of registered buildings.</summary>
     public int Count => _byBuildingId.Count;

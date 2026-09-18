@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using AcDream.App.Rendering.Gpu;
 using AcDream.App.Rendering.Wb;
 using AcDream.App.Rendering.Walk;
@@ -9,6 +10,62 @@ namespace AcDream.App.Tests.Rendering.Walk;
 
 public sealed class OrderedDrawStreamTests
 {
+    // The upload path reinterprets whole stream arrays instead of copying each
+    // command field by field, so the reinterpretation has to produce exactly
+    // the bytes the per-command writers produced.
+    [Fact]
+    public void LightSpanReinterpretedAsIntsMatchesPerCommandCopies()
+    {
+        var stream = new OrderedDrawStream();
+        for (int i = 0; i < 3; i++)
+        {
+            stream.Append(
+                MakeCommand(i) with
+                {
+                    Lights = new WbDrawDispatcher.InstanceLightSet(
+                        i * 8, i * 8 + 1, i * 8 + 2, i * 8 + 3,
+                        i * 8 + 4, i * 8 + 5, i * 8 + 6, i * 8 + 7),
+                });
+        }
+
+        int[] expected = new int[3 * 8];
+        for (int i = 0; i < 3; i++)
+            stream.Lights[i].CopyTo(expected, i * 8);
+
+        ReadOnlySpan<int> reinterpreted =
+            MemoryMarshal.Cast<WbDrawDispatcher.InstanceLightSet, int>(stream.LightSpan);
+        Assert.Equal(expected.Length, reinterpreted.Length);
+        Assert.Equal(expected, reinterpreted.ToArray());
+    }
+
+    [Fact]
+    public void TransformSpanReinterpretedAsFloatsIsRowMajorPerCommand()
+    {
+        var stream = new OrderedDrawStream();
+        var first = new Matrix4x4(
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f,
+            9f, 10f, 11f, 12f, 13f, 14f, 15f, 16f);
+        var second = Matrix4x4.CreateTranslation(21f, 22f, 23f);
+        stream.Append(MakeCommand(0) with { Transform = first });
+        stream.Append(MakeCommand(1) with { Transform = second });
+
+        ReadOnlySpan<float> floats =
+            MemoryMarshal.Cast<Matrix4x4, float>(stream.TransformSpan);
+        Assert.Equal(32, floats.Length);
+        Assert.Equal(
+            new[]
+            {
+                first.M11, first.M12, first.M13, first.M14,
+                first.M21, first.M22, first.M23, first.M24,
+                first.M31, first.M32, first.M33, first.M34,
+                first.M41, first.M42, first.M43, first.M44,
+            },
+            floats[..16].ToArray());
+        Assert.Equal(second.M41, floats[28]);
+        Assert.Equal(second.M42, floats[29]);
+        Assert.Equal(second.M43, floats[30]);
+    }
+
     private static OrderedDrawCommand MakeCommand(
         int index,
         WalkDrawStage stage = WalkDrawStage.Terrain,

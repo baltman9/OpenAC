@@ -161,8 +161,13 @@ public sealed class LandblockPresentationPipeline
     /// Building visibility registries published by the render owner. Legacy
     /// test pipelines have no render owner and therefore expose an empty view.
     /// </summary>
-    public IReadOnlyCollection<BuildingRegistry> BuildingRegistries =>
-        _renderPublisher?.BuildingRegistries ?? Array.Empty<BuildingRegistry>();
+    private static readonly Dictionary<uint, BuildingRegistry> NoBuildingRegistries = new();
+
+    /// <summary>The publisher's building registries, walked once per frame by
+    /// the frame's building gather; the concrete collection walks without
+    /// boxing an enumerator.</summary>
+    public Dictionary<uint, BuildingRegistry>.ValueCollection BuildingRegistries =>
+        _renderPublisher?.BuildingRegistries ?? NoBuildingRegistries.Values;
 
     public LandblockPresentationDiagnostics Diagnostics => new(
         _renderPublisher?.Diagnostics ?? default,

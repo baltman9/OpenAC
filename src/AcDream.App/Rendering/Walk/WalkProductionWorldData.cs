@@ -51,6 +51,9 @@ internal sealed class WalkProductionWorldData : IWalkFrameWorldData
     public ulong? GetOutdoorCellRenderRevision(uint cellId) =>
         _shadows.GetCellRenderRevision(cellId);
 
+    public ulong GetLandblockRenderRevision(uint landblockId) =>
+        _scene.GetLandblockWriteRevision(landblockId);
+
     public bool TryGetCurrentProjection(uint localEntityId, out RenderProjectionRecord record) =>
         _scene.TryGetByLocalEntityId(localEntityId, out record);
 
@@ -81,6 +84,7 @@ internal sealed class WalkProductionWorldData : IWalkFrameWorldData
         _outdoorDynamicsMaterialized.Clear();
         _outdoorObjectsMaterialized.Clear();
         _shellMaterialized.Clear();
+        TrimArena();
         _arenaLength = 0;
         UnregisteredRenderMembershipCount = 0;
         _unregisteredEntitiesThisFrame.Clear();
@@ -245,6 +249,16 @@ internal sealed class WalkProductionWorldData : IWalkFrameWorldData
         _shellMaterialized[anchor] = records;
         return records;
     }
+
+    // The arena only ever grew, because the segments it hands out are alive
+    // until the frame ends. A portal arrival or a pass over a dense town can
+    // push it past thirty thousand records -- fifteen megabytes -- and it kept
+    // that for the rest of the session. This runs at the frame boundary, from
+    // BeginFrame, right after the caches that hold segments into the arena are
+    // cleared, so no live segment can point into the array it replaces.
+    private FrameScratchTrim _arenaTrim = new(everyFrames: 512, floor: 4096);
+
+    private void TrimArena() => _arenaTrim.Observe(ref _arena, _arenaLength);
 
     private ArraySegment<RenderProjectionRecord> AppendToArena(
         ReadOnlySpan<RenderProjectionRecord> source)

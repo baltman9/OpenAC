@@ -2493,26 +2493,26 @@ public class CharacterStatControllerTests
     {
         var info = new ElementInfo();
         var direct = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        direct.Properties.Values[0x3Fu] = new UiPropertyValue
+        direct.Properties.Set(0x3Fu, new UiPropertyValue
         {
             Kind = UiPropertyKind.Integer,
             IntegerValue = 310,
-        };
-        direct.Properties.Values[0x3Eu] = new UiPropertyValue
+        });
+        direct.Properties.Set(0x3Eu, new UiPropertyValue
         {
             Kind = UiPropertyKind.Integer,
             IntegerValue = 372,
-        };
-        direct.Properties.Values[0x3Du] = new UiPropertyValue
+        });
+        direct.Properties.Set(0x3Du, new UiPropertyValue
         {
             Kind = UiPropertyKind.Integer,
             IntegerValue = 310,
-        };
-        direct.Properties.Values[0x3Cu] = new UiPropertyValue
+        });
+        direct.Properties.Set(0x3Cu, new UiPropertyValue
         {
             Kind = UiPropertyKind.Integer,
             IntegerValue = 1000,
-        };
+        });
         info.States[UiStateInfo.DirectStateId] = direct;
         return info;
     }
@@ -2575,6 +2575,96 @@ public class CharacterStatControllerTests
             child.ApplyAnchor(parent.Width, parent.Height);
             ApplyLayoutPass(child);
         }
+    }
+
+
+    /// <summary>
+    /// Every text in the panel is polled on every draw. A row keeps its
+    /// shaped line and composes its value again only when the sheet it shows
+    /// is replaced -- the sheet is immutable, so the instance is the revision
+    /// -- and a layout input the shaping reads still re-shapes.
+    /// </summary>
+    [Fact]
+    public void AttributeRow_ComposesOncePerSheetAndPollsAllocateNothing()
+    {
+        var list = new UiPanel { Width = 300 };
+        var layout = Fake((CharacterStatController.ListBoxId, list));
+        // The panel is handed the sheet it is showing, replaced when the sheet
+        // changes. A source that builds a sheet per poll would compose on
+        // every poll, which is the thing this pin is about.
+        CharacterSheet sheet = new() { Strength = 100 };
+        CharacterStatController.Bind(
+            layout, () => sheet, spriteResolve: id => (id, 16, 16));
+
+        UiText name = RowText(list, row: 0, text: 1);
+        UiText value = RowText(list, row: 0, text: 2);
+        Assert.Equal("Strength", name.LinesProvider()[0].Text);
+        Assert.Equal("100", value.LinesProvider()[0].Text);
+
+        IReadOnlyList<UiText.Line> shapedName = name.LinesProvider();
+        IReadOnlyList<UiText.Line> shapedValue = value.LinesProvider();
+        Assert.Same(shapedName, name.LinesProvider());
+        Assert.Same(shapedValue, value.LinesProvider());
+
+        ZeroAllocationProbe.AssertAllocatesNothing(
+            "character panel row text poll",
+            () =>
+            {
+                _ = name.LinesProvider();
+                _ = value.LinesProvider();
+            });
+
+        sheet = new CharacterSheet { Strength = 101 };
+        IReadOnlyList<UiText.Line> composed = value.LinesProvider();
+        Assert.NotSame(shapedValue, composed);
+        Assert.Equal("101", composed[0].Text);
+        Assert.Same(shapedName, name.LinesProvider());
+
+        value.Width += 7f;
+        Assert.NotSame(composed, value.LinesProvider());
+        Assert.Equal("101", value.LinesProvider()[0].Text);
+    }
+
+    /// <summary>The panel's own labels are polled the same way.</summary>
+    [Fact]
+    public void PanelLabels_KeepTheirShapedLineWhileTheirTextIsUnchanged()
+    {
+        var name = new UiText();
+        var level = new UiText();
+        var layout = Fake(
+            (CharacterStatController.NameId, name),
+            (CharacterStatController.LevelId, level));
+        CharacterSheet sheet = new() { Name = "Dww", Level = 126 };
+        CharacterStatController.Bind(layout, () => sheet);
+
+        IReadOnlyList<UiText.Line> shapedName = name.LinesProvider();
+        IReadOnlyList<UiText.Line> shapedLevel = level.LinesProvider();
+        Assert.Equal("Dww", shapedName[0].Text);
+        Assert.Equal("126", shapedLevel[0].Text);
+        Assert.Same(shapedName, name.LinesProvider());
+        Assert.Same(shapedLevel, level.LinesProvider());
+
+        ZeroAllocationProbe.AssertAllocatesNothing(
+            "character panel label poll",
+            () =>
+            {
+                _ = name.LinesProvider();
+                _ = level.LinesProvider();
+            });
+
+        sheet = new CharacterSheet { Name = "Dww", Level = 127 };
+        Assert.Equal("127", level.LinesProvider()[0].Text);
+        Assert.Same(shapedName, name.LinesProvider());
+    }
+
+    private static UiText RowText(UiElement list, int row, int text)
+    {
+        List<UiClickablePanel> rows =
+            Descendants(list).OfType<UiClickablePanel>().ToList();
+        Assert.True(rows.Count > row, "the panel built no rows.");
+        List<UiText> texts = rows[row].Children.OfType<UiText>().ToList();
+        Assert.True(texts.Count > text, "the row has no such text.");
+        return texts[text];
     }
 
     private static string FirstRowName(UiElement list)

@@ -112,7 +112,7 @@ internal sealed record SessionPlayerResult(
     LiveEntityHydrationController Hydration,
     LiveEntityDeletionController Deletion,
     LiveEntityNetworkUpdateController NetworkUpdates,
-    LiveEntityLivenessController Liveness,
+    RuntimeEntityLivenessController Liveness,
     LiveEntitySessionController SessionEvents,
     GameplayInputFrameController GameplayInput,
     StreamingFrameController StreamingFrame,
@@ -434,7 +434,8 @@ internal sealed class SessionPlayerCompositionPhase
             streaming,
             revealRenderResources,
             () => live.WorldState.LoadedLandblockCount,
-            revealResourceDiagnostics);
+            revealResourceDiagnostics,
+            live.Presentation.HasCollisionPendingRestore);
         Fault(SessionPlayerCompositionPoint.WorldRevealCreated);
 
         return CompleteSessionPlayer(
@@ -686,10 +687,11 @@ internal sealed class SessionPlayerCompositionPhase
             acceptedPositionDrive,
             remotePlacementDrive,
             worldDropProjection);
-        var liveness = new LiveEntityLivenessController(
-            live.LiveEntities,
-            d.PlayerIdentity,
-            deletion);
+        var liveness = new RuntimeEntityLivenessController(
+            d.Runtime.EntityObjects,
+            d.Runtime.PlayerIdentity,
+            deletion,
+            new RuntimePhysicsCurrentCellSource(d.Runtime.EntityObjects));
         var sessionEvents = new LiveEntitySessionController(
             d.InboundEntityEvents,
             hydration,

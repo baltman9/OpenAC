@@ -144,7 +144,7 @@ public sealed class RuntimeEntityOwnershipTests
         AssertExactKeyFields(typeof(LiveEntityAnimationScheduler), "_schedules");
         AssertExactKeyFields(typeof(EntitySpawnAdapter), "_ownersByKey");
         AssertExactKeyFields(
-            typeof(LiveEntityLivenessTracker),
+            typeof(RuntimeEntityLivenessTracker),
             "_deadlines",
             "_present");
         AssertExactKeyFields(
@@ -188,7 +188,7 @@ public sealed class RuntimeEntityOwnershipTests
             typeof(EquippedChildRenderController),
             typeof(LiveEntityAnimationScheduler),
             typeof(EntitySpawnAdapter),
-            typeof(LiveEntityLivenessTracker),
+            typeof(RuntimeEntityLivenessTracker),
             typeof(RemoteMovementObservationTracker),
         ];
 

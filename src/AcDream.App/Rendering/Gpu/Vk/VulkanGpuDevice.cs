@@ -391,7 +391,8 @@ internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineF
                 ringPeak = Math.Max(ringPeak, ring.PeakAllocatedBytes);
             Console.WriteLine(
                 $"[gpu-mem] {_allocator.Describe()} | {_allocator.DescribeOwners()} | "
-                + $"ring-peak {ringPeak / 1024} KiB of {MemoryProfile.RingCapacityBytesPerSlot / 1024} KiB");
+                + $"ring-peak {ringPeak / 1024} KiB of {MemoryProfile.RingCapacityBytesPerSlot / 1024} KiB"
+                + $" | {_uploads.DescribeStaging()}");
         }
 
         int slot = frame.SlotIndex;

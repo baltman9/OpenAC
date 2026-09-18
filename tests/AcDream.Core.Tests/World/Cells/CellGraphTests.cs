@@ -41,6 +41,79 @@ public class CellGraphTests
         Assert.Equal(3, land.Cy);
     }
 
+    /// <summary>
+    /// The land cells of a landblock are built on the first lookup that asks
+    /// for them and follow the terrain currently registered: nothing before
+    /// the terrain arrives, the same cell on every later lookup, nothing again
+    /// once the landblock retires, and a cell built from the new terrain after
+    /// a re-register. This fails if a lookup stops building the cell, if the
+    /// cell is not cached, or if a replaced terrain leaves its cell behind.
+    /// </summary>
+    [Fact]
+    public void GetVisible_LandCell_IsBuiltOnFirstLookupAndFollowsTheTerrain()
+    {
+        const uint prefix = 0xA9B40000u;
+        const uint cellId = prefix | 0x14u;
+        var origin = new Vector3(1000f, 2000f, 0f);
+        var replacementOrigin = new Vector3(3000f, 4000f, 0f);
+        var g = new CellGraph();
+
+        Assert.Null(g.GetVisible(cellId));
+
+        g.RegisterTerrain(prefix, FlatTerrain(), origin);
+        ObjCell? first = g.GetVisible(cellId);
+        LandCell built = Assert.IsType<LandCell>(first);
+        Assert.Equal(2, built.Cx);
+        Assert.Equal(3, built.Cy);
+        Assert.Equal(origin, built.WorldTransform.Translation);
+        Assert.Same(first, g.GetVisible(cellId));
+
+        g.RemoveLandblock(prefix);
+        Assert.Null(g.GetVisible(cellId));
+
+        g.RegisterTerrain(prefix, FlatTerrain(), replacementOrigin);
+        LandCell rebuilt = Assert.IsType<LandCell>(g.GetVisible(cellId));
+        Assert.NotSame(built, rebuilt);
+        Assert.Equal(replacementOrigin, rebuilt.WorldTransform.Translation);
+    }
+
+    /// <summary>
+    /// Replacing a landblock's terrain without retiring it first must drop the
+    /// cells cached from the terrain it replaced.
+    /// </summary>
+    [Fact]
+    public void RegisterTerrain_Again_DropsTheCellCachedFromTheOldTerrain()
+    {
+        const uint prefix = 0xA9B40000u;
+        const uint cellId = prefix | 0x01u;
+        var g = new CellGraph();
+
+        g.RegisterTerrain(prefix, FlatTerrain(), new Vector3(10f, 20f, 0f));
+        LandCell before = Assert.IsType<LandCell>(g.GetVisible(cellId));
+
+        g.RegisterTerrain(prefix, FlatTerrain(), new Vector3(50f, 60f, 0f));
+        LandCell after = Assert.IsType<LandCell>(g.GetVisible(cellId));
+
+        Assert.NotSame(before, after);
+        Assert.Equal(new Vector3(50f, 60f, 0f), after.WorldTransform.Translation);
+    }
+
+    /// <summary>Every outdoor cell of a registered landblock answers, and only
+    /// the sixty-four the landblock owns.</summary>
+    [Fact]
+    public void GetVisible_LandCells_CoverExactlyTheLandblocksSixtyFour()
+    {
+        const uint prefix = 0xA9B40000u;
+        var g = new CellGraph();
+        g.RegisterTerrain(prefix, FlatTerrain(), Vector3.Zero);
+
+        for (uint low = 1u; low <= 0x40u; low++)
+            Assert.IsType<LandCell>(g.GetVisible(prefix | low));
+
+        Assert.Null(g.GetVisible(prefix | 0x00u));
+        Assert.Null(g.GetVisible(prefix | 0x41u));
+    }
+
     [Fact]
     public void GetVisible_LandId_NoTerrain_ReturnsNull()
         => Assert.Null(new CellGraph().GetVisible(0xA9B40014u));

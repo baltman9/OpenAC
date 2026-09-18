@@ -159,12 +159,14 @@ public sealed class BookPanelController : IRetainedPanelController
             pageText.States[UiStateInfo.DirectStateId] = direct;
         }
 
-        direct.Properties.Values[EditablePropertyId] = new UiPropertyValue
-        {
-            Kind = UiPropertyKind.Bool,
-            MasterPropertyId = EditablePropertyId,
-            BoolValue = true,
-        };
+        direct.Properties.Set(
+            EditablePropertyId,
+            new UiPropertyValue
+            {
+                Kind = UiPropertyKind.Bool,
+                MasterPropertyId = EditablePropertyId,
+                BoolValue = true,
+            });
     }
 
     private static ElementInfo? FindInfo(ElementInfo info, uint id)

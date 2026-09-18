@@ -13,6 +13,18 @@ internal sealed class FarLandscapeDrawCache(
     private readonly record struct BatchRef(Entity Entity, int PartIndex, int BatchIndex);
     private readonly record struct AlphaOrder(float DistanceSq, int Index);
 
+    /// <summary>What the grouping reads out of a classified batch: which
+    /// group the batch joins and where that group sorts. A batch transform is
+    /// deliberately not part of it, because the append path reads the
+    /// transform from the batch itself, so moving geometry cannot move a
+    /// batch between groups.</summary>
+    private readonly record struct BatchShape(
+        GroupKey Key, uint DetailCategory, bool IsOpaque);
+
+    /// <summary>The batch range a classified part contributes, which decides
+    /// which batches the grouping visits and in what order.</summary>
+    private readonly record struct PartShape(int BatchStart, int BatchCount);
+
     private sealed class Entity(RenderProjectionRecord record, uint cellId)
     {
         public RenderProjectionRecord Record = record;
@@ -25,10 +37,19 @@ internal sealed class FarLandscapeDrawCache(
         public WalkDrawStage Stage;
         public readonly List<WbDrawDispatcher.WalkClassifiedBatch> Batches = new();
         public readonly List<WbDrawDispatcher.WalkCachedPart> Parts = new();
+        /// <summary>The grouping shape the owning entry cached groups and
+        /// alpha partition were built from; see <see cref="BatchShape"/>.</summary>
+        public readonly List<BatchShape> BatchShapes = new();
+        public readonly List<PartShape> PartShapes = new();
         public bool[] Visible = [];
         public WbDrawDispatcher.InstanceLightSet Lights;
         public uint Indoor;
         public Vector2 Selection;
+        /// <summary>The per-frame lighting the entry's command block was
+        /// built with; a block is only reusable while it still matches.</summary>
+        public WbDrawDispatcher.InstanceLightSet BlockLights;
+        public uint BlockIndoor;
+        public Vector2 BlockSelection;
     }
 
     private sealed class Entry(uint[] cells)
@@ -44,6 +65,26 @@ internal sealed class FarLandscapeDrawCache(
         /// <summary>World-space sort center of each <see cref="AlphaByCell"/> batch.</summary>
         public readonly List<Vector3> AlphaWorldCenters = new();
         public readonly int[] AlphaCellEnds = new int[cells.Length + 1];
+        /// <summary>The landblock write revision this entry was last read
+        /// at; while it holds, no record the entry owns has been written.</summary>
+        public ulong LandblockRevision;
+        /// <summary>The entry's opaque commands, built from
+        /// <see cref="Opaque"/> and handed to the stream in runs of visible
+        /// batches. Every batch has a slot, visible or not, so the block does
+        /// not depend on where the camera is looking. The array set behind
+        /// it comes from the cache's pool and goes back there with the
+        /// entry.</summary>
+        public OrderedDrawCommandBlock Block = new();
+        public bool BlockValid;
+        public int BlockClassification;
+        /// <summary>Advances whenever anything the block is built from
+        /// changes: a rebuild, a regroup, or a reclassification.</summary>
+        public int Classification;
+        /// <summary>Whether the entry holds a live dynamic. A dynamic's
+        /// classification also follows state the scene never writes -- a part
+        /// fade advances on its own clock -- so an entry holding one is read
+        /// again every frame whatever the landblock stamp says.</summary>
+        public bool HasDynamic;
         public readonly Dictionary<GroupKey, List<BatchRef>> Groups = new();
         public readonly List<List<BatchRef>> GroupLists = new();
         public readonly List<int> GroupOrder = new();
@@ -52,6 +93,7 @@ internal sealed class FarLandscapeDrawCache(
     }
 
     private readonly Dictionary<CellKey, Entry> _entries = new();
+    private readonly OrderedDrawCommandBlockPool _blocks = new();
     private readonly List<CellKey> _expired = new();
     private readonly List<WbDrawDispatcher.WalkClassifiedSelectionPart> _selectionScratch = new();
     private readonly List<AlphaOrder> _alphaOrderScratch = new();
@@ -59,12 +101,61 @@ internal sealed class FarLandscapeDrawCache(
     private (RenderSceneGeneration Generation, uint TupleLandblockId) _context;
 
     internal int RebuildCount { get; private set; }
+    /// <summary>How many times an entry groups and alpha partition were
+    /// rebuilt. A reclassification that keeps its shape does not rebuild
+    /// them.</summary>
+    internal int RegroupCount { get; private set; }
+    /// <summary>How many times an entry's command block was rebuilt.</summary>
+    internal int BlockBuildCount { get; private set; }
+    /// <summary>How many times a block rebuild had to take new arrays. A
+    /// rebuild that fits in the arrays the entry already holds takes none,
+    /// and one that fits a set an earlier entry left behind takes that
+    /// instead of allocating.</summary>
+    internal int BlockArrayAllocationCount => _blocks.AllocationCount;
+
+    /// <summary>How many block rebuilds took their arrays from the pool
+    /// instead of allocating.</summary>
+    internal int BlockArrayReuseCount => _blocks.ReuseCount;
+
+    /// <summary>Commands the pooled array sets hold room for: the arrays
+    /// kept alive between the entry that released them and the entry that
+    /// takes them next.</summary>
+    internal int PooledBlockCapacity => _blocks.ParkedCapacity;
+
+    /// <summary>Commands the entries' blocks can hold, and commands they
+    /// carry. Equal means the arrays are sized to their contents with no
+    /// slack.</summary>
+    internal int TotalBlockCapacity
+    {
+        get
+        {
+            int total = 0;
+            foreach (Entry entry in _entries.Values)
+                total += entry.Block.Capacity;
+            return total;
+        }
+    }
+
+    internal int TotalBlockCommands
+    {
+        get
+        {
+            int total = 0;
+            foreach (Entry entry in _entries.Values)
+                total += entry.Block.Count;
+            return total;
+        }
+    }
     internal int EntityClassificationCount { get; private set; }
     internal int EntryCount => _entries.Count;
     internal ReadOnlySpan<int> AlphaEnds => _alphaEnds;
 
     internal void Clear()
     {
+        // The entries go, their arrays stay: a generation change replaces
+        // every entry at once and the replacements want the same arrays.
+        foreach (Entry entry in _entries.Values)
+            _blocks.Park(entry.Block);
         _entries.Clear();
         _expired.Clear();
         _alphaOrderScratch.Clear();
@@ -100,7 +191,10 @@ internal sealed class FarLandscapeDrawCache(
                 _expired.Add(key);
         }
         foreach (CellKey key in _expired)
-            _entries.Remove(key);
+        {
+            if (_entries.Remove(key, out Entry? departed))
+                _blocks.Park(departed.Block);
+        }
     }
 
     internal bool TryAppend(
@@ -127,10 +221,23 @@ internal sealed class FarLandscapeDrawCache(
             _entries.Add(key, entry);
         }
 
+        // One landblock lookup answers for the whole entry what a revision
+        // lookup per entity used to: the scene stamps the landblock of every
+        // record it writes, so an unchanged stamp proves that none of the
+        // entry's dozens of records moved, changed, or went away.
+        ulong landblockRevision = world.GetLandblockRenderRevision(block);
         if (NeedsRebuild(entry))
+        {
             Rebuild(entry);
-        else
+            entry.LandblockRevision = landblockRevision;
+        }
+        else if (entry.HasDynamic
+                 || landblockRevision == 0
+                 || landblockRevision != entry.LandblockRevision)
+        {
             RefreshEntities(entry);
+            entry.LandblockRevision = landblockRevision;
+        }
 
         foreach (Entity entity in entry.Entities)
         {
@@ -154,18 +261,36 @@ internal sealed class FarLandscapeDrawCache(
             }
         }
 
-        foreach (BatchRef item in entry.Opaque)
+        // The entry's opaque commands only change when its classification or
+        // its lighting does, so they are built once and then handed to the
+        // stream in runs. What reaches the stream is the same commands in the
+        // same order the per-command path appended.
+        if (!entry.BlockValid
+            || entry.BlockClassification != entry.Classification
+            || LightingMoved(entry))
         {
-            Entity entity = item.Entity;
-            if (!entity.Visible[item.PartIndex])
-                continue;
-            ref readonly WbDrawDispatcher.WalkClassifiedBatch batch =
-                ref CollectionsMarshal.AsSpan(entity.Batches)[item.BatchIndex];
-            stream.Append(new OrderedDrawCommand(
-                batch.Key, batch.Transform, entity.Stage, firstCell, batch.ClipSlot,
-                entity.Lights, entity.Indoor, batch.Alpha,
-                entity.Selection, batch.DetailCategory, AllowInstanceMerge: true));
+            BuildBlock(entry, firstCell);
         }
+
+        int runStart = -1;
+        for (int i = 0; i < entry.Opaque.Count; i++)
+        {
+            BatchRef item = entry.Opaque[i];
+            if (item.Entity.Visible[item.PartIndex])
+            {
+                if (runStart < 0)
+                    runStart = i;
+                continue;
+            }
+
+            if (runStart >= 0)
+            {
+                stream.AppendRange(entry.Block, runStart, i - runStart);
+                runStart = -1;
+            }
+        }
+        if (runStart >= 0)
+            stream.AppendRange(entry.Block, runStart, entry.Opaque.Count - runStart);
 
         // Per cell: order the visible alpha batches far-to-near by their
         // precomputed world sort center, sorting only (distance, index) pairs,
@@ -202,6 +327,50 @@ internal sealed class FarLandscapeDrawCache(
         return true;
     }
 
+    private static bool LightingMoved(Entry entry)
+    {
+        foreach (Entity entity in entry.Entities)
+        {
+            if (entity.Lights != entity.BlockLights
+                || entity.Indoor != entity.BlockIndoor
+                || entity.Selection != entity.BlockSelection)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void BuildBlock(Entry entry, uint firstCell)
+    {
+        if (entry.Block.Capacity < entry.Opaque.Count)
+            entry.Block = _blocks.Exchange(entry.Block, entry.Opaque.Count);
+        for (int i = 0; i < entry.Opaque.Count; i++)
+        {
+            BatchRef item = entry.Opaque[i];
+            Entity entity = item.Entity;
+            ref readonly WbDrawDispatcher.WalkClassifiedBatch batch =
+                ref CollectionsMarshal.AsSpan(entity.Batches)[item.BatchIndex];
+            entry.Block.Set(i, new OrderedDrawCommand(
+                batch.Key, batch.Transform, entity.Stage, firstCell, batch.ClipSlot,
+                entity.Lights, entity.Indoor, batch.Alpha,
+                entity.Selection, batch.DetailCategory, AllowInstanceMerge: true));
+        }
+
+        entry.Block.Count = entry.Opaque.Count;
+        entry.BlockValid = true;
+        entry.BlockClassification = entry.Classification;
+        foreach (Entity entity in entry.Entities)
+        {
+            entity.BlockLights = entity.Lights;
+            entity.BlockIndoor = entity.Indoor;
+            entity.BlockSelection = entity.Selection;
+        }
+
+        BlockBuildCount++;
+    }
+
     private bool NeedsRebuild(Entry entry)
     {
         if (entry.Retry || entry.MeshVersion != dispatcher.WalkMeshAvailabilityVersion)
@@ -221,6 +390,7 @@ internal sealed class FarLandscapeDrawCache(
         entry.Alpha.Clear();
         entry.Retry = true;
         bool retry = false;
+        bool hasDynamic = false;
         entry.MeshVersion = dispatcher.WalkMeshAvailabilityVersion;
         var seen = new HashSet<RenderProjectionId>();
         for (int i = 0; i < entry.Cells.Length; i++)
@@ -239,12 +409,15 @@ internal sealed class FarLandscapeDrawCache(
                     CellIndex = i,
                     Stage = StageFor(in record),
                 };
-                retry |= ClassifyEntity(entity, records.TupleLandblockId);
+                retry |= ClassifyEntity(entity, records.TupleLandblockId, out _);
+                hasDynamic |= IsDynamic(in record);
                 entry.Entities.Add(entity);
             }
         }
         Regroup(entry);
         entry.Retry = retry;
+        entry.HasDynamic = hasDynamic;
+        entry.Classification++;
         RebuildCount++;
     }
 
@@ -256,9 +429,12 @@ internal sealed class FarLandscapeDrawCache(
     private void RefreshEntities(Entry entry)
     {
         bool changed = false;
+        bool regroup = false;
         bool retry = false;
+        bool hasDynamic = false;
         foreach (Entity entity in entry.Entities)
         {
+            hasDynamic |= IsDynamic(entity.Record);
             uint localEntityId = entity.Record.Source.LocalEntityId;
             if (entity.Revision != 0)
             {
@@ -287,22 +463,50 @@ internal sealed class FarLandscapeDrawCache(
                 Rebuild(entry);
                 return;
             }
+            hasDynamic |= IsDynamic(current);
             if (current == entity.Record && !IsDynamic(current))
                 continue;
             entry.Retry = true;
             changed = true;
             entity.Record = current;
             entity.Stage = StageFor(in current);
-            retry |= ClassifyEntity(entity, _context.TupleLandblockId);
+            retry |= ClassifyEntity(
+                entity, _context.TupleLandblockId, out bool shapeChanged);
+            regroup |= shapeChanged;
         }
         if (changed)
         {
-            Regroup(entry);
+            // Reclassifying a moving entity normally reproduces the same
+            // batches in the same order with new transforms: the cached
+            // groups and the alpha partition still describe it exactly, and
+            // only the alpha sort centres move. Rebuilding them walks every
+            // entity in the entry (up to sixty-four cells), so it runs only
+            // when a reclassification actually changed the shape.
+            if (regroup)
+                Regroup(entry);
+            else
+                RefreshAlphaCenters(entry);
             entry.Retry = retry;
+            entry.Classification++;
+        }
+
+        entry.HasDynamic = hasDynamic;
+    }
+
+    private static void RefreshAlphaCenters(Entry entry)
+    {
+        for (int k = 0; k < entry.AlphaByCell.Count; k++)
+        {
+            BatchRef item = entry.AlphaByCell[k];
+            ref readonly WbDrawDispatcher.WalkClassifiedBatch batch =
+                ref CollectionsMarshal.AsSpan(item.Entity.Batches)[item.BatchIndex];
+            entry.AlphaWorldCenters[k] =
+                Vector3.Transform(batch.LocalSortCenter, batch.Transform);
         }
     }
 
-    private bool ClassifyEntity(Entity entity, uint tupleLandblockId)
+    private bool ClassifyEntity(
+        Entity entity, uint tupleLandblockId, out bool shapeChanged)
     {
         entity.Batches.Clear();
         entity.Parts.Clear();
@@ -313,12 +517,79 @@ internal sealed class FarLandscapeDrawCache(
             retainedParts: entity.Parts);
         if (entity.Visible.Length < entity.Parts.Count)
             entity.Visible = new bool[entity.Parts.Count];
+        shapeChanged = UpdateShape(entity);
         EntityClassificationCount++;
         return dispatcher.WalkClassificationPending;
     }
 
-    private static void Regroup(Entry entry)
+    /// <summary>Compares a fresh classification against the shape the entry
+    /// grouping was built from, adopting it when it differs.</summary>
+    private static bool UpdateShape(Entity entity)
     {
+        ReadOnlySpan<WbDrawDispatcher.WalkCachedPart> parts =
+            CollectionsMarshal.AsSpan(entity.Parts);
+        ReadOnlySpan<WbDrawDispatcher.WalkClassifiedBatch> batches =
+            CollectionsMarshal.AsSpan(entity.Batches);
+        if (ShapeMatches(entity, parts, batches))
+            return false;
+
+        entity.PartShapes.Clear();
+        for (int i = 0; i < parts.Length; i++)
+        {
+            entity.PartShapes.Add(
+                new PartShape(parts[i].BatchStart, parts[i].BatchCount));
+        }
+
+        entity.BatchShapes.Clear();
+        for (int i = 0; i < batches.Length; i++)
+        {
+            entity.BatchShapes.Add(new BatchShape(
+                batches[i].Key, batches[i].DetailCategory, batches[i].IsOpaque));
+        }
+
+        return true;
+    }
+
+    private static bool ShapeMatches(
+        Entity entity,
+        ReadOnlySpan<WbDrawDispatcher.WalkCachedPart> parts,
+        ReadOnlySpan<WbDrawDispatcher.WalkClassifiedBatch> batches)
+    {
+        if (entity.PartShapes.Count != parts.Length
+            || entity.BatchShapes.Count != batches.Length)
+        {
+            return false;
+        }
+
+        ReadOnlySpan<PartShape> partShapes =
+            CollectionsMarshal.AsSpan(entity.PartShapes);
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (partShapes[i].BatchStart != parts[i].BatchStart
+                || partShapes[i].BatchCount != parts[i].BatchCount)
+            {
+                return false;
+            }
+        }
+
+        ReadOnlySpan<BatchShape> batchShapes =
+            CollectionsMarshal.AsSpan(entity.BatchShapes);
+        for (int i = 0; i < batches.Length; i++)
+        {
+            if (batchShapes[i].DetailCategory != batches[i].DetailCategory
+                || batchShapes[i].IsOpaque != batches[i].IsOpaque
+                || batchShapes[i].Key != batches[i].Key)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void Regroup(Entry entry)
+    {
+        RegroupCount++;
         entry.Opaque.Clear();
         entry.Alpha.Clear();
         entry.Groups.Clear();

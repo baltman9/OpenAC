@@ -92,10 +92,8 @@ public sealed class WalkLandscape
         }
 
         int viewCount = activeViews.ViewCount;
-        Span<float> boundsScratch = stackalloc float[32];
         int cornerRow = MidWidth + 1;
-        var intervals = new float[2 * cornerRow][];
-        for (int i = 0; i < intervals.Length; i++) intervals[i] = new float[32];
+        float[][] intervals = EnsureClipIntervals(2 * cornerRow);
 
         int v = 0;
         while (true)
@@ -151,6 +149,25 @@ public sealed class WalkLandscape
             }
             if (last) return;
         }
+    }
+
+    private float[][] _clipIntervals = [];
+
+    /// <summary>
+    /// Corner-row clip heights for the block sweep, carried between frames.
+    /// FillClipHeights rewrites every slot BlockCheck later reads, so a reused
+    /// row holds no state from the previous frame.
+    /// </summary>
+    private float[][] EnsureClipIntervals(int rows)
+    {
+        float[][] intervals = _clipIntervals;
+        if (intervals.Length >= rows) return intervals;
+
+        var grown = new float[rows][];
+        Array.Copy(intervals, grown, intervals.Length);
+        for (int i = intervals.Length; i < rows; i++) grown[i] = new float[32];
+        _clipIntervals = grown;
+        return grown;
     }
 
     private static readonly float[][] CellGridScratch = CreateCellGridScratch();

@@ -176,6 +176,8 @@ internal sealed class PrivateEntityViewportRenderer :
         });
 
         using IDisposable publication = _scope.Publish(encoder);
+        using IDisposable? stage = AcDream.App.Diagnostics.GpuStageProfiler.Measure(
+            encoder, "private-viewport");
 
         UploadCreatureLight();
 

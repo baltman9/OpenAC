@@ -32,8 +32,8 @@ public sealed class MapHousePanelControllerTests
     {
         var info = new ElementInfo { Type = 1, Width = 10, Height = 10 };
         var direct = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        direct.Properties.Values[0x13u] = new UiPropertyValue
-        { Kind = UiPropertyKind.Bool, BoolValue = true };
+        direct.Properties.Set(0x13u, new UiPropertyValue
+        { Kind = UiPropertyKind.Bool, BoolValue = true });
         info.States[UiStateInfo.DirectStateId] = direct;
         info.States[1u] = new UiStateInfo { Id = 1u, Name = "Normal", PassToChildren = true };
         info.States[2u] = new UiStateInfo { Id = 2u, Name = "Normal_rollover", PassToChildren = true };
@@ -44,11 +44,11 @@ public sealed class MapHousePanelControllerTests
     {
         var info = new ElementInfo { Id = 0x100001F1u, Type = 3, Width = 10, Height = 10 };
         var normal = new UiStateInfo { Id = 1u, Name = "Normal" };
-        normal.Properties.Values[0x3Bu] = new UiPropertyValue
-        { Kind = UiPropertyKind.Bool, BoolValue = true };
+        normal.Properties.Set(0x3Bu, new UiPropertyValue
+        { Kind = UiPropertyKind.Bool, BoolValue = true });
         var rollover = new UiStateInfo { Id = 2u, Name = "Normal_rollover" };
-        rollover.Properties.Values[0x3Bu] = new UiPropertyValue
-        { Kind = UiPropertyKind.Bool, BoolValue = false };
+        rollover.Properties.Set(0x3Bu, new UiPropertyValue
+        { Kind = UiPropertyKind.Bool, BoolValue = false });
         info.States[1u] = normal;
         info.States[2u] = rollover;
         return info;

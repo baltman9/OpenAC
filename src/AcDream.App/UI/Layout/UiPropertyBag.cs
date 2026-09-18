@@ -1,5 +1,7 @@
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Numerics;
+using System.Text.Json.Serialization;
 
 namespace AcDream.App.UI.Layout;
 
@@ -41,8 +43,73 @@ public sealed class UiPropertyValue
     public UiStringInfoValue StringInfoValue;
     public UiColorValue ColorValue;
     public Vector3 VectorValue;
-    public List<UiPropertyValue> ArrayValue = new();
-    public Dictionary<uint, UiPropertyValue> StructValue = new();
+
+    // Most authored properties are a scalar, a colour or a string: of the
+    // thirty-five thousand values an interface loads, only a handful are an
+    // array or a struct. Holding an empty list and an empty dictionary in
+    // every one of them cost several megabytes of nothing, so both are built
+    // on the first write. Reads see a shared empty view, which has no
+    // mutators, so a write cannot reach one.
+    private List<UiPropertyValue>? _arrayValue;
+    private Dictionary<uint, UiPropertyValue>? _structValue;
+
+    /// <summary>Members of an array property, empty for anything else.</summary>
+    [JsonIgnore]
+    public IReadOnlyList<UiPropertyValue> ArrayValue =>
+        _arrayValue ?? (IReadOnlyList<UiPropertyValue>)Array.Empty<UiPropertyValue>();
+
+    /// <summary>Members of a struct property, empty for anything else.</summary>
+    [JsonIgnore]
+    public IReadOnlyDictionary<uint, UiPropertyValue> StructValue =>
+        _structValue ?? (IReadOnlyDictionary<uint, UiPropertyValue>)EmptyStruct;
+
+    // The layout fixtures are this type serialised, so the storage keeps the
+    // names the fixtures use. Reading either back gives null when nothing was
+    // written, which is what keeps an untouched value free of collections.
+    [JsonInclude]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("ArrayValue")]
+    internal List<UiPropertyValue>? SerializedArrayValue
+    {
+        get => _arrayValue;
+        set => _arrayValue = value;
+    }
+
+    [JsonInclude]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("StructValue")]
+    internal Dictionary<uint, UiPropertyValue>? SerializedStructValue
+    {
+        get => _structValue;
+        set => _structValue = value;
+    }
+
+    /// <summary>Appends an array member, building the array on first use.</summary>
+    public void AddArrayItem(UiPropertyValue item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        (_arrayValue ??= []).Add(item);
+    }
+
+    /// <summary>Sets a struct member, building the struct on first use.</summary>
+    public void SetStructMember(uint key, UiPropertyValue value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        (_structValue ??= [])[key] = value;
+    }
+
+    /// <summary>Whether this value has built an array or a struct at all.
+    /// Diagnostic: nothing in the interface should depend on it.</summary>
+    internal bool HasArrayStorage => _arrayValue is not null;
+
+    internal bool HasStructStorage => _structValue is not null;
+
+    // Frozen, not a plain dictionary: this one instance stands in for every
+    // value that never wrote a struct member, so a cast back to a mutable
+    // dictionary would give one caller a handle on every empty value in the
+    // interface at once.
+    private static readonly FrozenDictionary<uint, UiPropertyValue> EmptyStruct =
+        FrozenDictionary<uint, UiPropertyValue>.Empty;
 
     public UiPropertyValue Clone()
     {
@@ -59,34 +126,85 @@ public sealed class UiPropertyValue
             VectorValue = VectorValue,
         };
 
-        foreach (var item in ArrayValue)
-            clone.ArrayValue.Add(item.Clone());
-        foreach (var (key, value) in StructValue)
-            clone.StructValue[key] = value.Clone();
+        if (_arrayValue is { Count: > 0 } items)
+        {
+            for (int i = 0; i < items.Count; i++)
+                clone.AddArrayItem(items[i].Clone());
+        }
+
+        if (_structValue is { Count: > 0 } members)
+        {
+            foreach (var (key, value) in members)
+                clone.SetStructMember(key, value.Clone());
+        }
+
         return clone;
     }
 }
 
 public sealed class UiPropertyBag
 {
-    public Dictionary<uint, UiPropertyValue> Values = new();
+    // Frozen for the same reason as the value's empty struct above.
+    private static readonly FrozenDictionary<uint, UiPropertyValue> Empty =
+        FrozenDictionary<uint, UiPropertyValue>.Empty;
+
+    // Built on the first write, for the same reason as the value's array and
+    // struct above: an element that overrides nothing carries no dictionary.
+    private Dictionary<uint, UiPropertyValue>? _values;
+
+    /// <summary>The properties this bag carries, empty when it carries none.</summary>
+    [JsonIgnore]
+    public IReadOnlyDictionary<uint, UiPropertyValue> Values =>
+        _values ?? (IReadOnlyDictionary<uint, UiPropertyValue>)Empty;
+
+    // The layout fixtures are this type serialised; the storage keeps the name
+    // they use.
+    [JsonInclude]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("Values")]
+    internal Dictionary<uint, UiPropertyValue>? SerializedValues
+    {
+        get => _values;
+        set => _values = value;
+    }
+
+    /// <summary>Whether this bag has built its dictionary at all. Diagnostic:
+    /// nothing in the interface should depend on it.</summary>
+    internal bool HasStorage => _values is not null;
+
+    /// <summary>Sets one property, building the dictionary on first use.</summary>
+    public void Set(uint id, UiPropertyValue value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        (_values ??= [])[id] = value;
+    }
 
     public bool TryGetValue(uint id, out UiPropertyValue value)
-        => Values.TryGetValue(id, out value!);
+    {
+        if (_values is not null)
+            return _values.TryGetValue(id, out value!);
+        value = null!;
+        return false;
+    }
 
     public UiPropertyBag Clone()
     {
         var clone = new UiPropertyBag();
-        foreach (var (key, value) in Values)
-            clone.Values[key] = value.Clone();
+        if (_values is { Count: > 0 } values)
+        {
+            foreach (var (key, value) in values)
+                clone.Set(key, value.Clone());
+        }
         return clone;
     }
 
     public static UiPropertyBag Merge(UiPropertyBag baseProperties, UiPropertyBag derivedProperties)
     {
-        var merged = baseProperties.Clone();
+        ArgumentNullException.ThrowIfNull(baseProperties);
+        ArgumentNullException.ThrowIfNull(derivedProperties);
+        UiPropertyBag merged = baseProperties.Clone();
         foreach (var (key, value) in derivedProperties.Values)
-            merged.Values[key] = value.Clone();
+            merged.Set(key, value.Clone());
         return merged;
     }
 }
