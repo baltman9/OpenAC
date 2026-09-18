@@ -17,7 +17,7 @@ public class BuildShadowCellSetTests
         new[] { new Sphere { Origin = center, Radius = radius } };
 
     private static CellPhysics MakeCellWithPortalAtRightWall(
-        Matrix4x4 worldTransform, ushort otherCellId, IReadOnlySet<uint>? visible = null)
+        Matrix4x4 worldTransform, ushort otherCellId, HashSet<uint>? visible = null)
     {
         var portalPoly = new ResolvedPolygon
         {

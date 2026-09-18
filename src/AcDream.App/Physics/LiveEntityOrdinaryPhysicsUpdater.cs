@@ -77,6 +77,7 @@ internal sealed class LiveEntityOrdinaryPhysicsUpdater
                 captureAnimationHooks,
                 callbacks.ExternalOwnerValid,
                 out RuntimeOrdinaryPhysicsCommit commit,
+                out RuntimeOrdinaryPhysicsTicket ticket,
                 sphereList: shape.Spheres,
                 sphereScale: shape.Scale,
                 stepUpHeight: shape.StepUpHeight,
@@ -89,6 +90,7 @@ internal sealed class LiveEntityOrdinaryPhysicsUpdater
 
         bool completed = _runtime.Complete(
             commit,
+            ticket,
             liveCenterX,
             liveCenterY,
             callbacks.Commit);

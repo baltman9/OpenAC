@@ -67,4 +67,35 @@ public class BuildingRegistryTests
 
         Assert.Equal(new HashSet<uint> { 1, 2, 3 }, ids);
     }
+
+    /// <summary>
+    /// The frame's building gather walks every registry on every frame. The
+    /// registry hands its buildings back as the dictionary's own collection,
+    /// so the walk takes no enumerator.
+    /// </summary>
+    [Fact]
+    public void WalkingEveryRegisteredBuildingAllocatesNothing()
+    {
+        var reg = new BuildingRegistry();
+        reg.Add(B(1, 0xA9B40101u));
+        reg.Add(B(2, 0xA9B40102u));
+        reg.Add(B(3, 0xA9B40103u));
+
+        uint warm = SumBuildingIds(reg);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        uint walked = SumBuildingIds(reg);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(warm, walked);
+        Assert.Equal(6u, walked);
+        Assert.Equal(0L, allocated);
+    }
+
+    private static uint SumBuildingIds(BuildingRegistry registry)
+    {
+        uint total = 0;
+        foreach (Building building in registry.All())
+            total += building.BuildingId;
+        return total;
+    }
 }
