@@ -707,7 +707,10 @@ public sealed partial class WalkStaticStreamPopulatorTests
         Assert.Equal(selectedGfx, Assert.Single(selections).GfxObjId);
         WbDrawDispatcher.WalkClassifiedBatch batch = Assert.Single(batches);
         Assert.Equal(1u, batch.DetailCategory);
-        Assert.Equal(Matrix4x4.CreateTranslation(8, 9, 10), batch.Transform);
+        // Degrade mode 4 turns the part toward the viewer; the pin is about allocation and mutation, so it asks the same rule.
+        Assert.Equal(
+            WalkBuildingDrawTransform.Resolve(Matrix4x4.CreateTranslation(8, 9, 10), Vector3.Zero, Vector3.Zero, 4u),
+            batch.Transform);
     }
 
     [Fact]
