@@ -130,6 +130,15 @@ internal sealed class HeadlessPluginHost
     public IPluginCommandRegistry Commands { get; }
     public IPluginStorage Storage { get; }
     public IPluginStorage VtankProfiles { get; }
+
+    /// <summary>
+    /// The session's loot classifier directory, the same one the graphical
+    /// client keeps: a plugin that publishes its loot rules loads headless
+    /// exactly as it does with a window, and another plugin can ask it for
+    /// verdicts by id.
+    /// </summary>
+    public IPluginLootClassifierRegistry LootClassifiers { get; } =
+        new AcDream.Core.Plugins.PluginLootClassifierRegistry();
     public IGameState State => this;
     public IEvents Events => this;
     public ISelectionService Selection => _runtime.ActionOwner.Selection;

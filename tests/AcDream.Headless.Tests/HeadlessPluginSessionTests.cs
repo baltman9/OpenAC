@@ -208,6 +208,42 @@ public sealed class HeadlessPluginSessionTests
     /// profile files silently runs on defaults with nothing in the record
     /// to say so.
     /// </summary>
+    /// <summary>
+    /// A plugin that publishes its loot rules loads headless as it does with
+    /// a window: the session hosts the same classifier directory, so the
+    /// registration is taken rather than refused, and it is listed.
+    /// Mutation: leave the headless host on the contract's no-op registry and
+    /// the registration throws.
+    /// </summary>
+    [Fact]
+    public void APluginCanPublishALootClassifierInAHeadlessSession()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+
+        IPluginLootClassifierRegistry registry = session.Plugins.Host.LootClassifiers;
+        using IDisposable registration = registry.Register(
+            "fixture",
+            "Fixture classifier",
+            new IndifferentClassifier());
+
+        Assert.Contains(
+            registry.Available,
+            static info => info.DisplayName == "Fixture classifier");
+    }
+
+    private sealed class IndifferentClassifier : IPluginLootClassifier
+    {
+        public PluginLootClassification Classify(
+            in PluginLootClassificationContext context) => default;
+    }
+
     [Fact]
     public void APluginsOwnStorageIsReadableAndWritableInAHeadlessSession()
     {
