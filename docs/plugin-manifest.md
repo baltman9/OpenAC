@@ -15,6 +15,8 @@ any code.
 | `maxHostVersion` | optional | Highest client version, inclusive. |
 | `skipHostVersions` | optional | Exact client versions with a known breakage. |
 | `hosts` | optional; absent = both | Non-empty array of `graphical`, `headless`. |
+| `capabilitiesVersion` | optional; required if `capabilities` is present | Which capability vocabulary the entries below are spelled in. |
+| `capabilities` | optional | What the plugin does, shown to the player before they install. See [Capabilities](#capabilities). |
 
 A property name must be unique, case-insensitively, within every object in the document, including objects nested inside arrays; a repeat fails to parse.
 
@@ -88,6 +90,50 @@ depth, on a hand-installed folder.
 The launcher never loads, reflects over, or runs a downloaded file. It unzips, verifies the
 `.sha256`, and stages the plugin disabled; enabling it is a separate, explicit choice the player
 makes on the Plugins tab.
+
+### Capabilities
+
+The launcher shows a player what a plugin does before they install it, and asks again when an
+update changes the answer. That disclosure is the author's, declared in the manifest. The client
+does not read or enforce this field; it is a launcher surface only.
+
+```json
+{
+  "capabilitiesVersion": 1,
+  "capabilities": [
+    { "name": "network", "note": "Checks this plugin's own repository for updates." },
+    { "name": "chat", "note": "Reads tells addressed to it and replies to them." }
+  ]
+}
+```
+
+| Name | Declare it when the plugin |
+|---|---|
+| `network` | opens any network connection of its own |
+| `analytics` | reports usage anywhere off the player's machine |
+| `fileWrite` | writes outside its own plugin directory |
+| `processLaunch` | starts another process |
+| `nativeCode` | loads or runs native code |
+| `inputAutomation` | synthesises keyboard or mouse input |
+| `chat` | reads chat or sends it (one flag covers both) |
+
+**Declaration order is display order.** The launcher shows the entries in the order the manifest
+lists them, so a heavier capability cannot be buried below benign ones.
+
+**Every entry needs a note**, and the note is the sentence the player reads. It is the author's
+own words rendered on the install surface, so it is held to a strict shape: at most 120
+characters, trimmed, no control characters, no Unicode formatting characters (bidirectional
+overrides and zero-width characters, which can disguise what a note says), and no links — a note
+containing `://` is refused. A missing or empty note fails to parse.
+
+**The launcher refuses what it cannot read.** A capability name it does not recognise, a duplicate
+name (case-insensitively), or a `capabilitiesVersion` newer than the vocabulary this launcher
+understands all refuse the install outright rather than installing with an incomplete disclosure.
+Declaring nothing is fine; declaring something unreadable is not. When an update declares a
+different set than the installed version, the launcher asks the player to agree again before it
+applies.
+
+The current vocabulary version is `1`.
 
 ### Beta releases
 
