@@ -569,6 +569,89 @@ public sealed class LiveSessionEventRouterTests
     }
 
 
+    private static WeenieData Weenie(uint guid) => new(
+        Guid: guid,
+        Name: null,
+        Type: null,
+        WeenieClassId: 1u,
+        IconId: 0u,
+        IconOverlayId: 0u,
+        IconUnderlayId: 0u,
+        Effects: 0u,
+        Value: null,
+        StackSize: null,
+        StackSizeMax: null,
+        Burden: null,
+        ContainerId: null,
+        WielderId: null,
+        ValidLocations: null,
+        CurrentWieldedLocation: null,
+        Priority: null,
+        ItemsCapacity: null,
+        ContainersCapacity: null,
+        Structure: null,
+        MaxStructure: null,
+        Workmanship: null);
+
+    [Fact]
+    public void ForgettingWorldObjectsDoesNotRecomputePlayerQualities()
+    {
+        using var session = NewSession();
+        const uint playerGuid = 0x50000001u;
+        const int worldObjects = 200;
+        var objects = new ClientObjectTable();
+        var character = new RuntimeCharacterState();
+        int movementStatsUpdated = 0;
+
+        var router = new LiveSessionEventRouter(
+            session,
+            NoOpEntitySink(),
+            NoOpEnvironmentSink(),
+            new LiveInventorySessionBindings(
+                objects,
+                PlayerGuid: () => playerGuid,
+                OnShortcuts: null,
+                OnUseDone: null,
+                ItemMana: new ItemManaState(),
+                ExternalContainers: new ExternalContainerState()),
+            new LiveCharacterSessionBindings(
+                new CombatState(),
+                character,
+                ResolveSkillFormulaBonus: null,
+                OnSkillsUpdated: null,
+                OnConfirmationRequest: null,
+                OnConfirmationDone: null,
+                ClientTime: () => 0d,
+                OnMovementStatsUpdated: () => movementStatsUpdated++),
+            NewSocialBindings());
+        router.Attach();
+
+        for (uint i = 0; i < worldObjects; i++)
+            objects.Ingest(Weenie(0x7000_0000u + i));
+        uint carried = 0x7000_0000u + worldObjects;
+        objects.Ingest(Weenie(carried));
+        objects.Get(carried)!.ContainerId = playerGuid;
+        uint wielded = carried + 1u;
+        objects.Ingest(Weenie(wielded));
+        objects.Get(wielded)!.WielderId = playerGuid;
+        movementStatsUpdated = 0;
+
+        // A landblock's worth of world objects falling out of the client's
+        // memory must not make the player recompute anything: the count is the
+        // bound, not the clock.
+        for (uint i = 0; i < worldObjects; i++)
+            Assert.True(objects.Remove(0x7000_0000u + i));
+        Assert.Equal(0, movementStatsUpdated);
+
+        // What the player carries or wields still does.
+        Assert.True(objects.Remove(carried));
+        Assert.Equal(1, movementStatsUpdated);
+        Assert.True(objects.Remove(wielded));
+        Assert.Equal(2, movementStatsUpdated);
+
+        router.Dispose();
+    }
+
     [Fact]
     public void ObjectTablePropertyChange_RecomputesAndPushesBurden()
     {
