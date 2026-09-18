@@ -57,6 +57,45 @@ public sealed class HeadlessItemAutomationTests
     }
 
     /// <summary>
+    /// The use throttle is one stamp read by every use entry point. The
+    /// runtime's own use path (the loot close goes through it) once stamped
+    /// it from the wall clock while this automation compared against the
+    /// simulation clock, so after one close every later automation use was
+    /// refused for good. Mutation: stamp the runtime path from
+    /// <c>Environment.TickCount64</c> again and the last use is refused.
+    /// </summary>
+    [Fact]
+    public void TryUse_SharesTheUseThrottleClockWithTheRuntimeUsePath()
+    {
+        const uint first = 0x80001250u;
+        const uint second = 0x80001251u;
+        var h = new Harness();
+        foreach (uint corpse in new[] { first, second })
+        {
+            h.Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+            {
+                ObjectId = corpse,
+                Type = ItemType.Container,
+                ContainerId = 0u,
+                Useability = ItemUseability.Remote,
+                ItemsCapacity = 10,
+                PublicWeenieBitfield = (uint)PublicWeenieFlags.Corpse,
+            });
+        }
+        _ = h.Runtime.Clock.Advance(1.0d);
+
+        // The runtime's own use path stamps the throttle.
+        _ = h.Runtime.ItemInteractionOwner.TryUseItemForAutomation(first);
+        h.Runtime.InventoryOwner.Transactions.ClearBusy();
+
+        _ = h.Runtime.Clock.Advance(0.1d);
+        Assert.False(h.Automation.TryUse(second));
+        _ = h.Runtime.Clock.Advance(0.3d);
+        Assert.True(h.Automation.TryUse(second));
+        Assert.Contains(second, h.Transport.UseCalls);
+    }
+
+    /// <summary>
     /// A headless pull from an open corpse is the runtime's own backpack
     /// placement, the same request the window's loot click makes. Before
     /// this the headless host bound a refusal, so no headless session could

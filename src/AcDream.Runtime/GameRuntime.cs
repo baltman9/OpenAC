@@ -320,7 +320,8 @@ public sealed class GameRuntime
                 context.Inventory,
                 context.Actions,
                 context.Character,
-                context.Communication);
+                context.Communication,
+                clock);
             construction.Own(context.ItemInteraction);
             Fault(
                 GameRuntimeConstructionPoint.ItemInteractionCreated,

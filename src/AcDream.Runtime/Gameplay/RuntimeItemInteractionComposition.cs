@@ -22,7 +22,8 @@ internal static class RuntimeItemInteractionComposition
         RuntimeInventoryState inventory,
         RuntimeActionState actions,
         RuntimeCharacterState character,
-        RuntimeCommunicationState communication)
+        RuntimeCommunicationState communication,
+        IGameRuntimeClock clock)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(identity);
@@ -30,6 +31,7 @@ internal static class RuntimeItemInteractionComposition
         ArgumentNullException.ThrowIfNull(actions);
         ArgumentNullException.ThrowIfNull(character);
         ArgumentNullException.ThrowIfNull(communication);
+        ArgumentNullException.ThrowIfNull(clock);
 
         WorldSession? Live() => session.CurrentSession;
         var transport = new RuntimeSessionInteractionTransport(Live);
@@ -67,6 +69,12 @@ internal static class RuntimeItemInteractionComposition
             actions.Transactions,
             actions.Interaction,
             playerGuid: () => identity.ServerGuid,
+            // The use throttle is one stamp shared by every use entry point: the
+            // window click, the command adapter and the headless automation all
+            // read the simulation clock, so this owner stamps it from the same
+            // clock. A wall-clock stamp here would sit far ahead of the others
+            // and refuse every use they attempt after it.
+            nowMs: () => checked((long)Math.Floor(clock.SimulationTimeSeconds * 1000d)),
             sendUse: guid => Live()?.SendUse(guid),
             sendUseWithTarget: (source, target) =>
                 Live()?.SendUseWithTarget(source, target),
