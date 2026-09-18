@@ -1251,7 +1251,15 @@ public sealed class CellPhysics
 
     public Dictionary<ushort, ResolvedPolygon>? PortalPolygons { get; init; }
 
-    public IReadOnlySet<uint> VisibleCellIds { get; init; } = new System.Collections.Generic.HashSet<uint>();
+    /// <summary>
+    /// The cell's visible-cell set, as the set itself rather than an
+    /// interface: the containment search walks it for every sphere path a
+    /// frame resolves, and walking it through an interface boxed the set's
+    /// enumerator each time -- sixteen megabytes per thirty seconds indoors.
+    /// It is built once when the cell enters the cache and is not written
+    /// afterwards.
+    /// </summary>
+    public System.Collections.Generic.HashSet<uint> VisibleCellIds { get; init; } = new();
 
     public bool SeenOutside { get; init; }
 
