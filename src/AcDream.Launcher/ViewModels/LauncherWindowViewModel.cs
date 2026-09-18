@@ -464,19 +464,12 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         }
     }
 
-    private string DescribeStartupUpdateCheckOutcome()
-    {
-        if (!UpdatePrompt.StartupCheckSucceeded)
-        {
-            return "Update check unavailable; the launcher works offline.";
-        }
-
-        // An available update gets its own banner at the top of the window; saying so again
-        // in the status line is noise.
-        return UpdatePrompt.IsClientUpdateAvailable || UpdatePrompt.IsLauncherUpdateAvailable
+    // An available update has its own banner and being current needs no announcement, so the
+    // status line speaks only when the check itself could not run.
+    private string DescribeStartupUpdateCheckOutcome() =>
+        UpdatePrompt.StartupCheckSucceeded
             ? ""
-            : "Up to date.";
-    }
+            : "Update check unavailable; the launcher works offline.";
 
     private void OnOrchestratorStateChanged(object? sender, EventArgs e) =>
         _dispatcher.Post(() =>

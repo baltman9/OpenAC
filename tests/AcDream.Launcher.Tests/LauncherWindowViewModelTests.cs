@@ -128,7 +128,7 @@ public sealed partial class LauncherWindowViewModelTests
     }
 
     [Fact]
-    public async Task StartupStatusReportsUpToDateWhenNothingIsAvailable()
+    public async Task StartupStatusStaysEmptyWhenNothingIsAvailable()
     {
         using var orchestrator = new FakeLauncherOrchestrator
         {
@@ -147,7 +147,7 @@ public sealed partial class LauncherWindowViewModelTests
         viewModel.Initialize();
         await viewModel.StartBackgroundInitializationAsync();
 
-        Assert.StartsWith("Up to date", viewModel.OperationStatus, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, viewModel.OperationStatus);
     }
 
     [Fact]
