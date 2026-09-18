@@ -127,6 +127,35 @@ public sealed partial class WalkStaticStreamPopulatorTests
     }
 
     [Fact]
+    public void RetainedCells_FadingDynamicKeepsFadingWithoutSceneWrites()
+    {
+        using var fx = new DispatcherFixture();
+        InstallRetainedMesh(fx);
+        var world = new RetainedWorld { LandblockRevision = 11UL };
+        RenderProjectionRecord dynamic = RetainedRecord(1) with
+        {
+            ProjectionClass = RenderProjectionClass.LiveDynamicRoot,
+        };
+        world.Set(dynamic);
+        var cache = new FarLandscapeDrawCache(fx.Dispatcher, world);
+
+        // A part fade runs on its own clock. Nothing writes the scene while it
+        // runs, so the landblock stamp never moves, and an entry holding a
+        // dynamic would keep its first classification and freeze the fade.
+        fx.Fades.StartPartFade(
+            dynamic.Source.LocalEntityId, partIndex: 0, start: 0.25f, end: 0.75f, time: 1f);
+        float before = Assert.Single(AppendRetainedAlpha(fx, cache)).Alpha;
+
+        fx.Fades.AdvanceAll(0.5f);
+        float after = Assert.Single(AppendRetainedAlpha(fx, cache)).Alpha;
+
+        Assert.Equal(0.75f, before, 3);
+        Assert.True(
+            after < before,
+            $"the dynamic opacity froze at {before} instead of fading to {after}.");
+    }
+
+    [Fact]
     public void RetainedCells_UnchangedLandblockSkipsThePerEntityRefresh()
     {
         using var fx = new DispatcherFixture();

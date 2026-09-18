@@ -63,6 +63,11 @@ internal sealed class FarLandscapeDrawCache(
         /// <summary>The landblock write revision this entry was last read
         /// at; while it holds, no record the entry owns has been written.</summary>
         public ulong LandblockRevision;
+        /// <summary>Whether the entry holds a live dynamic. A dynamic's
+        /// classification also follows state the scene never writes -- a part
+        /// fade advances on its own clock -- so an entry holding one is read
+        /// again every frame whatever the landblock stamp says.</summary>
+        public bool HasDynamic;
         public readonly Dictionary<GroupKey, List<BatchRef>> Groups = new();
         public readonly List<List<BatchRef>> GroupLists = new();
         public readonly List<int> GroupOrder = new();
@@ -160,7 +165,9 @@ internal sealed class FarLandscapeDrawCache(
             Rebuild(entry);
             entry.LandblockRevision = landblockRevision;
         }
-        else if (landblockRevision == 0 || landblockRevision != entry.LandblockRevision)
+        else if (entry.HasDynamic
+                 || landblockRevision == 0
+                 || landblockRevision != entry.LandblockRevision)
         {
             RefreshEntities(entry);
             entry.LandblockRevision = landblockRevision;
@@ -255,6 +262,7 @@ internal sealed class FarLandscapeDrawCache(
         entry.Alpha.Clear();
         entry.Retry = true;
         bool retry = false;
+        bool hasDynamic = false;
         entry.MeshVersion = dispatcher.WalkMeshAvailabilityVersion;
         var seen = new HashSet<RenderProjectionId>();
         for (int i = 0; i < entry.Cells.Length; i++)
@@ -274,11 +282,13 @@ internal sealed class FarLandscapeDrawCache(
                     Stage = StageFor(in record),
                 };
                 retry |= ClassifyEntity(entity, records.TupleLandblockId, out _);
+                hasDynamic |= IsDynamic(in record);
                 entry.Entities.Add(entity);
             }
         }
         Regroup(entry);
         entry.Retry = retry;
+        entry.HasDynamic = hasDynamic;
         RebuildCount++;
     }
 
@@ -292,8 +302,10 @@ internal sealed class FarLandscapeDrawCache(
         bool changed = false;
         bool regroup = false;
         bool retry = false;
+        bool hasDynamic = false;
         foreach (Entity entity in entry.Entities)
         {
+            hasDynamic |= IsDynamic(entity.Record);
             uint localEntityId = entity.Record.Source.LocalEntityId;
             if (entity.Revision != 0)
             {
@@ -322,6 +334,7 @@ internal sealed class FarLandscapeDrawCache(
                 Rebuild(entry);
                 return;
             }
+            hasDynamic |= IsDynamic(current);
             if (current == entity.Record && !IsDynamic(current))
                 continue;
             entry.Retry = true;
@@ -346,6 +359,8 @@ internal sealed class FarLandscapeDrawCache(
                 RefreshAlphaCenters(entry);
             entry.Retry = retry;
         }
+
+        entry.HasDynamic = hasDynamic;
     }
 
     private static void RefreshAlphaCenters(Entry entry)

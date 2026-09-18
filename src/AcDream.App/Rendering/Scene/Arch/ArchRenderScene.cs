@@ -1244,10 +1244,9 @@ internal sealed class ArchRenderScene : IRenderScene, IRenderSceneQuerySource
 
     private void NoteLandblockWrite(Entity entity)
     {
-        uint owner = LandblockKey(
-            _world.Get<RenderSpatialResidency>(entity).OwnerLandblockId);
-        uint cell = LandblockKey(
-            _world.Get<RenderSpatialResidency>(entity).FullCellId);
+        RenderSpatialResidency residency = _world.Get<RenderSpatialResidency>(entity);
+        uint owner = LandblockKey(residency.OwnerLandblockId);
+        uint cell = LandblockKey(residency.FullCellId);
         if (owner == 0 && cell == 0)
         {
             _unkeyedWriteRevision = ++_landblockWriteClock;
