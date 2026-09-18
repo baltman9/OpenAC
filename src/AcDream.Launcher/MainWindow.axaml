@@ -61,6 +61,8 @@
     <Style Selector="Border.chip.blocked TextBlock"><Setter Property="Foreground" Value="#FFB0A0" /></Style>
     <Style Selector="Border.chip.capability"><Setter Property="Background" Value="#16262E" /><Setter Property="BorderBrush" Value="#8FB8C9" /></Style>
     <Style Selector="Border.chip.capability TextBlock"><Setter Property="Foreground" Value="#8FB8C9" /></Style>
+    <Style Selector="Border.chip.beta"><Setter Property="Background" Value="#262E33" /><Setter Property="BorderBrush" Value="#7C8F99" /></Style>
+    <Style Selector="Border.chip.beta TextBlock"><Setter Property="Foreground" Value="#A9BBC5" /></Style>
     <Style Selector="Border.plugincard"><Setter Property="Background" Value="#141E24" /><Setter Property="BorderBrush" Value="#35434B" /><Setter Property="BorderThickness" Value="1" /><Setter Property="CornerRadius" Value="3" /><Setter Property="Margin" Value="0,0,0,6" /></Style>
     <Style Selector="Border.plugintile"><Setter Property="Width" Value="32" /><Setter Property="Height" Value="32" /><Setter Property="CornerRadius" Value="4" /><Setter Property="Background" Value="#1F2C34" /><Setter Property="VerticalAlignment" Value="Center" /></Style>
     <Style Selector="Border.plugintile TextBlock"><Setter Property="Foreground" Value="#A9BBC5" /><Setter Property="FontSize" Value="13" /><Setter Property="FontWeight" Value="SemiBold" /><Setter Property="HorizontalAlignment" Value="Center" /><Setter Property="VerticalAlignment" Value="Center" /></Style>
@@ -223,12 +225,13 @@
                 <DataTemplate x:DataType="vm:PluginInstalledRowViewModel">
                   <Border Classes="plugincard">
                     <StackPanel>
-                      <Grid ColumnDefinitions="32,*" ColumnSpacing="10" Margin="12,10,12,8">
+                      <Grid ColumnDefinitions="32,*,Auto" ColumnSpacing="10" Margin="12,10,12,8">
                         <Border Classes="plugintile"><Panel><TextBlock Text="{Binding Initials}" IsVisible="{Binding !HasIcon}" /><Image Source="{Binding Icon}" IsVisible="{Binding HasIcon}" Width="32" Height="32" RenderOptions.BitmapInterpolationMode="HighQuality" /></Panel></Border>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
                           <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="15" TextTrimming="CharacterEllipsis" />
                           <SelectableTextBlock FontSize="12" Foreground="#A9BBC5"><Run Text="{Binding Id}" FontFamily="Menlo, Consolas, monospace" FontSize="11" /><Run Text=" · " /><Run Text="{Binding SourceBadge}" /></SelectableTextBlock>
                         </StackPanel>
+                        <TextBlock Grid.Column="2" Text="Beta Channel" IsVisible="{Binding ShowBetaChannelLabel}" Foreground="#A9BBC5" FontSize="11" VerticalAlignment="Center" AutomationProperties.Name="Beta Channel" />
                       </Grid>
                       <StackPanel Margin="54,0,12,8" Spacing="2" IsVisible="{Binding HasNotes}">
                         <TextBlock Text="{Binding UpdateCompatibilityNote}" IsVisible="{Binding ShowUpdateCompatibilityNote}" Foreground="#DBB573" FontSize="12" TextWrapping="Wrap" />
@@ -251,8 +254,8 @@
                               <TextBlock Grid.Column="1" Grid.ColumnSpan="2" Text="{Binding CompatibilityText}" IsVisible="{Binding ShowCompatibilityInfoLine}" Classes="muted" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
                             </Grid>
                             <WrapPanel IsVisible="{Binding HasChips}">
-                              <Border Classes="chip" IsVisible="{Binding IsPrerelease}" Margin="0,0,6,0" AutomationProperties.Name="beta">
-                                <TextBlock Text="beta" Classes="muted" />
+                              <Border Classes="chip beta" IsVisible="{Binding IsPrerelease}" Margin="0,0,6,0" AutomationProperties.Name="beta install">
+                                <TextBlock Text="beta install" />
                               </Border>
                               <Border Classes="chip capability" IsVisible="{Binding HasCapabilities}" Margin="0,0,6,0" AutomationProperties.Name="{Binding CapabilityCountText}">
                                 <TextBlock Text="{Binding CapabilityCountText}" />
@@ -267,7 +270,6 @@
                                 <TextBlock Text="{Binding BlockedText}" TextWrapping="Wrap" />
                               </Border>
                             </WrapPanel>
-                            <CheckBox Content="Beta updates" IsVisible="{Binding ShowBetaToggle}" IsEnabled="{Binding IsBetaToggleEnabled}" IsChecked="{Binding IsBetaChannel, Mode=TwoWay}" AutomationProperties.Name="{Binding BetaToggleAutomationName}" />
                           </StackPanel>
                           <Button Grid.Column="1" Content="Update" Classes="primary" FontWeight="Normal" IsVisible="{Binding UpdateAvailable}" Command="{Binding UpdateCommand}" AutomationProperties.Name="{Binding UpdateAutomationName}" VerticalAlignment="Center" />
                           <Button Grid.Column="2" Content="Remove" Classes="destructive" IsVisible="{Binding CanRemove}" Command="{Binding RemoveCommand}" AutomationProperties.Name="{Binding RemoveAutomationName}" VerticalAlignment="Center" />
@@ -305,12 +307,13 @@
                       </Grid>
                       <TextBlock Text="{Binding Description}" Foreground="#C3D0D6" FontSize="13" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Description}" Margin="54,0,12,10" />
                       <Border Classes="pluginfoot">
-                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
                           <StackPanel VerticalAlignment="Center" Spacing="5">
                             <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
                               <TextBlock Text="{Binding LatestVersion, StringFormat='v{0}'}" IsVisible="{Binding HasLatestVersion}" Foreground="#7C8F99" FontSize="12" />
                               <TextBlock Grid.Column="1" Text="{Binding CompatibilityText}" IsVisible="{Binding ShowCompatibilityWarning}" Foreground="#DBB573" FontSize="12" TextWrapping="Wrap" />
                               <TextBlock Grid.Column="1" Text="{Binding CompatibilityText}" IsVisible="{Binding ShowCompatibilityInfo}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                              <TextBlock Grid.Column="1" Text="{Binding ChannelUnavailableText}" IsVisible="{Binding HasChannelUnavailable}" Foreground="#DBB573" FontSize="12" TextWrapping="Wrap" />
                             </Grid>
                             <WrapPanel IsVisible="{Binding HasCapabilities}">
                               <Border Classes="chip capability" AutomationProperties.Name="{Binding CapabilityCountText}">
@@ -318,7 +321,8 @@
                               </Border>
                             </WrapPanel>
                           </StackPanel>
-                          <Button Grid.Column="1" Content="Install" Classes="primary" Command="{Binding InstallCommand}" AutomationProperties.Name="{Binding InstallAutomationName}" VerticalAlignment="Center" />
+                          <ComboBox Grid.Column="1" IsVisible="{Binding ShowChannelPicker}" ItemsSource="{Binding ChannelChoices}" SelectedItem="{Binding SelectedChannelLabel, Mode=TwoWay}" VerticalAlignment="Center" AutomationProperties.Name="{Binding ChannelPickerAutomationName}" />
+                          <Button Grid.Column="2" Content="Install" Classes="primary" Command="{Binding InstallCommand}" AutomationProperties.Name="{Binding InstallAutomationName}" VerticalAlignment="Center" />
                         </Grid>
                       </Border>
                     </StackPanel>

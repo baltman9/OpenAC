@@ -2911,6 +2911,10 @@ public sealed partial class LauncherWindowViewModelTests
         viewModel.Plugins.ShowBetaPlugins = true;
 
         PluginDiscoverRowViewModel row = Assert.Single(viewModel.Plugins.Discover);
+        // Stable is the default and this repo has never published one, so the beta is a choice.
+        Assert.Null(row.LatestVersion);
+        Assert.Equal("No stable release yet.", row.ChannelUnavailableText);
+        row.SelectedChannelLabel = PluginDiscoverRowViewModel.BetaChannelLabel;
         Assert.Equal("0.2.0-beta.1", row.LatestVersion);
 
         row.InstallCommand.Execute(null);
@@ -2929,6 +2933,449 @@ public sealed partial class LauncherWindowViewModelTests
         PluginInstalledRowViewModel installed = Assert.Single(
             viewModel.Plugins.Installed, r => r.Id == id);
         Assert.True(installed.IsPrerelease);
+    }
+
+    [Fact]
+    public async Task TheChannelPickerShowsForEveryRowWhenShowBetaPluginsIsOnEvenWithNoBetaCandidate()
+    {
+        using var fixture = new PluginPanelFixture();
+        const string repo = "shaneedwards/openac-plugin-hello";
+        Uri stableUri = GitHubReleaseLocator.LatestAsset(repo, "plugin.json");
+        Uri stableTaggedUri = GitHubReleaseLocator.TaggedAsset(repo, "v0.2.0", "plugin.json");
+        Uri feedUri = GitHubReleaseLocator.ReleasesFeed(repo);
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(fixture.ListJson());
+            }
+
+            if (request.RequestUri == stableUri)
+            {
+                return Redirect(stableTaggedUri);
+            }
+
+            if (request.RequestUri == stableTaggedUri)
+            {
+                return Ok(PluginPanelFixture.ManifestJson(
+                    "edwards.discoverable", "0.2.0", "0.1.0", ["headless"]));
+            }
+
+            // No prerelease entries at all: the picker must still show while Show beta plugins is
+            // on (opting in is a durable subscription, not conditioned on today's releases).
+            if (request.RequestUri == feedUri)
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+        await viewModel.Plugins.RefreshDiscoverDetailsAsync();
+
+        PluginDiscoverRowViewModel row = Assert.Single(viewModel.Plugins.Discover);
+        Assert.False(row.ShowChannelPicker);
+
+        viewModel.Plugins.ShowBetaPlugins = true;
+
+        row = Assert.Single(viewModel.Plugins.Discover);
+        Assert.True(row.ShowChannelPicker);
+    }
+
+    [Fact]
+    public async Task SwitchingTheDiscoverRowsChannelChangesTheDisplayedVersionWithoutANewRequest()
+    {
+        using var fixture = new PluginPanelFixture();
+        const string repo = "shaneedwards/openac-plugin-hello";
+        const string id = "edwards.discoverable";
+        Uri stableUri = GitHubReleaseLocator.LatestAsset(repo, "plugin.json");
+        Uri stableTaggedUri = GitHubReleaseLocator.TaggedAsset(repo, "v0.2.0", "plugin.json");
+        Uri feedUri = GitHubReleaseLocator.ReleasesFeed(repo);
+        Uri betaTaggedUri = GitHubReleaseLocator.TaggedAsset(repo, "v0.3.0-beta.1", "plugin.json");
+        byte[] feedBytes = System.Text.Encoding.UTF8.GetBytes($$"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <entry><link rel="alternate" href="https://github.com/{{repo}}/releases/tag/v0.3.0-beta.1"/></entry>
+            </feed>
+            """);
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(fixture.ListJson());
+            }
+
+            if (request.RequestUri == stableUri)
+            {
+                return Redirect(stableTaggedUri);
+            }
+
+            if (request.RequestUri == stableTaggedUri)
+            {
+                return Ok(PluginPanelFixture.ManifestJson(id, "0.2.0", "0.1.0", ["headless"]));
+            }
+
+            if (request.RequestUri == feedUri)
+            {
+                return Ok(feedBytes);
+            }
+
+            if (request.RequestUri == betaTaggedUri)
+            {
+                return Ok(PluginPanelFixture.ManifestJson(id, "0.3.0-beta.1", "0.1.0", ["headless"]));
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        viewModel.Plugins.ShowBetaPlugins = true;
+
+        PluginDiscoverRowViewModel row = Assert.Single(viewModel.Plugins.Discover);
+        Assert.Equal("0.2.0", row.LatestVersion);
+
+        int requestsBeforeSwitch = handler.Requests.Count;
+        row.SelectedChannelLabel = PluginDiscoverRowViewModel.BetaChannelLabel;
+
+        Assert.Equal("0.3.0-beta.1", row.LatestVersion);
+        Assert.Equal(requestsBeforeSwitch, handler.Requests.Count);
+
+        row.SelectedChannelLabel = PluginDiscoverRowViewModel.StableChannelLabel;
+
+        Assert.Equal("0.2.0", row.LatestVersion);
+        Assert.Equal(requestsBeforeSwitch, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task InstallingWithStableSelectedPersistsTheStableChannelEvenWhenABetaCandidateExists()
+    {
+        using var fixture = new PluginPanelFixture();
+        const string repo = "shaneedwards/openac-plugin-hello";
+        const string id = "edwards.discoverable";
+        Uri stableUri = GitHubReleaseLocator.LatestAsset(repo, "plugin.json");
+        Uri stableTaggedUri = GitHubReleaseLocator.TaggedAsset(repo, "v0.2.0", "plugin.json");
+        Uri feedUri = GitHubReleaseLocator.ReleasesFeed(repo);
+        Uri betaTaggedUri = GitHubReleaseLocator.TaggedAsset(repo, "v0.3.0-beta.1", "plugin.json");
+        byte[] stableManifest = PluginPanelFixture.ManifestJson(id, "0.2.0", "0.1.0", ["headless"]);
+        byte[] betaManifest = PluginPanelFixture.ManifestJson(id, "0.3.0-beta.1", "0.1.0", ["headless"]);
+        byte[] stableZip = PluginPanelFixture.BuildZip(id, stableManifest);
+        string stableZipName = $"{id}-0.2.0.zip";
+        Uri stableZipUri = GitHubReleaseLocator.TaggedAsset(repo, "v0.2.0", stableZipName);
+        Uri stableShaUri = GitHubReleaseLocator.TaggedAsset(repo, "v0.2.0", stableZipName + ".sha256");
+        byte[] feedBytes = System.Text.Encoding.UTF8.GetBytes($$"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <entry><link rel="alternate" href="https://github.com/{{repo}}/releases/tag/v0.3.0-beta.1"/></entry>
+            </feed>
+            """);
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(fixture.ListJson());
+            }
+
+            if (request.RequestUri == stableUri)
+            {
+                return Redirect(stableTaggedUri);
+            }
+
+            if (request.RequestUri == stableTaggedUri)
+            {
+                return Ok(stableManifest);
+            }
+
+            if (request.RequestUri == feedUri)
+            {
+                return Ok(feedBytes);
+            }
+
+            if (request.RequestUri == betaTaggedUri)
+            {
+                return Ok(betaManifest);
+            }
+
+            if (request.RequestUri == stableShaUri)
+            {
+                return Ok(System.Text.Encoding.UTF8.GetBytes(
+                    $"{PluginPanelFixture.Sha256(stableZip)}  {stableZipName}\n"));
+            }
+
+            if (request.RequestUri == stableZipUri)
+            {
+                return Ok(stableZip);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        viewModel.Plugins.ShowBetaPlugins = true;
+
+        PluginDiscoverRowViewModel row = Assert.Single(viewModel.Plugins.Discover);
+        Assert.Equal(PluginDiscoverRowViewModel.StableChannelLabel, row.SelectedChannelLabel);
+        Assert.Equal("0.2.0", row.LatestVersion);
+
+        row.InstallCommand.Execute(null);
+        Assert.True(viewModel.Plugins.InstallDialog.IsOpen);
+        Assert.False(viewModel.Plugins.InstallDialog.IsOfferedPrerelease);
+
+        await viewModel.Plugins.InstallDialog.ConfirmCommand.ExecuteAsync();
+        Assert.False(viewModel.Plugins.InstallDialog.IsOpen);
+
+        InstalledPluginRecordStore store = InstalledPluginRecordStore.ForApplicationPaths(fixture.Paths);
+        store.Load();
+        Assert.Equal(PluginReleaseChannel.Stable, store.Find(id)!.Channel);
+        Assert.Equal("0.2.0", store.Find(id)!.Version);
+    }
+
+    [Fact]
+    public async Task SelectingBetaOnAPluginWhoseNewestReleaseIsStablePersistsBetaAndShowsInTheInstalledCorner()
+    {
+        using var fixture = new PluginPanelFixture();
+        const string repo = "shaneedwards/openac-plugin-hello";
+        const string id = "edwards.discoverable";
+        Uri stableUri = GitHubReleaseLocator.LatestAsset(repo, "plugin.json");
+        Uri stableTaggedUri = GitHubReleaseLocator.TaggedAsset(repo, "v0.2.0", "plugin.json");
+        Uri feedUri = GitHubReleaseLocator.ReleasesFeed(repo);
+        byte[] manifestBytes = PluginPanelFixture.ManifestJson(id, "0.2.0", "0.1.0", ["headless"]);
+        byte[] zipBytes = PluginPanelFixture.BuildZip(id, manifestBytes);
+        string zipName = $"{id}-0.2.0.zip";
+        Uri zipUri = GitHubReleaseLocator.TaggedAsset(repo, "v0.2.0", zipName);
+        Uri shaUri = GitHubReleaseLocator.TaggedAsset(repo, "v0.2.0", zipName + ".sha256");
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(fixture.ListJson());
+            }
+
+            if (request.RequestUri == stableUri)
+            {
+                return Redirect(stableTaggedUri);
+            }
+
+            if (request.RequestUri == stableTaggedUri)
+            {
+                return Ok(manifestBytes);
+            }
+
+            // No prerelease on the feed: the newest release really is the stable one.
+            if (request.RequestUri == feedUri)
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            if (request.RequestUri == shaUri)
+            {
+                return Ok(System.Text.Encoding.UTF8.GetBytes(
+                    $"{PluginPanelFixture.Sha256(zipBytes)}  {zipName}\n"));
+            }
+
+            if (request.RequestUri == zipUri)
+            {
+                return Ok(zipBytes);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        viewModel.Plugins.ShowBetaPlugins = true;
+
+        PluginDiscoverRowViewModel row = Assert.Single(viewModel.Plugins.Discover);
+        Assert.True(row.ShowChannelPicker);
+        Assert.Equal(PluginDiscoverRowViewModel.StableChannelLabel, row.SelectedChannelLabel);
+        row.SelectedChannelLabel = PluginDiscoverRowViewModel.BetaChannelLabel;
+
+        row.InstallCommand.Execute(null);
+        Assert.True(viewModel.Plugins.InstallDialog.IsOpen);
+
+        await viewModel.Plugins.InstallDialog.ConfirmCommand.ExecuteAsync();
+        Assert.False(viewModel.Plugins.InstallDialog.IsOpen);
+
+        InstalledPluginRecordStore store = InstalledPluginRecordStore.ForApplicationPaths(fixture.Paths);
+        store.Load();
+        Assert.Equal(PluginReleaseChannel.Beta, store.Find(id)!.Channel);
+        Assert.Equal("0.2.0", store.Find(id)!.Version);
+
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+        PluginInstalledRowViewModel installed = Assert.Single(viewModel.Plugins.Installed, r => r.Id == id);
+        Assert.True(installed.ShowBetaChannelLabel);
+    }
+
+    [Fact]
+    public async Task TheInstalledCardCornerShowsNothingForAStableChannelPluginEvenWithShowBetaPluginsOn()
+    {
+        using var fixture = new PluginPanelFixture();
+        fixture.WriteManifest("edwards.managed", "0.1.0", ["headless"]);
+        fixture.AddRecord(
+            "edwards.managed", "shaneedwards/openac-plugin-hello", "0.1.0",
+            channel: PluginReleaseChannel.Stable);
+        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
+            ? Ok(fixture.ListJson())
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        viewModel.Plugins.ShowBetaPlugins = true;
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        PluginInstalledRowViewModel managed = Assert.Single(
+            viewModel.Plugins.Installed, row => row.Id == "edwards.managed");
+        Assert.False(managed.ShowBetaChannelLabel);
+    }
+
+    [Fact]
+    public async Task TheInstalledCardCornerHidesTheBetaLabelWhenShowBetaPluginsIsOff()
+    {
+        using var fixture = new PluginPanelFixture();
+        fixture.WriteManifest("edwards.managed", "0.2.0-beta.1", ["headless"]);
+        fixture.AddRecord(
+            "edwards.managed", "shaneedwards/openac-plugin-hello", "0.2.0-beta.1",
+            channel: PluginReleaseChannel.Beta);
+        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
+            ? Ok(fixture.ListJson())
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        PluginInstalledRowViewModel managed = Assert.Single(
+            viewModel.Plugins.Installed, row => row.Id == "edwards.managed");
+        Assert.False(managed.ShowBetaChannelLabel);
+    }
+
+    /// <summary>Toggling the launcher-wide setting has to reach cards that are already built:
+    /// installed rows are rebuilt only by a Check pass, so a corner label captured at construction
+    /// would stay wrong for the rest of the session.</summary>
+    [Fact]
+    public async Task TheInstalledCardCornerFollowsShowBetaPluginsWithoutARecheck()
+    {
+        using var fixture = new PluginPanelFixture();
+        fixture.WriteManifest("edwards.managed", "0.2.0-beta.1", ["headless"]);
+        fixture.AddRecord(
+            "edwards.managed", "shaneedwards/openac-plugin-hello", "0.2.0-beta.1",
+            channel: PluginReleaseChannel.Beta);
+        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
+            ? Ok(fixture.ListJson())
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        viewModel.Plugins.ShowBetaPlugins = false;
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        PluginInstalledRowViewModel managed = Assert.Single(
+            viewModel.Plugins.Installed, row => row.Id == "edwards.managed");
+        Assert.False(managed.ShowBetaChannelLabel);
+
+        viewModel.Plugins.ShowBetaPlugins = true;
+        Assert.True(managed.ShowBetaChannelLabel);
+
+        viewModel.Plugins.ShowBetaPlugins = false;
+        Assert.False(managed.ShowBetaChannelLabel);
+    }
+
+    /// <summary>Found in live testing: BuffBot has only ever published prereleases, and picking Stable
+    /// installed the beta anyway. The selected channel must refuse rather than substitute the other
+    /// one — what the picker says and what Install does have to be the same release.</summary>
+    [Fact]
+    public async Task PickingStableOnAPluginWithNoStableReleaseRefusesInsteadOfInstallingTheBeta()
+    {
+        using var fixture = new PluginPanelFixture();
+        const string repo = "shaneedwards/openac-plugin-hello";
+        const string id = "edwards.discoverable";
+        Uri stableUri = GitHubReleaseLocator.LatestAsset(repo, "plugin.json");
+        Uri feedUri = GitHubReleaseLocator.ReleasesFeed(repo);
+        Uri betaTaggedUri = GitHubReleaseLocator.TaggedAsset(repo, "v0.1.0-beta.2", "plugin.json");
+        byte[] betaManifest = PluginPanelFixture.ManifestJson(id, "0.1.0-beta.2", "0.1.0", ["headless"]);
+        byte[] feedBytes = System.Text.Encoding.UTF8.GetBytes($$"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <entry><link rel="alternate" href="https://github.com/{{repo}}/releases/tag/v0.1.0-beta.2"/></entry>
+            </feed>
+            """);
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(fixture.ListJson());
+            }
+
+            if (request.RequestUri == feedUri)
+            {
+                return Ok(feedBytes);
+            }
+
+            if (request.RequestUri == betaTaggedUri)
+            {
+                return Ok(betaManifest);
+            }
+
+            // No stable release has ever been published: latest itself 404s.
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        viewModel.Plugins.ShowBetaPlugins = true;
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+        await viewModel.Plugins.RefreshDiscoverDetailsAsync();
+
+        PluginDiscoverRowViewModel row = Assert.Single(viewModel.Plugins.Discover);
+
+        // Default is Stable, and this plugin has none: nothing offered, Install refused.
+        Assert.Equal(PluginDiscoverRowViewModel.StableChannelLabel, row.SelectedChannelLabel);
+        Assert.Null(row.LatestVersion);
+        Assert.Equal("No stable release yet.", row.ChannelUnavailableText);
+        Assert.False(row.InstallCommand.CanExecute(null));
+
+        row.InstallCommand.Execute(null);
+        Assert.False(viewModel.Plugins.InstallDialog.IsOpen);
+
+        // Choosing Beta is what makes it installable, and it pins the prerelease.
+        row.SelectedChannelLabel = PluginDiscoverRowViewModel.BetaChannelLabel;
+        Assert.Equal("0.1.0-beta.2", row.LatestVersion);
+        Assert.Null(row.ChannelUnavailableText);
+        Assert.True(row.InstallCommand.CanExecute(null));
     }
 
     [Fact]

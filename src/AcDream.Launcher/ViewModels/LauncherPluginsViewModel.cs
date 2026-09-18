@@ -31,6 +31,16 @@ internal static class PluginMonogram
     }
 }
 
+/// <summary>One channel's resolved release for a Discover row (L-319 amendment): what its picker
+/// option would install and display if chosen, cached alongside the row so switching the picker
+/// never re-fetches.</summary>
+internal readonly record struct DiscoverChannelOption(
+    string Tag,
+    string Version,
+    string Compatibility,
+    bool CompatibilityIsWarning,
+    IReadOnlyList<LauncherPluginCapabilityDeclaration> Capabilities);
+
 /// <summary>One listed plugin not yet installed, shown on the Discover list.</summary>
 public sealed class PluginDiscoverRowViewModel(
     string id,
@@ -41,11 +51,18 @@ public sealed class PluginDiscoverRowViewModel(
     RelayCommand installCommand)
     : ObservableObject
 {
+    public const string StableChannelLabel = "Stable";
+    public const string BetaChannelLabel = "Beta";
+
     private string? _latestVersion;
     private string? _compatibility;
     private bool _compatibilityIsWarning;
     private IReadOnlyList<LauncherPluginCapabilityDeclaration> _capabilities = [];
     private Bitmap? _icon;
+    private bool _showChannelPicker;
+    private PluginReleaseChannel _selectedChannel = PluginReleaseChannel.Stable;
+    private DiscoverChannelOption? _stableOption;
+    private DiscoverChannelOption? _betaOption;
 
     public string Id { get; } = id;
     public string Name { get; } = name;
@@ -55,7 +72,107 @@ public sealed class PluginDiscoverRowViewModel(
     public string AuthorAndRepo { get; } = $"by {author} · {repo}";
     public string Initials { get; } = PluginMonogram.From(name);
     public string InstallAutomationName { get; } = $"Install {name}";
+    public string ChannelPickerAutomationName { get; } = $"Release channel for {name}";
     public RelayCommand InstallCommand { get; } = installCommand;
+
+    public IReadOnlyList<string> ChannelChoices { get; } = [StableChannelLabel, BetaChannelLabel];
+
+    /// <summary>Shown for every row whenever Show beta plugins is on: opting a plugin into Beta is a
+    /// durable subscription to its prereleases, useful before the first one ever ships, so visibility
+    /// never depends on whether this plugin happens to have one today (L-319 amendment).</summary>
+    public bool ShowChannelPicker => _showChannelPicker;
+
+    public string SelectedChannelLabel
+    {
+        get => _selectedChannel == PluginReleaseChannel.Beta ? BetaChannelLabel : StableChannelLabel;
+        set
+        {
+            PluginReleaseChannel channel = string.Equals(value, StableChannelLabel, StringComparison.Ordinal)
+                ? PluginReleaseChannel.Stable
+                : PluginReleaseChannel.Beta;
+            if (_selectedChannel == channel)
+            {
+                return;
+            }
+
+            _selectedChannel = channel;
+            OnPropertyChanged();
+            ApplySelectedOption();
+        }
+    }
+
+    internal PluginReleaseChannel SelectedChannel => _selectedChannel;
+
+    /// <summary>What Install pins to for the channel currently selected, and nothing else. It never
+    /// falls back to the other channel: picking Stable on a plugin that has only ever published
+    /// prereleases must refuse, not quietly install the beta the row happened to resolve.</summary>
+    internal DiscoverChannelOption? SelectedOption =>
+        _selectedChannel == PluginReleaseChannel.Beta ? _betaOption : _stableOption;
+
+    /// <summary>Why Install is refused for the selected channel, or null when it can proceed. Only
+    /// meaningful once a resolve pass has run; a row with neither channel resolved is not shown at
+    /// all (L-320).</summary>
+    public string? ChannelUnavailableText => SelectedOption is not null
+        ? null
+        : _selectedChannel == PluginReleaseChannel.Beta
+            ? "No beta release yet."
+            : "No stable release yet.";
+
+    public bool HasChannelUnavailable => ChannelUnavailableText is not null;
+
+    internal bool CanInstallSelectedChannel => SelectedOption is not null;
+
+    internal void SetShowChannelPicker(bool value) =>
+        SetProperty(ref _showChannelPicker, value, nameof(ShowChannelPicker));
+
+    /// <summary>Registers both candidates one resolve pass found, cached alongside the row so
+    /// switching the picker never re-fetches (L-319 amendment). Reapplies whichever channel is
+    /// currently selected, so a re-check never silently drops the choice someone made.</summary>
+    internal void SetChannelOptions(DiscoverChannelOption? stable, DiscoverChannelOption? beta)
+    {
+        _stableOption = stable;
+        _betaOption = beta;
+        ApplySelectedOption();
+    }
+
+    /// <summary>Puts the picker's own selection back to its default, alongside whatever else a
+    /// channel-wide toggle already clears on the row.</summary>
+    internal void ClearChannelOptions()
+    {
+        _stableOption = null;
+        _betaOption = null;
+        if (_selectedChannel != PluginReleaseChannel.Stable)
+        {
+            _selectedChannel = PluginReleaseChannel.Stable;
+            OnPropertyChanged(nameof(SelectedChannelLabel));
+        }
+
+        ApplySelectedOption();
+    }
+
+    private void ApplySelectedOption()
+    {
+        if (SelectedOption is { } option)
+        {
+            LatestVersion = option.Version;
+            Compatibility = option.Compatibility;
+            CompatibilityIsWarning = option.CompatibilityIsWarning;
+            Capabilities = option.Capabilities;
+        }
+        else
+        {
+            // Nothing on this channel: the card must show no version rather than the other
+            // channel's, so what Install would do and what the row says stay the same thing.
+            LatestVersion = null;
+            Compatibility = null;
+            CompatibilityIsWarning = false;
+            Capabilities = [];
+        }
+
+        OnPropertyChanged(nameof(ChannelUnavailableText));
+        OnPropertyChanged(nameof(HasChannelUnavailable));
+        InstallCommand.NotifyCanExecuteChanged();
+    }
 
     /// <summary>Whether the release resolver has found a usable release for this listed plugin
     /// (L-320): the row exists from the moment the curated list loads, but only counts toward
@@ -182,10 +299,12 @@ public sealed class PluginInstalledRowViewModel(
     Action<bool> onBetaToggled,
     Func<bool> canToggleBeta,
     IReadOnlyList<LauncherPluginCapabilityDeclaration> capabilities,
-    Bitmap? icon)
+    Bitmap? icon,
+    bool showBetaPlugins)
     : ObservableObject
 {
     private bool _isBetaChannel = isBetaChannel;
+    private bool _showBetaPlugins = showBetaPlugins;
 
     public string Id { get; } = id;
     public string DisplayName { get; } = displayName;
@@ -254,6 +373,25 @@ public sealed class PluginInstalledRowViewModel(
     /// of the plugin's channel (a beta-channel plugin reads stable most of the time, per L-319).</summary>
     public bool IsPrerelease { get; } = isPrerelease;
 
+    /// <summary>The card corner's own channel label (L-319 amendment): quiet metadata about what
+    /// the plugin will fetch next, shown only for a beta-channel, launcher-managed plugin while Show
+    /// beta plugins is on. A stable-channel plugin shows nothing there; the "beta install" chip
+    /// already covers what a prerelease install has, so the corner never repeats it for Stable.</summary>
+    /// <summary>Mutable for the same reason Discover's picker is: toggling Show beta plugins must
+    /// reach cards that are already built, and installed rows are only rebuilt by a Check pass.</summary>
+    public bool ShowBetaChannelLabel => _isBetaChannel && _showBetaPlugins;
+
+    internal void SetShowBetaPlugins(bool value)
+    {
+        if (_showBetaPlugins == value)
+        {
+            return;
+        }
+
+        _showBetaPlugins = value;
+        OnPropertyChanged(nameof(ShowBetaChannelLabel));
+    }
+
     public bool IsBetaChannel
     {
         get => _isBetaChannel;
@@ -264,6 +402,7 @@ public sealed class PluginInstalledRowViewModel(
                 return;
             }
 
+            OnPropertyChanged(nameof(ShowBetaChannelLabel));
             onBetaToggled(value);
         }
     }
@@ -283,6 +422,7 @@ public sealed class PluginInstalledRowViewModel(
 
         _isBetaChannel = value;
         OnPropertyChanged(nameof(IsBetaChannel));
+        OnPropertyChanged(nameof(ShowBetaChannelLabel));
     }
 
     public IReadOnlyList<LauncherPluginCapabilityDeclaration> Capabilities { get; } = capabilities;
@@ -590,11 +730,18 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
             }
 
             _orchestrator.SetShowBetaPlugins(value);
+            foreach (PluginInstalledRowViewModel installed in _allInstalled)
+            {
+                installed.SetShowBetaPlugins(value);
+            }
+
             foreach (PluginDiscoverRowViewModel row in _allDiscover)
             {
                 _discoverDetailsCache.Remove(row.Id);
                 row.LatestVersion = null;
                 row.Compatibility = null;
+                row.SetShowChannelPicker(value);
+                row.ClearChannelOptions();
                 // The new channel's own resolve decides visibility (L-320); a row stays hidden
                 // until it does, same as the first time the list loaded.
                 row.IsVisible = false;
@@ -737,18 +884,21 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         _allDiscover.Clear();
         foreach (PluginDiscoverEntry entry in outcome.Discover)
         {
+            // The row doesn't exist until the constructor returns; the install command's closure
+            // reads it back through this local once construction has finished, the same pattern
+            // BuildInstalledRow's own toggle callback uses.
+            PluginDiscoverRowViewModel? self = null;
             var install = new RelayCommand(
-                () => OpenDiscoverInstallDialog(entry),
-                () => _canInteract() && !IsBusy);
+                () => OpenDiscoverInstallDialog(entry, self!),
+                () => _canInteract() && !IsBusy && self!.CanInstallSelectedChannel);
             var row = new PluginDiscoverRowViewModel(
                 entry.Id, entry.Name, entry.Author, entry.Description, entry.Repo, install);
+            self = row;
+            row.SetShowChannelPicker(ShowBetaPlugins);
             if (_discoverDetailsCache.TryGetValue(entry.Id, out DiscoverDetails cached))
             {
-                row.LatestVersion = cached.LatestVersion;
-                row.Compatibility = cached.Compatibility;
-                row.CompatibilityIsWarning = cached.CompatibilityIsWarning;
-                row.Capabilities = cached.Capabilities;
                 row.Icon = cached.Icon;
+                row.SetChannelOptions(cached.Stable, cached.Beta);
                 // Already resolved this session (L-320): shown right away, no re-checking wait.
                 row.IsVisible = true;
             }
@@ -820,7 +970,8 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
             onBetaToggled: isBeta => _ = ToggleBetaAsync(self!, isBeta),
             canToggleBeta: () => _canInteract() && !IsBusy,
             installedCapabilities,
-            ResolveInstalledIcon(info.Id, info.Version, info.Directory));
+            ResolveInstalledIcon(info.Id, info.Version, info.Directory),
+            ShowBetaPlugins);
         self = row;
         return row;
     }
@@ -940,7 +1091,8 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
                 // known; a wildcard block never reaches here, since the Check pipeline already hid it.
                 if (_composition.CurrentCatalog?.IsBlocked(row.Id, remoteVersion) != true)
                 {
-                    await ApplyDiscoverDetailsAsync(row.Id, row.Repo, manifest, tag, CancellationToken.None)
+                    await ApplyDiscoverDetailsAsync(
+                            row.Id, row.Repo, manifest, tag, fetch.Candidates!, CancellationToken.None)
                         .ConfigureAwait(true);
                     row.IsVisible = true;
                     if (Matches(
@@ -996,7 +1148,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
                 fetch.ErrorMessage ?? "This plugin's details could not be checked.");
         }
 
-        await ApplyDiscoverDetailsAsync(pluginId, repo, manifest, tag, cancellationToken)
+        await ApplyDiscoverDetailsAsync(pluginId, repo, manifest, tag, fetch.Candidates!, cancellationToken)
             .ConfigureAwait(true);
         return manifest.Capabilities;
     }
@@ -1004,10 +1156,13 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
     /// <summary><see cref="Status"/> is null only for an exception the resolver itself threw (an
     /// oversized document): the one case a fetch never reached a <see cref="PluginReleaseResolveStatus"/>
     /// at all, which <see cref="RefreshDiscoverDetailsAsync"/> still treats as worth a panel status
-    /// line, the same as <see cref="PluginReleaseResolveStatus.RateLimited"/>.</summary>
+    /// line, the same as <see cref="PluginReleaseResolveStatus.RateLimited"/>. <see cref="Candidates"/>
+    /// carries both the stable and (on <see cref="PluginReleaseChannel.Beta"/>) the beta resolve, so
+    /// <see cref="ApplyDiscoverDetailsAsync"/> can offer the row's channel picker both options from
+    /// this one pass (L-319 amendment); non-null whenever a resolve was actually attempted.</summary>
     private readonly record struct ManifestFetch(
         LauncherPluginManifest? Manifest, string? Tag, string? ErrorMessage,
-        PluginReleaseResolveStatus? Status);
+        PluginReleaseResolveStatus? Status, PluginReleaseCandidates? Candidates);
 
     /// <summary>Resolves through the plugin's channel (L-319), the same as the update check and
     /// Discover's background pass, so a beta plugin's Discover details and install/update consent
@@ -1016,52 +1171,60 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
     {
         if (_composition is null)
         {
-            return new ManifestFetch(null, null, "This plugin's details could not be checked.", null);
+            return new ManifestFetch(null, null, "This plugin's details could not be checked.", null, null);
         }
 
-        PluginReleaseResolveResult result;
+        PluginReleaseCandidates candidates;
         try
         {
-            result = await _composition.ReleaseResolver
-                .ResolveAsync(repo, DiscoverChannel, cancellationToken)
+            candidates = await _composition.ReleaseResolver
+                .ResolveCandidatesAsync(repo, DiscoverChannel, cancellationToken)
                 .ConfigureAwait(true);
         }
         catch (LauncherUpdateException)
         {
-            return new ManifestFetch(null, null, "This plugin's details could not be checked.", null);
+            return new ManifestFetch(null, null, "This plugin's details could not be checked.", null, null);
         }
 
+        PluginReleaseResolveResult result = candidates.For(DiscoverChannel);
         switch (result.Status)
         {
             case PluginReleaseResolveStatus.RateLimited:
-                return new ManifestFetch(null, null, "GitHub is rate limiting; try later.", result.Status);
+                return new ManifestFetch(
+                    null, null, "GitHub is rate limiting; try later.", result.Status, candidates);
             case PluginReleaseResolveStatus.Success:
                 break;
             case PluginReleaseResolveStatus.Prerelease:
                 return new ManifestFetch(
-                    null, null, result.Error ?? "This plugin's details could not be checked.", result.Status);
+                    null, null, result.Error ?? "This plugin's details could not be checked.", result.Status,
+                    candidates);
             default:
                 return new ManifestFetch(
-                    null, null, "This plugin's details could not be checked.", result.Status);
+                    null, null, "This plugin's details could not be checked.", result.Status, candidates);
         }
 
         PluginReleaseResolution resolution = result.Resolution!;
-        return new ManifestFetch(resolution.Manifest, resolution.Tag, null, result.Status);
+        return new ManifestFetch(resolution.Manifest, resolution.Tag, null, result.Status, candidates);
     }
 
     /// <summary>Writes a freshly fetched manifest's compatibility, capabilities and icon into the
-    /// shared cache and, when the row is still on Discover, onto the row itself.</summary>
+    /// shared cache and, when the row is still on Discover, onto the row itself: the stable option
+    /// always, and the beta option (<see cref="PluginReleaseCandidates.For"/>, so it never disagrees
+    /// with the resolver's own precedence) only while Show beta plugins is on, since that is the only
+    /// time the feed was even read (L-319 amendment).</summary>
     private async Task ApplyDiscoverDetailsAsync(
         string pluginId, string repo, LauncherPluginManifest manifest, string tag,
-        CancellationToken cancellationToken)
+        PluginReleaseCandidates candidates, CancellationToken cancellationToken)
     {
         LauncherVersion? clientVersion = _clientVersionResolver()?.Version;
-        LauncherPluginCompatibility.CompatibilityDescription compatibility =
-            LauncherPluginCompatibility.Describe(manifest, clientVersion);
         Bitmap? icon = await ResolveDiscoverIconAsync(pluginId, repo, manifest, tag, cancellationToken)
             .ConfigureAwait(true);
-        var details = new DiscoverDetails(
-            manifest.Version, tag, compatibility.Text, compatibility.IsWarning, manifest.Capabilities, icon);
+        DiscoverChannelOption? stableOption = BuildChannelOption(candidates.Stable, clientVersion);
+        DiscoverChannelOption? betaOption = ShowBetaPlugins
+            ? BuildChannelOption(candidates.For(PluginReleaseChannel.Beta), clientVersion)
+            : null;
+
+        var details = new DiscoverDetails(stableOption, betaOption, icon);
         _discoverDetailsCache[pluginId] = details;
 
         PluginDiscoverRowViewModel? row = _allDiscover.FirstOrDefault(
@@ -1071,19 +1234,30 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
             return;
         }
 
-        row.LatestVersion = details.LatestVersion;
-        row.Compatibility = details.Compatibility;
-        row.CompatibilityIsWarning = details.CompatibilityIsWarning;
-        row.Capabilities = details.Capabilities;
         row.Icon = details.Icon;
+        row.SetShowChannelPicker(ShowBetaPlugins);
+        row.SetChannelOptions(details.Stable, details.Beta);
+    }
+
+    private static DiscoverChannelOption? BuildChannelOption(
+        PluginReleaseResolveResult result, LauncherVersion? clientVersion)
+    {
+        if (result.Status != PluginReleaseResolveStatus.Success)
+        {
+            return null;
+        }
+
+        PluginReleaseResolution resolution = result.Resolution!;
+        LauncherPluginCompatibility.CompatibilityDescription compatibility =
+            LauncherPluginCompatibility.Describe(resolution.Manifest, clientVersion);
+        return new DiscoverChannelOption(
+            resolution.Tag, resolution.Manifest.Version, compatibility.Text, compatibility.IsWarning,
+            resolution.Manifest.Capabilities);
     }
 
     private readonly record struct DiscoverDetails(
-        string LatestVersion,
-        string Tag,
-        string Compatibility,
-        bool CompatibilityIsWarning,
-        IReadOnlyList<LauncherPluginCapabilityDeclaration> Capabilities,
+        DiscoverChannelOption? Stable,
+        DiscoverChannelOption? Beta,
         Bitmap? Icon);
 
     /// <summary>The Discover-side half of the icon rule (plan, L-317): the tag the manifest fetch
@@ -1256,16 +1430,24 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>Discover's Install button: the cache may not hold this plugin's details yet (its
-    /// own request, "Request budget"), so both the tag and version are read live, not captured when
-    /// the row was built.</summary>
-    private void OpenDiscoverInstallDialog(PluginDiscoverEntry entry)
+    /// <summary>Discover's Install button: pins to whichever channel the row's own picker currently
+    /// has selected (L-319 amendment), read from the row itself rather than a fresh cache lookup, so
+    /// what was shown is what installs.</summary>
+    private void OpenDiscoverInstallDialog(PluginDiscoverEntry entry, PluginDiscoverRowViewModel row)
     {
-        _discoverDetailsCache.TryGetValue(entry.Id, out DiscoverDetails cached);
+        if (row.SelectedOption is not { } option)
+        {
+            // Belt and braces behind the disabled button: an unpinned install would resolve latest
+            // itself and land the very release the selected channel excludes.
+            Error = row.ChannelUnavailableText;
+            return;
+        }
+
         OpenInstallDialog(
-            entry.Repo, entry.Id, entry.Name, isUpdate: false, cached.Tag, cached.LatestVersion,
-            DiscoverCapabilities(entry.Id),
-            cancellationToken => LoadDiscoverCapabilitiesAsync(entry.Id, entry.Repo, cancellationToken));
+            entry.Repo, entry.Id, entry.Name, isUpdate: false, option.Tag, option.Version,
+            option.Capabilities,
+            cancellationToken => LoadDiscoverCapabilitiesAsync(entry.Id, entry.Repo, cancellationToken),
+            channel: row.SelectedChannel);
     }
 
     /// <summary>Opens the install/update dialog for a repo. <paramref name="pinnedTag"/> is the
@@ -1275,7 +1457,9 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
     /// travels the same way, so the dialog's notice can name a pre-release offer (L-319).
     /// <paramref name="capabilities"/> is the declared list when already known; <see langword="null"/>
     /// means it still needs fetching, and <paramref name="loadCapabilities"/> is the fetch to run for
-    /// it (L-316).</summary>
+    /// it (L-316). <paramref name="channel"/> is the channel the player chose for this install
+    /// (Discover's per-row picker, L-319 amendment); omitted for update and Add from URL, which keep
+    /// today's version-inferred channel.</summary>
     private void OpenInstallDialog(
         string repo,
         string pluginId,
@@ -1286,7 +1470,8 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         IReadOnlyList<LauncherPluginCapabilityDeclaration>? capabilities,
         Func<CancellationToken, Task<IReadOnlyList<LauncherPluginCapabilityDeclaration>>>? loadCapabilities = null,
         IReadOnlyList<LauncherPluginCapabilityDeclaration>? installedCapabilities = null,
-        IReadOnlyList<string>? affectedCharacters = null)
+        IReadOnlyList<string>? affectedCharacters = null,
+        PluginReleaseChannel? channel = null)
     {
         if (_composition is null)
         {
@@ -1304,7 +1489,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
             offeredVersion,
             BuildCharacterOptions(),
             (displayedCapabilities, cancellationToken) =>
-                InstallAsync(repo, pinnedTag, displayedCapabilities, cancellationToken),
+                InstallAsync(repo, pinnedTag, displayedCapabilities, channel, cancellationToken),
             EnableForCharacters,
             capabilities,
             loadCapabilities,
@@ -1339,26 +1524,23 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
             .Where(character => character.Plugins.Contains(pluginId, StringComparer.OrdinalIgnoreCase))
             .Select(character => $"{character.Name} ({character.AccountName}@{character.ServerName})")];
 
-    /// <summary>The capabilities Discover already fetched for this listed plugin
-    /// (<see cref="RefreshDiscoverDetailsAsync"/>), or <see langword="null"/> when Install is pressed
-    /// before that finishes: the dialog fetches them itself in that case
-    /// (<see cref="LoadDiscoverCapabilitiesAsync"/>) rather than opening on an unknown list.</summary>
-    private IReadOnlyList<LauncherPluginCapabilityDeclaration>? DiscoverCapabilities(string pluginId) =>
-        _discoverDetailsCache.TryGetValue(pluginId, out DiscoverDetails cached) ? cached.Capabilities : null;
-
     private async Task<PluginInstallResult> InstallAsync(
         string repo,
         string? pinnedTag,
         IReadOnlyList<LauncherPluginCapabilityDeclaration> displayedCapabilities,
+        PluginReleaseChannel? channel,
         CancellationToken cancellationToken)
     {
-        string tag = pinnedTag ?? await ResolveLatestTagAsync(repo, cancellationToken).ConfigureAwait(true);
+        string tag = pinnedTag
+            ?? await ResolveLatestTagAsync(repo, channel ?? PluginReleaseChannel.Stable, cancellationToken)
+                .ConfigureAwait(true);
         PluginInstallResult result = await _composition!.Installer.InstallOrUpdateAsync(
                 repo,
                 tag,
                 _composition.CurrentCatalog,
                 _clientVersionResolver(),
                 displayedCapabilities,
+                channel,
                 cancellationToken)
             .ConfigureAwait(true);
         _ = CheckNowAsync();
@@ -1368,10 +1550,11 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
     /// <summary>Discover's own fallback when its details fetch hasn't populated a tag yet: resolved
     /// once, right before install, never inside <see cref="PluginInstaller.InstallOrUpdateAsync"/>
     /// itself.</summary>
-    private async Task<string> ResolveLatestTagAsync(string repo, CancellationToken cancellationToken)
+    private async Task<string> ResolveLatestTagAsync(
+        string repo, PluginReleaseChannel channel, CancellationToken cancellationToken)
     {
         PluginReleaseResolveResult result = await _composition!.ReleaseResolver
-            .ResolveAsync(repo, PluginReleaseChannel.Stable, cancellationToken)
+            .ResolveAsync(repo, channel, cancellationToken)
             .ConfigureAwait(true);
         return result.Status switch
         {
