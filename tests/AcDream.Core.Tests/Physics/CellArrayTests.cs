@@ -100,10 +100,38 @@ public class CellArrayTests
         Assert.Equal(direct, asCollection);
     }
 
+    /// <summary>
+    /// The cell-set search walks the ids in order for every sphere path a
+    /// frame resolves; that walk takes no enumerator either.
+    /// </summary>
+    [Fact]
+    public void WalkingACellArraysOrderedIdsAllocatesNothing()
+    {
+        var cells = new CellArray();
+        for (uint id = 1; id <= 64; id++)
+            cells.Add(0xA9B40000u | id);
+
+        ulong warm = SumOrdered(cells);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        ulong walked = SumOrdered(cells);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(warm, walked);
+        Assert.Equal(0L, allocated);
+    }
+
     private static ulong Sum(CellArray cells)
     {
         ulong total = 0;
         foreach (uint id in cells)
+            total += id;
+        return total;
+    }
+
+    private static ulong SumOrdered(CellArray cells)
+    {
+        ulong total = 0;
+        foreach (uint id in cells.OrderedIds)
             total += id;
         return total;
     }

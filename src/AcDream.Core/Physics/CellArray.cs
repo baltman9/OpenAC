@@ -13,7 +13,13 @@ public sealed class CellArray : ICollection<uint>, IReadOnlyCollection<uint>
     public int Count => _order.Count;
     public bool IsReadOnly => false;
 
-    public IReadOnlyList<uint> OrderedIds => _order;
+    /// <summary>
+    /// The ids in the order they were added, as the list itself: the cell-set
+    /// search walks this for every sphere path a frame resolves, and walking
+    /// it through an interface boxed the list's enumerator every time. The
+    /// list is the array's own; it is added to through <see cref="Add"/>.
+    /// </summary>
+    public List<uint> OrderedIds => _order;
 
     public void Add(uint id)
     {
