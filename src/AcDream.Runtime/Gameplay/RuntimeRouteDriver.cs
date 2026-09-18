@@ -245,6 +245,9 @@ public sealed class RuntimeRouteDriver
     private Vector2 _touchdown;
     private readonly bool _takeOverMoves;
     private readonly Func<IReadOnlyList<Vector3>, bool>? _canCutAlong;
+
+    /// <summary>Where the body walks rather than runs, as beside a trap, so it holds its line; null for nowhere.</summary>
+    private readonly Func<Vector2, bool>? _carefulAt;
     private int _cutPlannedFor;
     private Cut _cut;
     private Cut _cutting;
@@ -270,6 +273,7 @@ public sealed class RuntimeRouteDriver
         IReadOnlyList<RuntimeRouteLeap>? leaps = null,
         bool takeOverMoves = false,
         Func<IReadOnlyList<Vector3>, bool>? canCutAlong = null,
+        Func<Vector2, bool>? carefulAt = null,
         Func<Vector3, Vector3, bool, bool, RuntimeLeapAim?>? aimLeapFrom = null,
         Func<Vector3, Vector3, bool, (RuntimeLeapAim Aim, Vector3 Spot)?>? aimOnward = null,
         Func<Vector3, Vector3, bool>? sameFloor = null)
@@ -287,6 +291,7 @@ public sealed class RuntimeRouteDriver
         LegIndex = 1;
         _takeOverMoves = takeOverMoves;
         _canCutAlong = canCutAlong;
+        _carefulAt = carefulAt;
         _aimLeapFrom = aimLeapFrom;
         _aimOnward = aimOnward;
         _sameFloor = sameFloor;
@@ -467,13 +472,13 @@ public sealed class RuntimeRouteDriver
             {
                 float offBack = SignedDegrees(CompassHeading(back - position) - sample.HeadingDegrees);
                 if (MathF.Abs(offBack) > TurnInPlaceDegrees)
-                    return new RuntimeRouteDriveStep(Turn: turning ? null : TurnBy(offBack), StopTravel: travelling);
+                    return new RuntimeRouteDriveStep(Turn: turning ? null : TurnBy(offBack, RuntimeMovePace.Walk), StopTravel: travelling);
                 bool walkAgain = !travelling
                     || travel.Request.Direction != RuntimeMoveDirection.Forward
                     || travel.Request.Pace != RuntimeMovePace.Walk;
                 return new RuntimeRouteDriveStep(
                     Travel: walkAgain ? new RuntimeMoveRequest(RuntimeMoveDirection.Forward, RuntimeMovePace.Walk, 0f) : null,
-                    Turn: !turning && MathF.Abs(offBack) > SteerToleranceDegrees ? TurnBy(offBack) : null);
+                    Turn: !turning && MathF.Abs(offBack) > SteerToleranceDegrees ? TurnBy(offBack, RuntimeMovePace.Walk) : null);
             }
             _walkingBack = null;
         }
@@ -551,14 +556,17 @@ public sealed class RuntimeRouteDriver
         if (_settling is not null && MathF.Abs(error) <= TurnInPlaceDegrees)
             _settling = null;
         bool lenient = _cutting.Pace is not null || _settling is not null;
+        // A turn is made at the pace the body travels at. The client holds run or walk
+        // for turning as for travelling, and a turn asked for at a run while the body
+        // walks flips its hold to run as the walk ends, which sends the rest of that
+        // walk out at a run: beside a trap, straight into it.
+        RuntimeMovePace pace = PaceFor(position, sample.WalkStopMeters, sample.RunStopMeters, running);
         if (MathF.Abs(error) > (lenient ? CutTurnInPlaceDegrees : TurnInPlaceDegrees))
         {
             return new RuntimeRouteDriveStep(
-                Turn: turning ? null : TurnBy(error),
+                Turn: turning ? null : TurnBy(error, pace),
                 StopTravel: travelling);
         }
-
-        RuntimeMovePace pace = PaceFor(position, sample.WalkStopMeters, sample.RunStopMeters, running);
         bool renew = !travelling
             || travel.Request.Direction != RuntimeMoveDirection.Forward
             || travel.Request.Pace != pace
@@ -572,7 +580,7 @@ public sealed class RuntimeRouteDriver
         }
         return new RuntimeRouteDriveStep(
             Travel: renew ? new RuntimeMoveRequest(RuntimeMoveDirection.Forward, pace, 0f) : null,
-            Turn: !turning && MathF.Abs(error) > SteerToleranceDegrees ? TurnBy(error) : null);
+            Turn: !turning && MathF.Abs(error) > SteerToleranceDegrees ? TurnBy(error, pace) : null);
     }
 
     private long Baseline(in RuntimeMoveChannelSnapshot channel) =>
@@ -671,7 +679,7 @@ public sealed class RuntimeRouteDriver
                         TurnedDegrees = _approach.TurnedDegrees + MathF.Abs(error),
                         TurnedAt = _approach.Turns == 0 ? position : _approach.TurnedAt,
                     };
-                    return new RuntimeRouteDriveStep(Turn: TurnBy(error));
+                    return new RuntimeRouteDriveStep(Turn: TurnBy(error, RuntimeMovePace.Run));
                 }
                 RuntimeLeapAim? aimed = _aim;
                 RuntimeLeapAim flown = aimed ?? new RuntimeLeapAim(leap.Power, leap.Run);
@@ -881,7 +889,7 @@ public sealed class RuntimeRouteDriver
         bool right = MathF.Abs(toTheRight) <= MathF.Abs(toTheLeft);
         float error = right ? toTheRight : toTheLeft;
         if (MathF.Abs(error) > SteerToleranceDegrees)
-            return new RuntimeRouteDriveStep(Turn: turning ? null : TurnBy(error), StopTravel: travelling);
+            return new RuntimeRouteDriveStep(Turn: turning ? null : TurnBy(error, RuntimeMovePace.Walk), StopTravel: travelling);
         if (travelling || turning)
             return default(RuntimeRouteDriveStep);
         _sidestepping = true;
@@ -893,7 +901,9 @@ public sealed class RuntimeRouteDriver
     }
 
     private RuntimeMovePace PaceFor(Vector2 position, float walkStopMeters, float runStopMeters, bool running) =>
-        (_cutting.Pace ?? _settling)
+        _carefulAt?.Invoke(position) == true
+            ? RuntimeMovePace.Walk
+            : (_cutting.Pace ?? _settling)
         ?? (walkStopMeters > 0f
             && !running
             && _leaps.ContainsKey(LegIndex + 1)
@@ -1021,10 +1031,11 @@ public sealed class RuntimeRouteDriver
         return points;
     }
 
-    private static RuntimeMoveRequest TurnBy(float degrees) =>
+    /// <summary>A turn through an angle at a pace: the body's hold for turning is the same as for travelling.</summary>
+    private static RuntimeMoveRequest TurnBy(float degrees, RuntimeMovePace pace) =>
         new(
             degrees > 0f ? RuntimeMoveDirection.TurnRight : RuntimeMoveDirection.TurnLeft,
-            RuntimeMovePace.Run,
+            pace,
             MathF.Abs(degrees));
 
     private static Vector2 Flat(Vector3 point) => new(point.X, point.Y);

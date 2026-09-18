@@ -71,6 +71,28 @@ public sealed partial class RuntimeRouteDriverTests
         Assert.InRange(Vector2.Distance(body.Position, new Vector2(10f, 10f)), 0f, 0.6f);
     }
 
+    /// <summary>
+    /// Beside a trap the body walks, and its turns are asked for at a walk too. Live, a turn
+    /// asked for at a run as a walk ended flipped the client's hold to run, and the rest of
+    /// the walk went out at a run, into the trap.
+    /// </summary>
+    [Fact]
+    public void BesideATrapTheBodyWalksAndTurnsAtAWalk()
+    {
+        var body = new SimulatedBody();
+        var driver = new RuntimeRouteDriver(
+            [new Vector3(0f, 0f, 0f), new Vector3(0f, 10f, 0f), new Vector3(10f, 10f, 0f)],
+            carefulAt: _ => true);
+
+        List<RuntimeRouteDriveStep> steps = Drive(driver, body, seconds: 40f);
+
+        Assert.Equal(RuntimeRouteDriveState.Arrived, driver.State);
+        Assert.DoesNotContain(steps, step => step.Travel is { Pace: RuntimeMovePace.Run });
+        Assert.Contains(steps, step => step.Travel is { Pace: RuntimeMovePace.Walk });
+        Assert.Contains(steps, step => step.StopTravel && step.Turn is { Direction: RuntimeMoveDirection.TurnRight });
+        Assert.DoesNotContain(steps, step => step.Turn is { Pace: RuntimeMovePace.Run });
+    }
+
     [Fact]
     public void ACornerWithRoomIsRunAroundAlongAnArcWithoutStopping()
     {
