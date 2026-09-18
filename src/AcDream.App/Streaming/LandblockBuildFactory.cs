@@ -7,7 +7,6 @@ public sealed class LandblockBuildFactory
 {
     private readonly IDatReaderWriter _dats;
     private readonly IPreparedCollisionSource _preparedCollisions;
-    private readonly object _datLock;
     private readonly float[] _heightTable;
     private readonly bool _dumpSceneryZ;
 
@@ -18,10 +17,13 @@ public sealed class LandblockBuildFactory
         float[] heightTable,
         bool dumpSceneryZ = false)
     {
-        _dats = dats ?? throw new ArgumentNullException(nameof(dats));
+        ArgumentNullException.ThrowIfNull(dats);
+        ArgumentNullException.ThrowIfNull(datLock);
+        // Every read still holds the content gate; the build no longer holds
+        // it from its first read to its last. See LockedContentReads.
+        _dats = new LockedContentReads(dats, datLock);
         _preparedCollisions = preparedCollisions ??
             throw new ArgumentNullException(nameof(preparedCollisions));
-        _datLock = datLock ?? throw new ArgumentNullException(nameof(datLock));
         ArgumentNullException.ThrowIfNull(heightTable);
         if (heightTable.Length < 256)
             throw new ArgumentException(
@@ -44,20 +46,15 @@ public sealed class LandblockBuildFactory
         if (AcDream.Core.Physics.PhysicsDiagnostics.ProbeTeleportEnabled)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            lock (_datLock)
-            {
-                long waitedMs = sw.ElapsedMilliseconds;
-                sw.Restart();
-                build = BuildLocked(request);
-                AcDream.Core.Physics.PhysicsDiagnostics.LogTeleport(
-                    "BUILD", request.LandblockId,
-                    $"waited={waitedMs}ms held={sw.ElapsedMilliseconds}ms kind={request.Kind}");
-            }
+            build = BuildContent(request);
+            AcDream.Core.Physics.PhysicsDiagnostics.LogTeleport(
+                "BUILD", request.LandblockId,
+                $"build={sw.ElapsedMilliseconds}ms kind={request.Kind} " +
+                "(content gate held per read)");
         }
         else
         {
-            lock (_datLock)
-                build = BuildLocked(request);
+            build = BuildContent(request);
         }
 
         if (build is null ||
@@ -84,7 +81,7 @@ public sealed class LandblockBuildFactory
         };
     }
 
-    private AcDream.App.Streaming.LandblockBuild? BuildLocked(
+    private AcDream.App.Streaming.LandblockBuild? BuildContent(
         AcDream.App.Streaming.LandblockBuildRequest request)
     {
         uint landblockId = request.LandblockId;
