@@ -155,15 +155,21 @@ public sealed class GpuStageProfiler
     internal void ResetWindow()
     {
         _samplesInWindow = 0;
+        _droppedRanges = 0;
         foreach (FrameStatsBuffer buffer in _stages.Values)
             buffer.Reset();
         foreach (FrameStatsBuffer buffer in _stageRanges.Values)
             buffer.Reset();
     }
 
-    /// <summary>How many ranges the backend refused this session because the
-    /// per-frame budget was full.</summary>
-    internal void NoteDroppedRanges(int dropped) => _droppedRanges = dropped;
+    /// <summary>Adds what the backend refused in one frame to this reporting
+    /// window. <see cref="ResetWindow"/> starts the count again, so a clean
+    /// window after a busy one says nothing.</summary>
+    internal void NoteDroppedRanges(int dropped)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(dropped);
+        _droppedRanges += dropped;
+    }
 
     internal void Record(string stage, double milliseconds, int rangeCount = 1)
     {

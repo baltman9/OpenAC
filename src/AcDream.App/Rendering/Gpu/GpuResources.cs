@@ -84,8 +84,8 @@ internal interface IGpuTimerPool
     /// <summary>The ranges the last read-back covered, in record order.</summary>
     IReadOnlyList<(string Name, double Milliseconds)> LastResolved { get; }
 
-    /// <summary>Ranges refused because the per-frame budget was full. Anything
-    /// above zero means the report is missing stages rather than showing them
-    /// as free.</summary>
+    /// <summary>Ranges this frame refused because the per-frame budget was
+    /// full. Above zero means the report is missing stages rather than showing
+    /// them as free.</summary>
     int DroppedScopes { get; }
 }

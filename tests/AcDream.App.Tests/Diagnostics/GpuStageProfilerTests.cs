@@ -91,6 +91,34 @@ public sealed class GpuStageProfilerTests
     }
 
     [Fact]
+    public void DropsAddUpAcrossTheFramesOfOneWindow()
+    {
+        var profiler = new GpuStageProfiler();
+        profiler.Record("shadow", 0.4);
+
+        profiler.NoteDroppedRanges(3);
+        profiler.NoteDroppedRanges(4);
+
+        Assert.Contains("DROPPED=7", profiler.FormatReport(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ACleanWindowAfterABusyOneSaysNothingAboutDrops()
+    {
+        // The count belongs to the window being reported, not to the session:
+        // one busy frame must not mark every line after it.
+        var profiler = new GpuStageProfiler();
+        profiler.Record("shadow", 0.4);
+        profiler.NoteDroppedRanges(12);
+        Assert.Contains("DROPPED", profiler.FormatReport(), StringComparison.Ordinal);
+
+        profiler.ResetWindow();
+        profiler.Record("shadow", 0.4);
+
+        Assert.DoesNotContain("DROPPED", profiler.FormatReport(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ResettingTheWindowEmptiesTheReport()
     {
         var profiler = new GpuStageProfiler();

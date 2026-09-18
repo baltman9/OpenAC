@@ -66,6 +66,9 @@ internal sealed unsafe class VulkanGpuTimerPool : IGpuTimerPool, IDisposable
             return;
 
         _currentSlot = slotIndex;
+        // Per frame, not per session: a line that reported every drop since the
+        // client started would keep saying so long after the busy frame.
+        DroppedScopes = 0;
         List<string> names = _scopeNames[slotIndex];
         if (names.Count > 0)
         {
