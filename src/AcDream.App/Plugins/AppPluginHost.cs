@@ -17,7 +17,8 @@ public sealed class AppPluginHost : IPluginHost
         IPluginStorage? vtankProfiles = null,
         IPluginClipboard? clipboard = null,
         IHotkeyRegistry? hotkeys = null,
-        IHostWindow? window = null)
+        IHostWindow? window = null,
+        IPluginWorldLines? worldLines = null)
     {
         Log = log;
         State = state;
@@ -33,9 +34,11 @@ public sealed class AppPluginHost : IPluginHost
         Clipboard = clipboard ?? NoOpPluginClipboard.Instance;
         Hotkeys = hotkeys ?? NoOpHotkeyRegistry.Instance;
         Window = window ?? NoOpHostWindow.Instance;
+        WorldLines = worldLines ?? NoOpPluginWorldLines.Instance;
     }
 
     public bool HasUi => true;
+    public IPluginWorldLines WorldLines { get; }
     public IPluginLogger Log { get; }
     public IGameState State { get; }
     public IEvents Events { get; }

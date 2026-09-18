@@ -15,6 +15,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     private readonly ScopedAutomationSurface _automation;
     private readonly ScopedHotkeyRegistry _hotkeys;
     private bool _disposed;
+    private readonly ScopedWorldLines _worldLines;
 
     internal ScopedPluginHost(
         IPluginHost inner,
@@ -22,6 +23,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         string pluginDisplayName)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+        _worldLines = new ScopedWorldLines(inner.WorldLines);
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginDisplayName);
         _pluginId = pluginId;
@@ -46,6 +48,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     public IEvents Events => _events;
     public ISelectionService Selection => _selection;
     public IUiRegistry Ui => _ui;
+    public IPluginWorldLines WorldLines => _worldLines;
     public IPluginStorage Storage => _storage;
     public IPluginStorage VtankProfiles => _inner.VtankProfiles;
     public IPluginCommandRegistry Commands => _commands;
@@ -111,6 +114,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             return;
         _disposed = true;
         _events.Dispose();
+        _worldLines.Dispose();
         _selection.Dispose();
         _ui.Dispose();
         _commands.Dispose();
@@ -381,6 +385,32 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
 
             public void Dispose() => Interlocked.Exchange(ref _owner, null)?
                 .RemoveFilter(registration);
+        }
+    }
+
+    /// <summary>
+    /// The layers one plugin drew, let go together when the plugin is.
+    /// </summary>
+    private sealed class ScopedWorldLines(IPluginWorldLines inner) : IPluginWorldLines, IDisposable
+    {
+        private readonly List<IPluginWorldLineLayer> _layers = [];
+        private bool _disposed;
+
+        public IPluginWorldLineLayer? CreateLayer()
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            IPluginWorldLineLayer? layer = inner.CreateLayer();
+            if (layer is not null)
+                _layers.Add(layer);
+            return layer;
+        }
+
+        public void Dispose()
+        {
+            _disposed = true;
+            foreach (IPluginWorldLineLayer layer in _layers)
+                layer.Dispose();
+            _layers.Clear();
         }
     }
 

@@ -74,6 +74,7 @@ internal sealed class VulkanWorldScenePhase : IWorldSceneFramePhase
     private readonly RenderSceneShadowRuntime? _renderScene;
     private readonly WbDrawDispatcher? _worldMeshes;
     private readonly TerrainModernRenderer? _terrain;
+    private readonly PluginWorldLineRenderer? _worldLines;
 
     public VulkanWorldScenePhase(
         ICurrentGpuFrameSource frames,
@@ -87,7 +88,8 @@ internal sealed class VulkanWorldScenePhase : IWorldSceneFramePhase
             applyRenderPackBoundary = null,
         RenderSceneShadowRuntime? renderScene = null,
         WbDrawDispatcher? worldMeshes = null,
-        TerrainModernRenderer? terrain = null)
+        TerrainModernRenderer? terrain = null,
+        PluginWorldLineRenderer? worldLines = null)
     {
         _frames = frames ?? throw new ArgumentNullException(nameof(frames));
         _clear = clear ?? throw new ArgumentNullException(nameof(clear));
@@ -100,6 +102,7 @@ internal sealed class VulkanWorldScenePhase : IWorldSceneFramePhase
         _renderScene = renderScene;
         _worldMeshes = worldMeshes;
         _terrain = terrain;
+        _worldLines = worldLines;
     }
 
     public WorldRenderFrameOutcome Render(RenderFrameInput input)
@@ -278,6 +281,8 @@ internal sealed class VulkanWorldScenePhase : IWorldSceneFramePhase
                 {
                     outcome = _world.Render(input);
                 }
+                if (outcome.NormalWorldDrawn)
+                    _worldLines?.Render(encoder, input.ViewportWidth, input.ViewportHeight);
             }
             catch (Exception error) when (VulkanRenderFailurePolicy.IsFatal(error))
             {
@@ -378,7 +383,10 @@ internal sealed class VulkanWorldScenePhase : IWorldSceneFramePhase
         });
 
         using IDisposable publication = _scope.Publish(encoder);
-        return _world.Render(input);
+        WorldRenderFrameOutcome outcome = _world.Render(input);
+        if (outcome.NormalWorldDrawn)
+            _worldLines?.Render(encoder, input.ViewportWidth, input.ViewportHeight);
+        return outcome;
     }
 }
 

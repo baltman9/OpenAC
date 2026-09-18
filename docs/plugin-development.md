@@ -67,7 +67,9 @@ constructor. The host creates it with no arguments, then calls:
   `Enable`: unsubscribe events, release hotkeys, stop timers.
 
 `IPluginHost` gives you `State`, `Events`, `Commands`, `Storage`, `Log`,
-`Ui`, `Window`, `Clipboard`, `Hotkeys` and `Automation`. `Automation` is the
+`Ui`, `Window`, `Clipboard`, `Hotkeys`, `WorldLines` and `Automation`.
+`WorldLines` draws lines in the world (a route, say) in layers the plugin
+owns; a host without a window hands out no layer. `Automation` is the
 large surface: character, items, spells, combat, world objects, trade,
 vendor, navigation, fellowship, login. Check `IsAvailable` on a surface
 before relying on it; a host that cannot provide something returns an inert

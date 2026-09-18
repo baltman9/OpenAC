@@ -184,7 +184,8 @@ var host = new AppPluginHost(
     new AcDream.App.Plugins.WindowPluginHostWindow(
         () => window.PluginWindowHandle,
         () => window.PluginWindowIsMinimized,
-        () => window.ClipboardDispatch));
+        () => window.ClipboardDispatch),
+    window.WorldLines);
 GraphicalPluginSession pluginSession = GraphicalPluginSession.Create(
     applicationPaths,
     runtimeOptions.Plugins,
