@@ -20,11 +20,13 @@ internal sealed unsafe class VulkanUploadQueue : IDisposable
 
     private readonly List<BufferCopy2> _bufferCopies = [];
     private readonly List<ImageCopy2> _imageCopies = [];
-    private readonly List<TemporaryStaging> _temporaries = [];
+    /// <summary>Temporaries staged for <see cref="_flightSerial"/>, released
+    /// together when that flight retires. Frame thread only.</summary>
+    private List<TemporaryStaging>? _flightTemporaries;
+    private long _flightSerial;
     private int _temporariesCreated;
+    private int _temporariesReleased;
     private int _temporariesPeak;
-    private long _temporaryCreateTicks;
-    private long _temporaryReleaseTicks;
 
     private bool _disposed;
 
@@ -96,13 +98,12 @@ internal sealed unsafe class VulkanUploadQueue : IDisposable
     /// ring and a ring that was merely full at that moment are different
     /// problems with different answers, so they are counted apart.</summary>
     internal string DescribeStaging() =>
-        $"staging temp live {_temporaries.Count} peak {_temporariesPeak} made {_temporariesCreated} "
+        $"staging temp live {LiveTemporaryCount} peak {_temporariesPeak} made {_temporariesCreated} "
         + $"(too-big {_ringState.RejectedLargerThanRing}, ring-full {_ringState.RejectedRingFull}, "
-        + $"largest {_ringState.LargestRejectedBytes / 1024} KiB of {_ringState.CapacityBytes / (1024 * 1024)} MiB ring)"
-        + $" | temp-cost make {Milliseconds(_temporaryCreateTicks)} release {Milliseconds(_temporaryReleaseTicks)}";
+        + $"largest {_ringState.LargestRejectedBytes / 1024} KiB of {_ringState.CapacityBytes / (1024 * 1024)} MiB ring)";
 
-    private static string Milliseconds(long ticks) =>
-        (ticks * 1000.0 / System.Diagnostics.Stopwatch.Frequency).ToString("F2") + " ms";
+    /// <summary>Temporaries created and not yet released.</summary>
+    internal int LiveTemporaryCount => _temporariesCreated - _temporariesReleased;
 
     internal void StageBufferWrite(
         Buffer destination,
@@ -514,31 +515,56 @@ internal sealed unsafe class VulkanUploadQueue : IDisposable
             return (_stagingBuffer, offset);
         }
 
-        long createStarted = System.Diagnostics.Stopwatch.GetTimestamp();
         (Buffer temporary, VulkanAllocation allocation) = CreateHostBuffer(
             (ulong)data.Length,
             BufferUsageFlags.TransferSrcBit,
             $"vk-staging-temp-{ownerName}");
-        _temporaryCreateTicks += System.Diagnostics.Stopwatch.GetTimestamp() - createStarted;
         data.CopyTo(allocation.AsSpan());
-        _temporaries.Add(new TemporaryStaging(temporary, allocation));
         _temporariesCreated++;
         // The high-water mark is what a pool of these would have to hold: a
         // buffer can only be handed out again once its frame has retired, so
         // the peak outstanding is the floor on how many must exist.
-        _temporariesPeak = Math.Max(_temporariesPeak, _temporaries.Count);
+        _temporariesPeak = Math.Max(_temporariesPeak, LiveTemporaryCount);
 
-        Buffer captured = temporary;
-        VulkanAllocation capturedAllocation = allocation;
+        OpenFlightTemporaries(serial).Add(new TemporaryStaging(temporary, allocation));
+        return (temporary, 0);
+    }
+
+    /// <summary>The list this flight's temporaries go into, registering the
+    /// hand-over the first time the flight needs one.</summary>
+    private List<TemporaryStaging> OpenFlightTemporaries(long serial)
+    {
+        if (_flightTemporaries is { } open && _flightSerial == serial)
+            return open;
+
+        List<TemporaryStaging> batch = [];
+        _flightTemporaries = batch;
+        _flightSerial = serial;
         _flights.Retire(() =>
         {
-            long releaseStarted = System.Diagnostics.Stopwatch.GetTimestamp();
-            _vk.DestroyBuffer(_device, captured, null);
-            _allocator.Free(capturedAllocation);
-            _temporaries.RemoveAll(entry => entry.Buffer.Handle == captured.Handle);
-            _temporaryReleaseTicks += System.Diagnostics.Stopwatch.GetTimestamp() - releaseStarted;
+            if (ReferenceEquals(_flightTemporaries, batch))
+                _flightTemporaries = null;
+            ReleaseTemporaries(batch);
         });
-        return (temporary, 0);
+        return batch;
+    }
+
+    /// <summary>
+    /// Releases a retired flight's temporaries: the buffer objects die at
+    /// exactly the point they died before — their flight has completed, so no
+    /// submitted command buffer still reads them — and their memory goes back
+    /// to the allocator, which hands any block that empties to its own release
+    /// worker rather than calling the driver here.
+    /// </summary>
+    private void ReleaseTemporaries(List<TemporaryStaging> batch)
+    {
+        foreach (TemporaryStaging entry in batch)
+        {
+            _vk.DestroyBuffer(_device, entry.Buffer, null);
+            _allocator.Free(entry.Allocation);
+        }
+
+        _temporariesReleased += batch.Count;
     }
 
     private (Buffer Buffer, VulkanAllocation Allocation) CreateHostBuffer(
@@ -575,12 +601,14 @@ internal sealed unsafe class VulkanUploadQueue : IDisposable
             return;
         _disposed = true;
 
-        foreach (TemporaryStaging temporary in _temporaries)
+        // A flight that will never retire still owns its temporaries; the
+        // device is idle by the time the queue is disposed, so they are
+        // released here rather than left behind.
+        if (_flightTemporaries is { } pending)
         {
-            _vk.DestroyBuffer(_device, temporary.Buffer, null);
-            _allocator.Free(temporary.Allocation);
+            ReleaseTemporaries(pending);
+            _flightTemporaries = null;
         }
-        _temporaries.Clear();
 
         _vk.DestroyBuffer(_device, _stagingBuffer, null);
         _allocator.Free(_stagingAllocation);
