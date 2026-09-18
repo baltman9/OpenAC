@@ -10,6 +10,7 @@ using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 using AcDream.Runtime;
 using AcDream.Runtime.Chat;
+using AcDream.Runtime.Entities;
 using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Navigation;
 using AcDream.Runtime.Physics;
@@ -172,6 +173,7 @@ internal sealed class HeadlessSessionHost : IDisposable
     private AcDream.Core.Net.WorldSession? _currentSession;
     private HeadlessSessionWorldProjection? _worldProjection;
     private RuntimeLiveEntitySessionController? _entities;
+    private RuntimeEntityLivenessController? _liveness;
     private HeadlessSessionEventRoute? _eventRoute;
     private GameEvents.CharacterConfirmationRequest? _pendingConfirmation;
     private int _disposeStage;
@@ -591,6 +593,7 @@ internal sealed class HeadlessSessionHost : IDisposable
         _worldProjection?.PumpFirstEntry();
         _entities?.PumpPortalCompletion();
         _eventRoute?.RetryPending();
+        _liveness?.Tick(Runtime.Clock.SimulationTimeSeconds);
         _localPlayerFrame.RunPostNetworkCommandPhase();
         Runtime.ActionOwner.CombatAttack.Tick();
         _policy.Tick(Runtime, Commands);
@@ -1228,6 +1231,15 @@ internal sealed class HeadlessSessionHost : IDisposable
             // sites — see RuntimeLiveEntitySessionController's own doc.
             onLoginCompleteSent: () => _optionsSeeder?.NoteLoginCompleteSent());
         _entities = entities;
+        // The 25-second out-of-visibility destruction runs here too: the
+        // server forgets an object on that schedule without a message and
+        // only announces a destroyed object to players still knowing it, so
+        // a bot that never expired anything would keep every corpse it saw.
+        _liveness = new RuntimeEntityLivenessController(
+            Runtime.EntityObjects,
+            Runtime.PlayerIdentity,
+            new RuntimeCanonicalEntityExpirySink(Runtime.EntityObjects),
+            new RuntimePhysicsCurrentCellSource(Runtime.EntityObjects));
         var route = new LiveSessionEventRouter(
             session,
             entities.CreateSink(),
