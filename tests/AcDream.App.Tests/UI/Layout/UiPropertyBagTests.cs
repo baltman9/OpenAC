@@ -11,12 +11,12 @@ public sealed class UiPropertyBagTests
     public void Merge_UsesKeyPresence_ForExplicitFalseAndZero()
     {
         var baseBag = new UiPropertyBag();
-        baseBag.Values[0x16u] = Bool(true);
-        baseBag.Values[0x14u] = Enum(3u);
+        baseBag.Set(0x16u, Bool(true));
+        baseBag.Set(0x14u, Enum(3u));
 
         var derivedBag = new UiPropertyBag();
-        derivedBag.Values[0x16u] = Bool(false);
-        derivedBag.Values[0x14u] = Enum(0u);
+        derivedBag.Set(0x16u, Bool(false));
+        derivedBag.Set(0x14u, Enum(0u));
 
         var merged = UiPropertyBag.Merge(baseBag, derivedBag);
 
@@ -177,6 +177,79 @@ public sealed class UiPropertyBagTests
         Assert.Equal(new UiColorValue(1, 2, 3, 4), convertedColor.ColorValue);
     }
 
+    /// <summary>
+    /// An element that never wrote a property carries no dictionary, and
+    /// reading it does not build one: an interface loads tens of thousands of
+    /// property values and almost none of them are an array or a struct.
+    /// This fails the moment a read allocates the storage.
+    /// </summary>
+    [Fact]
+    public void ReadingAValueThatWroteNothingBuildsNoStorage()
+    {
+        var bag = new UiPropertyBag();
+        var value = new UiPropertyValue { Kind = UiPropertyKind.Bool, BoolValue = true };
+
+        Assert.Empty(bag.Values);
+        Assert.False(bag.TryGetValue(0x10u, out _));
+        Assert.Empty(value.ArrayValue);
+        Assert.Empty(value.StructValue);
+        Assert.False(value.StructValue.ContainsKey(0x30u));
+        Assert.False(value.StructValue.TryGetValue(0x30u, out _));
+
+        Assert.False(bag.HasStorage);
+        Assert.False(value.HasArrayStorage);
+        Assert.False(value.HasStructStorage);
+    }
+
+    /// <summary>Every empty value shares one view, so an interface's worth of
+    /// them costs one dictionary, not tens of thousands.</summary>
+    [Fact]
+    public void EmptyViewsAreShared()
+    {
+        Assert.Same(new UiPropertyValue().StructValue, new UiPropertyValue().StructValue);
+        Assert.Same(new UiPropertyBag().Values, new UiPropertyBag().Values);
+    }
+
+    /// <summary>A write builds the storage, once, and only the storage it
+    /// wrote.</summary>
+    [Fact]
+    public void AWriteBuildsExactlyTheStorageItWrote()
+    {
+        var bag = new UiPropertyBag();
+        var value = new UiPropertyValue { Kind = UiPropertyKind.Bool };
+
+        bag.Set(0x10u, value);
+        Assert.True(bag.HasStorage);
+        Assert.Same(value, bag.Values[0x10u]);
+        Assert.True(bag.TryGetValue(0x10u, out UiPropertyValue read));
+        Assert.Same(value, read);
+
+        value.AddArrayItem(new UiPropertyValue { IntegerValue = 7 });
+        Assert.True(value.HasArrayStorage);
+        Assert.False(value.HasStructStorage);
+        Assert.Equal(7, Assert.Single(value.ArrayValue).IntegerValue);
+
+        value.SetStructMember(0x30u, new UiPropertyValue { IntegerValue = 9 });
+        Assert.True(value.HasStructStorage);
+        Assert.Equal(9, value.StructValue[0x30u].IntegerValue);
+    }
+
+    /// <summary>Cloning or merging something empty stays empty: the clone of
+    /// an interface's worth of plain values must not build what the original
+    /// avoided.</summary>
+    [Fact]
+    public void CloningSomethingEmptyBuildsNoStorage()
+    {
+        UiPropertyBag bagClone = new UiPropertyBag().Clone();
+        UiPropertyValue valueClone = new UiPropertyValue().Clone();
+        UiPropertyBag merged = UiPropertyBag.Merge(new UiPropertyBag(), new UiPropertyBag());
+
+        Assert.False(bagClone.HasStorage);
+        Assert.False(valueClone.HasArrayStorage);
+        Assert.False(valueClone.HasStructStorage);
+        Assert.False(merged.HasStorage);
+    }
+
     private static UiPropertyValue Bool(bool value)
         => new() { Kind = UiPropertyKind.Bool, BoolValue = value };
 
@@ -193,7 +266,7 @@ public sealed class UiPropertyBagTests
     {
         var state = new UiStateInfo { Id = id, Name = name };
         foreach (var property in properties)
-            state.Properties.Values[property.Id] = property.Value;
+            state.Properties.Set(property.Id, property.Value);
         return state;
     }
 }
