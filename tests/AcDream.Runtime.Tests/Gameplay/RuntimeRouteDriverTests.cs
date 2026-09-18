@@ -93,6 +93,29 @@ public sealed partial class RuntimeRouteDriverTests
         Assert.DoesNotContain(steps, step => step.Turn is { Pace: RuntimeMovePace.Run });
     }
 
+    /// <summary>
+    /// A body moves off from a turn in place only once the arc it then goes round bows out
+    /// from its leg by no more than a hand's breadth: at a run that is a third of the angle a
+    /// walk may have left, and where its speeds are not known the old thirty degrees stand.
+    /// Live, a body moving off at a run with thirty degrees still to turn swung 0.7 m wide in
+    /// a lane between traps.
+    /// </summary>
+    [Fact]
+    public void ABodyMovesOffFromATurnOnlyWhenItsArcStaysInItsLane()
+    {
+        var human = new RuntimeRouteTurning(RunSpeed: 11f, RunTurnDegreesPerSecond: 129f, WalkSpeed: 3.12f, WalkTurnDegreesPerSecond: 86f);
+
+        float run = RuntimeRouteDriver.MoveOffDegrees(human, RuntimeMovePace.Run);
+        float walk = RuntimeRouteDriver.MoveOffDegrees(human, RuntimeMovePace.Walk);
+
+        Assert.InRange(run, 10f, 16f);
+        Assert.InRange(walk, 18f, 26f);
+        Assert.True(run < walk);
+        Assert.Equal(RuntimeRouteDriver.TurnInPlaceDegrees, RuntimeRouteDriver.MoveOffDegrees(null, RuntimeMovePace.Run));
+        // Speeds known for a run alone leave a walk at the old angle.
+        Assert.Equal(RuntimeRouteDriver.TurnInPlaceDegrees, RuntimeRouteDriver.MoveOffDegrees(new RuntimeRouteTurning(11f, 129f), RuntimeMovePace.Walk));
+    }
+
     [Fact]
     public void ACornerWithRoomIsRunAroundAlongAnArcWithoutStopping()
     {

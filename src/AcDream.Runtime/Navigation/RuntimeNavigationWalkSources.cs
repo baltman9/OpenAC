@@ -61,7 +61,9 @@ internal sealed class RuntimeNavigationWalkBody : INavigationWalkBody
             controller.IsAirborne,
             new RuntimeRouteTurning(
                 controller.RunSpeed,
-                WalkTurnDegreesPerSecond * MotionInterpreter.RunTurnFactor),
+                WalkTurnDegreesPerSecond * MotionInterpreter.RunTurnFactor,
+                MotionInterpreter.WalkAnimSpeed,
+                WalkTurnDegreesPerSecond),
             WalkStopMeters,
             RunStopMeters,
             _movement.PlayerMovementInputFrames);

@@ -27,7 +27,9 @@ public enum RuntimeRouteDriveState
 /// </summary>
 public readonly record struct RuntimeRouteTurning(
     float RunSpeed,
-    float RunTurnDegreesPerSecond);
+    float RunTurnDegreesPerSecond,
+    float WalkSpeed = 0f,
+    float WalkTurnDegreesPerSecond = 0f);
 
 /// <summary>
 /// The body as a route driver sees it on one frame, with how fast it goes and turns when that
@@ -161,6 +163,15 @@ public sealed class RuntimeRouteDriver
 
     public const float SteerToleranceDegrees = 3f;
     public const float TurnInPlaceDegrees = 30f;
+
+    /// <summary>
+    /// How far aside of its leg a body may drift by moving off while it still has some of a
+    /// turn in place to make. Moving off with an angle still to turn takes the body round
+    /// an arc of the pace's speed over its turn rate, and the drift is what that arc bows
+    /// out by: 0.15 m is a walk's worth at <see cref="TurnInPlaceDegrees"/>, and a run's at
+    /// about a third of that angle.
+    /// </summary>
+    public const float MoveOffDriftMeters = 0.15f;
 
     /// <summary>A corner turning more than this is never cut; the body turns in place at it.</summary>
     public const float SharpestCutDegrees = 120f;
@@ -561,7 +572,7 @@ public sealed class RuntimeRouteDriver
         // walks flips its hold to run as the walk ends, which sends the rest of that
         // walk out at a run: beside a trap, straight into it.
         RuntimeMovePace pace = PaceFor(position, sample.WalkStopMeters, sample.RunStopMeters, running);
-        if (MathF.Abs(error) > (lenient ? CutTurnInPlaceDegrees : TurnInPlaceDegrees))
+        if (MathF.Abs(error) > (lenient ? CutTurnInPlaceDegrees : MoveOffDegrees(sample.Turning, pace)))
         {
             return new RuntimeRouteDriveStep(
                 Turn: turning ? null : TurnBy(error, pace),
@@ -1029,6 +1040,28 @@ public sealed class RuntimeRouteDriver
             points[step] = new Vector3(point, start.Z + ((end.Z - start.Z) * share));
         }
         return points;
+    }
+
+    /// <summary>
+    /// The most of a turn in place a body may have left when it moves off at a pace, so that
+    /// the arc it then goes round bows out from its leg by no more than
+    /// <see cref="MoveOffDriftMeters"/>: never more than <see cref="TurnInPlaceDegrees"/>, and
+    /// that much where the body's speed and turn rate at the pace are not known.
+    /// </summary>
+    internal static float MoveOffDegrees(RuntimeRouteTurning? turning, RuntimeMovePace pace)
+    {
+        if (turning is not { } speeds)
+            return TurnInPlaceDegrees;
+        (float speed, float degreesPerSecond) = pace == RuntimeMovePace.Run
+            ? (speeds.RunSpeed, speeds.RunTurnDegreesPerSecond)
+            : (speeds.WalkSpeed, speeds.WalkTurnDegreesPerSecond);
+        if (!(speed > 0f) || !(degreesPerSecond > 0f))
+            return TurnInPlaceDegrees;
+        float radius = speed / (degreesPerSecond * (MathF.PI / 180f));
+        if (radius <= MoveOffDriftMeters)
+            return TurnInPlaceDegrees;
+        float degrees = MathF.Acos(1f - (MoveOffDriftMeters / radius)) * (180f / MathF.PI);
+        return Math.Clamp(degrees, SteerToleranceDegrees, TurnInPlaceDegrees);
     }
 
     /// <summary>A turn through an angle at a pace: the body's hold for turning is the same as for travelling.</summary>
