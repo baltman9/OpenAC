@@ -767,11 +767,18 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         cell.DragRejectSprite = 0x060011F8u;
     }
 
+    /// <summary>
+    /// The container fill meter on a pack cell. Shown only for a container with a
+    /// positive item capacity that holds at least one loose item; an empty container
+    /// hides the meter entirely, rail included, which is the original client's rule
+    /// (a zero contents-to-capacity ratio hides it rather than drawing an empty rail).
+    /// </summary>
     private void SetCapacityBar(UiItemSlot cell, uint containerGuid)
     {
         int cap = _objects.Get(containerGuid)?.ItemsCapacity ?? 0;
         if (cap <= 0) { cell.CapacityFill = -1f; return; }
         int n = CountLooseContents(containerGuid);
+        if (n == 0) { cell.CapacityFill = -1f; return; }
         cell.CapacityFill = Math.Clamp(n / (float)cap, 0f, 1f);
     }
 

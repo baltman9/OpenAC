@@ -475,10 +475,15 @@ internal sealed class WorldSelectionQuery
             return null;
         }
 
-        uint pwdBits = _liveEntities.TryGetSnapshot(serverGuid, out var spawn)
-            ? spawn.ObjectDescriptionFlags ?? 0u
-            : 0u;
-        return new VividTargetInfo(center, radius, (uint)GetItemType(serverGuid), pwdBits);
+        bool hasSpawn = _liveEntities.TryGetSnapshot(serverGuid, out var spawn);
+        uint pwdBits = hasSpawn ? spawn.ObjectDescriptionFlags ?? 0u : 0u;
+        // The indicator takes its color from the same radar rule as the blip, so the
+        // server's blip-color override travels with the description bits.
+        byte blipColor = target.RadarBlipColor
+            ?? (hasSpawn ? spawn.RadarBlipColor : null)
+            ?? (byte)0;
+        return new VividTargetInfo(
+            center, radius, (uint)GetItemType(serverGuid), pwdBits, blipColor);
     }
 
     public bool TryGetSelectionSphere(

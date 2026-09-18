@@ -3289,7 +3289,13 @@ public sealed class RetailUiRuntime : IDisposable
                     {
                         return fellowshipStrings.ResolveTemplate(tableId, keyHash, variables);
                     }
-                }),
+                },
+                LocalPlayerAllegianceRankQuality: () =>
+                    _bindings.Inventory.Objects.Get(_bindings.Social.LocalPlayerGuid())
+                        ?.Properties.Ints.TryGetValue(
+                            Layout.AllegianceRankTitleTable.AllegianceRankPropertyId, out int rank) == true
+                        ? rank
+                        : null),
             Friends: _bindings.Social.Friends,
             Squelch: _bindings.Social.Squelch,
             TemplateResolver: TemplateResolver,

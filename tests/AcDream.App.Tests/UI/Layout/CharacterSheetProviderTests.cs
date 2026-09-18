@@ -219,6 +219,35 @@ public sealed class CharacterSheetProviderTests
     }
 
     [Fact]
+    public void VitalRaise_RebuildsOnTheRecordEvenWhenTheXpUpdateReleasedTheGateFirst()
+    {
+        // The server answers a vital raise with two messages in this order: the
+        // available-XP property update on the player object, then the vital record.
+        // The sheet must refresh AFTER the record, or every later click computes
+        // its XP amount from the previous rank and spent XP (OpenAC #116).
+        var h = new Harness();
+        ClientObject player = h.AddPlayerObject(unassignedXp: 1_000_000L);
+        h.Player.OnVitalUpdate(vitalId: 1u, ranks: 0u, start: 10u, xp: 0u, current: 10u);
+        int rebuilds = 0;
+        using (h.Provider.SubscribeChanged(() => rebuilds++))
+        {
+            h.Provider.HandleRaiseRequest(new CharacterStatController.RaiseRequest(
+                CharacterStatController.RaiseTargetKind.Vital, StatId: 1u, Cost: 20L, Amount: 10));
+            Assert.True(h.Provider.BuildSheet().AwaitingRaise);
+
+            player.Properties.Int64s[2u] = 1_000_000L - 20L;
+            h.Table.AddOrUpdate(player);
+            int afterXpUpdate = rebuilds;
+
+            h.Player.OnVitalUpdate(vitalId: 1u, ranks: 10u, start: 10u, xp: 20u, current: 20u);
+
+            Assert.False(h.Provider.BuildSheet().AwaitingRaise);
+            Assert.True(rebuilds > afterXpUpdate,
+                "the vital record must rebuild the sheet even though the gate was already open");
+        }
+    }
+
+    [Fact]
     public void AwaitingRaise_ReleasesOnTheAuthoritativeRecord_AndOnPanelUnmount()
     {
         var h = new Harness();
