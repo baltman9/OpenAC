@@ -4,6 +4,7 @@ using System.Numerics;
 using AcDream.App.Rendering;
 using AcDream.App.UI;
 using AcDream.Core.Chat;
+using AcDream.Plugin.Abstractions;
 using AcDream.UI.Abstractions;
 using AcDream.UI.Abstractions.Input;
 using AcDream.UI.Abstractions.Panels.Chat;

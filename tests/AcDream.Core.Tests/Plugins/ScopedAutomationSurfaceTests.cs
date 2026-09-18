@@ -113,9 +113,9 @@ public sealed class ScopedAutomationSurfaceTests
         EventInfo[] events = typeof(IPluginChat)
             .GetEvents(BindingFlags.Public | BindingFlags.Instance);
         Assert.True(
-            methods.Length == 7 && events.Length == 1,
+            methods.Length == 9 && events.Length == 2,
             "IPluginChat should still have exactly the members this test "
-                + "knows about (7 methods incl. event accessors, 1 event) -- "
+                + "knows about (9 methods incl. event accessors, 2 events) -- "
                 + "a member was added or removed without updating this test.");
 
         chat.CaptureMessages(0);
@@ -132,6 +132,9 @@ public sealed class ScopedAutomationSurfaceTests
 
         chat.RegisterFilter(static _ => true);
         Assert.Equal(1, recording.FilterCount);
+
+        chat.LinkClicked += static _ => { };
+        Assert.Equal(1, recording.LinkClickedSubscriberCount);
 
         chat.Received += static _ => { };
         Assert.Equal(1, recording.SubscriberCount);
@@ -151,6 +154,7 @@ public sealed class ScopedAutomationSurfaceTests
     private sealed class RecordingIPluginChat : IPluginChat
     {
         private readonly List<Func<PluginChatMessage, bool>> _filters = [];
+        private Action<PluginChatLinkClicked>? _linkClicked;
         private Action<PluginChatMessage>? _received;
 
         internal int CaptureMessagesCalls { get; private set; }
@@ -158,6 +162,8 @@ public sealed class ScopedAutomationSurfaceTests
         internal int PostMessageCalls { get; private set; }
         internal int SubmitCalls { get; private set; }
         internal int FilterCount => _filters.Count;
+        internal int LinkClickedSubscriberCount =>
+            _linkClicked?.GetInvocationList().Length ?? 0;
         internal int SubscriberCount => _received?.GetInvocationList().Length ?? 0;
 
         public IReadOnlyList<PluginChatMessage> CaptureMessages(ulong afterSequence)
@@ -180,6 +186,12 @@ public sealed class ScopedAutomationSurfaceTests
         {
             _filters.Add(suppress);
             return new Removal(this, suppress);
+        }
+
+        public event Action<PluginChatLinkClicked> LinkClicked
+        {
+            add => _linkClicked += value;
+            remove => _linkClicked -= value;
         }
 
         public event Action<PluginChatMessage> Received
