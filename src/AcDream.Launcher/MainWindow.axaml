@@ -288,7 +288,9 @@
             <TextBox Grid.Row="1" Text="{Binding Plugins.DiscoverFilter, Mode=TwoWay}" PlaceholderText="Search the plugin list" AutomationProperties.Name="Search listed plugins" />
             <ScrollViewer Grid.Row="2" x:Name="DiscoverScroll" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
               <StackPanel Spacing="5" Margin="0,0,14,0">
-              <TextBlock Text="{Binding Plugins.DiscoverEmptyText}" Classes="muted" IsVisible="{Binding !Plugins.HasDiscover}" />
+              <TextBlock Text="{Binding Plugins.DiscoverStatusLine}" Classes="muted" IsVisible="{Binding Plugins.HasDiscoverStatusLine}" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding Plugins.DiscoverCheckingText}" Classes="muted" IsVisible="{Binding Plugins.IsDiscoverChecking}" />
+              <TextBlock Text="{Binding Plugins.DiscoverEmptyText}" Classes="muted" IsVisible="{Binding Plugins.ShowDiscoverEmptyText}" />
               <ItemsControl ItemsSource="{Binding Plugins.Discover}">
               <ItemsControl.ItemTemplate>
                 <DataTemplate x:DataType="vm:PluginDiscoverRowViewModel">

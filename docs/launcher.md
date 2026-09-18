@@ -45,8 +45,11 @@ structured command list for bulk editing.
 
 The **Plugins** tab lists what is installed and what is available to install
 from the curated list. **Discover** shows plugins not yet installed, except
-any the curated list blocks; **Install** downloads and unzips one, but never
-runs it. **Installed** shows what is on disk, with a source badge (**Listed**
+any the curated list blocks, and only once each one's release has been
+checked and found usable; a row appears as its check finishes, and if GitHub
+is rate limiting or unreachable, a line says so instead of a shorter list.
+**Install** downloads and unzips one, but never runs it. **Installed** shows
+what is on disk, with a source badge (**Listed**
 or **Unlisted** for a launcher-managed plugin, **Direct install** or
 **Bundled** otherwise), **Update** for plugins the launcher itself installed,
 and **Remove** for those plus a Direct install. Removing a plugin also

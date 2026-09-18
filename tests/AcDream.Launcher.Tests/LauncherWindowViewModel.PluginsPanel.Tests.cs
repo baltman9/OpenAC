@@ -466,7 +466,7 @@ public sealed partial class LauncherWindowViewModelTests
     }
 
     [Fact]
-    public async Task RefreshDiscoverDetailsAsyncFillsInLatestVersionAndFetchesItOnce()
+    public async Task RefreshDiscoverDetailsAsyncFillsInLatestVersionAndRefetchesOnlyOnANewCheck()
     {
         using var fixture = new PluginPanelFixture();
         byte[] remoteManifest = PluginPanelFixture.ManifestJson(
@@ -502,23 +502,28 @@ public sealed partial class LauncherWindowViewModelTests
         viewModel.ConfigurePlugins(composition, () => null);
         await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
 
-        PluginDiscoverRowViewModel row = Assert.Single(viewModel.Plugins.Discover);
-        Assert.False(row.HasLatestVersion);
+        // Nothing has asked Discover to resolve anything yet, so the row stays hidden (L-320).
+        Assert.Empty(viewModel.Plugins.Discover);
 
         await viewModel.Plugins.RefreshDiscoverDetailsAsync();
 
+        PluginDiscoverRowViewModel row = Assert.Single(viewModel.Plugins.Discover);
         Assert.Equal("0.2.0", row.LatestVersion);
         Assert.Equal("Client not installed", row.Compatibility);
         Assert.False(row.CompatibilityIsWarning);
         int detailRequests = handler.Requests.Count(uri => uri == manifestUri);
         Assert.Equal(1, detailRequests);
 
-        // A second Check pass and a second refresh must not re-fetch what the session already has.
-        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+        // Re-opening the tab, with no new Check in between, must not re-fetch what it already has.
         await viewModel.Plugins.RefreshDiscoverDetailsAsync();
+        Assert.Equal(1, handler.Requests.Count(uri => uri == manifestUri));
+
+        // A Check pass the user asks for once Discover has been looked at re-resolves everything,
+        // so a release published since the last look is picked up.
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
 
         Assert.Equal("0.2.0", Assert.Single(viewModel.Plugins.Discover).LatestVersion);
-        Assert.Equal(1, handler.Requests.Count(uri => uri == manifestUri));
+        Assert.Equal(2, handler.Requests.Count(uri => uri == manifestUri));
     }
 
     [Fact]
@@ -565,9 +570,9 @@ public sealed partial class LauncherWindowViewModelTests
         using var viewModel = CreateInitialized(orchestrator);
         viewModel.ConfigurePlugins(composition, () => null);
         await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+        await viewModel.Plugins.RefreshDiscoverDetailsAsync();
 
         PluginDiscoverRowViewModel row = Assert.Single(viewModel.Plugins.Discover);
-        // Details are not loaded yet, so pressing Install fetches this row's manifest itself.
         row.InstallCommand.Execute(null);
         Assert.True(viewModel.Plugins.InstallDialog.IsOpen);
 
@@ -624,6 +629,7 @@ public sealed partial class LauncherWindowViewModelTests
         using var viewModel = CreateInitialized(orchestrator);
         viewModel.ConfigurePlugins(composition, () => null);
         await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+        await viewModel.Plugins.RefreshDiscoverDetailsAsync();
 
         Assert.Single(viewModel.Plugins.Discover).InstallCommand.Execute(null);
         PluginInstallDialogViewModel dialog = viewModel.Plugins.InstallDialog;
@@ -1083,9 +1089,31 @@ public sealed partial class LauncherWindowViewModelTests
     public async Task SearchingDiscoverKeepsOnlyTheMatchingPluginsAndSaysSoWhenNoneMatch()
     {
         using var fixture = new PluginPanelFixture();
-        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
-            ? Ok(fixture.ListJson())
-            : throw new InvalidOperationException("Unexpected request: " + request.RequestUri));
+        byte[] remoteManifest = PluginPanelFixture.ManifestJson(
+            "edwards.discoverable", "0.2.0", "0.1.0", ["headless", "graphical"]);
+        Uri manifestUri = GitHubReleaseLocator.LatestAsset(
+            "shaneedwards/openac-plugin-hello", "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
+            "shaneedwards/openac-plugin-hello", "v0.2.0", "plugin.json");
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(fixture.ListJson());
+            }
+
+            if (request.RequestUri == manifestUri)
+            {
+                return Redirect(taggedManifestUri);
+            }
+
+            if (request.RequestUri == taggedManifestUri)
+            {
+                return Ok(remoteManifest);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
 
         using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
             fixture.Paths, PluginListUri, handler);
@@ -1094,6 +1122,7 @@ public sealed partial class LauncherWindowViewModelTests
         viewModel.ConfigurePlugins(composition, () => null);
 
         await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+        await viewModel.Plugins.RefreshDiscoverDetailsAsync();
         int listed = viewModel.Plugins.Discover.Count;
         Assert.True(listed > 0, "The fixture list should offer at least one plugin.");
 
@@ -1180,11 +1209,13 @@ public sealed partial class LauncherWindowViewModelTests
         viewModel.ConfigurePlugins(composition, () => null);
         await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
 
-        PluginDiscoverRowViewModel row = Assert.Single(viewModel.Plugins.Discover);
+        // Not blocked at the list-check stage (the block only names an older version), so it stays
+        // hidden until its release resolves, exactly like an unblocked listing would (L-320).
+        Assert.Empty(viewModel.Plugins.Discover);
 
         await viewModel.Plugins.RefreshDiscoverDetailsAsync();
 
-        Assert.Single(viewModel.Plugins.Discover);
+        PluginDiscoverRowViewModel row = Assert.Single(viewModel.Plugins.Discover);
         Assert.Equal("0.2.0", row.LatestVersion);
     }
 
@@ -1236,11 +1267,276 @@ public sealed partial class LauncherWindowViewModelTests
         viewModel.ConfigurePlugins(composition, () => null);
         await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
 
-        Assert.Single(viewModel.Plugins.Discover);
+        Assert.Empty(viewModel.Plugins.Discover);
 
         await viewModel.Plugins.RefreshDiscoverDetailsAsync();
 
         Assert.Empty(viewModel.Plugins.Discover);
+    }
+
+    [Fact]
+    public async Task A404OnPluginJsonHidesTheDiscoverRow()
+    {
+        using var fixture = new PluginPanelFixture();
+        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
+            ? Ok(fixture.ListJson())
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        await viewModel.Plugins.RefreshDiscoverDetailsAsync();
+
+        Assert.Empty(viewModel.Plugins.Discover);
+        Assert.False(viewModel.Plugins.HasDiscoverStatusLine);
+    }
+
+    [Fact]
+    public async Task ARepoWithNoReleaseAtAllStaysHiddenEvenWithBetaFallback()
+    {
+        using var fixture = new PluginPanelFixture();
+        const string repo = "shaneedwards/openac-plugin-hello";
+        Uri feedUri = GitHubReleaseLocator.ReleasesFeed(repo);
+        byte[] emptyFeed = System.Text.Encoding.UTF8.GetBytes("""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom"></feed>
+            """);
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(fixture.ListJson());
+            }
+
+            // A bare tag with no release: the latest-asset redirect never resolves.
+            if (request.RequestUri == feedUri)
+            {
+                return Ok(emptyFeed);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        viewModel.Plugins.ShowBetaPlugins = true;
+
+        Assert.Empty(viewModel.Plugins.Discover);
+    }
+
+    [Fact]
+    public async Task AnInvalidManifestHidesTheDiscoverRow()
+    {
+        using var fixture = new PluginPanelFixture();
+        Uri manifestUri = GitHubReleaseLocator.LatestAsset(
+            "shaneedwards/openac-plugin-hello", "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
+            "shaneedwards/openac-plugin-hello", "v0.2.0", "plugin.json");
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(fixture.ListJson());
+            }
+
+            if (request.RequestUri == manifestUri)
+            {
+                return Redirect(taggedManifestUri);
+            }
+
+            if (request.RequestUri == taggedManifestUri)
+            {
+                return Ok(System.Text.Encoding.UTF8.GetBytes("{ this is not a plugin.json"));
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        await viewModel.Plugins.RefreshDiscoverDetailsAsync();
+
+        Assert.Empty(viewModel.Plugins.Discover);
+    }
+
+    [Fact]
+    public async Task ADiscoverSearchAndCountReflectOnlyRowsThatHaveResolved()
+    {
+        using var fixture = new PluginPanelFixture();
+        byte[] remoteManifest = PluginPanelFixture.ManifestJson(
+            "edwards.discoverable", "0.2.0", "0.1.0", ["headless", "graphical"]);
+        Uri manifestUri = GitHubReleaseLocator.LatestAsset(
+            "shaneedwards/openac-plugin-hello", "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
+            "shaneedwards/openac-plugin-hello", "v0.2.0", "plugin.json");
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(System.Text.Encoding.UTF8.GetBytes("""
+                    {
+                      "schemaVersion": 1,
+                      "plugins": [
+                        { "id": "edwards.discoverable", "name": "edwards.discoverable",
+                          "author": "Shane Edwards", "description": "Test fixture.",
+                          "repo": "shaneedwards/openac-plugin-hello" },
+                        { "id": "edwards.unreleased", "name": "edwards.unreleased",
+                          "author": "Shane Edwards", "description": "No release yet.",
+                          "repo": "shaneedwards/openac-plugin-unreleased" }
+                      ],
+                      "blocked": []
+                    }
+                    """));
+            }
+
+            if (request.RequestUri == manifestUri)
+            {
+                return Redirect(taggedManifestUri);
+            }
+
+            if (request.RequestUri == taggedManifestUri)
+            {
+                return Ok(remoteManifest);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+        await viewModel.Plugins.RefreshDiscoverDetailsAsync();
+
+        // The unreleased listing never resolves, so it never counts, even though it was eligible.
+        PluginDiscoverRowViewModel row = Assert.Single(viewModel.Plugins.Discover);
+        Assert.Equal("edwards.discoverable", row.Id);
+
+        viewModel.Plugins.DiscoverFilter = "unreleased";
+        Assert.Empty(viewModel.Plugins.Discover);
+        Assert.Equal("No listed plugin matches that search.", viewModel.Plugins.DiscoverEmptyText);
+    }
+
+    [Fact]
+    public async Task DiscoverShowsHowManyAreStillCheckingAndClearsItWhenTheFirstResolves()
+    {
+        using var fixture = new PluginPanelFixture();
+        byte[] remoteManifest = PluginPanelFixture.ManifestJson(
+            "edwards.discoverable", "0.2.0", "0.1.0", ["headless", "graphical"]);
+        Uri manifestUri = GitHubReleaseLocator.LatestAsset(
+            "shaneedwards/openac-plugin-hello", "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
+            "shaneedwards/openac-plugin-hello", "v0.2.0", "plugin.json");
+        var manifestGate = new TaskCompletionSource<HttpResponseMessage>();
+        var handler = new DeferredHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Task.FromResult(Ok(fixture.ListJson()));
+            }
+
+            if (request.RequestUri == manifestUri)
+            {
+                return manifestGate.Task;
+            }
+
+            if (request.RequestUri == taggedManifestUri)
+            {
+                return Task.FromResult(Ok(remoteManifest));
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        });
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        Task refresh = viewModel.Plugins.RefreshDiscoverDetailsAsync();
+
+        Assert.True(viewModel.Plugins.IsDiscoverChecking);
+        Assert.Equal("Checking 1 plugin…", viewModel.Plugins.DiscoverCheckingText);
+        Assert.False(viewModel.Plugins.ShowDiscoverEmptyText);
+        Assert.Empty(viewModel.Plugins.Discover);
+
+        manifestGate.SetResult(Redirect(taggedManifestUri));
+        await refresh;
+
+        Assert.False(viewModel.Plugins.IsDiscoverChecking);
+        Assert.Single(viewModel.Plugins.Discover);
+    }
+
+    [Fact]
+    public async Task APluginJsonThatAppearsAfterA404ShowsUpAfterACheckPass()
+    {
+        using var fixture = new PluginPanelFixture();
+        Uri manifestUri = GitHubReleaseLocator.LatestAsset(
+            "shaneedwards/openac-plugin-hello", "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(
+            "shaneedwards/openac-plugin-hello", "v0.2.0", "plugin.json");
+        byte[] remoteManifest = PluginPanelFixture.ManifestJson(
+            "edwards.discoverable", "0.2.0", "0.1.0", ["headless", "graphical"]);
+        bool releasePublished = false;
+        var handler = new RoutedHandler(request =>
+        {
+            if (request.RequestUri == PluginListUri)
+            {
+                return Ok(fixture.ListJson());
+            }
+
+            if (!releasePublished)
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            if (request.RequestUri == manifestUri)
+            {
+                return Redirect(taggedManifestUri);
+            }
+
+            if (request.RequestUri == taggedManifestUri)
+            {
+                return Ok(remoteManifest);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+        await viewModel.Plugins.RefreshDiscoverDetailsAsync();
+
+        Assert.Empty(viewModel.Plugins.Discover);
+
+        // The author publishes the release's plugin.json; a Check pass the user asks for picks
+        // it up without needing a restart.
+        releasePublished = true;
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        Assert.Equal("0.2.0", Assert.Single(viewModel.Plugins.Discover).LatestVersion);
     }
 
     [Fact]
@@ -1676,6 +1972,7 @@ public sealed partial class LauncherWindowViewModelTests
         using var viewModel = CreateInitialized(orchestrator);
         viewModel.ConfigurePlugins(composition, () => null);
         await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+        await viewModel.Plugins.RefreshDiscoverDetailsAsync();
 
         PluginInstalledRowViewModel managed = Assert.Single(
             viewModel.Plugins.Installed, row => row.Id == "edwards.managed");
@@ -2103,12 +2400,11 @@ public sealed partial class LauncherWindowViewModelTests
         using var viewModel = CreateInitialized(orchestrator);
         viewModel.ConfigurePlugins(composition, () => null);
         await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
-
-        PluginDiscoverRowViewModel row = Assert.Single(viewModel.Plugins.Discover);
-        Assert.False(row.HasCapabilities);
+        Assert.Empty(viewModel.Plugins.Discover);
 
         await viewModel.Plugins.RefreshDiscoverDetailsAsync();
 
+        PluginDiscoverRowViewModel row = Assert.Single(viewModel.Plugins.Discover);
         Assert.True(row.HasCapabilities);
         Assert.Equal("2 capabilities", row.CapabilityCountText);
     }
@@ -2169,7 +2465,7 @@ public sealed partial class LauncherWindowViewModelTests
     }
 
     [Fact]
-    public async Task InstallPressedBeforeDetailsLoadFetchesTheManifestAndShowsEveryCapability()
+    public async Task InstallOnAVisibleDiscoverRowShowsEveryCapabilityItAlreadyResolved()
     {
         using var fixture = new PluginPanelFixture();
         const string repo = "shaneedwards/openac-plugin-hello";
@@ -2210,10 +2506,12 @@ public sealed partial class LauncherWindowViewModelTests
         using var viewModel = CreateInitialized(orchestrator);
         viewModel.ConfigurePlugins(composition, () => null);
         await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+        // A row only shows once its release resolves (L-320), so by the time Install can be
+        // pressed at all, its capabilities are already loaded.
+        await viewModel.Plugins.RefreshDiscoverDetailsAsync();
 
-        // Install is pressed before RefreshDiscoverDetailsAsync ever runs: nothing is cached yet.
         PluginDiscoverRowViewModel row = Assert.Single(viewModel.Plugins.Discover);
-        Assert.False(row.HasCapabilities);
+        Assert.True(row.HasCapabilities);
         row.InstallCommand.Execute(null);
 
         PluginInstallDialogViewModel dialog = viewModel.Plugins.InstallDialog;
@@ -2222,10 +2520,6 @@ public sealed partial class LauncherWindowViewModelTests
         Assert.Equal(2, dialog.Capabilities.Count);
         Assert.Equal("uses network", dialog.Capabilities[0].Label);
         Assert.Equal("uses chat", dialog.Capabilities[1].Label);
-
-        // The row itself now reflects what the dialog fetched, same as a background refresh would.
-        Assert.True(row.HasCapabilities);
-        Assert.Equal("2 capabilities", row.CapabilityCountText);
     }
 
     [Fact]
@@ -2278,7 +2572,7 @@ public sealed partial class LauncherWindowViewModelTests
     }
 
     [Fact]
-    public async Task InstallPressedBeforeDetailsLoadLeavesInstallDisabledWhenTheFetchIsRateLimited()
+    public async Task ARateLimitedDiscoverRowStaysHiddenAndThePanelSaysSo()
     {
         using var fixture = new PluginPanelFixture();
         var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
@@ -2295,15 +2589,13 @@ public sealed partial class LauncherWindowViewModelTests
         viewModel.ConfigurePlugins(composition, () => null);
         await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
 
-        Assert.Single(viewModel.Plugins.Discover).InstallCommand.Execute(null);
+        await viewModel.Plugins.RefreshDiscoverDetailsAsync();
 
-        PluginInstallDialogViewModel dialog = viewModel.Plugins.InstallDialog;
-        Assert.True(dialog.IsOpen);
-        Assert.False(dialog.IsLoadingCapabilities);
-        Assert.True(dialog.HasCapabilitiesLoadError);
-        Assert.Equal("GitHub is rate limiting; try later.", dialog.CapabilitiesLoadError);
-        Assert.False(dialog.ConfirmCommand.CanExecute(null));
-        Assert.True(dialog.CancelCommand.CanExecute(null));
+        Assert.Empty(viewModel.Plugins.Discover);
+        Assert.True(viewModel.Plugins.HasDiscoverStatusLine);
+        Assert.Equal(
+            "GitHub is rate limiting; some plugins could not be checked. Try Refresh list in a minute.",
+            viewModel.Plugins.DiscoverStatusLine);
     }
 
     [Fact]
@@ -2542,9 +2834,10 @@ public sealed partial class LauncherWindowViewModelTests
         await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
 
         Assert.False(viewModel.Plugins.ShowBetaPlugins);
-        PluginDiscoverRowViewModel row = Assert.Single(viewModel.Plugins.Discover);
         await viewModel.Plugins.RefreshDiscoverDetailsAsync();
-        Assert.False(row.HasLatestVersion);
+        // Stable is unavailable and beta is off, so the release never resolves and the row
+        // stays hidden (L-320), not merely blank.
+        Assert.Empty(viewModel.Plugins.Discover);
 
         viewModel.Plugins.AddFromUrlText = "https://github.com/" + repo;
         await viewModel.Plugins.AddFromUrlCommand.ExecuteAsync();
@@ -2945,6 +3238,17 @@ public sealed partial class LauncherWindowViewModelTests
             Requests.Add(request.RequestUri!);
             return Task.FromResult(respond(request));
         }
+    }
+
+    /// <summary>Like <see cref="RoutedHandler"/>, but the response is a <see cref="Task"/> the
+    /// caller drives itself: the one way to pause <see cref="LauncherPluginsViewModel.RefreshDiscoverDetailsAsync"/>
+    /// mid-resolution so a test can observe the "checking" state before completing the request.</summary>
+    private sealed class DeferredHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> respond)
+        : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) => respond(request);
     }
 
     [Fact]

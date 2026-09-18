@@ -142,7 +142,7 @@ public sealed partial class LauncherWindowViewModelTests
     }
 
     [AvaloniaFact]
-    public async Task DiscoverIconIsNotOfferedForAnUnregisteredAssetAndIsNotRetried()
+    public async Task DiscoverIconFor404dAssetIsRetriedOnlyOnACheckPassNotAPlainReopen()
     {
         using var fixture = new PluginPanelFixture();
         byte[] remoteManifest = PluginPanelFixture.ManifestJson(
@@ -169,10 +169,88 @@ public sealed partial class LauncherWindowViewModelTests
         Assert.False(Assert.Single(viewModel.Plugins.Discover).HasIcon);
         Assert.Equal(1, handler.Requests.Count(uri => uri == iconUri));
 
+        // Re-opening Discover with no new Check must not retry a failed fetch.
+        await viewModel.Plugins.RefreshDiscoverDetailsAsync();
+        Assert.Equal(1, handler.Requests.Count(uri => uri == iconUri));
+
+        // A Check pass the user asks for retries it, in case the asset has appeared since.
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        Assert.False(Assert.Single(viewModel.Plugins.Discover).HasIcon);
+        Assert.Equal(2, handler.Requests.Count(uri => uri == iconUri));
+    }
+
+    [AvaloniaFact]
+    public async Task AnIconThatAppearsAfterA404ShowsUpAfterACheckPass()
+    {
+        using var fixture = new PluginPanelFixture();
+        byte[] remoteManifest = PluginPanelFixture.ManifestJson(
+            IconPluginId, "0.2.0", "0.1.0", ["headless", "graphical"]);
+        Uri latestManifestUri = GitHubReleaseLocator.LatestAsset(IconRepo, "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(IconRepo, "v0.2.0", "plugin.json");
+        Uri iconUri = GitHubReleaseLocator.TaggedAsset(IconRepo, "v0.2.0", LauncherPluginIcon.FileName);
+        bool iconPublished = false;
+        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
+            ? Ok(fixture.ListJson())
+            : request.RequestUri == latestManifestUri
+                ? Redirect(taggedManifestUri)
+                : request.RequestUri == taggedManifestUri
+                    ? Ok(remoteManifest)
+                    : request.RequestUri == iconUri && iconPublished
+                        ? Ok(PngTestData.Valid())
+                        : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
         await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
         await viewModel.Plugins.RefreshDiscoverDetailsAsync();
 
         Assert.False(Assert.Single(viewModel.Plugins.Discover).HasIcon);
+
+        // The author publishes icon.png on the same release; a Check pass the user asks for
+        // picks it up rather than keeping the earlier 404 as the final answer.
+        iconPublished = true;
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        Assert.True(Assert.Single(viewModel.Plugins.Discover).HasIcon);
+    }
+
+    [AvaloniaFact]
+    public async Task ASuccessfullyCachedIconIsNotRefetchedOnACheckPass()
+    {
+        using var fixture = new PluginPanelFixture();
+        byte[] remoteManifest = PluginPanelFixture.ManifestJson(
+            IconPluginId, "0.2.0", "0.1.0", ["headless", "graphical"]);
+        Uri latestManifestUri = GitHubReleaseLocator.LatestAsset(IconRepo, "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset(IconRepo, "v0.2.0", "plugin.json");
+        Uri iconUri = GitHubReleaseLocator.TaggedAsset(IconRepo, "v0.2.0", LauncherPluginIcon.FileName);
+        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
+            ? Ok(fixture.ListJson())
+            : request.RequestUri == latestManifestUri
+                ? Redirect(taggedManifestUri)
+                : request.RequestUri == taggedManifestUri
+                    ? Ok(remoteManifest)
+                    : request.RequestUri == iconUri
+                        ? Ok(PngTestData.Valid())
+                        : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+        await viewModel.Plugins.RefreshDiscoverDetailsAsync();
+
+        Assert.True(Assert.Single(viewModel.Plugins.Discover).HasIcon);
+        Assert.Equal(1, handler.Requests.Count(uri => uri == iconUri));
+
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        Assert.True(Assert.Single(viewModel.Plugins.Discover).HasIcon);
         Assert.Equal(1, handler.Requests.Count(uri => uri == iconUri));
     }
 
@@ -208,7 +286,7 @@ public sealed partial class LauncherWindowViewModelTests
     }
 
     [AvaloniaFact]
-    public async Task DiscoverIconIsNotFetchedWhenTheTagDoesNotMatchTheManifestVersion()
+    public async Task AMismatchedReleaseTagHidesTheRowBeforeAnyIconFetch()
     {
         using var fixture = new PluginPanelFixture();
         byte[] remoteManifest = PluginPanelFixture.ManifestJson(
@@ -236,12 +314,14 @@ public sealed partial class LauncherWindowViewModelTests
         await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
         await viewModel.Plugins.RefreshDiscoverDetailsAsync();
 
-        Assert.False(Assert.Single(viewModel.Plugins.Discover).HasIcon);
+        // The mismatch already fails the release resolve itself (L-310), so the row stays hidden
+        // (L-320) well before Discover's own icon check would ever run.
+        Assert.Empty(viewModel.Plugins.Discover);
         Assert.False(Directory.Exists(Path.Combine(fixture.Paths.CacheDirectory, "plugin-icons")));
     }
 
     [AvaloniaFact]
-    public async Task DiscoverIconIsNotFetchedWhenTheManifestVersionFailsToParse()
+    public async Task AnUnparsableManifestVersionHidesTheRowBeforeAnyIconFetch()
     {
         using var fixture = new PluginPanelFixture();
         // Not valid SemVer: "MatchesTag" can still agree with a redirect tag naming this exact
@@ -273,7 +353,9 @@ public sealed partial class LauncherWindowViewModelTests
         await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
         await viewModel.Plugins.RefreshDiscoverDetailsAsync();
 
-        Assert.False(Assert.Single(viewModel.Plugins.Discover).HasIcon);
+        // An unparsable version fails the release resolve itself (L-310), so the row stays hidden
+        // (L-320) well before Discover's own icon check would ever run.
+        Assert.Empty(viewModel.Plugins.Discover);
         Assert.False(Directory.Exists(Path.Combine(fixture.Paths.CacheDirectory, "plugin-icons")));
     }
 

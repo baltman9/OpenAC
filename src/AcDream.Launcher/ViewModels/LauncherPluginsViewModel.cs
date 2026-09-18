@@ -57,6 +57,11 @@ public sealed class PluginDiscoverRowViewModel(
     public string InstallAutomationName { get; } = $"Install {name}";
     public RelayCommand InstallCommand { get; } = installCommand;
 
+    /// <summary>Whether the release resolver has found a usable release for this listed plugin
+    /// (L-320): the row exists from the moment the curated list loads, but only counts toward
+    /// Discover, search, and the shown list once this is true.</summary>
+    internal bool IsVisible { get; set; }
+
     /// <summary>Filled in once the Plugins tab is opened (plan, "Request budget"): blank until
     /// then, so opening Discover costs one request per listed, not-installed plugin rather than
     /// every Check pass paying for plugins nobody is looking at.</summary>
@@ -319,6 +324,13 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
     private string? _statusText;
     private bool _isRateLimited;
     private bool _showBetaPlugins;
+    private int _discoverPendingCount;
+    private bool _isDiscoverChecking;
+    private string? _discoverStatusLine;
+    /// <summary>Whether <see cref="RefreshDiscoverDetailsAsync"/> has run at least once this
+    /// session: a later Check pass only re-resolves Discover when this is set, so the startup Check
+    /// never pays for a look nobody has taken yet.</summary>
+    private bool _discoverDetailsRequested;
     private string _addFromUrlText = string.Empty;
     private bool _isRemoveDialogOpen;
     private InstalledPluginInfo? _removeTarget;
@@ -386,11 +398,16 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         ? "No listed plugin matches that search."
         : "No listed plugins are available to install.";
 
+    /// <summary>The empty-state text only makes sense once resolution has finished; while it is
+    /// still running with nothing shown yet, <see cref="DiscoverCheckingText"/> takes its place.</summary>
+    public bool ShowDiscoverEmptyText => !HasDiscover && !IsDiscoverChecking;
+
     private static bool Matches(string filter, params string?[] fields) =>
         filter.Length == 0
         || fields.Any(field => field is not null && field.Contains(filter, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>Rebuilds the two shown lists from the full ones, keeping only what the searches match.</summary>
+    /// <summary>Rebuilds the two shown lists from the full ones: Installed by the search alone,
+    /// Discover by the search over only the rows whose release has resolved (L-320).</summary>
     private void ApplyFilters()
     {
         string installedFilter = _installedFilter.Trim();
@@ -404,7 +421,8 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         string discoverFilter = _discoverFilter.Trim();
         Discover.Clear();
         foreach (PluginDiscoverRowViewModel row in _allDiscover
-            .Where(row => Matches(discoverFilter, row.Name, row.Id, row.Author, row.Description, row.Repo)))
+            .Where(row => row.IsVisible
+                && Matches(discoverFilter, row.Name, row.Id, row.Author, row.Description, row.Repo)))
         {
             Discover.Add(row);
         }
@@ -413,6 +431,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HasDiscover));
         OnPropertyChanged(nameof(InstalledEmptyText));
         OnPropertyChanged(nameof(DiscoverEmptyText));
+        OnPropertyChanged(nameof(ShowDiscoverEmptyText));
     }
 
     /// <summary>
@@ -521,6 +540,40 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _isRateLimited, value);
     }
 
+    /// <summary>Set while <see cref="RefreshDiscoverDetailsAsync"/> is resolving rows that have
+    /// never resolved before (L-320): true only until the first one becomes visible, or until the
+    /// whole pass finishes finding none, whichever comes first.</summary>
+    public bool IsDiscoverChecking => _isDiscoverChecking;
+
+    public string DiscoverCheckingText => _discoverPendingCount == 1
+        ? "Checking 1 plugin…"
+        : $"Checking {_discoverPendingCount} plugins…";
+
+    /// <summary>Set for the panel, not per-row (L-320): a rate-limited or unreachable release fetch
+    /// still leaves its row hidden, but is worth explaining once rather than leaving the list merely
+    /// short.</summary>
+    public string? DiscoverStatusLine
+    {
+        get => _discoverStatusLine;
+        private set
+        {
+            if (SetProperty(ref _discoverStatusLine, value))
+            {
+                OnPropertyChanged(nameof(HasDiscoverStatusLine));
+            }
+        }
+    }
+
+    public bool HasDiscoverStatusLine => !string.IsNullOrWhiteSpace(DiscoverStatusLine);
+
+    private void UpdateDiscoverCheckingState()
+    {
+        _isDiscoverChecking = _discoverPendingCount > 0 && !HasDiscover;
+        OnPropertyChanged(nameof(IsDiscoverChecking));
+        OnPropertyChanged(nameof(DiscoverCheckingText));
+        OnPropertyChanged(nameof(ShowDiscoverEmptyText));
+    }
+
     /// <summary>Launcher-wide (L-319 amendment): offers a beta-only repo in Discover and Add from
     /// URL when on, persisted through the orchestrator like every other launcher setting. Off keeps
     /// every resolve on <see cref="PluginReleaseChannel.Stable"/>, exactly as before the setting
@@ -542,8 +595,12 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
                 _discoverDetailsCache.Remove(row.Id);
                 row.LatestVersion = null;
                 row.Compatibility = null;
+                // The new channel's own resolve decides visibility (L-320); a row stays hidden
+                // until it does, same as the first time the list loaded.
+                row.IsVisible = false;
             }
 
+            ApplyFilters();
             _ = RefreshDiscoverDetailsAsync();
         }
     }
@@ -614,10 +671,21 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         IsRateLimited = false;
         try
         {
+            // Discover has already been looked at this session: a fresh release or icon should
+            // replace whatever that look found, not hide behind it.
+            if (_discoverDetailsRequested)
+            {
+                ClearStaleDiscoverCaches();
+            }
+
             PluginCheckOutcome outcome = await _composition
                 .CheckAsync(_clientVersionResolver(), cancellation.Token)
                 .ConfigureAwait(true);
             ApplyOutcome(outcome);
+            if (_discoverDetailsRequested)
+            {
+                await RefreshDiscoverDetailsAsync().ConfigureAwait(true);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -681,11 +749,18 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
                 row.CompatibilityIsWarning = cached.CompatibilityIsWarning;
                 row.Capabilities = cached.Capabilities;
                 row.Icon = cached.Icon;
+                // Already resolved this session (L-320): shown right away, no re-checking wait.
+                row.IsVisible = true;
             }
 
             _allDiscover.Add(row);
         }
 
+        // A fresh list replaces whatever the last refresh pass was doing; nothing is checking
+        // again until RefreshDiscoverDetailsAsync actually runs.
+        _discoverPendingCount = 0;
+        DiscoverStatusLine = null;
+        UpdateDiscoverCheckingState();
         ApplyFilters();
     }
 
@@ -822,8 +897,10 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Opening Discover's own request (plan, "Request budget"): one <c>plugin.json</c> per
-    /// listed, not-installed plugin still missing its details, cached here for the rest of the
-    /// launcher session so switching tabs or checking again never re-fetches it.</summary>
+    /// listed, not-installed plugin still missing its details, cached here so switching tabs never
+    /// re-fetches it. A listed plugin shows only once this resolves it to a usable release for the
+    /// current channel (L-320); rows appear one at a time, in the curated list's own order, as each
+    /// finishes.</summary>
     internal async Task RefreshDiscoverDetailsAsync()
     {
         if (_composition is null)
@@ -831,36 +908,76 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
             return;
         }
 
-        foreach (PluginDiscoverRowViewModel row in Discover.ToArray())
-        {
-            if (_discoverDetailsCache.ContainsKey(row.Id))
-            {
-                continue;
-            }
+        _discoverDetailsRequested = true;
+        PluginDiscoverRowViewModel[] pending = [.. _allDiscover
+            .Where(row => !row.IsVisible && !_discoverDetailsCache.ContainsKey(row.Id))];
+        _discoverPendingCount = pending.Length;
+        bool sawRateLimited = false;
+        bool sawTransportFailure = false;
+        UpdateDiscoverCheckingState();
 
-            // Rate-limited, unavailable, an invalid manifest and a prerelease latest are all
-            // skipped the same way (L-319): the row just keeps showing no details this pass.
+        foreach (PluginDiscoverRowViewModel row in pending)
+        {
             ManifestFetch fetch = await FetchPluginManifestAsync(row.Repo, CancellationToken.None)
                 .ConfigureAwait(true);
-            if (fetch.Manifest is not { } manifest || fetch.Tag is not { } tag)
+            switch (fetch.Status)
             {
-                continue;
+                case PluginReleaseResolveStatus.RateLimited:
+                    sawRateLimited = true;
+                    break;
+                case null:
+                    sawTransportFailure = true;
+                    break;
             }
 
-            LauncherVersion? remoteVersion = LauncherVersion.TryParse(manifest.Version, out LauncherVersion? parsed)
-                ? parsed
+            if (fetch.Manifest is { } manifest && fetch.Tag is { } tag)
+            {
+                LauncherVersion? remoteVersion = LauncherVersion.TryParse(
+                    manifest.Version, out LauncherVersion? parsed)
+                    ? parsed
+                    : null;
+                // A version-specific block (L-314) can only be judged once the latest version is
+                // known; a wildcard block never reaches here, since the Check pipeline already hid it.
+                if (_composition.CurrentCatalog?.IsBlocked(row.Id, remoteVersion) != true)
+                {
+                    await ApplyDiscoverDetailsAsync(row.Id, row.Repo, manifest, tag, CancellationToken.None)
+                        .ConfigureAwait(true);
+                    row.IsVisible = true;
+                    if (Matches(
+                        _discoverFilter.Trim(), row.Name, row.Id, row.Author, row.Description, row.Repo))
+                    {
+                        // Appended, never inserted: rows resolve in the curated list's own order, so
+                        // the next one to arrive always belongs after everything shown so far.
+                        Discover.Add(row);
+                        OnPropertyChanged(nameof(HasDiscover));
+                        OnPropertyChanged(nameof(ShowDiscoverEmptyText));
+                    }
+                }
+            }
+
+            _discoverPendingCount--;
+            UpdateDiscoverCheckingState();
+        }
+
+        DiscoverStatusLine = sawRateLimited
+            ? "GitHub is rate limiting; some plugins could not be checked. Try Refresh list in a minute."
+            : sawTransportFailure
+                ? "Some plugins could not be checked. Check your connection and Refresh list."
                 : null;
-            // A version-specific block (L-314) can only be judged once the latest version is known;
-            // a wildcard block never reaches here, since the Check pipeline already hid the row.
-            if (_composition.CurrentCatalog?.IsBlocked(row.Id, remoteVersion) == true)
-            {
-                Discover.Remove(row);
-                OnPropertyChanged(nameof(HasDiscover));
-                continue;
-            }
+    }
 
-            await ApplyDiscoverDetailsAsync(row.Id, row.Repo, manifest, tag, CancellationToken.None)
-                .ConfigureAwait(true);
+    /// <summary>Drops every resolved release and every failed icon fetch, so a Check pass the user
+    /// asked for re-reads each listed plugin rather than repeating what an earlier look found. A
+    /// decoded icon and Installed's own icon cache are left alone.</summary>
+    private void ClearStaleDiscoverCaches()
+    {
+        _discoverDetailsCache.Clear();
+        foreach ((string Id, string Version, bool Installed) key in _iconCache
+            .Where(entry => !entry.Key.Installed && entry.Value is null)
+            .Select(entry => entry.Key)
+            .ToArray())
+        {
+            _iconCache.Remove(key);
         }
     }
 
@@ -884,8 +1001,13 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         return manifest.Capabilities;
     }
 
+    /// <summary><see cref="Status"/> is null only for an exception the resolver itself threw (an
+    /// oversized document): the one case a fetch never reached a <see cref="PluginReleaseResolveStatus"/>
+    /// at all, which <see cref="RefreshDiscoverDetailsAsync"/> still treats as worth a panel status
+    /// line, the same as <see cref="PluginReleaseResolveStatus.RateLimited"/>.</summary>
     private readonly record struct ManifestFetch(
-        LauncherPluginManifest? Manifest, string? Tag, string? ErrorMessage);
+        LauncherPluginManifest? Manifest, string? Tag, string? ErrorMessage,
+        PluginReleaseResolveStatus? Status);
 
     /// <summary>Resolves through the plugin's channel (L-319), the same as the update check and
     /// Discover's background pass, so a beta plugin's Discover details and install/update consent
@@ -894,7 +1016,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
     {
         if (_composition is null)
         {
-            return new ManifestFetch(null, null, "This plugin's details could not be checked.");
+            return new ManifestFetch(null, null, "This plugin's details could not be checked.", null);
         }
 
         PluginReleaseResolveResult result;
@@ -906,24 +1028,25 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         }
         catch (LauncherUpdateException)
         {
-            return new ManifestFetch(null, null, "This plugin's details could not be checked.");
+            return new ManifestFetch(null, null, "This plugin's details could not be checked.", null);
         }
 
         switch (result.Status)
         {
             case PluginReleaseResolveStatus.RateLimited:
-                return new ManifestFetch(null, null, "GitHub is rate limiting; try later.");
+                return new ManifestFetch(null, null, "GitHub is rate limiting; try later.", result.Status);
             case PluginReleaseResolveStatus.Success:
                 break;
             case PluginReleaseResolveStatus.Prerelease:
                 return new ManifestFetch(
-                    null, null, result.Error ?? "This plugin's details could not be checked.");
+                    null, null, result.Error ?? "This plugin's details could not be checked.", result.Status);
             default:
-                return new ManifestFetch(null, null, "This plugin's details could not be checked.");
+                return new ManifestFetch(
+                    null, null, "This plugin's details could not be checked.", result.Status);
         }
 
         PluginReleaseResolution resolution = result.Resolution!;
-        return new ManifestFetch(resolution.Manifest, resolution.Tag, null);
+        return new ManifestFetch(resolution.Manifest, resolution.Tag, null, result.Status);
     }
 
     /// <summary>Writes a freshly fetched manifest's compatibility, capabilities and icon into the
