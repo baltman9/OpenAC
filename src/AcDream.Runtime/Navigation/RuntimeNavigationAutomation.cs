@@ -39,6 +39,10 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
     }
 
     private bool _remoteBodiesUnsimulated;
+    private PluginNavigationSnapshot _lastPublishedSnapshot;
+    private bool _hasPublishedSnapshot;
+    private ulong _snapshotRevision;
+    private Action<PluginNavigationSnapshot>? _snapshotChanged;
 
     /// <summary>A host that never moves a remote entity's physics body reads remote positions from the latest snapshot instead.</summary>
     public void BindRemoteBodiesUnsimulated() => _remoteBodiesUnsimulated = true;
@@ -130,6 +134,50 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
             : PluginNavigationCommandStatus.Rejected;
 
     // ── Where things stand ────────────────────────────────────────────────
+
+    public event Action<PluginNavigationSnapshot> SnapshotChanged
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_gate)
+                _snapshotChanged += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_gate)
+                _snapshotChanged -= value;
+        }
+    }
+
+    internal void PublishSnapshotChanged()
+    {
+        PluginNavigationSnapshot snapshot = Snapshot;
+        lock (_gate)
+        {
+            if (!_hasPublishedSnapshot || !snapshot.Equals(_lastPublishedSnapshot))
+                _snapshotRevision++;
+            snapshot = snapshot with { Revision = _snapshotRevision };
+        }
+        Action<PluginNavigationSnapshot>? handlers;
+        lock (_gate)
+        {
+            if (_hasPublishedSnapshot && snapshot.Equals(_lastPublishedSnapshot))
+                return;
+            _lastPublishedSnapshot = snapshot;
+            _hasPublishedSnapshot = true;
+            handlers = _snapshotChanged;
+        }
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginNavigationSnapshot>)handler)(snapshot); }
+            catch { /* plugin errors do not propagate out of event dispatch */ }
+        }
+    }
 
     public PluginNavigationSnapshot Snapshot
     {

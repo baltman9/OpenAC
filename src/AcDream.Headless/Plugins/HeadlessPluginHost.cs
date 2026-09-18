@@ -33,6 +33,9 @@ internal sealed class HeadlessPluginHost
     private Action? _logoff;
     private Action<string>? _localPlayerDied;
     private Action<PluginObjectChange>? _objectChanged;
+    private Action<PluginGoToReport>? _navigationChanged;
+    private long _lastNavigationSequence;
+    private PluginGoToState _lastNavigationState;
     private Action<uint>? _containerOpened;
     private Action<uint>? _containerClosed;
     private Action<PluginConfirmation>? _confirmationRequested;
@@ -174,6 +177,15 @@ internal sealed class HeadlessPluginHost
     internal void FireTick(double elapsedSeconds)
     {
         _automation.Poll();
+        _automation.NavigationAutomation.PublishSnapshotChanged();
+        PluginGoToReport report = _automation.NavigationAutomation.GoToReport;
+        if (report.Revision != 0L
+            && report.Revision != _lastNavigationSequence)
+        {
+            _lastNavigationSequence = report.Revision;
+            _lastNavigationState = report.State;
+            RaiseNavigationChanged(report);
+        }
         Action<double>? handlers;
         lock (_tickGate)
             handlers = _tick;
@@ -487,6 +499,23 @@ internal sealed class HeadlessPluginHost
         }
     }
 
+    public event Action<PluginGoToReport> NavigationChanged
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_tickGate)
+                _navigationChanged += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_tickGate)
+                _navigationChanged -= value;
+        }
+    }
+
     public event Action<uint> ContainerOpened
     {
         add
@@ -553,6 +582,23 @@ internal sealed class HeadlessPluginHost
                 RuntimeInventoryChange.Removed => PluginObjectChangeKind.Released,
                 _ => PluginObjectChangeKind.Updated,
             });
+    }
+
+    private void RaiseNavigationChanged(PluginGoToReport report)
+    {
+        Action<PluginGoToReport>? handlers;
+        lock (_tickGate)
+            handlers = _navigationChanged;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginGoToReport>)handler)(report); }
+            catch (Exception error)
+            {
+                Log.Warn($"Plugin navigation handler threw: {error}");
+            }
+        }
     }
 
     private void RaiseObjectChanged(uint objectId, PluginObjectChangeKind kind)

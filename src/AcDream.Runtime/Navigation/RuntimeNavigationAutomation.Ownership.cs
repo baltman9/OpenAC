@@ -19,6 +19,9 @@ internal sealed partial class RuntimeNavigationAutomation : IScopedNavigationSou
 
     private string? _walkOwner;
     private long _walkSequence;
+    private long _reportRevision;
+    private long _lastReportedSequence;
+    private PluginGoToState _lastReportedState;
 
     /// <summary>Who owns the walk under way, or null when no walk is.</summary>
     internal string? WalkOwner
@@ -143,10 +146,21 @@ internal sealed partial class RuntimeNavigationAutomation : IScopedNavigationSou
             if (!TryWalk(out NavigationWalkController walk))
                 return default;
             NavigationWalkReport report = walk.Report;
+            PluginGoToReport projected = RuntimeNavigationProjection.GoToReport(report);
+            if (report.Sequence != _lastReportedSequence || projected.State != _lastReportedState)
+            {
+                _lastReportedSequence = report.Sequence;
+                _lastReportedState = projected.State;
+                _reportRevision++;
+            }
             string? owner = walk.IsBusy
                 ? report.Sequence == _walkSequence ? _walkOwner : PlayerOwner
                 : null;
-            return RuntimeNavigationProjection.GoToReport(report) with { Owner = owner };
+            return projected with
+            {
+                Owner = owner,
+                Revision = _reportRevision,
+            };
         }
     }
 
@@ -163,6 +177,12 @@ internal sealed partial class RuntimeNavigationAutomation : IScopedNavigationSou
     private sealed class OwnedNavigation(RuntimeNavigationAutomation inner, string owner) : INavigationAutomation
     {
         public PluginNavigationSnapshot Snapshot => inner.Snapshot;
+
+        public event Action<PluginNavigationSnapshot> SnapshotChanged
+        {
+            add => inner.SnapshotChanged += value;
+            remove => inner.SnapshotChanged -= value;
+        }
 
         public bool TryGetObject(uint objectId, out PluginNavigationObject value) =>
             inner.TryGetObject(objectId, out value);
