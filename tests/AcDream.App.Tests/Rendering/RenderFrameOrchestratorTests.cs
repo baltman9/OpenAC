@@ -1,6 +1,7 @@
 using System.Reflection;
 using AcDream.App.Diagnostics;
 using AcDream.App.Rendering;
+using AcDream.Core.Rendering;
 using AcDream.UI.Abstractions.Panels.Settings;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
@@ -603,6 +604,9 @@ public sealed class RenderFrameOrchestratorTests
             typeof(IRenderFrameFailureRecovery),
             typeof(IBuildingDegradeFrameTick),
             typeof(IPrivateFrameScreenshot),
+            // The frame profiler is an owner, not a phase: the orchestrator
+            // only opens stage scopes on it, and it is null off the window.
+            typeof(FrameProfiler),
         ];
         FieldInfo[] fields = typeof(RenderFrameOrchestrator).GetFields(
             BindingFlags.Instance | BindingFlags.NonPublic);
@@ -804,6 +808,66 @@ public sealed class RenderFrameOrchestratorTests
         return phases.Select(phase => (phase, Input)).ToArray();
     }
 
+    [Fact]
+    public void FrameProfiler_SeesTheDrawSubmissionPresentAndDiagnosticsPhases()
+    {
+        bool wasEnabled = RenderingDiagnostics.FrameProfEnabled;
+        RenderingDiagnostics.FrameProfEnabled = true;
+        try
+        {
+            using var profiler = new FrameProfiler();
+            var calls = new List<string>();
+            var phases = new RecordingPhases(calls)
+            {
+                Observe = call =>
+                {
+                    if (call is "gpu-begin" or "gpu-end" or "world"
+                        or "post-diagnostics")
+                    {
+                        SpinFor(TimeSpan.FromMilliseconds(2));
+                    }
+                },
+            };
+            var orchestrator = new RenderFrameOrchestrator(
+                phases, phases, phases, phases, phases, phases, phases, phases,
+                buildingDegrades: null,
+                screenshots: phases,
+                profiler: profiler);
+
+            profiler.FrameBoundary();
+            orchestrator.Render(Input);
+            profiler.FrameBoundary();
+
+            // Each spinning phase burned 2 ms; a stage that is not wrapped,
+            // or a profiler the orchestrator never received, reads 0.
+            Assert.True(
+                profiler.LastStageUs(FrameStage.Render) >= 1000,
+                $"render stage was {profiler.LastStageUs(FrameStage.Render)} us");
+            // Present brackets both ends of the GPU frame, so it carries two
+            // of the four spins; one end alone could not reach 3 ms.
+            Assert.True(
+                profiler.LastStageUs(FrameStage.Present) >= 3000,
+                $"present stage was {profiler.LastStageUs(FrameStage.Present)} us");
+            Assert.True(
+                profiler.LastStageUs(FrameStage.Diagnostics) >= 1000,
+                $"diagnostics stage was {profiler.LastStageUs(FrameStage.Diagnostics)} us");
+            Assert.Equal(0L, profiler.LastStageUs(FrameStage.Update));
+        }
+        finally
+        {
+            RenderingDiagnostics.FrameProfEnabled = wasEnabled;
+        }
+    }
+
+    private static void SpinFor(TimeSpan duration)
+    {
+        long deadline = System.Diagnostics.Stopwatch.GetTimestamp()
+            + (long)(duration.TotalSeconds * System.Diagnostics.Stopwatch.Frequency);
+        while (System.Diagnostics.Stopwatch.GetTimestamp() < deadline)
+        {
+        }
+    }
+
     private static RenderFrameOrchestrator Create(RecordingPhases phases) =>
         new(phases, phases, phases, phases, phases, phases, phases, phases, null, phases);
 
@@ -852,6 +916,7 @@ public sealed class RenderFrameOrchestratorTests
         public WorldRenderFrameOutcome World { get; init; } = new(7, 19, true);
         public PrivatePresentationFrameOutcome Presentation { get; init; } = new(false, false);
         public bool CaptureResult { get; init; }
+        public Action<string>? Observe { get; init; }
         public List<(string Phase, RenderFrameInput Input)> ObservedInputs { get; } = [];
         public WorldRenderFrameOutcome ObservedWorld { get; private set; }
         public RenderFrameOutcome ObservedOutcome { get; private set; }
@@ -861,6 +926,7 @@ public sealed class RenderFrameOrchestratorTests
         void IRenderFrameLifetime.EndFrame()
         {
             _calls.Add("gpu-end");
+            Observe?.Invoke("gpu-end");
             if (CloseFailure is not null)
                 throw CloseFailure;
         }
@@ -927,6 +993,7 @@ public sealed class RenderFrameOrchestratorTests
         private void Record(string call)
         {
             _calls.Add(call);
+            Observe?.Invoke(call);
             if (FailurePoint == call && Failure is not null)
                 throw Failure;
         }
