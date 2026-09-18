@@ -4,6 +4,7 @@ using Xunit;
 
 namespace AcDream.App.Tests;
 
+[Collection(FrameProfilerStateCollection.Name)]
 public class FrameProfilerReportTests
 {
     [Fact]

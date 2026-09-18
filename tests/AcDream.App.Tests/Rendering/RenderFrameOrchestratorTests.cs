@@ -8,6 +8,7 @@ using SixLabors.ImageSharp.PixelFormats;
 
 namespace AcDream.App.Tests.Rendering;
 
+[Collection(FrameProfilerStateCollection.Name)]
 public sealed class RenderFrameOrchestratorTests
 {
     private static readonly RenderFrameInput Input = new(
