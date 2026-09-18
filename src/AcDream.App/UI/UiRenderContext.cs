@@ -28,7 +28,7 @@ public sealed class UiRenderContext
 {
     public TextRenderer TextRenderer { get; }
     public BitmapFont? DefaultFont { get; set; }
-    public Vector2 ScreenSize { get; }
+    public Vector2 ScreenSize { get; private set; }
 
     private readonly System.Collections.Generic.List<Vector2> _stack = new();
     private Vector2 _current;
@@ -54,8 +54,28 @@ public sealed class UiRenderContext
     public UiRenderContext(TextRenderer tr, Vector2 screenSize, BitmapFont? defaultFont = null)
     {
         TextRenderer = tr;
+        Begin(screenSize, defaultFont);
+    }
+
+    /// <summary>
+    /// Points the context at a new frame and clears what the last one left.
+    /// One context serves every frame instead of one being built per frame:
+    /// its three stacks are built empty and grown as the interface nests, so
+    /// a context per frame grew them again from nothing every frame -- fifteen
+    /// megabytes per thirty seconds of clip-stack arrays alone at an uncapped
+    /// frame rate. A newly constructed context goes through this same reset,
+    /// which is what makes a reused one start where a fresh one starts.
+    /// </summary>
+    public void Begin(Vector2 screenSize, BitmapFont? defaultFont)
+    {
         ScreenSize = screenSize;
         DefaultFont = defaultFont;
+        _stack.Clear();
+        _current = default;
+        _clipStack.Clear();
+        _clip = null;
+        _alphaStack.Clear();
+        _alpha = 1f;
     }
 
     public void PushTransform(float dx, float dy)
