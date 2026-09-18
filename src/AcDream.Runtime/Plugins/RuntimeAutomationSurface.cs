@@ -847,6 +847,11 @@ internal sealed class RuntimeAutomationSurface
                 }
                 continue;
             }
+            // A beneficial spell the caster cannot be the target of (the retail
+            // target rule refuses it on the caster) is no self buff, however
+            // good it sounds; a plugin handed it would ask for it forever.
+            if (!RetailSpellTargetPolicy.CanTargetSelf(meta))
+                continue;
             buffs.Add(Project(meta));
         }
 
