@@ -45,6 +45,11 @@ internal sealed class FarLandscapeDrawCache(
         public WbDrawDispatcher.InstanceLightSet Lights;
         public uint Indoor;
         public Vector2 Selection;
+        /// <summary>The per-frame lighting the entry's command block was
+        /// built with; a block is only reusable while it still matches.</summary>
+        public WbDrawDispatcher.InstanceLightSet BlockLights;
+        public uint BlockIndoor;
+        public Vector2 BlockSelection;
     }
 
     private sealed class Entry(uint[] cells)
@@ -63,6 +68,16 @@ internal sealed class FarLandscapeDrawCache(
         /// <summary>The landblock write revision this entry was last read
         /// at; while it holds, no record the entry owns has been written.</summary>
         public ulong LandblockRevision;
+        /// <summary>The entry's opaque commands, built from
+        /// <see cref="Opaque"/> and handed to the stream in runs of visible
+        /// batches. Every batch has a slot, visible or not, so the block does
+        /// not depend on where the camera is looking.</summary>
+        public readonly OrderedDrawCommandBlock Block = new();
+        public bool BlockValid;
+        public int BlockClassification;
+        /// <summary>Advances whenever anything the block is built from
+        /// changes: a rebuild, a regroup, or a reclassification.</summary>
+        public int Classification;
         /// <summary>Whether the entry holds a live dynamic. A dynamic's
         /// classification also follows state the scene never writes -- a part
         /// fade advances on its own clock -- so an entry holding one is read
@@ -87,6 +102,8 @@ internal sealed class FarLandscapeDrawCache(
     /// rebuilt. A reclassification that keeps its shape does not rebuild
     /// them.</summary>
     internal int RegroupCount { get; private set; }
+    /// <summary>How many times an entry's command block was rebuilt.</summary>
+    internal static int BlockBuildCount { get; private set; }
     internal int EntityClassificationCount { get; private set; }
     internal int EntryCount => _entries.Count;
     internal ReadOnlySpan<int> AlphaEnds => _alphaEnds;
@@ -195,18 +212,36 @@ internal sealed class FarLandscapeDrawCache(
             }
         }
 
-        foreach (BatchRef item in entry.Opaque)
+        // The entry's opaque commands only change when its classification or
+        // its lighting does, so they are built once and then handed to the
+        // stream in runs. What reaches the stream is the same commands in the
+        // same order the per-command path appended.
+        if (!entry.BlockValid
+            || entry.BlockClassification != entry.Classification
+            || LightingMoved(entry))
         {
-            Entity entity = item.Entity;
-            if (!entity.Visible[item.PartIndex])
-                continue;
-            ref readonly WbDrawDispatcher.WalkClassifiedBatch batch =
-                ref CollectionsMarshal.AsSpan(entity.Batches)[item.BatchIndex];
-            stream.Append(new OrderedDrawCommand(
-                batch.Key, batch.Transform, entity.Stage, firstCell, batch.ClipSlot,
-                entity.Lights, entity.Indoor, batch.Alpha,
-                entity.Selection, batch.DetailCategory, AllowInstanceMerge: true));
+            BuildBlock(entry, firstCell);
         }
+
+        int runStart = -1;
+        for (int i = 0; i < entry.Opaque.Count; i++)
+        {
+            BatchRef item = entry.Opaque[i];
+            if (item.Entity.Visible[item.PartIndex])
+            {
+                if (runStart < 0)
+                    runStart = i;
+                continue;
+            }
+
+            if (runStart >= 0)
+            {
+                stream.AppendRange(entry.Block, runStart, i - runStart);
+                runStart = -1;
+            }
+        }
+        if (runStart >= 0)
+            stream.AppendRange(entry.Block, runStart, entry.Opaque.Count - runStart);
 
         // Per cell: order the visible alpha batches far-to-near by their
         // precomputed world sort center, sorting only (distance, index) pairs,
@@ -241,6 +276,49 @@ internal sealed class FarLandscapeDrawCache(
             _alphaEnds[cellIndex] = alpha.Count;
         }
         return true;
+    }
+
+    private static bool LightingMoved(Entry entry)
+    {
+        foreach (Entity entity in entry.Entities)
+        {
+            if (entity.Lights != entity.BlockLights
+                || entity.Indoor != entity.BlockIndoor
+                || entity.Selection != entity.BlockSelection)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void BuildBlock(Entry entry, uint firstCell)
+    {
+        entry.Block.EnsureCapacity(entry.Opaque.Count);
+        for (int i = 0; i < entry.Opaque.Count; i++)
+        {
+            BatchRef item = entry.Opaque[i];
+            Entity entity = item.Entity;
+            ref readonly WbDrawDispatcher.WalkClassifiedBatch batch =
+                ref CollectionsMarshal.AsSpan(entity.Batches)[item.BatchIndex];
+            entry.Block.Set(i, new OrderedDrawCommand(
+                batch.Key, batch.Transform, entity.Stage, firstCell, batch.ClipSlot,
+                entity.Lights, entity.Indoor, batch.Alpha,
+                entity.Selection, batch.DetailCategory, AllowInstanceMerge: true));
+        }
+
+        entry.Block.Count = entry.Opaque.Count;
+        entry.BlockValid = true;
+        entry.BlockClassification = entry.Classification;
+        foreach (Entity entity in entry.Entities)
+        {
+            entity.BlockLights = entity.Lights;
+            entity.BlockIndoor = entity.Indoor;
+            entity.BlockSelection = entity.Selection;
+        }
+
+        BlockBuildCount++;
     }
 
     private bool NeedsRebuild(Entry entry)
@@ -289,6 +367,7 @@ internal sealed class FarLandscapeDrawCache(
         Regroup(entry);
         entry.Retry = retry;
         entry.HasDynamic = hasDynamic;
+        entry.Classification++;
         RebuildCount++;
     }
 
@@ -358,6 +437,7 @@ internal sealed class FarLandscapeDrawCache(
             else
                 RefreshAlphaCenters(entry);
             entry.Retry = retry;
+            entry.Classification++;
         }
 
         entry.HasDynamic = hasDynamic;

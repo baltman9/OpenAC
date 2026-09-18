@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using AcDream.App.Rendering.Scene;
 using AcDream.App.Rendering.Walk;
 using AcDream.App.Rendering.Wb;
+using AcDream.App.Rendering.Selection;
 using AcDream.Core.Meshing;
 
 namespace AcDream.App.Tests.Rendering.Walk;
@@ -122,6 +123,177 @@ public sealed partial class WalkStaticStreamPopulatorTests
                 RetainedBlock, 4, 0, new OrderedDrawStream(), new RetainedViews(), 0,
                 Vector3.Zero, alpha));
             return alpha;
+        }
+        finally { fx.Dispatcher.EndWalkPartFrame(); }
+    }
+
+    /// <summary>
+    /// The exactness pin for the retained command block: a cache that keeps
+    /// and patches its commands must produce, every frame, the stream a cache
+    /// built from scratch that frame produces -- through moves, a geometry
+    /// swap, a retirement, a re-admission on a reused entity id, a fade, a
+    /// cell change, a translucency change and a visibility flip.
+    /// </summary>
+    [Fact]
+    public void RetainedCells_PatchedStreamMatchesAFullRebuildThroughAScriptedSequence()
+    {
+        const uint secondCell = RetainedBlock | 2u;
+        var lighting = new RetainedLighting();
+        using var fx = new DispatcherFixture(selectionSink: lighting);
+        InstallRetainedMesh(fx);
+        InstallRetainedMesh(fx, RetainedMesh + 1, 12);
+        InjectRenderData(
+            fx.Manager,
+            RetainedMesh + 2,
+            MakeFlatMesh(MakeBatch(2, TranslucencyKind.AlphaBlend, 21, 0, 3, 1)));
+
+        var world = new RetainedWorld();
+        world.Set(RetainedRecord(1), RetainedRecord(2), RetainedRecord(3));
+        var retained = new FarLandscapeDrawCache(fx.Dispatcher, world);
+        var views = new RetainedViews();
+        AssertMatchesFullRebuild(fx, world, retained, views, "first frame");
+        AssertMatchesFullRebuild(fx, world, retained, views, "idle frame");
+
+        // A move: the same batches with a new transform.
+        UpdateInPlace(
+            world,
+            RetainedRecord(1) with
+            {
+                Transform = new RenderTransform(Matrix4x4.CreateTranslation(17f, 0f, 0f)),
+            });
+        AssertMatchesFullRebuild(fx, world, retained, views, "moved");
+
+        // A geometry swap: different batches, so a different grouping.
+        UpdateInPlace(world, RetainedRecord(2, RetainedMesh + 1));
+        AssertMatchesFullRebuild(fx, world, retained, views, "geometry swapped");
+
+        // A retirement.
+        world.Set(RetainedRecord(1), RetainedRecord(2, RetainedMesh + 1));
+        AssertMatchesFullRebuild(fx, world, retained, views, "retired");
+
+        // A re-admission that reuses the entity id under a new incarnation.
+        world.Set(
+            RetainedRecord(1),
+            RetainedRecord(2, RetainedMesh + 1),
+            RetainedRecord(3) with
+            {
+                OwnerIncarnation = RenderOwnerIncarnation.FromRaw(2),
+            });
+        AssertMatchesFullRebuild(fx, world, retained, views, "re-admitted");
+
+        // A translucent entity, then a fade advancing on its own clock.
+        world.Set(
+            RetainedRecord(1),
+            RetainedRecord(2, RetainedMesh + 2) with
+            {
+                ProjectionClass = RenderProjectionClass.LiveDynamicRoot,
+            },
+            RetainedRecord(3));
+        AssertMatchesFullRebuild(fx, world, retained, views, "translucent dynamic");
+        fx.Fades.StartPartFade(2u, partIndex: 0, start: 0.2f, end: 0.8f, time: 1f);
+        AssertMatchesFullRebuild(fx, world, retained, views, "fade started");
+        fx.Fades.AdvanceAll(0.4f);
+        AssertMatchesFullRebuild(fx, world, retained, views, "fade advanced");
+        fx.Fades.AdvanceAll(0.4f);
+        AssertMatchesFullRebuild(fx, world, retained, views, "fade advanced again");
+
+        // A cell change inside the same entry.
+        world.Cells[RetainedCell] = [RetainedRecord(1), RetainedRecord(2)];
+        world.Cells[secondCell] = [RetainedRecord(3)];
+        world.Revisions[RetainedCell] = world.Revisions.GetValueOrDefault(RetainedCell) + 1;
+        world.Revisions[secondCell] = world.Revisions.GetValueOrDefault(secondCell) + 1;
+        world.Current.Clear();
+        foreach (RenderProjectionRecord[] cellRecords in world.Cells.Values)
+        {
+            foreach (RenderProjectionRecord cellRecord in cellRecords)
+                world.Current[cellRecord.Source.LocalEntityId] = cellRecord;
+        }
+        AssertMatchesFullRebuild(fx, world, retained, views, "cell changed");
+
+        // Selection lighting, which is resolved per frame per entity and is
+        // not part of any record.
+        lighting.Value = new RetailSelectionLighting(0.6f, 0.4f);
+        AssertMatchesFullRebuild(fx, world, retained, views, "selection lighting changed");
+        lighting.Value = new RetailSelectionLighting(0.1f, 0.9f);
+        AssertMatchesFullRebuild(fx, world, retained, views, "selection lighting restored");
+
+        // A visibility flip, which selects runs out of the block.
+        views.Visible = false;
+        AssertMatchesFullRebuild(fx, world, retained, views, "nothing visible");
+        views.Visible = true;
+        AssertMatchesFullRebuild(fx, world, retained, views, "visible again");
+    }
+
+    /// <summary>Writes a record change the way the scene does: the record a
+    /// refresh reads and the record a rebuild reads are the same record, and
+    /// the cell keeps its membership stamp because membership did not
+    /// change.</summary>
+    private static void UpdateInPlace(RetainedWorld world, RenderProjectionRecord record)
+    {
+        world.Current[record.Source.LocalEntityId] = record;
+        foreach (RenderProjectionRecord[] records in world.Cells.Values)
+        {
+            for (int i = 0; i < records.Length; i++)
+            {
+                if (records[i].Source.LocalEntityId == record.Source.LocalEntityId)
+                    records[i] = record;
+            }
+        }
+    }
+
+    private static void AssertMatchesFullRebuild(
+        DispatcherFixture fx,
+        RetainedWorld world,
+        FarLandscapeDrawCache retained,
+        RetainedViews views,
+        string step)
+    {
+        (OrderedDrawStream patched, List<WbDrawDispatcher.WalkClassifiedBatch> patchedAlpha) =
+            AppendOneFrame(fx, retained, views);
+        (OrderedDrawStream rebuilt, List<WbDrawDispatcher.WalkClassifiedBatch> rebuiltAlpha) =
+            AppendOneFrame(fx, new FarLandscapeDrawCache(fx.Dispatcher, world), views);
+
+        void Same<T>(string field, IReadOnlyList<T> expected, IReadOnlyList<T> actual)
+        {
+            if (expected.Count == actual.Count
+                && expected.SequenceEqual(actual))
+            {
+                return;
+            }
+
+            Assert.Fail(
+                $"step '{step}': {field} diverged from a full rebuild."
+                + $" rebuilt=[{string.Join(", ", expected)}]"
+                + $" patched=[{string.Join(", ", actual)}]");
+        }
+
+        Assert.True(rebuilt.Count == patched.Count, $"step '{step}': command count {patched.Count} against a rebuild count of {rebuilt.Count}. rebuilt=[{string.Join(",", rebuilt.Transforms.Select(m => m.M41))}] patched=[{string.Join(",", patched.Transforms.Select(m => m.M41))}] rk=[{string.Join(",", rebuilt.Keys.Select(k => k.FirstIndex))}] pk=[{string.Join(",", patched.Keys.Select(k => k.FirstIndex))}]");
+        Same("keys", rebuilt.Keys, patched.Keys);
+        Same("transforms", rebuilt.Transforms, patched.Transforms);
+        Same("stages", rebuilt.Stages, patched.Stages);
+        Same("cell ids", rebuilt.CellIds, patched.CellIds);
+        Same("clip slots", rebuilt.ClipSlots, patched.ClipSlots);
+        Same("lights", rebuilt.Lights, patched.Lights);
+        Same("indoor flags", rebuilt.IndoorFlags, patched.IndoorFlags);
+        Same("alphas", rebuilt.Alphas, patched.Alphas);
+        Same("selection lighting", rebuilt.SelectionLighting, patched.SelectionLighting);
+        Same("detail categories", rebuilt.DetailCategories, patched.DetailCategories);
+        Same("instance merges", rebuilt.AllowInstanceMerges, patched.AllowInstanceMerges);
+        Same("alpha batches", rebuiltAlpha, patchedAlpha);
+    }
+
+    private static (OrderedDrawStream Stream, List<WbDrawDispatcher.WalkClassifiedBatch> Alpha)
+        AppendOneFrame(DispatcherFixture fx, FarLandscapeDrawCache cache, RetainedViews views)
+    {
+        fx.Dispatcher.BeginWalkPartFrame();
+        try
+        {
+            cache.BeginFrame();
+            var stream = new OrderedDrawStream();
+            var alpha = new List<WbDrawDispatcher.WalkClassifiedBatch>();
+            Assert.True(cache.TryAppend(
+                RetainedBlock, 4, 0, stream, views, 0, Vector3.Zero, alpha));
+            return (stream, alpha);
         }
         finally { fx.Dispatcher.EndWalkPartFrame(); }
     }
