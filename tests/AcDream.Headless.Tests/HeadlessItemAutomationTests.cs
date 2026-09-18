@@ -28,6 +28,28 @@ public sealed class HeadlessItemAutomationTests
     }
 
     [Fact]
+    public void TryIdentify_OwnedItemSendsTheAppraisal()
+    {
+        var h = new Harness();
+        h.AddOwnedItem(Item, ItemUseability.Contained);
+
+        Assert.True(h.Automation.TryIdentify(Item));
+
+        Assert.Equal(new[] { Item }, h.Appraisals);
+    }
+
+    [Fact]
+    public void TryIdentify_UnknownObjectSendsNothing()
+    {
+        var h = new Harness();
+
+        Assert.False(h.Automation.TryIdentify(Item));
+        Assert.False(h.Automation.TryIdentify(0u));
+
+        Assert.Empty(h.Appraisals);
+    }
+
+    [Fact]
     public void TryUse_TargetedItemDoesNotSend()
     {
         var h = new Harness();
@@ -561,6 +583,8 @@ public sealed class HeadlessItemAutomationTests
         internal bool DropResult = true;
         internal bool SplitToWorldResult = true;
         internal bool GiveResult = true;
+        internal bool AppraiseResult = true;
+        internal readonly List<uint> Appraisals = [];
         internal readonly HeadlessItemAutomation Automation;
         internal readonly AutoWieldController? AutoWield;
 
@@ -616,6 +640,11 @@ public sealed class HeadlessItemAutomationTests
                 {
                     Gives.Add((target, item, amount));
                     return GiveResult;
+                },
+                item =>
+                {
+                    Appraisals.Add(item);
+                    return AppraiseResult;
                 },
                 isComponentPack: null,
                 autoWield: AutoWield);

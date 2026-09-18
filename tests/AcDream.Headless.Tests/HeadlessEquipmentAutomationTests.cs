@@ -138,6 +138,7 @@ public sealed class HeadlessEquipmentAutomationTests
                 item => true,
                 (item, amount) => true,
                 (target, item, amount) => true,
+                item => true,
                 isComponentPack: null,
                 autoWield: AutoWield);
         }

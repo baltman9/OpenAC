@@ -16,6 +16,7 @@ internal sealed class HeadlessItemAutomation
     private readonly Func<uint, bool> _sendDrop;
     private readonly Func<uint, uint, bool> _sendStackableSplitTo3D;
     private readonly Func<uint, uint, uint, bool> _sendGive;
+    private readonly Func<uint, bool> _sendAppraise;
     private readonly Func<uint, bool> _isComponentPack;
     private readonly AutoWieldController? _autoWield;
 
@@ -29,6 +30,7 @@ internal sealed class HeadlessItemAutomation
         Func<uint, bool> sendDrop,
         Func<uint, uint, bool> sendStackableSplitTo3D,
         Func<uint, uint, uint, bool> sendGive,
+        Func<uint, bool> sendAppraise,
         Func<uint, bool>? isComponentPack = null,
         AutoWieldController? autoWield = null)
     {
@@ -46,6 +48,7 @@ internal sealed class HeadlessItemAutomation
         _sendStackableSplitTo3D = sendStackableSplitTo3D
             ?? throw new ArgumentNullException(nameof(sendStackableSplitTo3D));
         _sendGive = sendGive ?? throw new ArgumentNullException(nameof(sendGive));
+        _sendAppraise = sendAppraise ?? throw new ArgumentNullException(nameof(sendAppraise));
         _isComponentPack = isComponentPack ?? (_ => false);
         _autoWield = autoWield;
     }
@@ -279,9 +282,26 @@ internal sealed class HeadlessItemAutomation
         _autoWield?.IsBusy == true
         || !_runtime.InventoryOwner.Transactions.CanBeginRequest;
 
-    // The surface requires these bound; not supported on headless yet.
+    // The surface requires this bound; not supported on headless yet.
     internal static bool RefusePickup(uint itemId, bool mainPack) => false;
-    internal static bool RefuseIdentify(uint itemId) => false;
+
+    /// <summary>
+    /// Mirrors the GUI automation appraisal: the same request the client's
+    /// own assess sends, through the one awaiting slot, marked as
+    /// automation so it never bumps a deliberate user assess. Without it no
+    /// headless session could ever assess an item, and every rule that
+    /// waits on an assessed item waited forever.
+    /// </summary>
+    internal bool TryIdentify(uint itemId)
+    {
+        if (itemId == 0u
+            || !_transport.IsInWorld
+            || _runtime.InventoryOwner.Objects.Get(itemId) is null)
+        {
+            return false;
+        }
+        return _sendAppraise(itemId);
+    }
 
     private static StackMergeItem ToStackMergeItem(ClientObject item) => new(
         item.ObjectId,

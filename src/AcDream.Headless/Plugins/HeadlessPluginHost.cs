@@ -92,7 +92,7 @@ internal sealed class HeadlessPluginHost
                 items.TryDrop,
                 items.TryGive,
                 HeadlessItemAutomation.RefusePickup,
-                HeadlessItemAutomation.RefuseIdentify);
+                items.TryIdentify);
             _automation.BindEquipment(items.TryEquip, () => items.EquipmentBusy);
         }
         if (logout is not null)
