@@ -829,22 +829,19 @@ internal sealed class LocalPlayerTeleportController
         if (!IsCurrentLifetime(generation, sequence))
             return;
 
-        // The accepted destination is placed as soon as it is accepted, not
-        // once the world around it is drawable. A destination cell that is not
-        // resident yet answers "deferred": the placement parks, and the
-        // ordinary wake re-runs it against the finished cell — which is what
-        // lets the arrival slide clear of whatever the server spawns there
-        // while the stream is still catching up. Only the streaming origin
-        // shift has to settle first, because it moves the coordinate frame the
-        // placement resolves against. World readiness still gates the
-        // presentation below; see the research note on lifestone arrival.
-        bool placementCommitted = haveDestination
-            && originReady
-            && TryAdvancePortalCommit(sequence);
+        // The arrival is placed once the destination neighbourhood has been
+        // gathered, not at the moment the destination is accepted. That edge
+        // is the one the original client re-places every parked object on, and
+        // it is the only edge at which this client's destination cell is fully
+        // populated: the objects standing in it get their collision back on
+        // the same gathering pass, so an arrival placed here slides clear of
+        // them. Placing earlier - at the accept, or at the destination
+        // landblock's collision admission - runs before those objects are
+        // back and puts the player inside one of them. See the research note
+        // on lifestone arrival.
+        bool placementReady = dataReady && TryAdvancePortalCommit(sequence);
         if (!IsCurrentLifetime(generation, sequence))
             return;
-
-        bool placementReady = dataReady && placementCommitted;
 
         if (haveDestination && !placementReady)
             _holdSeconds += deltaSeconds;

@@ -307,8 +307,12 @@ public sealed class LocalPlayerTeleportControllerTests
         Assert.True(harness.Reveal.WaitCueShown);
     }
 
+    // The arrival must NOT be placed while the destination neighbourhood is
+    // still being gathered: the objects standing in the destination cell only
+    // get their collision back on that gathering pass, so a placement made
+    // before it ends up inside one of them (OpenAC #127, measured live).
     [Fact]
-    public void ArrivalIsPlacedWhileTheWorldIsStillStreaming_ButNothingIsRevealed()
+    public void ArrivalIsNotPlacedWhileTheWorldIsStillStreaming()
     {
         var harness = new Harness(worldReady: false);
         Vector3 before = harness.Movement.Controller!.Position;
@@ -318,17 +322,19 @@ public sealed class LocalPlayerTeleportControllerTests
             teleportTimestampAdvanced: true);
         harness.Presentation.EmitPlaceWhenReady = true;
 
-        harness.Controller.Tick(0.016f);
+        for (int i = 0; i < 20; i++)
+            harness.Controller.Tick(0.1f);
 
-        // The accepted destination is placed at once...
-        Assert.NotEqual(before, harness.Movement.Controller.Position);
-        Assert.Equal(new Vector3(31f, 32f, 33f), harness.Movement.Controller.Position);
-        Assert.Equal(0x20210000u, harness.Movement.Controller.CellId & 0xFFFF0000u);
-        // ...and the world behind the wormhole stays held until it is drawable.
+        Assert.Equal(before, harness.Movement.Controller.Position);
         Assert.All(harness.Presentation.WorldReadyValues, Assert.False);
         Assert.False(harness.Placement.Called);
         Assert.Equal(0, harness.Reveal.PortalMaterializationCount);
-        Assert.False(harness.Reveal.Snapshot.Completed);
+
+        harness.WorldReady = true;
+        harness.Controller.Tick(0.016f);
+
+        Assert.Equal(new Vector3(31f, 32f, 33f), harness.Movement.Controller.Position);
+        Assert.True(harness.Placement.Called);
     }
 
     [Fact]
