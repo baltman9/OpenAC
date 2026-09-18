@@ -474,24 +474,34 @@ public interface ISpellCatalog
     double GetCooldownRemaining(uint cooldownId) => 0d;
 }
 
+/// <summary>The semantic kind of a link selected in the chat transcript.</summary>
+public enum PluginChatLinkKind
+{
+    /// <summary>A world coordinate.</summary>
+    Coordinate,
+}
+
+/// <summary>A coordinate carried by a chat link.</summary>
+/// <param name="EastWest">The east-west coordinate; west is negative.</param>
+/// <param name="NorthSouth">The north-south coordinate; south is negative.</param>
+public readonly record struct PluginChatCoordinate(double EastWest, double NorthSouth);
+
+/// <summary>A semantic link selected in the client's chat transcript.</summary>
+/// <param name="Kind">The kind of link.</param>
+/// <param name="DisplayText">The text displayed for the link.</param>
+/// <param name="Coordinate">The coordinate payload, when <paramref name="Kind"/> is <see cref="PluginChatLinkKind.Coordinate"/>.</param>
+public readonly record struct PluginChatLinkClicked(
+    PluginChatLinkKind Kind,
+    string DisplayText,
+    PluginChatCoordinate? Coordinate = null);
+
 /// <summary>One line of the client's text, as a plugin sees it.</summary>
-/// <param name="Sequence">
-/// The host's own counter for this line, rising by one per line. Pass the
-/// last one you saw back to <see cref="IPluginChat.CaptureMessages"/>.
-/// </param>
-/// <param name="SenderObjectId">
-/// The object that said it, or 0 when the line has no speaker.
-/// </param>
-/// <param name="Kind">
-/// What kind of line it is: 0 local speech, 1 ranged speech, 2 channel,
-/// 3 tell, 4 system, 5 popup, 6 emote, 7 soul emote, 8 combat, and
-/// <see cref="StatusTextKind"/> for a status notice.
-/// </param>
-/// <param name="Sender">The speaker's name; empty when there is none.</param>
+/// <param name="Sequence">The host's counter for this line.</param>
+/// <param name="SenderObjectId">The object that said it, or 0 without a speaker.</param>
+/// <param name="Kind">The line kind.</param>
+/// <param name="Sender">The speaker's name.</param>
 /// <param name="Text">The line itself.</param>
-/// <param name="ChannelName">
-/// The channel the line came over; empty when it came over none.
-/// </param>
+/// <param name="ChannelName">The channel name, when applicable.</param>
 public readonly record struct PluginChatMessage(
     ulong Sequence,
     uint SenderObjectId,
@@ -544,6 +554,13 @@ public interface IPluginChat
     /// thread that raises <see cref="IEvents.Tick"/>. Unlike
     /// <see cref="CaptureMessages"/>, nothing is dropped between polls.
     /// </summary>
+    event Action<PluginChatLinkClicked> LinkClicked
+    {
+        add { }
+        remove { }
+    }
+
+    /// <summary>Raised for each delivered chat line.</summary>
     event Action<PluginChatMessage> Received
     {
         add { }

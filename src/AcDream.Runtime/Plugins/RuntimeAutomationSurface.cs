@@ -89,6 +89,7 @@ internal sealed class RuntimeAutomationSurface
     private Func<uint, bool, bool>? _answerConfirmation;
     private Action<ExternalContainerTransition>? _externalContainerChanged;
     private Action<PluginChatMessage>? _chatReceived;
+    private Action<PluginChatLinkClicked>? _chatLinkClicked;
     private SpellTable? _spellCatalogSource;
     private IReadOnlyList<PluginSpellInfo> _allSpells = Array.Empty<PluginSpellInfo>();
     private long _inventoryCompletionRevision;
@@ -1425,6 +1426,37 @@ internal sealed class RuntimeAutomationSurface
             out double remaining)
                 ? Math.Max(0d, remaining)
                 : 0d;
+    }
+
+    public event Action<PluginChatLinkClicked> LinkClicked
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_gate)
+                _chatLinkClicked += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_gate)
+                _chatLinkClicked -= value;
+        }
+    }
+
+    internal void RaiseChatLinkClicked(PluginChatLinkClicked link)
+    {
+        Action<PluginChatLinkClicked>? handlers;
+        lock (_gate)
+            handlers = _chatLinkClicked;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginChatLinkClicked>)handler)(link); }
+            catch { /* plugin errors do not propagate out of event dispatch */ }
+        }
     }
 
     public event Action<PluginChatMessage> Received
