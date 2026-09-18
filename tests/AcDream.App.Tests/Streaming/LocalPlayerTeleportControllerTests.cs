@@ -308,6 +308,30 @@ public sealed class LocalPlayerTeleportControllerTests
     }
 
     [Fact]
+    public void ArrivalIsPlacedWhileTheWorldIsStillStreaming_ButNothingIsRevealed()
+    {
+        var harness = new Harness(worldReady: false);
+        Vector3 before = harness.Movement.Controller!.Position;
+        harness.Controller.OnTeleportStarted(7);
+        harness.OfferDestination(
+            Position(0x20210001u, 7, 31f, 32f, 33f),
+            teleportTimestampAdvanced: true);
+        harness.Presentation.EmitPlaceWhenReady = true;
+
+        harness.Controller.Tick(0.016f);
+
+        // The accepted destination is placed at once...
+        Assert.NotEqual(before, harness.Movement.Controller.Position);
+        Assert.Equal(new Vector3(31f, 32f, 33f), harness.Movement.Controller.Position);
+        Assert.Equal(0x20210000u, harness.Movement.Controller.CellId & 0xFFFF0000u);
+        // ...and the world behind the wormhole stays held until it is drawable.
+        Assert.All(harness.Presentation.WorldReadyValues, Assert.False);
+        Assert.False(harness.Placement.Called);
+        Assert.Equal(0, harness.Reveal.PortalMaterializationCount);
+        Assert.False(harness.Reveal.Snapshot.Completed);
+    }
+
+    [Fact]
     public void Place_ReconcilesInsidePlacementBeforeRevealMaterialized()
     {
         var order = new List<string>();
