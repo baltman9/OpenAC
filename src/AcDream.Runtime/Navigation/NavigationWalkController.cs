@@ -404,6 +404,10 @@ internal sealed partial class NavigationWalkController
 
     private const int MaximumBuildsPerPlan = 2;
     private const int ViewRetryTicks = 120;
+
+    /// <summary>How far from the goal an object still counts as the thing the goal stands on.</summary>
+    private const float GoalObjectReach = 4f;
+
     private const float FaceToleranceDegrees = 10f;
 
     /// <summary>
@@ -499,6 +503,15 @@ internal sealed partial class NavigationWalkController
     /// </summary>
     private uint _gridDungeon;
     private uint _buildingDungeon;
+
+    /// <summary>What sent the grid being built building, as the build reports when it lands.</summary>
+    private string _buildingWhy = "a walk needs one over its route";
+
+    /// <summary>
+    /// What the objects in the grid's region came to when they were last looked at, so
+    /// that a change is built for once it has stayed put from one look to the next.
+    /// </summary>
+    private ulong _objectsLastSeen;
 
     /// <summary>
     /// The cell last asked about whether it lies in a sealed dungeon, and the
@@ -916,9 +929,14 @@ internal sealed partial class NavigationWalkController
             && _gridDungeon == gridDungeon
             && built.Contains(sample.Position, CoverMargin)
             && !IsStale(built, gridDungeon)
-            && !ObjectsMoved(built)
                 ? built
                 : null;
+        if (usable is { } have && !active.BuiltForObjects && GoalStandsOnWhatTheGridHasNot(have, active, sample.Body))
+        {
+            active.BuiltForObjects = true;
+            active.RebuildWhy = "the goal stands on something the grid has none of";
+            usable = null;
+        }
         bool staged = false;
         if (usable is null || !usable.Contains(active.Goal, CoverMargin))
         {
@@ -1639,6 +1657,8 @@ internal sealed partial class NavigationWalkController
             End(active, NavigationWalkState.NoRoute, Inv($"the goal was still {away:0} m away after {active.Stages} stages"));
             return;
         }
+        active.BuiltForObjects = false;
+        active.RebuildWhy = null;
         string next = Inv($"stage {active.Stages} walked; planning the next toward the goal, {away:0} m away");
         Publish(active, NavigationWalkState.Planning, next, float.NaN);
         Say($"Walk to {Label(active)}: {next}");
@@ -1658,7 +1678,13 @@ internal sealed partial class NavigationWalkController
             return;
         }
         active.Builds++;
-        if (!StartBuild(originX, originY, size, sample.Body, dungeon))
+        if (!StartBuild(
+                originX,
+                originY,
+                size,
+                sample.Body,
+                dungeon,
+                active.RebuildWhy ?? "a walk needs one over its route"))
             End(active, NavigationWalkState.NoRoute, "no collision is loaded around the character");
     }
 
@@ -1840,9 +1866,8 @@ internal sealed partial class NavigationWalkController
     /// <summary>
     /// Whether a grid no longer stands for the world: the resident landblocks it was
     /// built from have changed, or the landblock of a grid over a whole sealed dungeon
-    /// has left. Objects arriving and leaving are <see cref="ObjectsMoved"/>, which only
-    /// the grid kept around the character follows, so that a walk can always plan with
-    /// the grid it has.
+    /// has left. Objects arriving and leaving are <see cref="ObjectsMoved"/>, which a walk
+    /// asks about as it plans and the grid kept around the character follows as it is shown.
     /// </summary>
     /// <summary>
     /// Lets go of the grid kept between walks once nothing it was built over is loaded any
@@ -1881,8 +1906,10 @@ internal sealed partial class NavigationWalkController
     /// <summary>
     /// Starts building a grid over a region, or over the whole of the sealed
     /// dungeon whose landblock <paramref name="dungeon"/> names when it is not zero.
+    /// <paramref name="why"/> is what sent it building, which the build reports when it
+    /// lands: a grid built again and again has a reason, and it is worth telling.
     /// </summary>
-    private bool StartBuild(float originX, float originY, float size, NavBody body, uint dungeon)
+    private bool StartBuild(float originX, float originY, float size, NavBody body, uint dungeon, string why)
     {
         NavGeometry? geometry = dungeon == 0u
             ? NavGeometry.Capture(_physics, originX, originY, size, _goals.StandsStill)
@@ -1890,22 +1917,76 @@ internal sealed partial class NavigationWalkController
         if (geometry is null)
             return false;
         _buildingDungeon = dungeon;
+        _buildingWhy = why;
         _building = Task.Run(() => NavGrid.Build(geometry, body));
         return true;
     }
 
     /// <summary>
     /// Whether the objects a body meets in a grid's region have changed since it was
-    /// built, so the grid shown around the character is worth building again.
+    /// built. A walk asks this as it plans, and plans on the answer at once: an object
+    /// the server placed after the grid was built is floor the walk must be given, and
+    /// waiting to be sure of it would be waiting with the walk standing still.
     /// </summary>
-    private bool ObjectsMoved(NavGrid grid) =>
+    private bool ObjectsMoved(NavGrid grid) => Objects(grid) != grid.ObjectFingerprint;
+
+    /// <summary>
+    /// Whether the objects have changed and stayed changed, which is what the grid kept
+    /// around the character is built again for. It is built again for as long as the
+    /// answer is yes, so the answer must not be yes for a thing on its way through: what
+    /// the region holds has to read the same twice running first. The ground hardly ever
+    /// changes, and what changes it is a thing the server places and leaves, which reads
+    /// the same from the moment it lands; anything crossing the region is somewhere else
+    /// on the next look. A dungeon's grid takes far longer to build than to look at, and
+    /// one built for a thing in flight is out of date before the build finishes.
+    /// </summary>
+    private bool ObjectsMovedAndStayed(NavGrid grid)
+    {
+        ulong now = Objects(grid);
+        bool stayed = now != grid.ObjectFingerprint && now == _objectsLastSeen;
+        _objectsLastSeen = now;
+        return stayed;
+    }
+
+    /// <summary>
+    /// Whether the goal stands on or in an object whose collision the grid has none of,
+    /// which is an object the server placed after the grid was built. A route over such a
+    /// grid still arrives: it ends on the floor beside the object or under it, rather than
+    /// on top, as a walk onto a rock the grid never saw does. Asked once as a walk plans,
+    /// not on every tick, since it reads the objects standing around the goal. The grid's
+    /// own rule for what it holds decides, so that what it is asked about and what it was
+    /// built from are the same objects.
+    /// </summary>
+    private bool GoalStandsOnWhatTheGridHasNot(NavGrid grid, Request active, NavBody body)
+    {
+        var goal = new Vector2(active.Goal.X, active.Goal.Y);
+        foreach (ShadowEntry entry in _physics.ShadowObjects.AllEntriesForDebug())
+        {
+            if (grid.ObjectIds.Contains(entry.EntityId)
+                || Vector2.Distance(new Vector2(entry.Position.X, entry.Position.Y), goal)
+                    > GoalObjectReach + entry.Radius
+                || !_goals.StandsStill(entry.EntityId))
+            {
+                continue;
+            }
+            NavAvoidance footprint = NavGeometry.FootprintOf(entry, _physics.DataCache);
+            if (Vector2.Distance(new Vector2(footprint.Centre.X, footprint.Centre.Y), goal)
+                <= footprint.Radius + body.Radius)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>What the objects a body meets in a grid's region come to now.</summary>
+    private ulong Objects(NavGrid grid) =>
         NavGeometry.FingerprintObjects(
             _physics,
             grid.OriginX,
             grid.OriginY,
             grid.Size,
-            _goals.StandsStill)
-        != grid.ObjectFingerprint;
+            _goals.StandsStill);
 
     /// <summary>Keeps a grid around the character while it is shown: the whole dungeon inside a sealed one.</summary>
     private void KeepViewGrid(in NavigationWalkBodySample sample)
@@ -1914,14 +1995,13 @@ internal sealed partial class NavigationWalkController
             return;
         if (TryMeasureDungeon(sample.CellId, out uint dungeon, out Vector2 minimum, out Vector2 maximum))
         {
-            if (_grid is { } whole
-                && whole.Body == sample.Body
-                && _gridDungeon == dungeon
-                && !IsStale(whole, dungeon)
-                && !ObjectsMoved(whole))
-            {
+            string? whyDungeon = _grid is { } whole && whole.Body == sample.Body && _gridDungeon == dungeon
+                ? IsStale(whole, dungeon)
+                    ? "the dungeon's landblock left"
+                    : ObjectsMovedAndStayed(whole) ? "the objects in it changed" : null
+                : "there was none over this dungeon";
+            if (whyDungeon is null)
                 return;
-            }
             Vector2 at = Flat(sample.Position);
             if (!TryChooseSquare(
                     Vector2.Min(minimum, at),
@@ -1930,22 +2010,21 @@ internal sealed partial class NavigationWalkController
                     out float originX,
                     out float originY,
                     out float size)
-                || !StartBuild(originX, originY, size, sample.Body, dungeon))
+                || !StartBuild(originX, originY, size, sample.Body, dungeon, whyDungeon))
             {
                 _viewRetryTick = _tick + ViewRetryTicks;
             }
             return;
         }
-        if (_grid is { } grid
-            && grid.Body == sample.Body
-            && _gridDungeon == 0u
-            && grid.Contains(sample.Position, ViewRegion / 8f)
-            && !ObjectsMoved(grid))
-        {
+        string? why = _grid is { } grid && grid.Body == sample.Body && _gridDungeon == 0u
+            ? grid.Contains(sample.Position, ViewRegion / 8f)
+                ? ObjectsMovedAndStayed(grid) ? "the objects in it changed" : null
+                : "the character walked out of it"
+            : "there was none around the character";
+        if (why is null)
             return;
-        }
         float half = ViewRegion * 0.5f;
-        if (!StartBuild(Snap(sample.Position.X - half), Snap(sample.Position.Y - half), ViewRegion, sample.Body, dungeon: 0u))
+        if (!StartBuild(Snap(sample.Position.X - half), Snap(sample.Position.Y - half), ViewRegion, sample.Body, dungeon: 0u, why))
             _viewRetryTick = _tick + ViewRetryTicks;
     }
 
@@ -1968,7 +2047,7 @@ internal sealed partial class NavigationWalkController
         _gridDungeon = _buildingDungeon;
         NavGridBuildReport report = grid.Report;
         Say(Inv(
-            $"Navmesh: {report.Nodes} standing points ({report.ClearNodes} clear) over {grid.Size:0} m from {grid.LandblockIds.Count} landblocks in {report.Milliseconds:0} ms"));
+            $"Navmesh: {report.Nodes} standing points ({report.ClearNodes} clear) over {grid.Size:0} m from {grid.LandblockIds.Count} landblocks in {report.Milliseconds:0} ms, built because {_buildingWhy}"));
     }
 
     private void CollectRoute()
@@ -2036,6 +2115,25 @@ internal sealed partial class NavigationWalkController
             string through = "no route keeps out of where the character stuck; planning through it again";
             Publish(requester, NavigationWalkState.Planning, through, float.NaN);
             Say($"{(requester.Follow ? "Follow" : "Walk to")} {Label(requester)}: {through}");
+            return;
+        }
+        if (route.Outcome != NavRouteOutcome.Routed
+            && !requester.BuiltForObjects
+            && _grid is { } searched
+            && ObjectsMoved(searched))
+        {
+            // The grid was built before the server had placed everything here: a dungeon's
+            // is built on arrival, and objects are placed as the character comes near them.
+            // A route keeps out of the objects the grid has none of, as obstacles, which is
+            // right until the way on is over them — the rocks of a jump puzzle are the
+            // route. Having found none, build the grid again with what stands here now and
+            // search once more, rather than asking on every tick whether anything moved.
+            requester.BuiltForObjects = true;
+            requester.RebuildWhy = "no route was found with the objects the grid had";
+            _grid = null;
+            string again = $"{requester.RebuildWhy}; building it again with what stands here now";
+            Publish(requester, NavigationWalkState.Planning, again, float.NaN);
+            Say($"{(requester.Follow ? "Follow" : "Walk to")} {Label(requester)}: {again}");
             return;
         }
         if (route.Outcome != NavRouteOutcome.Routed)
@@ -2918,6 +3016,18 @@ internal sealed partial class NavigationWalkController
 
         /// <summary>Grids built for the current plan.</summary>
         public int Builds { get; set; }
+
+        /// <summary>
+        /// Whether this walk has already built its grid again over the objects standing
+        /// here. It does that once for each stretch it walks, where a search found no
+        /// route and the grid was built without some of what stands here: a goal nothing
+        /// reaches must not build grid after grid, so another one is earned only by
+        /// walking a stage of the way first.
+        /// </summary>
+        public bool BuiltForObjects { get; set; }
+
+        /// <summary>Why this walk asked for its grid again, as the build reports when it lands.</summary>
+        public string? RebuildWhy { get; set; }
 
         /// <summary>Whether the route planned or walked is one stage of a walk to a goal beyond it.</summary>
         public bool Staged { get; set; }

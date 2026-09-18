@@ -210,12 +210,14 @@ internal sealed class RuntimeNavigationGoalSource : INavigationGoalSource
     /// <summary>
     /// The server objects near a point whose collision stands in a route's way, as
     /// <see cref="StandsInTheWay"/> tells. Each part of an object's collision is a
-    /// footprint of its own.
+    /// footprint of its own. A missile in flight stands nowhere, so an arrow or a
+    /// spell's bolt on its way past is none of them.
     /// </summary>
     public bool StandsStill(uint entityLocalId) =>
         _runtime.EntityObjects.Entities.TryGetByLocalId(entityLocalId, out RuntimeEntityRecord record)
         && record.ServerGuid != _runtime.PlayerIdentity.ServerGuid
         && !record.FinalPhysicsState.HasFlag(PhysicsStateFlags.Ethereal)
+        && !record.FinalPhysicsState.HasFlag(PhysicsStateFlags.Missile)
         && _runtime.InventoryOwner.Objects.Get(record.ServerGuid) is { } item
         && CanBeStoodOn(item);
 
@@ -251,6 +253,7 @@ internal sealed class RuntimeNavigationGoalSource : INavigationGoalSource
                 || record.ServerGuid == player
                 || record.ServerGuid == goalObjectId
                 || record.FinalPhysicsState.HasFlag(PhysicsStateFlags.Ethereal)
+                || record.FinalPhysicsState.HasFlag(PhysicsStateFlags.Missile)
                 || _runtime.InventoryOwner.Objects.Get(record.ServerGuid) is not { } item
                 || !StandsInTheWay(item))
             {
