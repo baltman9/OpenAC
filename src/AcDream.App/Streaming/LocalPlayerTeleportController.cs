@@ -829,6 +829,16 @@ internal sealed class LocalPlayerTeleportController
         if (!IsCurrentLifetime(generation, sequence))
             return;
 
+        // The arrival is placed once the destination neighbourhood has been
+        // gathered, not at the moment the destination is accepted. That edge
+        // is the one the original client re-places every parked object on, and
+        // it is the only edge at which this client's destination cell is fully
+        // populated: the objects standing in it get their collision back on
+        // the same gathering pass, so an arrival placed here slides clear of
+        // them. Placing earlier - at the accept, or at the destination
+        // landblock's collision admission - runs before those objects are
+        // back and puts the player inside one of them. See the research note
+        // on lifestone arrival.
         bool placementReady = dataReady && TryAdvancePortalCommit(sequence);
         if (!IsCurrentLifetime(generation, sequence))
             return;
