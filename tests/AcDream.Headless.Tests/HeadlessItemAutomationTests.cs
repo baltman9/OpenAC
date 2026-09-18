@@ -56,6 +56,44 @@ public sealed class HeadlessItemAutomationTests
         Assert.Equal(corpse, h.Runtime.InventoryOwner.ExternalContainers.RequestedContainerId);
     }
 
+    /// <summary>
+    /// A headless pull from an open corpse is the runtime's own backpack
+    /// placement, the same request the window's loot click makes. Before
+    /// this the headless host bound a refusal, so no headless session could
+    /// pull anything. Mutation: bind the refusal again and nothing is sent.
+    /// </summary>
+    [Fact]
+    public void TryPickup_ItemInAnOpenCorpseIsPlacedInTheBackpack()
+    {
+        const uint corpse = 0x80001240u;
+        const uint prize = 0x80001241u;
+        var h = new Harness();
+        h.Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = Player,
+            Type = ItemType.Creature,
+            ItemsCapacity = 102,
+        });
+        h.Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = corpse,
+            Type = ItemType.Container,
+            ContainerId = 0u,
+            ItemsCapacity = 10,
+            PublicWeenieBitfield = (uint)PublicWeenieFlags.Corpse,
+        });
+        h.Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = prize,
+            Type = ItemType.Misc,
+            ContainerId = corpse,
+        });
+
+        Assert.True(h.Automation.TryPickup(prize, mainPack: false));
+
+        Assert.Equal(new[] { prize }, h.Pickups);
+    }
+
     [Fact]
     public void TryIdentify_OwnedItemSendsTheAppraisal()
     {
@@ -582,11 +620,14 @@ public sealed class HeadlessItemAutomationTests
             return SendUseSucceeds;
         }
 
+        internal List<uint> PickupCalls { get; } = [];
+
         public bool TrySendPickup(
             uint itemGuid, uint destinationContainerId, int placement, out uint sequence)
         {
-            sequence = 0u;
-            return false;
+            PickupCalls.Add(itemGuid);
+            sequence = 1u;
+            return true;
         }
     }
 
@@ -598,6 +639,7 @@ public sealed class HeadlessItemAutomationTests
 
         internal readonly GameRuntime Runtime;
         internal readonly FakeTransport Transport = new();
+        internal List<uint> Pickups { get; } = [];
         internal readonly List<(uint Item, uint Container, int Placement)> Puts = [];
         internal readonly List<(uint Item, uint Container, uint Placement, uint Amount)> Splits = [];
         internal readonly List<(uint Source, uint Target, uint Amount)> Merges = [];
@@ -676,7 +718,12 @@ public sealed class HeadlessItemAutomationTests
                     return AppraiseResult;
                 },
                 isComponentPack: null,
-                autoWield: AutoWield);
+                autoWield: AutoWield,
+                placeInBackpack: (item, _) =>
+                {
+                    Pickups.Add(item);
+                    return true;
+                });
         }
 
         // The blocker's confirmed move lands it in a sub-pack rather than the

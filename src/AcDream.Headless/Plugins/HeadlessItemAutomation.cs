@@ -32,7 +32,8 @@ internal sealed class HeadlessItemAutomation
         Func<uint, uint, uint, bool> sendGive,
         Func<uint, bool> sendAppraise,
         Func<uint, bool>? isComponentPack = null,
-        AutoWieldController? autoWield = null)
+        AutoWieldController? autoWield = null,
+        Func<uint, bool, bool>? placeInBackpack = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
@@ -51,7 +52,12 @@ internal sealed class HeadlessItemAutomation
         _sendAppraise = sendAppraise ?? throw new ArgumentNullException(nameof(sendAppraise));
         _isComponentPack = isComponentPack ?? (_ => false);
         _autoWield = autoWield;
+        _placeInBackpack = placeInBackpack
+            ?? ((item, mainPack) =>
+                _runtime.ItemInteractionOwner.PlaceWorldItemInBackpack(item, mainPack));
     }
+
+    private readonly Func<uint, bool, bool> _placeInBackpack;
 
     // Mirrors the GUI automation use, including its auto-wield gate; approach
     // and secure trade are not driven headless.
@@ -290,7 +296,19 @@ internal sealed class HeadlessItemAutomation
         || !_runtime.InventoryOwner.Transactions.CanBeginRequest;
 
     // The surface requires this bound; not supported on headless yet.
-    internal static bool RefusePickup(uint itemId, bool mainPack) => false;
+    /// <summary>
+    /// Mirrors the window's automation pickup: the runtime's own backpack
+    /// placement of a world item, the same request the window's loot click
+    /// makes. Without it no headless session could ever pull an item from a
+    /// corpse: every pull was refused on the spot and the corpse closed
+    /// untouched.
+    /// </summary>
+    internal bool TryPickup(uint itemId, bool mainPack)
+    {
+        if (itemId == 0u || !_transport.IsInWorld)
+            return false;
+        return _placeInBackpack(itemId, mainPack);
+    }
 
     /// <summary>
     /// Mirrors the GUI automation appraisal: the same request the client's
