@@ -23,6 +23,8 @@ internal sealed unsafe class VulkanUploadQueue : IDisposable
     private readonly List<TemporaryStaging> _temporaries = [];
     private int _temporariesCreated;
     private int _temporariesPeak;
+    private long _temporaryCreateTicks;
+    private long _temporaryReleaseTicks;
 
     private bool _disposed;
 
@@ -96,7 +98,11 @@ internal sealed unsafe class VulkanUploadQueue : IDisposable
     internal string DescribeStaging() =>
         $"staging temp live {_temporaries.Count} peak {_temporariesPeak} made {_temporariesCreated} "
         + $"(too-big {_ringState.RejectedLargerThanRing}, ring-full {_ringState.RejectedRingFull}, "
-        + $"largest {_ringState.LargestRejectedBytes / 1024} KiB of {_ringState.CapacityBytes / (1024 * 1024)} MiB ring)";
+        + $"largest {_ringState.LargestRejectedBytes / 1024} KiB of {_ringState.CapacityBytes / (1024 * 1024)} MiB ring)"
+        + $" | temp-cost make {Milliseconds(_temporaryCreateTicks)} release {Milliseconds(_temporaryReleaseTicks)}";
+
+    private static string Milliseconds(long ticks) =>
+        (ticks * 1000.0 / System.Diagnostics.Stopwatch.Frequency).ToString("F2") + " ms";
 
     internal void StageBufferWrite(
         Buffer destination,
@@ -508,10 +514,12 @@ internal sealed unsafe class VulkanUploadQueue : IDisposable
             return (_stagingBuffer, offset);
         }
 
+        long createStarted = System.Diagnostics.Stopwatch.GetTimestamp();
         (Buffer temporary, VulkanAllocation allocation) = CreateHostBuffer(
             (ulong)data.Length,
             BufferUsageFlags.TransferSrcBit,
             $"vk-staging-temp-{ownerName}");
+        _temporaryCreateTicks += System.Diagnostics.Stopwatch.GetTimestamp() - createStarted;
         data.CopyTo(allocation.AsSpan());
         _temporaries.Add(new TemporaryStaging(temporary, allocation));
         _temporariesCreated++;
@@ -524,9 +532,11 @@ internal sealed unsafe class VulkanUploadQueue : IDisposable
         VulkanAllocation capturedAllocation = allocation;
         _flights.Retire(() =>
         {
+            long releaseStarted = System.Diagnostics.Stopwatch.GetTimestamp();
             _vk.DestroyBuffer(_device, captured, null);
             _allocator.Free(capturedAllocation);
             _temporaries.RemoveAll(entry => entry.Buffer.Handle == captured.Handle);
+            _temporaryReleaseTicks += System.Diagnostics.Stopwatch.GetTimestamp() - releaseStarted;
         });
         return (temporary, 0);
     }

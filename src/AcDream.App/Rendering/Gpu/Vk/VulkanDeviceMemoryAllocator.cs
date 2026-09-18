@@ -96,6 +96,10 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
     private readonly Dictionary<(uint TypeIndex, int BlockIndex, ulong OffsetBytes), string> _ownerByRange = [];
 
     private bool _disposed;
+    private int _blocksCreated;
+    private int _blocksRetired;
+    private long _blockCreateTicks;
+    private long _blockRetireTicks;
 
     private readonly record struct BlockMemory(DeviceMemory Memory, nint Mapped, ulong CapacityBytes);
 
@@ -300,9 +304,12 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
             if (!_blockMemory.Remove(key, out BlockMemory block))
                 return;
 
+            long retireStarted = System.Diagnostics.Stopwatch.GetTimestamp();
             if (block.Mapped != 0)
                 _backend.UnmapMemory(block.Memory);
             _backend.FreeMemory(block.Memory);
+            _blockRetireTicks += System.Diagnostics.Stopwatch.GetTimestamp() - retireStarted;
+            _blocksRetired++;
             CommittedBytes -= Math.Min(CommittedBytes, block.CapacityBytes);
         }
     }
@@ -317,6 +324,7 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
         block = default;
         operation = $"vkAllocateMemory ({capacityBytes} bytes on memory type {typeIndex} for '{ownerName}')";
 
+        long createStarted = System.Diagnostics.Stopwatch.GetTimestamp();
         Result result = _backend.AllocateMemory(typeIndex, capacityBytes, out DeviceMemory memory);
         if (result != Result.Success)
             return result;
@@ -336,6 +344,8 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
         }
 
         block = new BlockMemory(memory, mapped, capacityBytes);
+        _blockCreateTicks += System.Diagnostics.Stopwatch.GetTimestamp() - createStarted;
+        _blocksCreated++;
         return Result.Success;
     }
 
@@ -349,6 +359,10 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
                 + $"{AllocatedBytes / (1024 * 1024)} MiB allocated";
             if (_exhaustedTypes.Count > 0)
                 description += $"; exhausted memory types: {string.Join(", ", _exhaustedTypes.Order())}";
+            description += $"; blocks made {_blocksCreated} in "
+                + $"{_blockCreateTicks * 1000.0 / System.Diagnostics.Stopwatch.Frequency:F2} ms, "
+                + $"retired {_blocksRetired} in "
+                + $"{_blockRetireTicks * 1000.0 / System.Diagnostics.Stopwatch.Frequency:F2} ms";
             return description;
         }
     }
