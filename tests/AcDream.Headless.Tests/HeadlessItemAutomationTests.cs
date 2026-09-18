@@ -27,6 +27,35 @@ public sealed class HeadlessItemAutomationTests
         Assert.Equal(new[] { Item }, h.Transport.UseCalls);
     }
 
+    /// <summary>
+    /// A landscape container answers a use with its contents, and that answer
+    /// lands only where an open request is armed to receive it. The window's
+    /// click arms it once its use has gone out; this use must too, or the
+    /// server's view-contents is dropped and the corpse never opens.
+    /// Mutation: drop the <c>ArmLandscapeContainerRequest</c> call after the
+    /// dispatch and the requested container stays 0.
+    /// </summary>
+    [Fact]
+    public void TryUse_LandscapeCorpseArmsTheOpenRequest()
+    {
+        const uint corpse = 0x80001234u;
+        var h = new Harness();
+        h.Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = corpse,
+            Type = ItemType.Container,
+            ContainerId = 0u,
+            Useability = ItemUseability.Remote,
+            ItemsCapacity = 10,
+            PublicWeenieBitfield = (uint)PublicWeenieFlags.Corpse,
+        });
+
+        Assert.True(h.Automation.TryUse(corpse));
+
+        Assert.Equal(new[] { corpse }, h.Transport.UseCalls);
+        Assert.Equal(corpse, h.Runtime.InventoryOwner.ExternalContainers.RequestedContainerId);
+    }
+
     [Fact]
     public void TryIdentify_OwnedItemSendsTheAppraisal()
     {

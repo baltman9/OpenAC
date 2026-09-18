@@ -114,7 +114,14 @@ internal sealed class HeadlessItemAutomation
             reservation.CancelBeforeDispatch();
             throw;
         }
-        return dispatched == RuntimeInteractionDispatchResult.Dispatched;
+        if (dispatched != RuntimeInteractionDispatchResult.Dispatched)
+            return false;
+        // A landscape container (a corpse, a chest) answers a use with its
+        // contents, and that answer lands only where an open request is
+        // armed to receive it. The window's click arms it once its use has
+        // gone out; this use is the same wire use and arms it the same way.
+        _runtime.ItemInteractionOwner.ArmLandscapeContainerRequest(itemId);
+        return true;
     }
 
     // Mirrors the GUI's TryApplyItem, guard checked first since dispatch always marks the wait.
