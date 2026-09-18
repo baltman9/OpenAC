@@ -84,6 +84,57 @@ internal sealed class LiveEntityLivenessTracker
 /// object 25 s after it leaves and re-sending it on return. Objects held by
 /// a container, wielder, or parent, and attached projections, never expire.
 /// </summary>
+/// <summary>
+/// Holds the objects whose destruction deadline has fallen due and hands them
+/// out a few per frame.
+///
+/// Every object of a landblock the player left starts its twenty-five second
+/// deadline within the same second, so a quarter of a minute later they all
+/// fall due in one maintenance tick. Destroying one object is a full
+/// lifetime transaction -- accept, complete, tear down, forget -- and at a
+/// dense spot seventy of them in one frame cost twenty-three milliseconds
+/// against a five millisecond frame.
+///
+/// Which frame inside the next fraction of a second destroys them is not
+/// observable: they are outside the visible landblocks, which is why they
+/// expired, nothing draws them, and their destruction sends nothing. The
+/// first few still go in the tick that found them, so an ordinary expiry of
+/// one or two objects behaves exactly as before.
+/// </summary>
+internal sealed class LiveEntityPruneBacklog
+{
+    /// <summary>Objects destroyed per frame. Four keeps the added frame cost
+    /// near a millisecond at the densest spot measured, and drains a whole
+    /// landblock's expiry inside a fifth of a second at sixty frames.</summary>
+    internal const int MaxPerFrame = 4;
+
+    private readonly Queue<LiveEntityPruneCandidate> _pending = new();
+
+    internal int Count => _pending.Count;
+
+    internal void Add(IReadOnlyList<LiveEntityPruneCandidate> due)
+    {
+        ArgumentNullException.ThrowIfNull(due);
+        for (int i = 0; i < due.Count; i++)
+            _pending.Enqueue(due[i]);
+    }
+
+    /// <summary>Moves up to <see cref="MaxPerFrame"/> candidates into
+    /// <paramref name="destination"/>, oldest deadline first.</summary>
+    internal void TakeFrameBatch(List<LiveEntityPruneCandidate> destination)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        destination.Clear();
+        while (destination.Count < MaxPerFrame
+               && _pending.TryDequeue(out LiveEntityPruneCandidate candidate))
+        {
+            destination.Add(candidate);
+        }
+    }
+
+    internal void Clear() => _pending.Clear();
+}
+
 internal sealed class LiveEntityLivenessController
 {
     /// <summary>Landblock Chebyshev radius of the visible neighbourhood.</summary>
@@ -95,6 +146,8 @@ internal sealed class LiveEntityLivenessController
     private readonly ILiveEntityPruneSink _prune;
     private readonly LiveEntityLivenessTracker _tracker = new();
     private readonly List<LiveEntityLivenessSample> _samples = new();
+    private readonly LiveEntityPruneBacklog _backlog = new();
+    private readonly List<LiveEntityPruneCandidate> _frameBatch = new();
     private double _nextMaintenanceAt;
 
     public LiveEntityLivenessController(
@@ -109,6 +162,8 @@ internal sealed class LiveEntityLivenessController
 
     public void Tick(double now)
     {
+        // The backlog drains every frame, not only on a maintenance tick.
+        DrainBacklog();
         if (now < _nextMaintenanceAt)
             return;
         _nextMaintenanceAt = now + MaintenanceIntervalSeconds;
@@ -146,10 +201,19 @@ internal sealed class LiveEntityLivenessController
                 retained));
         }
 
-        IReadOnlyList<LiveEntityPruneCandidate> due = _tracker.Tick(now, _samples);
-        for (int i = 0; i < due.Count; i++)
+        _backlog.Add(_tracker.Tick(now, _samples));
+        DrainBacklog();
+    }
+
+    private void DrainBacklog()
+    {
+        if (_backlog.Count == 0)
+            return;
+
+        _backlog.TakeFrameBatch(_frameBatch);
+        for (int i = 0; i < _frameBatch.Count; i++)
         {
-            LiveEntityPruneCandidate candidate = due[i];
+            LiveEntityPruneCandidate candidate = _frameBatch[i];
             if (_runtime.TryGetRecord(candidate.Key, out LiveEntityRecord current)
                 && current.ServerGuid == candidate.ServerGuid)
             {
@@ -162,6 +226,8 @@ internal sealed class LiveEntityLivenessController
     {
         _tracker.Clear();
         _samples.Clear();
+        _backlog.Clear();
+        _frameBatch.Clear();
         _nextMaintenanceAt = 0;
     }
 
