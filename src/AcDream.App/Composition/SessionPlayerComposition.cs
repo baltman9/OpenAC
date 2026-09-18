@@ -434,7 +434,8 @@ internal sealed class SessionPlayerCompositionPhase
             streaming,
             revealRenderResources,
             () => live.WorldState.LoadedLandblockCount,
-            revealResourceDiagnostics);
+            revealResourceDiagnostics,
+            live.Presentation.HasCollisionPendingRestore);
         Fault(SessionPlayerCompositionPoint.WorldRevealCreated);
 
         return CompleteSessionPlayer(

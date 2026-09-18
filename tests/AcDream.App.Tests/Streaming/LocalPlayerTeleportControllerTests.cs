@@ -337,6 +337,55 @@ public sealed class LocalPlayerTeleportControllerTests
         Assert.True(harness.Placement.Called);
     }
 
+    // OpenAC #127. An object standing in the destination landblock that has
+    // not got its collision back yet holds the arrival, however ready the
+    // world looks otherwise; it is released by the object getting it back.
+    [Fact]
+    public void ObjectInTheDestinationWaitingForItsCollision_HoldsTheArrival()
+    {
+        var harness = new Harness(worldReady: true);
+        Vector3 before = harness.Movement.Controller!.Position;
+        bool pending = true;
+        harness.LiveCollisionPendingRestore = cell =>
+            pending && (cell & 0xFFFF0000u) == 0x20210000u;
+        harness.Controller.OnTeleportStarted(90);
+        harness.OfferDestination(
+            Position(0x20210001u, 90, 41f, 42f, 43f),
+            teleportTimestampAdvanced: true);
+        harness.Presentation.EmitPlaceWhenReady = true;
+
+        for (int i = 0; i < 20; i++)
+            harness.Controller.Tick(0.1f);
+
+        Assert.Equal(before, harness.Movement.Controller.Position);
+        Assert.False(harness.Placement.Called);
+        Assert.All(harness.Presentation.WorldReadyValues, Assert.False);
+        Assert.Equal(0, harness.Reveal.PortalMaterializationCount);
+
+        pending = false;
+        harness.Controller.Tick(0.016f);
+
+        Assert.Equal(new Vector3(41f, 42f, 43f), harness.Movement.Controller.Position);
+        Assert.True(harness.Placement.Called);
+    }
+
+    [Fact]
+    public void DestinationWithNothingWaiting_PlacesOnTheSameTickAsBefore()
+    {
+        var harness = new Harness(worldReady: true);
+        harness.Controller.OnTeleportStarted(91);
+        harness.OfferDestination(
+            Position(0x20210001u, 91, 44f, 45f, 46f),
+            teleportTimestampAdvanced: true);
+        harness.Presentation.EmitPlaceWhenReady = true;
+
+        harness.Controller.Tick(0.016f);
+
+        Assert.True(harness.Placement.Called);
+        Assert.Equal(new Vector3(44f, 45f, 46f), harness.Movement.Controller!.Position);
+        Assert.Equal(1, harness.Reveal.PortalMaterializationCount);
+    }
+
     [Fact]
     public void Place_ReconcilesInsidePlacementBeforeRevealMaterialized()
     {
@@ -802,6 +851,13 @@ public sealed class LocalPlayerTeleportControllerTests
 
         public bool WorldReady;
 
+        /// <summary>
+        /// Stands in for an object in the destination landblock that has not
+        /// got its collision back yet.
+        /// </summary>
+        public Func<uint, bool> LiveCollisionPendingRestore { get; set; } =
+            static _ => false;
+
         public RuntimeCharacterSelectionLifecycle SelectionLifecycle
         {
             get => LoginLifecycle.SelectionLifecycle;
@@ -836,7 +892,9 @@ public sealed class LocalPlayerTeleportControllerTests
                 prepareCompositeTextures: (_, _) => { },
                 invalidateCompositeTextures: () => { },
                 isSpawnClaimUnhydratable: _ => false,
-                streaming: Streaming);
+                streaming: Streaming,
+                hasLiveCollisionPendingRestore:
+                    cell => LiveCollisionPendingRestore(cell));
 
             var engine = new PhysicsEngine { DataCache = new PhysicsDataCache() };
             var heights = new byte[81];

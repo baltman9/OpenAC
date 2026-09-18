@@ -86,6 +86,43 @@ public sealed class LiveEntityPresentationController : IDisposable
     internal int ReadyOwnerCount => _readyOwners.Count;
     internal int DeferredShadowRestoreCount => _suspendedShadowOwners.Count;
 
+    /// <summary>
+    /// True while some object standing in <paramref name="destinationCell"/>'s
+    /// landblock has had its collision taken away and is still expected to get
+    /// it back. Leaving a landblock takes the collision of everything standing
+    /// in it; coming back gives it back one landblock at a time, and an arrival
+    /// placed in between is placed into a cell whose objects are not there,
+    /// which can put the arriving body inside one of them.
+    /// <para>
+    /// The landblock is the unit because that is the unit both the taking away
+    /// and the giving back happen in. Two things are not waited for: an object
+    /// whose record has gone away (there is nothing left to come back), and one
+    /// the server has hidden (a hidden object carries no collision at all).
+    /// </para>
+    /// </summary>
+    public bool HasCollisionPendingRestore(uint destinationCell)
+    {
+        if (destinationCell == 0u || _suspendedShadowOwners.Count == 0)
+            return false;
+
+        uint landblock = destinationCell & 0xFFFF0000u;
+        foreach (RuntimeEntityKey key in _suspendedShadowOwners)
+        {
+            if (!_liveEntities.TryGetProjection(key, out LiveEntityRecord record)
+                || !record.IsSpatiallyProjected
+                || record.FullCellId == 0u
+                || (record.FullCellId & 0xFFFF0000u) != landblock
+                || (record.FinalPhysicsState & PhysicsStateFlags.Hidden) != 0)
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
     public void Forget(LiveEntityRecord record)
     {
         ArgumentNullException.ThrowIfNull(record);
