@@ -555,16 +555,18 @@ internal sealed unsafe class VulkanUploadQueue : IDisposable
     /// submitted command buffer still reads them — and their memory goes back
     /// to the allocator, which hands any block that empties to its own release
     /// worker rather than calling the driver here.
+    /// <para>The batch empties as it is released, because the flight ledger's
+    /// closure still holds it and teardown drains that ledger more than once.
+    /// </para>
     /// </summary>
     private void ReleaseTemporaries(List<TemporaryStaging> batch)
     {
-        foreach (TemporaryStaging entry in batch)
+        _temporariesReleased += batch.Count;
+        VulkanRetiredBatch.DrainOnce(batch, entry =>
         {
             _vk.DestroyBuffer(_device, entry.Buffer, null);
             _allocator.Free(entry.Allocation);
-        }
-
-        _temporariesReleased += batch.Count;
+        });
     }
 
     private (Buffer Buffer, VulkanAllocation Allocation) CreateHostBuffer(

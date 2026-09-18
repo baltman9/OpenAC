@@ -422,6 +422,11 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
             string description = $"{_blockMemory.Count + _retiringBlocks} device-memory object(s), "
                 + $"{(_committedBytes + _retiringBytes) / (1024 * 1024)} MiB committed, "
                 + $"{AllocatedBytes / (1024 * 1024)} MiB allocated";
+            // The block list that follows this line names only the blocks the
+            // pools still hold, so say how many of the objects counted above
+            // are on their way back to the driver and therefore absent from it.
+            if (_retiringBlocks > 0)
+                description += $"; {_retiringBlocks} being handed back";
             if (_exhaustedTypes.Count > 0)
                 description += $"; exhausted memory types: {string.Join(", ", _exhaustedTypes.Order())}";
             description += $"; blocks made {_blocksCreated} in "
