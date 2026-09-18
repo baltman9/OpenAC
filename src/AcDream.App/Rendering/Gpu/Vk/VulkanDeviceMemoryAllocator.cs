@@ -95,11 +95,16 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
     private readonly Dictionary<string, ulong> _allocatedByOwner = [];
     private readonly Dictionary<(uint TypeIndex, int BlockIndex, ulong OffsetBytes), string> _ownerByRange = [];
 
+    private readonly VulkanDeferredReleaseQueue<BlockMemory> _blockRelease;
+
     private bool _disposed;
     private int _blocksCreated;
     private int _blocksRetired;
     private long _blockCreateTicks;
     private long _blockRetireTicks;
+    private ulong _committedBytes;
+    private ulong _retiringBytes;
+    private int _retiringBlocks;
 
     private readonly record struct BlockMemory(DeviceMemory Memory, nint Mapped, ulong CapacityBytes);
 
@@ -141,6 +146,9 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
         _backend = backend;
         _blockSizeBytes = blockSizeBytes;
         _dedicatedThresholdBytes = dedicatedThresholdBytes;
+        _blockRelease = new VulkanDeferredReleaseQueue<BlockMemory>(
+            UnmapAndFree,
+            "acdream-device-memory-release");
     }
 
     private static MemoryPropertyFlags[] ReadMemoryTypeProperties(
@@ -154,8 +162,18 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
         return flags;
     }
 
-    /// <summary>Live <c>vkAllocateMemory</c> objects. Kept two orders of magnitude below the device limit by design.</summary>
-    internal int DeviceMemoryObjectCount => _blockMemory.Count;
+    /// <summary>Live <c>vkAllocateMemory</c> objects, the ones whose free has
+    /// been handed to the release worker and not yet returned included: the
+    /// process still owns those. Kept two orders of magnitude below the device
+    /// limit by design.</summary>
+    internal int DeviceMemoryObjectCount
+    {
+        get
+        {
+            lock (_sync)
+                return _blockMemory.Count + _retiringBlocks;
+        }
+    }
 
     /// <summary>Blocks the pools still hold, across every memory type.</summary>
     internal int LiveBlockCount
@@ -174,7 +192,20 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
 
     internal ulong AllocatedBytes { get; private set; }
 
-    internal ulong CommittedBytes { get; private set; }
+    /// <summary>Device memory this process holds, including a block the
+    /// release worker has taken but not yet handed back to the driver.</summary>
+    internal ulong CommittedBytes
+    {
+        get
+        {
+            lock (_sync)
+                return _committedBytes + _retiringBytes;
+        }
+    }
+
+    /// <summary>Waits for the release worker to hand back every block it has
+    /// been given. Teardown and the tests that read the accounting use it.</summary>
+    internal void DrainBlockReleases() => _blockRelease.Drain();
 
     internal IReadOnlyList<MemoryPropertyFlags> MemoryTypeProperties => _memoryTypeProperties;
 
@@ -239,7 +270,7 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
 
                     int blockIndex = pool.AddBlock(capacity, dedicated);
                     _blockMemory[(typeIndex, blockIndex)] = memory;
-                    CommittedBytes += capacity;
+                    _committedBytes += capacity;
 
                     range = dedicated
                         ? pool.AllocateWholeBlock(blockIndex, size)
@@ -275,9 +306,13 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
         }
     }
 
-    /// <summary>Returns an allocation's bytes to its pool, freeing the block when a dedicated one empties.</summary>
+    /// <summary>Returns an allocation's bytes to its pool. A block that empties
+    /// goes back to the driver — through the release worker, so the caller,
+    /// usually the frame thread, never waits on the driver's free.</summary>
     internal void Free(in VulkanAllocation allocation)
     {
+        BlockMemory retired = default;
+        bool blockRetired = false;
         lock (_sync)
         {
             if (_disposed || allocation.SizeBytes == 0)
@@ -304,13 +339,43 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
             if (!_blockMemory.Remove(key, out BlockMemory block))
                 return;
 
-            long retireStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+            _committedBytes -= Math.Min(_committedBytes, block.CapacityBytes);
+            _retiringBytes += block.CapacityBytes;
+            _retiringBlocks++;
+            _blocksRetired++;
+            retired = block;
+            blockRetired = true;
+        }
+
+        if (blockRetired)
+            _blockRelease.Enqueue(retired);
+    }
+
+    /// <summary>
+    /// Hands one retired block back to the driver. Runs on the release worker,
+    /// and outside the allocator's lock in either case: the block is out of
+    /// every table before it is handed over, so nothing else can reach it, and
+    /// unmapping and freeing a mapped 32 MiB block costs the best part of a
+    /// millisecond — long enough to hold up an allocation on the frame thread
+    /// if it ran under the lock.
+    /// </summary>
+    private void UnmapAndFree(BlockMemory block)
+    {
+        long retireStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+        try
+        {
             if (block.Mapped != 0)
                 _backend.UnmapMemory(block.Memory);
             _backend.FreeMemory(block.Memory);
-            _blockRetireTicks += System.Diagnostics.Stopwatch.GetTimestamp() - retireStarted;
-            _blocksRetired++;
-            CommittedBytes -= Math.Min(CommittedBytes, block.CapacityBytes);
+        }
+        finally
+        {
+            lock (_sync)
+            {
+                _retiringBytes -= Math.Min(_retiringBytes, block.CapacityBytes);
+                _retiringBlocks--;
+                _blockRetireTicks += System.Diagnostics.Stopwatch.GetTimestamp() - retireStarted;
+            }
         }
     }
 
@@ -354,8 +419,8 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
     {
         lock (_sync)
         {
-            string description = $"{DeviceMemoryObjectCount} device-memory object(s), "
-                + $"{CommittedBytes / (1024 * 1024)} MiB committed, "
+            string description = $"{_blockMemory.Count + _retiringBlocks} device-memory object(s), "
+                + $"{(_committedBytes + _retiringBytes) / (1024 * 1024)} MiB committed, "
                 + $"{AllocatedBytes / (1024 * 1024)} MiB allocated";
             if (_exhaustedTypes.Count > 0)
                 description += $"; exhausted memory types: {string.Join(", ", _exhaustedTypes.Order())}";
@@ -383,14 +448,27 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
                     ? pool.BlockUsedBytes(blockIndex)
                     : 0UL;
                 blocks.Add(
-                    $"t{typeIndex}b{blockIndex}:{used / (1024 * 1024)}/{block.CapacityBytes / (1024 * 1024)}");
+                    $"t{typeIndex}b{blockIndex}:{DescribeBlockUse(used)}/{block.CapacityBytes / (1024 * 1024)}");
             }
             return $"owners(MiB) {string.Join(' ', parts)} | blocks(MiB) {string.Join(' ', blocks)}";
         }
     }
 
+    /// <summary>Whole MiB, except that a block holding less than a megabyte
+    /// reads as a fraction: "0" has to mean empty, because an empty block is
+    /// committed memory nothing is using.</summary>
+    private static string DescribeBlockUse(ulong usedBytes) =>
+        usedBytes == 0 || usedBytes >= 1024 * 1024
+            ? (usedBytes / (1024 * 1024)).ToString()
+            : (usedBytes / (1024.0 * 1024.0)).ToString("F2");
+
     public void Dispose()
     {
+        // Stop the worker before the tables are torn down: it releases
+        // everything already handed to it, and anything retired after this
+        // point is released on this thread instead.
+        _blockRelease.Dispose();
+
         lock (_sync)
         {
             if (_disposed)
@@ -408,7 +486,7 @@ internal sealed unsafe class VulkanDeviceMemoryAllocator : IDisposable
             _pools.Clear();
             _exhaustedTypes.Clear();
             AllocatedBytes = 0;
-            CommittedBytes = 0;
+            _committedBytes = 0;
         }
     }
 }

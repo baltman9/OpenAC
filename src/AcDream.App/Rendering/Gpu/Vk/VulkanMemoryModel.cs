@@ -231,7 +231,7 @@ internal sealed class VulkanMemoryTypePool
     {
         VulkanMemoryBlockFreeList block = BlockAt(range.BlockIndex);
         block.Free(range.OffsetBytes, range.SizeBytes);
-        if (block.UsedBytes != 0 || !_dedicatedBlocks.Contains(range.BlockIndex))
+        if (block.UsedBytes != 0)
             return false;
 
         _blocks[range.BlockIndex] = null;

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using AcDream.App.Rendering.Gpu;
 using AcDream.App.Rendering.Gpu.Vk;
 using Silk.NET.Vulkan;
@@ -130,34 +131,55 @@ public sealed class VulkanMemoryModelTests
     }
 
     [Fact]
-    public void Pool_FreeingADedicatedRangeRetiresItsBlockButKeepsSharedOnes()
+    public void Pool_RetiresAnyBlockThatEmpties_DedicatedOrShared()
     {
         var pool = new VulkanMemoryTypePool(memoryTypeIndex: 0, blockSizeBytes: 4096, dedicatedThresholdBytes: 2048);
         int shared = pool.AddBlock(4096, dedicated: false);
         Assert.True(pool.TryAllocate(64, 1, out VulkanMemoryRange small));
+        Assert.True(pool.TryAllocate(64, 1, out VulkanMemoryRange alsoSmall));
         int dedicatedBlock = pool.AddBlock(3000, dedicated: true);
         VulkanMemoryRange large = pool.AllocateWholeBlock(dedicatedBlock, 3000);
 
-        Assert.True(pool.Free(large));   // dedicated block is now free device memory
-        Assert.False(pool.Free(small));  // shared block is kept for reuse
+        Assert.True(pool.Free(large));       // dedicated block: nothing else can use it
+        Assert.False(pool.Free(small));      // shared block still holds the other allocation
+        Assert.True(pool.Free(alsoSmall));   // now empty, so it goes back to the driver
 
         Assert.Equal(0, shared);
-        Assert.Equal(1, pool.LiveBlockCount);
+        Assert.Equal(0, pool.LiveBlockCount);
     }
 
     [Fact]
-    public void Pool_ReusesASharedBlockAfterItsAllocationsAreReleased()
+    public void Pool_ReusesTheHoleAnAllocationLeavesWhileTheBlockIsStillInUse()
     {
         var pool = new VulkanMemoryTypePool(memoryTypeIndex: 3, blockSizeBytes: 1024, dedicatedThresholdBytes: 4096);
         pool.AddBlock(1024, dedicated: false);
-        Assert.True(pool.TryAllocate(1024, 1, out VulkanMemoryRange whole));
+        Assert.True(pool.TryAllocate(512, 1, out VulkanMemoryRange first));
+        Assert.True(pool.TryAllocate(512, 1, out _));
         Assert.False(pool.TryAllocate(16, 1, out _));
 
-        pool.Free(whole);
+        Assert.False(pool.Free(first));
 
         Assert.True(pool.TryAllocate(16, 1, out VulkanMemoryRange reused));
         Assert.Equal(0, reused.BlockIndex);
         Assert.Equal(1, pool.LiveBlockCount);
+    }
+
+    [Fact]
+    public void Pool_NeverHandsOutTheIndexOfARetiredBlock()
+    {
+        // A range carries its block index, and a stale index must not be able
+        // to name a different block's memory.
+        var pool = new VulkanMemoryTypePool(memoryTypeIndex: 0, blockSizeBytes: 1024, dedicatedThresholdBytes: 4096);
+        pool.AddBlock(1024, dedicated: false);
+        Assert.True(pool.TryAllocate(1024, 1, out VulkanMemoryRange whole));
+        Assert.True(pool.Free(whole));
+        Assert.Equal(0, pool.LiveBlockCount);
+
+        int replacement = pool.AddBlock(1024, dedicated: false);
+
+        Assert.Equal(1, replacement);
+        Assert.True(pool.TryAllocate(16, 1, out VulkanMemoryRange range));
+        Assert.Equal(1, range.BlockIndex);
     }
 
     // ── heap selection ───────────────────────────────────────────────────────
@@ -264,6 +286,17 @@ public sealed class VulkanMemoryModelTests
 
         internal List<DeviceMemory> FreeCalls { get; } = [];
 
+        internal List<DeviceMemory> UnmapCalls { get; } = [];
+
+        /// <summary>Signalled as the fake driver enters vkFreeMemory.</summary>
+        internal ManualResetEventSlim FreeEntered { get; } = new(false);
+
+        /// <summary>Holds the fake driver inside vkFreeMemory until it is set.</summary>
+        internal ManualResetEventSlim? FreeGate { get; set; }
+
+        /// <summary>Runs inside vkFreeMemory, before it returns.</summary>
+        internal Action? WhileFreeing { get; set; }
+
         public Result AllocateMemory(uint typeIndex, ulong sizeBytes, out DeviceMemory memory)
         {
             AllocateCalls.Add(typeIndex);
@@ -286,9 +319,18 @@ public sealed class VulkanMemoryModelTests
 
         public void UnmapMemory(DeviceMemory memory)
         {
+            lock (UnmapCalls)
+                UnmapCalls.Add(memory);
         }
 
-        public void FreeMemory(DeviceMemory memory) => FreeCalls.Add(memory);
+        public void FreeMemory(DeviceMemory memory)
+        {
+            FreeEntered.Set();
+            WhileFreeing?.Invoke();
+            FreeGate?.Wait(TimeSpan.FromSeconds(5));
+            lock (FreeCalls)
+                FreeCalls.Add(memory);
+        }
     }
 
     private static readonly MemoryRequirements SmallHostRequirement = new()
@@ -337,6 +379,98 @@ public sealed class VulkanMemoryModelTests
 
         Assert.Equal(2u, allocation.MemoryTypeIndex);
         Assert.Equal([1u, 2u, 2u], backend.AllocateCalls);
+    }
+
+    [Fact]
+    public void Allocator_HandsAnEmptiedSharedBlockBackToTheDriver()
+    {
+        // The reason this slice exists: a staging temporary is a share of a
+        // block, so if a shared block is never returned the bytes a burst
+        // needed stay committed and mapped for the rest of the session.
+        var backend = new FakeDeviceMemoryBackend();
+        using VulkanDeviceMemoryAllocator allocator = NewAllocator(backend);
+        VulkanAllocation first = allocator.Allocate(SmallHostRequirement, GpuMemoryResidency.HostWritable, "temp-a");
+        VulkanAllocation second = allocator.Allocate(SmallHostRequirement, GpuMemoryResidency.HostWritable, "temp-b");
+        Assert.Equal(1, allocator.LiveBlockCount);
+
+        allocator.Free(first);
+        allocator.DrainBlockReleases();
+        Assert.Empty(backend.FreeCalls);
+        Assert.Equal(4096ul, allocator.CommittedBytes);
+
+        allocator.Free(second);
+        allocator.DrainBlockReleases();
+
+        Assert.Single(backend.FreeCalls);
+        Assert.Single(backend.UnmapCalls);
+        Assert.Equal(0, allocator.LiveBlockCount);
+        Assert.Equal(0, allocator.DeviceMemoryObjectCount);
+        Assert.Equal(0ul, allocator.CommittedBytes);
+        Assert.Equal(0ul, allocator.AllocatedBytes);
+    }
+
+    [Fact]
+    public void Allocator_StillCountsABlockWhoseDriverFreeHasNotReturned()
+    {
+        // The free is asynchronous, so the accounting has to say the process
+        // still owns the block until the driver call comes back — otherwise
+        // the memory report understates what is held.
+        var gate = new ManualResetEventSlim(false);
+        var backend = new FakeDeviceMemoryBackend { FreeGate = gate };
+        using VulkanDeviceMemoryAllocator allocator = NewAllocator(backend);
+        VulkanAllocation only = allocator.Allocate(SmallHostRequirement, GpuMemoryResidency.HostWritable, "temp");
+
+        allocator.Free(only);
+        Assert.True(backend.FreeEntered.Wait(TimeSpan.FromSeconds(5)));
+
+        Assert.Equal(1, allocator.DeviceMemoryObjectCount);
+        Assert.Equal(4096ul, allocator.CommittedBytes);
+        Assert.Equal(0ul, allocator.AllocatedBytes);
+
+        gate.Set();
+        allocator.DrainBlockReleases();
+
+        Assert.Equal(0, allocator.DeviceMemoryObjectCount);
+        Assert.Equal(0ul, allocator.CommittedBytes);
+    }
+
+    [Fact]
+    public void Allocator_DoesNotHoldItsLockWhileTheDriverFreesABlock()
+    {
+        // A mapped 32 MiB block takes the best part of a millisecond to unmap
+        // and free. If that ran under the allocator's lock it would stall the
+        // next allocation on the frame thread, which is the hitch this slice
+        // is about.
+        var backend = new FakeDeviceMemoryBackend();
+        using VulkanDeviceMemoryAllocator allocator = NewAllocator(backend);
+        VulkanAllocation only = allocator.Allocate(SmallHostRequirement, GpuMemoryResidency.HostWritable, "temp");
+
+        // The attempt runs from inside the driver's free, whichever thread is
+        // making that call, so the pin holds however the release is scheduled.
+        var allocated = new ManualResetEventSlim(false);
+        Thread? allocating = null;
+        bool allocatedWhileFreeing = false;
+        backend.WhileFreeing = () =>
+        {
+            // Once: the allocator's own teardown frees blocks too, and by then
+            // allocating from it is an error.
+            backend.WhileFreeing = null;
+            allocating = new Thread(() =>
+            {
+                _ = allocator.Allocate(SmallHostRequirement, GpuMemoryResidency.HostWritable, "next");
+                allocated.Set();
+            });
+            allocating.Start();
+            allocatedWhileFreeing = allocated.Wait(TimeSpan.FromSeconds(2));
+        };
+
+        allocator.Free(only);
+        allocator.DrainBlockReleases();
+        allocating?.Join(TimeSpan.FromSeconds(5));
+
+        Assert.True(
+            allocatedWhileFreeing,
+            "an allocation waited on a block free that had already left the allocator's tables");
     }
 
     [Fact]
