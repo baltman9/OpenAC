@@ -115,10 +115,10 @@ public class DatWidgetFactoryTests
     {
         var info = new ElementInfo { Id = 0x1000069Bu, Type = 9, Width = 5, Height = 5 };
         var state = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        if (bottom) state.Properties.Values[0x2Au] = Bool(true);
-        if (left) state.Properties.Values[0x2Bu] = Bool(true);
-        if (right) state.Properties.Values[0x2Cu] = Bool(true);
-        if (top) state.Properties.Values[0x2Du] = Bool(true);
+        if (bottom) state.Properties.Set(0x2Au, Bool(true));
+        if (left) state.Properties.Set(0x2Bu, Bool(true));
+        if (right) state.Properties.Set(0x2Cu, Bool(true));
+        if (top) state.Properties.Set(0x2Du, Bool(true));
         info.States[UiStateInfo.DirectStateId] = state;
         return info;
     }
@@ -356,11 +356,11 @@ public class DatWidgetFactoryTests
             HJustify = HJustify.Center,
         };
         caption.States[UiStateInfo.DirectStateId] = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        caption.States[UiStateInfo.DirectStateId].Properties.Values[0x17u] = new UiPropertyValue
+        caption.States[UiStateInfo.DirectStateId].Properties.Set(0x17u, new UiPropertyValue
         {
             Kind = UiPropertyKind.StringInfo,
             StringInfoValue = new UiStringInfoValue(0, stringId, 0, 0, 0, 0),
-        };
+        });
         info.Children.Add(caption);
 
         var marker = new ElementInfo { Type = 3, X = 36, Y = 36, Width = 38, Height = 38 };
@@ -384,11 +384,11 @@ public class DatWidgetFactoryTests
         uint stringId = 777u;
         var info = new ElementInfo { Type = 1, Width = 305, Height = 32, HJustify = HJustify.Left };
         info.States[UiStateInfo.DirectStateId] = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        info.States[UiStateInfo.DirectStateId].Properties.Values[0x17u] = new UiPropertyValue
+        info.States[UiStateInfo.DirectStateId].Properties.Set(0x17u, new UiPropertyValue
         {
             Kind = UiPropertyKind.StringInfo,
             StringInfoValue = new UiStringInfoValue(0, stringId, 0, 0, 0, 0),
-        };
+        });
         info.States[RetailUiStateIds.Unselected] = new UiStateInfo { Id = RetailUiStateIds.Unselected, Name = "Unselected" };
         info.States[RetailUiStateIds.Selected] = new UiStateInfo { Id = RetailUiStateIds.Selected, Name = "Selected" };
 
@@ -413,11 +413,11 @@ public class DatWidgetFactoryTests
         uint captionStringId = 111u;
         var info = new ElementInfo { Type = 1, Width = 80, Height = 20 };
         info.States[UiStateInfo.DirectStateId] = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        info.States[UiStateInfo.DirectStateId].Properties.Values[0x17u] = new UiPropertyValue
+        info.States[UiStateInfo.DirectStateId].Properties.Set(0x17u, new UiPropertyValue
         {
             Kind = UiPropertyKind.StringInfo,
             StringInfoValue = new UiStringInfoValue(0, captionStringId, 0, 0, 0, 0),
-        };
+        });
         info.StateMedia[""] = (0x06000001u, 1);
 
         var valueChild = new ElementInfo { Type = 12, X = 5, Y = 2, Width = 60, Height = 16 };
@@ -442,11 +442,11 @@ public class DatWidgetFactoryTests
         uint captionStringId = 333u;
         var info = new ElementInfo { Type = 1, Width = 231, Height = 28 };
         info.States[UiStateInfo.DirectStateId] = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        info.States[UiStateInfo.DirectStateId].Properties.Values[0x17u] = new UiPropertyValue
+        info.States[UiStateInfo.DirectStateId].Properties.Set(0x17u, new UiPropertyValue
         {
             Kind = UiPropertyKind.StringInfo,
             StringInfoValue = new UiStringInfoValue(0, captionStringId, 0, 0, 0, 0),
-        };
+        });
 
         var valueChild = new ElementInfo
         {
@@ -482,11 +482,11 @@ public class DatWidgetFactoryTests
         uint captionStringId = 334u;
         var info = new ElementInfo { Type = 1, Width = 150, Height = 28 };
         info.States[UiStateInfo.DirectStateId] = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        info.States[UiStateInfo.DirectStateId].Properties.Values[0x17u] = new UiPropertyValue
+        info.States[UiStateInfo.DirectStateId].Properties.Set(0x17u, new UiPropertyValue
         {
             Kind = UiPropertyKind.StringInfo,
             StringInfoValue = new UiStringInfoValue(0, captionStringId, 0, 0, 0, 0),
-        };
+        });
 
         var valueChild = new ElementInfo
         {
@@ -522,11 +522,11 @@ public class DatWidgetFactoryTests
 
         var caption = new ElementInfo { Type = 12, X = 0, Y = 4, Width = 100, Height = 37 };
         caption.States[UiStateInfo.DirectStateId] = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        caption.States[UiStateInfo.DirectStateId].Properties.Values[0x17u] = new UiPropertyValue
+        caption.States[UiStateInfo.DirectStateId].Properties.Set(0x17u, new UiPropertyValue
         {
             Kind = UiPropertyKind.StringInfo,
             StringInfoValue = new UiStringInfoValue(0, stringId, 0, 0, 0, 0),
-        };
+        });
         info.Children.Add(caption);
 
         var marker = new ElementInfo { Type = 3, X = 36, Y = 36, Width = 38, Height = 38 };
@@ -618,11 +618,11 @@ public class DatWidgetFactoryTests
             Children = [decrement, increment],
         };
         var state = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        state.Properties.Values[0x77u] = new UiPropertyValue
-            { Kind = UiPropertyKind.Enum, UnsignedValue = IncrementId };
-        state.Properties.Values[0x78u] = new UiPropertyValue
-            { Kind = UiPropertyKind.Enum, UnsignedValue = DecrementId };
-        state.Properties.Values[0x79u] = Bool(true);
+        state.Properties.Set(0x77u, new UiPropertyValue
+            { Kind = UiPropertyKind.Enum, UnsignedValue = IncrementId });
+        state.Properties.Set(0x78u, new UiPropertyValue
+            { Kind = UiPropertyKind.Enum, UnsignedValue = DecrementId });
+        state.Properties.Set(0x79u, Bool(true));
         info.States[UiStateInfo.DirectStateId] = state;
 
         var bar = Assert.IsType<UiScrollbar>(
@@ -666,10 +666,10 @@ public class DatWidgetFactoryTests
             Children = [decrement, increment, thumb],
         };
         var state = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        state.Properties.Values[0x77u] = new UiPropertyValue
-            { Kind = UiPropertyKind.Enum, UnsignedValue = IncrementId };
-        state.Properties.Values[0x78u] = new UiPropertyValue
-            { Kind = UiPropertyKind.Enum, UnsignedValue = DecrementId };
+        state.Properties.Set(0x77u, new UiPropertyValue
+            { Kind = UiPropertyKind.Enum, UnsignedValue = IncrementId });
+        state.Properties.Set(0x78u, new UiPropertyValue
+            { Kind = UiPropertyKind.Enum, UnsignedValue = DecrementId });
         info.States[UiStateInfo.DirectStateId] = state;
 
         var bar = Assert.IsType<UiScrollbar>(DatWidgetFactory.Create(info, NoTex, null));
@@ -704,10 +704,10 @@ public class DatWidgetFactoryTests
             Children = [decrement, increment],
         };
         var state = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        state.Properties.Values[0x77u] = new UiPropertyValue
-            { Kind = UiPropertyKind.Enum, UnsignedValue = IncrementId };
-        state.Properties.Values[0x78u] = new UiPropertyValue
-            { Kind = UiPropertyKind.Enum, UnsignedValue = DecrementId };
+        state.Properties.Set(0x77u, new UiPropertyValue
+            { Kind = UiPropertyKind.Enum, UnsignedValue = IncrementId });
+        state.Properties.Set(0x78u, new UiPropertyValue
+            { Kind = UiPropertyKind.Enum, UnsignedValue = DecrementId });
         info.States[UiStateInfo.DirectStateId] = state;
 
         var bar = Assert.IsType<UiScrollbar>(DatWidgetFactory.Create(info, NoTex, null));
@@ -756,10 +756,10 @@ public class DatWidgetFactoryTests
             Children = [decrement, increment, thumb],
         };
         var state = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        state.Properties.Values[0x77u] = new UiPropertyValue
-            { Kind = UiPropertyKind.Enum, UnsignedValue = 0x10000072u };
-        state.Properties.Values[0x78u] = new UiPropertyValue
-            { Kind = UiPropertyKind.Enum, UnsignedValue = 0x10000071u };
+        state.Properties.Set(0x77u, new UiPropertyValue
+            { Kind = UiPropertyKind.Enum, UnsignedValue = 0x10000072u });
+        state.Properties.Set(0x78u, new UiPropertyValue
+            { Kind = UiPropertyKind.Enum, UnsignedValue = 0x10000071u });
         info.States[UiStateInfo.DirectStateId] = state;
 
         var bar = Assert.IsType<UiScrollbar>(DatWidgetFactory.Create(info, NoTex, null));
@@ -1019,15 +1019,15 @@ public class DatWidgetFactoryTests
             DefaultStateName = "Closed",
         };
         var direct = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        direct.Properties.Values[0x17u] = new UiPropertyValue
+        direct.Properties.Set(0x17u, new UiPropertyValue
         {
             Kind = UiPropertyKind.StringInfo,
             StringInfoValue = new UiStringInfoValue(0, 1, 2, 0, 1, 0),
-        };
+        });
         var closed = new UiStateInfo { Id = RetailUiStateIds.Closed, Name = "Closed" };
-        closed.Properties.Values[0x1Bu] = Color(127, 127, 127);
+        closed.Properties.Set(0x1Bu, Color(127, 127, 127));
         var open = new UiStateInfo { Id = RetailUiStateIds.Open, Name = "Open" };
-        open.Properties.Values[0x1Bu] = Color(204, 204, 204);
+        open.Properties.Set(0x1Bu, Color(204, 204, 204));
         info.States[UiStateInfo.DirectStateId] = direct;
         info.States[RetailUiStateIds.Closed] = closed;
         info.States[RetailUiStateIds.Open] = open;
@@ -1046,11 +1046,11 @@ public class DatWidgetFactoryTests
     {
         var info = new ElementInfo { Type = 12, Width = 100, Height = 80 };
         var direct = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        direct.Properties.Values[0x17u] = new UiPropertyValue
+        direct.Properties.Set(0x17u, new UiPropertyValue
         {
             Kind = UiPropertyKind.StringInfo,
             StringInfoValue = new UiStringInfoValue(0, 1, 2, 0, 1, 0),
-        };
+        });
         info.States[UiStateInfo.DirectStateId] = direct;
         var text = Assert.IsType<UiText>(DatWidgetFactory.Create(
             info, NoTex, null,
@@ -1076,19 +1076,19 @@ public class DatWidgetFactoryTests
     {
         var info = new ElementInfo { Type = 12, Width = 270, Height = 24 };
         var online = new UiStateInfo { Id = 0x10000054u, Name = "Online" };
-        online.Properties.Values[0x17u] = new UiPropertyValue
+        online.Properties.Set(0x17u, new UiPropertyValue
         {
             Kind = UiPropertyKind.StringInfo,
             // (Token, StringId, TableId, ...) — StringId 2 = 'Online'.
             StringInfoValue = new UiStringInfoValue(0, 2, 1, 0, 1, 0),
-        };
-        online.Properties.Values[0x1Bu] = Color(0, 255, 0);
+        });
+        online.Properties.Set(0x1Bu, Color(0, 255, 0));
         var offline = new UiStateInfo { Id = 0x10000055u, Name = "Offline" };
-        offline.Properties.Values[0x17u] = new UiPropertyValue
+        offline.Properties.Set(0x17u, new UiPropertyValue
         {
             Kind = UiPropertyKind.StringInfo,
             StringInfoValue = new UiStringInfoValue(0, 3, 1, 0, 1, 0),
-        };
+        });
         info.States[0x10000054u] = online;
         info.States[0x10000055u] = offline;
 
@@ -1119,16 +1119,16 @@ public class DatWidgetFactoryTests
 
         var caption = new ElementInfo { Id = 0x35, Type = 12, Width = 600, Height = 15 };
         var jumpText = new UiStateInfo { Id = 0x10000042u, Name = "JumpMode" };
-        jumpText.Properties.Values[0x17u] = new UiPropertyValue
+        jumpText.Properties.Set(0x17u, new UiPropertyValue
         {
             Kind = UiPropertyKind.StringInfo,
             StringInfoValue = new UiStringInfoValue(0, 1, 2, 0, 1, 0),
-        };
-        jumpText.Properties.Values[0x14u] = new UiPropertyValue
+        });
+        jumpText.Properties.Set(0x14u, new UiPropertyValue
         {
             Kind = UiPropertyKind.Enum,
             UnsignedValue = 0x3u,
-        };
+        });
         caption.States[0x10000042u] = jumpText;
         meter.Children.Add(caption);
 
@@ -1180,8 +1180,8 @@ public class DatWidgetFactoryTests
             Children = [fill, range],
         };
         var meterState = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        meterState.Properties.Values[0x6Fu] = new UiPropertyValue
-            { Kind = UiPropertyKind.Enum, UnsignedValue = 1u };
+        meterState.Properties.Set(0x6Fu, new UiPropertyValue
+            { Kind = UiPropertyKind.Enum, UnsignedValue = 1u });
         meter.States[UiStateInfo.DirectStateId] = meterState;
         var info = new ElementInfo
         {
@@ -1209,7 +1209,7 @@ public class DatWidgetFactoryTests
         var info = new ElementInfo { Id = 0x10000016u, Type = 12, Width = 100, Height = 20 };
         var state = new UiStateInfo { Id = UiStateInfo.DirectStateId };
         foreach (var property in properties)
-            state.Properties.Values[property.Id] = property.Value;
+            state.Properties.Set(property.Id, property.Value);
         info.States[UiStateInfo.DirectStateId] = state;
         return info;
     }

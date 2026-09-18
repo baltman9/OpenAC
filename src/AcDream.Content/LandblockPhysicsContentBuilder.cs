@@ -244,7 +244,7 @@ public static class LandblockPhysicsContentBuilder
         if (heightTable.Length < 256)
         {
             throw new ArgumentException(
-                "The retail terrain height table must contain at least 256 entries.",
+                "The terrain height table must contain at least 256 entries.",
                 nameof(heightTable));
         }
 
@@ -532,7 +532,7 @@ public static class LandblockPhysicsContentBuilder
         if (heightTable.Length < 256)
         {
             throw new ArgumentException(
-                "The retail terrain height table must contain at least 256 entries.",
+                "The terrain height table must contain at least 256 entries.",
                 nameof(heightTable));
         }
 

@@ -311,16 +311,16 @@ public sealed class RetailWindowFrameTests
     {
         var info = new ElementInfo();
         var direct = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        direct.Properties.Values[0x3Eu] = new UiPropertyValue
+        direct.Properties.Set(0x3Eu, new UiPropertyValue
         {
             Kind = UiPropertyKind.Integer,
             IntegerValue = minHeight,
-        };
-        direct.Properties.Values[0x3Cu] = new UiPropertyValue
+        });
+        direct.Properties.Set(0x3Cu, new UiPropertyValue
         {
             Kind = UiPropertyKind.Integer,
             IntegerValue = maxHeight,
-        };
+        });
         info.States[UiStateInfo.DirectStateId] = direct;
         return info;
     }
@@ -329,26 +329,26 @@ public sealed class RetailWindowFrameTests
     {
         var info = new ElementInfo();
         var direct = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        direct.Properties.Values[0x3Fu] = new UiPropertyValue
+        direct.Properties.Set(0x3Fu, new UiPropertyValue
         {
             Kind = UiPropertyKind.Integer,
             IntegerValue = 300,
-        };
-        direct.Properties.Values[0x3Eu] = new UiPropertyValue
+        });
+        direct.Properties.Set(0x3Eu, new UiPropertyValue
         {
             Kind = UiPropertyKind.Integer,
             IntegerValue = 100,
-        };
-        direct.Properties.Values[0x3Du] = new UiPropertyValue
+        });
+        direct.Properties.Set(0x3Du, new UiPropertyValue
         {
             Kind = UiPropertyKind.Integer,
             IntegerValue = 2000,
-        };
-        direct.Properties.Values[0x3Cu] = new UiPropertyValue
+        });
+        direct.Properties.Set(0x3Cu, new UiPropertyValue
         {
             Kind = UiPropertyKind.Integer,
             IntegerValue = 2000,
-        };
+        });
         info.States[UiStateInfo.DirectStateId] = direct;
         return info;
     }

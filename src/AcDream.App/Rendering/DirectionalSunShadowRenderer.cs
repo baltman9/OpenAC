@@ -624,6 +624,7 @@ internal sealed class DirectionalSunShadowRenderer : IDirectionalShadowReceiverS
             using IDisposable? timer = measureGpuTimers
                 ? encoder.BeginTimerScope(MultiviewTimerName)
                 : null;
+            using IDisposable? stage = Diagnostics.GpuStageProfiler.Measure(encoder, "shadow");
             encoder.BindUniformBuffer(
                 GpuBindingModel.UniformDirectionalShadow,
                 uniformAllocation.Buffer,
@@ -652,6 +653,7 @@ internal sealed class DirectionalSunShadowRenderer : IDirectionalShadowReceiverS
             using IDisposable? timer = measureGpuTimers
                 ? encoder.BeginTimerScope(TimerName(cascadeIndex))
                 : null;
+            using IDisposable? stage = Diagnostics.GpuStageProfiler.Measure(encoder, "shadow");
             encoder.BindUniformBuffer(
                 GpuBindingModel.UniformDirectionalShadow,
                 uniformAllocation.Buffer,

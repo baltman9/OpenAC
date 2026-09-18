@@ -844,6 +844,9 @@ public sealed class DirectionalShadowCasterFrameTests
 
         public ulong GetBuildingShellRevision(RenderSceneGeneration generation) => 1;
 
+        public ulong GetLandblockWriteRevision(
+            RenderSceneGeneration generation, uint landblockId) => 0;
+
         public bool TryGetRevisionByLocalEntityId(
             RenderSceneGeneration generation,
             uint localEntityId,

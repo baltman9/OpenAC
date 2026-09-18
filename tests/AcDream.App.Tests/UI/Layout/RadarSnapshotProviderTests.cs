@@ -530,4 +530,63 @@ public sealed class RadarSnapshotProviderTests
         Structure: null,
         MaxStructure: null,
         Workmanship: null);
+
+    /// <summary>
+    /// The radar refreshes on its own cadence for as long as a session runs,
+    /// and its blips are the provider's list rewritten in place: a refresh
+    /// after the first takes no new list, and what it reports is what a
+    /// provider building that refresh for the first time reports.
+    /// </summary>
+    [Fact]
+    public void BuildSnapshot_RewritesOneBlipListAndReportsTheCurrentRefresh()
+    {
+        const uint player = 1u;
+        const uint monster = 2u;
+        const uint second = 3u;
+        var objects = new ClientObjectTable();
+        objects.Ingest(Weenie(player, "Player", ItemType.Creature));
+        objects.Ingest(Weenie(monster, "Drudge", ItemType.Creature) with
+        {
+            RadarBehavior = (byte)RadarBehavior.ShowAlways,
+        });
+        objects.Ingest(Weenie(second, "Rat", ItemType.Creature) with
+        {
+            RadarBehavior = (byte)RadarBehavior.ShowAlways,
+        });
+
+        var entities = new Dictionary<uint, WorldEntity>
+        {
+            [player] = Entity(player, Vector3.Zero, Quaternion.Identity),
+            [monster] = Entity(monster, new Vector3(0f, 15f, 6f), Quaternion.Identity),
+        };
+        var spawns = new Dictionary<uint, WorldSession.EntitySpawn>
+        {
+            [player] = Spawn(player) with { ObjectDescriptionFlags = 0x00000008u },
+            [monster] = Spawn(monster) with { ObjectDescriptionFlags = 0x00000010u },
+            [second] = Spawn(second) with { ObjectDescriptionFlags = 0x00000010u },
+        };
+
+        RadarSnapshotProvider Provider() => new(
+            objects, new RadarEntities(() => entities), () => spawns,
+            playerGuid: () => player,
+            playerYawRadians: () => MathF.PI / 2f,
+            playerCellId: () => 0xA9B40001u,
+            selectedGuid: () => null,
+            coordinatesOnRadar: () => true,
+            uiLocked: () => false);
+
+        var provider = Provider();
+        UiRadarSnapshot first = provider.BuildSnapshot();
+        Assert.Single(first.Blips);
+
+        entities[second] = Entity(second, new Vector3(0f, 7.5f, 0f), Quaternion.Identity);
+        UiRadarSnapshot refreshed = provider.BuildSnapshot();
+        UiRadarSnapshot built = Provider().BuildSnapshot();
+
+        Assert.Same(first.Blips, refreshed.Blips);
+        Assert.Equal(
+            built.Blips.Select(blip => (blip.ObjectId, blip.PixelX, blip.PixelY, blip.Shape)),
+            refreshed.Blips.Select(blip => (blip.ObjectId, blip.PixelX, blip.PixelY, blip.Shape)));
+        Assert.Equal(2, refreshed.Blips.Count);
+    }
 }

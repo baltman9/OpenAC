@@ -21,6 +21,11 @@ internal interface IWalkFrameWorldData
 
     ulong? GetOutdoorCellRenderRevision(uint cellId) => null;
 
+    /// <summary>Advances whenever any record in the landblock is written.
+    /// Zero means the source does not report it, and every consumer then
+    /// re-reads as it did before.</summary>
+    ulong GetLandblockRenderRevision(uint landblockId) => 0;
+
     bool TryGetCurrentProjection(uint localEntityId, out RenderProjectionRecord record)
     {
         record = default;

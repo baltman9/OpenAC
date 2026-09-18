@@ -44,9 +44,9 @@ public class FloatingChatWindowControllerTests
             X = 0, Y = 80, Width = 202, Height = 18,
         };
         var inputState = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        inputState.Properties.Values[0x16u] = new UiPropertyValue { Kind = UiPropertyKind.Bool, BoolValue = true };
-        inputState.Properties.Values[0x20u] = new UiPropertyValue { Kind = UiPropertyKind.Bool, BoolValue = true };
-        inputState.Properties.Values[0x27u] = new UiPropertyValue { Kind = UiPropertyKind.Bool, BoolValue = true };
+        inputState.Properties.Set(0x16u, new UiPropertyValue { Kind = UiPropertyKind.Bool, BoolValue = true });
+        inputState.Properties.Set(0x20u, new UiPropertyValue { Kind = UiPropertyKind.Bool, BoolValue = true });
+        inputState.Properties.Set(0x27u, new UiPropertyValue { Kind = UiPropertyKind.Bool, BoolValue = true });
         inputNode.States[UiStateInfo.DirectStateId] = inputState;
         var sendNode = new ElementInfo
         {

@@ -24,6 +24,7 @@ public sealed class RadarSnapshotProvider
     private readonly Func<uint, RadarRelationshipTraits>? _relationshipFor;
     private readonly Func<ILiveEntitySpatialQuery?>? _spatialQuery;
     private readonly List<KeyValuePair<uint, WorldEntity>> _candidateScratch = new();
+    private readonly List<UiRadarBlip> _blipScratch = new();
 
     public RadarSnapshotProvider(
         ClientObjectTable objects,
@@ -87,7 +88,12 @@ public sealed class RadarSnapshotProvider
             _liveEntities.CopyVisibleTo(_candidateScratch);
         }
 
-        var blips = new List<UiRadarBlip>(Math.Min(_candidateScratch.Count, 64));
+        // The blips are the provider's own list, rewritten on every refresh.
+        // A snapshot is read by the radar that asked for it and replaced by
+        // the next refresh's, so nothing outlives the rewrite; a list per
+        // refresh was one of the last per-frame allocations left.
+        List<UiRadarBlip> blips = _blipScratch;
+        blips.Clear();
         foreach (var pair in _candidateScratch)
         {
             uint guid = pair.Key;

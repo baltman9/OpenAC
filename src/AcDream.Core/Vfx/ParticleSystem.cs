@@ -21,6 +21,16 @@ public sealed class ParticleSystem : IParticleSystem
     private readonly Dictionary<uint, OwnerEmitterBucket>[] _cellHandlesByPass =
         [new(), new(), new()];
     private readonly List<int> _tickSnapshot = [];
+
+    // The simulation set is walked once per tick to fill the snapshot the
+    // tick iterates (the tick itself may retire an emitter, so it cannot
+    // walk the set directly). Walking a sorted set allocates a traversal
+    // stack every time, and at an uncapped frame rate that is megabytes a
+    // minute, so the walk happens only when the membership has moved. Every
+    // change to the set goes through the two helpers below, which is what
+    // makes the version a complete account of it.
+    private int _simulationVersion;
+    private int _tickSnapshotVersion = -1;
     private readonly List<int> _scopeHandleScratch = [];
 
     private sealed class OwnerEmitterBucket
@@ -129,7 +139,7 @@ public sealed class ParticleSystem : IParticleSystem
 
         _byHandle[handle] = emitter;
         _allHandles.Add(handle);
-        _simulationHandles.Add(handle);
+        AddSimulationHandle(handle);
         if (visibilityPolicy == ParticleVisibilityPolicy.World)
             AddWorldSimulationHandle(handle);
         AddEmitterToRenderIndexes(emitter);
@@ -372,7 +382,7 @@ public sealed class ParticleSystem : IParticleSystem
         {
             bool wasRenderable = IsRenderable(emitter);
             emitter.SimulationEnabled = false;
-            _simulationHandles.Remove(handle);
+            RemoveSimulationHandle(handle);
             _worldSimulationHandles.Remove(handle);
             if (emitter.VisibilityPolicy == ParticleVisibilityPolicy.World)
             {
@@ -388,7 +398,7 @@ public sealed class ParticleSystem : IParticleSystem
             emitter.EmittedAccumulator = 0f;
         }
         emitter.SimulationEnabled = true;
-        _simulationHandles.Add(handle);
+        AddSimulationHandle(handle);
         if (emitter.VisibilityPolicy == ParticleVisibilityPolicy.World)
             AddWorldSimulationHandle(handle);
         else
@@ -400,6 +410,26 @@ public sealed class ParticleSystem : IParticleSystem
 
     public event Action<int>? EmitterDied;
 
+    /// <summary>How many times the tick has had to walk the simulation set
+    /// to refill its snapshot. It walks only when the membership moved.</summary>
+    internal int SimulationSnapshotRebuilds { get; private set; }
+
+    /// <summary>The handles the last tick iterated, in the order it took
+    /// them.</summary>
+    internal IReadOnlyList<int> SimulationTickOrder => _tickSnapshot;
+
+    private void AddSimulationHandle(int handle)
+    {
+        if (_simulationHandles.Add(handle))
+            _simulationVersion++;
+    }
+
+    private void RemoveSimulationHandle(int handle)
+    {
+        if (_simulationHandles.Remove(handle))
+            _simulationVersion++;
+    }
+
     public void Tick(float dt)
     {
         if (dt <= 0f)
@@ -409,9 +439,14 @@ public sealed class ParticleSystem : IParticleSystem
         _activeParticleCount = 0;
         LastTickEmitterVisitCount = 0;
 
-        _tickSnapshot.Clear();
-        foreach (int handle in _simulationHandles)
-            _tickSnapshot.Add(handle);
+        if (_tickSnapshotVersion != _simulationVersion)
+        {
+            _tickSnapshot.Clear();
+            foreach (int handle in _simulationHandles)
+                _tickSnapshot.Add(handle);
+            _tickSnapshotVersion = _simulationVersion;
+            SimulationSnapshotRebuilds++;
+        }
 
         for (int i = 0; i < _tickSnapshot.Count; i++)
         {
@@ -740,7 +775,7 @@ public sealed class ParticleSystem : IParticleSystem
             return;
 
         _allHandles.Remove(handle);
-        _simulationHandles.Remove(handle);
+        RemoveSimulationHandle(handle);
         _worldSimulationHandles.Remove(handle);
         int passIndex = RenderPassIndex(emitter.RenderPass);
         _renderableHandlesByPass[passIndex].Remove(handle);

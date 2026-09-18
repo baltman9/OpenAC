@@ -1,3 +1,5 @@
+using AcDream.App.Diagnostics;
+
 namespace AcDream.App.Rendering;
 
 internal readonly record struct RenderFrameInput(
@@ -154,6 +156,7 @@ internal sealed class RenderFrameOrchestrator : IGameRenderFrameRoot
     private readonly IRenderFrameFailureRecovery _recovery;
     private readonly IBuildingDegradeFrameTick? _buildingDegrades;
     private readonly IPrivateFrameScreenshot? _screenshots;
+    private readonly FrameProfiler? _profiler;
 
     public RenderFrameOrchestrator(
         IRenderFrameLifetime lifetime,
@@ -165,7 +168,8 @@ internal sealed class RenderFrameOrchestrator : IGameRenderFrameRoot
         IRenderFramePostDiagnosticsPhase postDiagnostics,
         IRenderFrameFailureRecovery recovery,
         IBuildingDegradeFrameTick? buildingDegrades = null,
-        IPrivateFrameScreenshot? screenshots = null)
+        IPrivateFrameScreenshot? screenshots = null,
+        FrameProfiler? profiler = null)
     {
         _lifetime = lifetime ?? throw new ArgumentNullException(nameof(lifetime));
         _gpuMeasurement = gpuMeasurement
@@ -179,6 +183,7 @@ internal sealed class RenderFrameOrchestrator : IGameRenderFrameRoot
         _recovery = recovery ?? throw new ArgumentNullException(nameof(recovery));
         _buildingDegrades = buildingDegrades;
         _screenshots = screenshots;
+        _profiler = profiler;
     }
 
     public RenderFrameOutcome Render(RenderFrameInput input)
@@ -191,7 +196,12 @@ internal sealed class RenderFrameOrchestrator : IGameRenderFrameRoot
             return RenderFrameOutcome.ZeroArea;
 
         _buildingDegrades?.Tick(input.DeltaSeconds);
-        _lifetime.BeginFrame();
+        // The stage scopes below are inert unless the frame profiler is on.
+        // BeginFrame runs before the frame boundary the GPU measurement takes,
+        // so its cost is accumulated into the frame that is about to close --
+        // which is the frame whose wall time already contains it.
+        using (BeginStage(FrameStage.Present))
+            _lifetime.BeginFrame();
         WorldRenderFrameOutcome world;
         PrivatePresentationFrameOutcome presentation;
         try
@@ -201,8 +211,11 @@ internal sealed class RenderFrameOrchestrator : IGameRenderFrameRoot
             try
             {
                 _resources.Prepare(input);
-                world = _world.Render(input);
-                presentation = _presentation.Render(input, world);
+                using (BeginStage(FrameStage.Render))
+                {
+                    world = _world.Render(input);
+                    presentation = _presentation.Render(input, world);
+                }
             }
             catch (Exception error)
             {
@@ -231,17 +244,25 @@ internal sealed class RenderFrameOrchestrator : IGameRenderFrameRoot
             throw;
         }
 
-        _lifetime.EndFrame();
-        bool screenshotCaptured = _screenshots?.CapturePending(
-            input.ViewportWidth,
-            input.ViewportHeight) == true;
-        var outcome = new RenderFrameOutcome(
-            world,
-            presentation with { ScreenshotCaptured = screenshotCaptured });
-        _diagnostics.Publish(input, outcome);
-        _postDiagnostics.Process(input, outcome);
-        return outcome;
+        using (BeginStage(FrameStage.Present))
+            _lifetime.EndFrame();
+
+        using (BeginStage(FrameStage.Diagnostics))
+        {
+            bool screenshotCaptured = _screenshots?.CapturePending(
+                input.ViewportWidth,
+                input.ViewportHeight) == true;
+            var outcome = new RenderFrameOutcome(
+                world,
+                presentation with { ScreenshotCaptured = screenshotCaptured });
+            _diagnostics.Publish(input, outcome);
+            _postDiagnostics.Process(input, outcome);
+            return outcome;
+        }
     }
+
+    private StageScope BeginStage(FrameStage stage) =>
+        _profiler?.BeginStage(stage) ?? default;
 
     private void HandleRenderFailure(Exception renderFailure)
     {

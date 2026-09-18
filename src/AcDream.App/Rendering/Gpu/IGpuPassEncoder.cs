@@ -41,4 +41,9 @@ internal interface IGpuPassEncoder : IDisposable
     void MultiDrawIndexedIndirect(IGpuBuffer commands, uint offsetBytes, uint drawCount, uint strideBytes);
 
     IDisposable BeginTimerScope(string scopeName);
+
+    /// <summary>A measured range that reports only its own GPU work: it starts
+    /// once every earlier command has completed, so back-to-back stage ranges
+    /// add up instead of each counting the wait for everything before it.</summary>
+    IDisposable BeginStageTimerScope(string scopeName);
 }

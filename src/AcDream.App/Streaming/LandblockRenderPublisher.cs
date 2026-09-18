@@ -123,7 +123,10 @@ public sealed class LandblockRenderPublisher
         _removeEnvCells = removeEnvCells;
     }
 
-    public IReadOnlyCollection<BuildingRegistry> BuildingRegistries =>
+    /// <summary>The registries themselves, walked once per frame by the
+    /// frame's building gather; the concrete collection walks without boxing
+    /// an enumerator.</summary>
+    public Dictionary<uint, BuildingRegistry>.ValueCollection BuildingRegistries =>
         _buildingRegistries.Values;
 
     public WalkBuildingRegistry WalkBuildings => _walkBuildingRegistry;

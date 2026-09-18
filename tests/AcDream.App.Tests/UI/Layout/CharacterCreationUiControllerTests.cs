@@ -2621,11 +2621,11 @@ public sealed class CharacterCreationUiControllerTests
             Height = 16f,
         };
         var state = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        state.Properties.Values[0x16u] = new UiPropertyValue
+        state.Properties.Set(0x16u, new UiPropertyValue
         {
             Kind = UiPropertyKind.Bool,
             BoolValue = true,
-        };
+        });
         info.States[UiStateInfo.DirectStateId] = state;
         return info;
     }

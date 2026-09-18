@@ -27,6 +27,11 @@ internal sealed class RetailStaticAnimatingObjectScheduler : ILiveStaticPartFram
         public PhysicsBody? Body;
 
         public Vector3 Omega;
+        /// <summary>Whether anything has written this owner's entity since
+        /// the render scene last read it. Set wherever the scheduler touches
+        /// the entity -- the pose advance, the root rotation, a hook batch --
+        /// and cleared only when the entity is handed to the scene.</summary>
+        public bool RenderDirty = true;
         public AnimationSequencer? PendingProcessHooks;
         public ulong PendingResidencyVersion;
         public readonly List<PartTransform> PreparedLivePartFrames = new();
@@ -177,6 +182,7 @@ internal sealed class RetailStaticAnimatingObjectScheduler : ILiveStaticPartFram
         owner.PartAvailable = available;
         owner.HasPreparedLivePartFrames = false;
         owner.PreparedLivePartFrames.Clear();
+        owner.RenderDirty = true;
     }
 
     public bool BindLiveOwner(
@@ -201,6 +207,7 @@ internal sealed class RetailStaticAnimatingObjectScheduler : ILiveStaticPartFram
         owner.Sequencer = sequencer;
         owner.LiveAnimation = animation;
         owner.Body = body;
+        owner.RenderDirty = true;
         return true;
     }
 
@@ -305,18 +312,37 @@ internal sealed class RetailStaticAnimatingObjectScheduler : ILiveStaticPartFram
         }
     }
 
+    /// <summary>
+    /// Hands the render scene the DAT statics whose entity it has not seen
+    /// since it was last written.
+    ///
+    /// Every resident animating static used to be handed over every frame --
+    /// about fifteen hundred of them at the owner's Sawato spot -- and the
+    /// scene projected and diffed each one to find the couple of hundred that
+    /// had actually moved. An owner is offered now only when the scheduler has
+    /// written its entity since the last handover, which includes the frame
+    /// after a hook batch ran: hooks are applied after the scene reads, so an
+    /// owner whose last act was a hook must still be offered once more, or the
+    /// hook's effect -- a part it hid, for one -- would never reach the scene.
+    /// </summary>
     internal void CopyActiveDatStaticEntitiesTo(List<WorldEntity> destination)
     {
         ArgumentNullException.ThrowIfNull(destination);
         destination.Clear();
         foreach (Owner owner in _owners.Values)
         {
-            if (owner.Entity.ServerGuid == 0
-                && owner.Sequencer is not null
-                && _isResident(owner.Entity))
+            if (owner.Entity.ServerGuid != 0
+                || owner.Sequencer is null
+                || !_isResident(owner.Entity))
             {
-                destination.Add(owner.Entity);
+                continue;
             }
+
+            if (!owner.RenderDirty)
+                continue;
+
+            owner.RenderDirty = false;
+            destination.Add(owner.Entity);
         }
     }
 
@@ -354,6 +380,9 @@ internal sealed class RetailStaticAnimatingObjectScheduler : ILiveStaticPartFram
             owner.ElapsedSinceUpdate += elapsedSeconds;
             if (!_isResident(owner.Entity))
             {
+                // A resident owner that left has to be offered again when it
+                // comes back, whatever happened while it was away.
+                owner.RenderDirty = true;
                 InvalidatePending(owner);
                 continue;
             }
@@ -367,6 +396,15 @@ internal sealed class RetailStaticAnimatingObjectScheduler : ILiveStaticPartFram
                 continue;
             }
 
+            // Everything from here writes the entity: the part poses, and the
+            // root rotation in both the body and the omega branch below. The
+            // mark goes on every advancing tick by design, not only when a
+            // pose actually moved: an owner that advances into an identical
+            // pose still has to be offered, because the scene's own
+            // reconciliation can have re-projected it as an ordinary outdoor
+            // static in the meantime, and withholding the offer would leave
+            // that projection standing for a frame.
+            owner.RenderDirty = true;
             IReadOnlyList<PartTransform> frames = sequencer.Advance((float)ownerElapsed);
             owner.PreparedLivePartFrames.Clear();
             for (int i = 0; i < frames.Count; i++)
@@ -460,6 +498,9 @@ internal sealed class RetailStaticAnimatingObjectScheduler : ILiveStaticPartFram
             }
 
             ApplyOmegaHooks(owner, sequencer.PendingHooks);
+            // Hooks run after the scene has read this frame, so whatever this
+            // batch changed is only visible to the scene one frame later.
+            owner.RenderDirty = true;
 
             owner.PendingProcessHooks = null;
             _captureHooks(owner.Entity.Id, sequencer);

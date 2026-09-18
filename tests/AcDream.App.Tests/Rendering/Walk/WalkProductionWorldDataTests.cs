@@ -412,6 +412,87 @@ public sealed class WalkProductionWorldDataTests
         Assert.Equal(first.Records.Count, second.Records.Count);
     }
 
+    [Theory]
+    [InlineData("UpdateTransform")]
+    [InlineData("UpdateAppearance")]
+    [InlineData("UpdateFlags")]
+    [InlineData("Rebucket")]
+    public void LandblockWriteRevision_AdvancesOnEveryWriteToTheLandblock(
+        string kindName)
+    {
+        RenderProjectionDeltaKind kind =
+            Enum.Parse<RenderProjectionDeltaKind>(kindName);
+        const uint entityId = 0x48A02021u;
+        const uint cellId = 0x8A020161u;
+        const uint landblockId = 0x8A020000u;
+
+        RenderSceneGeneration generation = RenderSceneGeneration.FromRaw(1);
+        using var scene = new ArchRenderScene(generation);
+        Assert.Equal(0UL, scene.OpenQuery().GetLandblockWriteRevision(landblockId));
+
+        RenderProjectionRecord projection =
+            OutdoorStaticRecord(entityId, sourceId: 0x02000021u, cellId);
+        scene.Apply([RenderProjectionDelta.Register(generation, 1, projection)]);
+        ulong afterRegister = scene.OpenQuery().GetLandblockWriteRevision(landblockId);
+        Assert.NotEqual(0UL, afterRegister);
+
+        scene.Apply(
+        [
+            RenderProjectionDelta.Update(
+                kind,
+                generation,
+                2,
+                projection with
+                {
+                    Transform = new RenderTransform(Matrix4x4.CreateTranslation(4f, 0f, 0f)),
+                }),
+        ]);
+        ulong afterUpdate = scene.OpenQuery().GetLandblockWriteRevision(landblockId);
+        Assert.True(afterUpdate > afterRegister);
+
+        scene.Apply(
+        [
+            RenderProjectionDelta.Unregister(
+                generation, 3, projection.Id, projection.OwnerIncarnation),
+        ]);
+        Assert.True(
+            scene.OpenQuery().GetLandblockWriteRevision(landblockId) > afterUpdate);
+    }
+
+    [Fact]
+    public void LandblockWriteRevision_AdvancesWhenADynamicIsSynchronized()
+    {
+        const uint entityId = 0x48A02022u;
+        const uint cellId = 0x8A020162u;
+        const uint landblockId = 0x8A020000u;
+
+        RenderSceneGeneration generation = RenderSceneGeneration.FromRaw(1);
+        using var scene = new ArchRenderScene(generation);
+        RenderProjectionRecord projection =
+            OutdoorStaticRecord(entityId, sourceId: 0x02000022u, cellId) with
+            {
+                ProjectionClass = RenderProjectionClass.LiveDynamicRoot,
+            };
+        scene.Apply([RenderProjectionDelta.Register(generation, 1, projection)]);
+        ulong before = scene.OpenQuery().GetLandblockWriteRevision(landblockId);
+
+        // The dynamic channel does not restamp the record revision, so the
+        // landblock stamp is the only thing telling a reader the pose moved.
+        scene.SynchronizeDynamicSources(
+            new DynamicProjectionSyncInput(
+                generation,
+                [
+                    new DynamicProjectionUpdate(
+                        projection.Id,
+                        projection.OwnerIncarnation,
+                        new RenderTransform(Matrix4x4.CreateTranslation(6f, 0f, 0f)),
+                        new RenderWorldBounds(
+                            new Vector3(5f, -1f, -1f), new Vector3(7f, 1f, 1f))),
+                ]));
+
+        Assert.True(scene.OpenQuery().GetLandblockWriteRevision(landblockId) > before);
+    }
+
     [Fact]
     public void BeginFrame_KeepsBuildingShellBucketsUntilAShellRecordChanges()
     {

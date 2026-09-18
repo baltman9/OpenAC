@@ -1380,4 +1380,49 @@ public sealed class ParticleSystemTests
             return value is not null;
         }
     }
+
+    /// <summary>
+    /// The tick walks the simulation set only when its membership has moved:
+    /// walking a sorted set allocates a traversal stack every time, and the
+    /// tick runs as often as the client draws. What it iterates is still
+    /// exactly the set, in the set's order, after every kind of change.
+    /// </summary>
+    [Fact]
+    public void Tick_WalksTheSimulationSetOnlyWhenItsMembershipMoves()
+    {
+        var sys = MakeSystem();
+        int first = sys.SpawnEmitter(MakeDesc(lifetime: 100f), Vector3.Zero);
+        int second = sys.SpawnEmitter(MakeDesc(lifetime: 100f), Vector3.Zero);
+
+        sys.Tick(0.01f);
+        int walks = sys.SimulationSnapshotRebuilds;
+        Assert.Equal(new[] { first, second }, sys.SimulationTickOrder);
+
+        // Ticks that change nothing do not walk it again.
+        sys.Tick(0.01f);
+        sys.Tick(0.01f);
+        Assert.Equal(walks, sys.SimulationSnapshotRebuilds);
+        Assert.Equal(new[] { first, second }, sys.SimulationTickOrder);
+
+        // Every kind of membership change is accounted for.
+        sys.SetEmitterSimulationEnabled(first, enabled: false);
+        sys.Tick(0.01f);
+        Assert.Equal(walks + 1, sys.SimulationSnapshotRebuilds);
+        Assert.Equal(new[] { second }, sys.SimulationTickOrder);
+
+        sys.SetEmitterSimulationEnabled(first, enabled: true);
+        sys.Tick(0.01f);
+        Assert.Equal(walks + 2, sys.SimulationSnapshotRebuilds);
+        Assert.Equal(new[] { first, second }, sys.SimulationTickOrder);
+
+        int third = sys.SpawnEmitter(MakeDesc(lifetime: 100f), Vector3.Zero);
+        sys.Tick(0.01f);
+        Assert.Equal(walks + 3, sys.SimulationSnapshotRebuilds);
+        Assert.Equal(new[] { first, second, third }, sys.SimulationTickOrder);
+
+        sys.StopEmitter(third, fadeOut: false);
+        sys.Tick(0.01f);
+        Assert.Equal(walks + 4, sys.SimulationSnapshotRebuilds);
+        Assert.Equal(new[] { first, second }, sys.SimulationTickOrder);
+    }
 }

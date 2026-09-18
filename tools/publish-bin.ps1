@@ -86,7 +86,8 @@ function Invoke-Publish {
         [Parameter(Mandatory)][string]$Project,
         [Parameter(Mandatory)][string]$Rid,
         [Parameter(Mandatory)][string]$OutputDirectory,
-        [switch]$SingleFile
+        [switch]$SingleFile,
+        [switch]$ReadyToRun
     )
 
     $arguments = @(
@@ -101,6 +102,14 @@ function Invoke-Publish {
         '--nologo'
     )
     if ($SingleFile) { $arguments += '-p:PublishSingleFile=true' }
+    # Ahead-of-time compilation, for the hosts that run a frame loop: every
+    # path a player walks for the first time -- the first object torn down,
+    # the first portal, the first spell -- otherwise pays its compilation
+    # inside the frame that needs it. It costs payload size, so the launcher
+    # and the bake tool it co-deploys stay just-in-time: they start once and
+    # have no frames to miss. Cross-RID is fine -- the self-contained restore
+    # already pulls the target runtime pack and the compiler runs on the host.
+    if ($ReadyToRun) { $arguments += '-p:PublishReadyToRun=true' }
 
     & dotnet @arguments | Out-Null
     if ($LASTEXITCODE) { throw "publish failed: $Project ($Rid)" }
@@ -254,8 +263,8 @@ foreach ($rid in $Rids) {
     $launcherDirectory = Join-Path $Staging "launcher-$rid"
 
     Write-Host "[$rid] publishing client (App + Headless)..." -ForegroundColor Yellow
-    Invoke-Publish 'src/AcDream.App/AcDream.App.csproj' $rid $clientDirectory
-    Invoke-Publish 'src/AcDream.Headless/AcDream.Headless.csproj' $rid $clientDirectory
+    Invoke-Publish 'src/AcDream.App/AcDream.App.csproj' $rid $clientDirectory -ReadyToRun
+    Invoke-Publish 'src/AcDream.Headless/AcDream.Headless.csproj' $rid $clientDirectory -ReadyToRun
 
     Write-Host "[$rid] publishing launcher (+ co-deployed bake)..." -ForegroundColor Yellow
     Invoke-Publish 'src/AcDream.Launcher/AcDream.Launcher.csproj' $rid $launcherDirectory

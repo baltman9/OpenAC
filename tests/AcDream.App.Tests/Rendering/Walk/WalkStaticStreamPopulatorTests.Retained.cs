@@ -30,6 +30,8 @@ public sealed partial class WalkStaticStreamPopulatorTests
         public int CurrentReads;
         public uint? ThrowOnceForCell;
         public ulong? GetOutdoorCellRenderRevision(uint cellId) => SupportsRevisions ? Revisions.GetValueOrDefault(cellId) : null;
+        public ulong LandblockRevision;
+        public ulong GetLandblockRenderRevision(uint landblockId) => LandblockRevision;
         public bool TryGetCurrentProjection(uint id, out RenderProjectionRecord record)
         {
             CurrentReads++;

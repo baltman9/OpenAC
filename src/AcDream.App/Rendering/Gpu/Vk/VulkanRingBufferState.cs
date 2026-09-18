@@ -59,6 +59,18 @@ internal sealed class VulkanStagingRingState
 
     internal int PendingSegmentCount => _pending.Count;
 
+    /// <summary>Payloads refused because they are bigger than the whole ring.
+    /// A ring that is simply too small shows up here.</summary>
+    internal int RejectedLargerThanRing { get; private set; }
+
+    /// <summary>Payloads refused because the ring was momentarily full of
+    /// bytes that frames still in flight have not released yet. A ring that is
+    /// big enough but drains too late shows up here instead.</summary>
+    internal int RejectedRingFull { get; private set; }
+
+    /// <summary>The largest payload the ring has refused, either way.</summary>
+    internal ulong LargestRejectedBytes { get; private set; }
+
     internal bool TryAllocate(int byteCount, ulong alignmentBytes, long serial, out ulong offsetBytes)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(byteCount);
@@ -68,7 +80,11 @@ internal sealed class VulkanStagingRingState
 
         var size = (ulong)byteCount;
         if (size > CapacityBytes)
+        {
+            RejectedLargerThanRing++;
+            LargestRejectedBytes = Math.Max(LargestRejectedBytes, size);
             return false;
+        }
 
         ulong aligned = VulkanMemoryBlockFreeList.AlignUp(_head, alignmentBytes);
         ulong consumed;
@@ -84,7 +100,11 @@ internal sealed class VulkanStagingRingState
         }
 
         if (_live + consumed > CapacityBytes)
+        {
+            RejectedRingFull++;
+            LargestRejectedBytes = Math.Max(LargestRejectedBytes, size);
             return false;
+        }
 
         _head = (aligned + size) % CapacityBytes;
         _live += consumed;
