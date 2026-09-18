@@ -306,6 +306,9 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         try
         {
             _orchestrator.LoadProfiles();
+            // The plugin panel is configured before this runs (App.axaml.cs), so it read the
+            // unloaded store's default; hand it the saved value now the profiles are in.
+            Plugins.RestoreShowBetaPluginsFromProfile();
             LastError = null;
         }
         catch (Exception ex)

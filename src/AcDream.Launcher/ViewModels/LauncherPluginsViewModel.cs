@@ -795,11 +795,31 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         _composition = composition ?? throw new ArgumentNullException(nameof(composition));
         _clientVersionResolver = clientVersionResolver
             ?? throw new ArgumentNullException(nameof(clientVersionResolver));
-        SetProperty(
-            ref _showBetaPlugins,
-            _orchestrator.GetSnapshot().ShowBetaPlugins,
-            nameof(ShowBetaPlugins));
+        RestoreShowBetaPluginsFromProfile();
         NotifyCommandStates();
+    }
+
+    /// <summary>Reads the saved Show beta plugins back without writing it again, which the public
+    /// setter would. At startup the panel is configured before the profiles load, so the first read
+    /// sees the empty store's default; the window calls this again once they have, before any Check
+    /// builds a row, and the loops below keep any row that already exists in step.</summary>
+    internal void RestoreShowBetaPluginsFromProfile()
+    {
+        bool saved = _orchestrator.GetSnapshot().ShowBetaPlugins;
+        if (!SetProperty(ref _showBetaPlugins, saved, nameof(ShowBetaPlugins)))
+        {
+            return;
+        }
+
+        foreach (PluginInstalledRowViewModel installed in _allInstalled)
+        {
+            installed.SetShowBetaPlugins(saved);
+        }
+
+        foreach (PluginDiscoverRowViewModel row in _allDiscover)
+        {
+            row.SetShowChannelPicker(saved);
+        }
     }
 
     private async Task CheckNowAsync()

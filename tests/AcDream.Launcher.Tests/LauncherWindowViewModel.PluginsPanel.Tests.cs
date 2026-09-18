@@ -3403,6 +3403,34 @@ public sealed partial class LauncherWindowViewModelTests
         Assert.True(reloadedViewModel.Plugins.ShowBetaPlugins);
     }
 
+    /// <summary>Found in live testing: the setting was saved but came back off on every launch. App wires
+    /// the plugin panel (ConfigurePlugins) before Initialize loads the profiles, so the panel read
+    /// the empty store's default. The test above builds its view model already initialized, the
+    /// opposite order, which is why it never saw this; this one runs the order App actually uses.</summary>
+    [Fact]
+    public async Task ShowBetaPluginsIsRestoredWhenProfilesLoadAfterThePanelIsConfigured()
+    {
+        using var fixture = new PluginPanelFixture();
+        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
+            ? Ok(fixture.ListJson())
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator { ShowBetaPluginsOnDisk = true };
+        using var viewModel = new LauncherWindowViewModel(orchestrator, new ImmediateUiDispatcher());
+
+        // App.axaml.cs order: the panel is configured first, the profiles load second.
+        viewModel.ConfigurePlugins(composition, () => null);
+        Assert.False(viewModel.Plugins.ShowBetaPlugins);
+        viewModel.Initialize();
+
+        Assert.True(viewModel.Plugins.ShowBetaPlugins);
+        // Restoring a saved value must not write it straight back as if the player toggled it.
+        Assert.True(orchestrator.ShowBetaPlugins);
+        await Task.CompletedTask;
+    }
+
     [Fact]
     public async Task TogglingShowBetaPluginsNeverChangesInstalledRecords()
     {

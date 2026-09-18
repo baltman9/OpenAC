@@ -1015,7 +1015,19 @@ public sealed partial class LauncherWindowViewModelTests
         /// hold it, so a freshly configured view model reads back whatever the last one wrote.</summary>
         public bool ShowBetaPlugins { get; private set; }
 
-        public void LoadProfiles() => LoadCalled = true;
+        /// <summary>What the profile file on disk holds, unseen until <see cref="LoadProfiles"/>
+        /// runs, the way the real store starts from an empty document. Null keeps the fake's
+        /// original behaviour: the value is visible at once and loading changes nothing.</summary>
+        public bool? ShowBetaPluginsOnDisk { get; init; }
+
+        public void LoadProfiles()
+        {
+            LoadCalled = true;
+            if (ShowBetaPluginsOnDisk is { } onDisk)
+            {
+                ShowBetaPlugins = onDisk;
+            }
+        }
 
         public LauncherStateSnapshot GetSnapshot() => new(
             ServersOverride ?? [CreateServerSnapshot()],
