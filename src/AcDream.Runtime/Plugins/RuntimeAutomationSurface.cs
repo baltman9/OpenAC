@@ -173,6 +173,20 @@ internal class RuntimeAutomationSurface
     public IProjectileAutomation Projectiles => this;
     public ISelectionAutomation Selection => this;
 
+    PluginBusyState IRecoveryAutomation.CaptureBusyState()
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        if (runtime is null)
+            return default;
+        var state = runtime.ItemInteractionOwner.RuntimeTransactions.CaptureOwnership();
+        var inventory = runtime.InventoryOwner.Transactions;
+        return new(inventory.BusyCount, inventory.HasPendingRequest,
+            state.AwaitingAppraisalId, state.LastUseSourceId, state.LastUseTargetId,
+            state.AwaitingItemUseCompletion);
+    }
+
     PluginRecoveryResult IRecoveryAutomation.ClearOneBusyReference()
     {
         GameRuntime? runtime;
@@ -437,6 +451,7 @@ internal class RuntimeAutomationSurface
         _knownAttackSpells = Array.Empty<PluginSpellInfo>();
         _knownCombatSpells = Array.Empty<PluginSpellInfo>();
         _enchantments = Array.Empty<PluginActiveEnchantment>();
+        _timedEnchantments = Array.Empty<PluginActiveEnchantment>();
     }
 
     private void DetachLocked()
@@ -639,14 +654,29 @@ internal class RuntimeAutomationSurface
         _knownCombatSpells = combat;
     }
 
+    private double _enchantmentProjectionTime = double.NaN;
+
+    // The clock must match the timestamp source used when receiving effects.
+    protected virtual double EnchantmentTime => _runtime?.Clock.SimulationTimeSeconds ?? 0d;
+
+    private void RefreshEnchantmentTime()
+    {
+        double now = _runtime?.Clock.SimulationTimeSeconds ?? 0d;
+        if (now != _enchantmentProjectionTime)
+            RebuildEnchantments();
+    }
+
     private void RebuildEnchantments()
     {
         Spellbook? spellbook;
         lock (_gate)
             spellbook = _spellbook;
+        double now = EnchantmentTime;
+        _enchantmentProjectionTime = _runtime?.Clock.SimulationTimeSeconds ?? 0d;
         if (spellbook is null)
         {
             _enchantments = Array.Empty<PluginActiveEnchantment>();
+            _timedEnchantments = Array.Empty<PluginActiveEnchantment>();
             return;
         }
 
@@ -663,10 +693,24 @@ internal class RuntimeAutomationSurface
                 tier = meta.Generation;
             }
             built.Add(new PluginActiveEnchantment(
-                record.SpellId, family, tier, record.Duration));
+                record.SpellId, family, tier, Remaining(record, now)));
         }
         _enchantments = built;
+        _timedEnchantments = spellbook.ActiveEnchantmentSnapshot
+            .Where(record => record.Bucket is 1u or 2u && record.Duration > 0d)
+            .Select(record =>
+            {
+                bool known = spellbook.TryGetMetadata(record.SpellId, out SpellMetadata metadata);
+                return new PluginActiveEnchantment(
+                    record.SpellId, known ? metadata.Family : 0u,
+                    known ? metadata.Generation : 0, Remaining(record, now));
+            }).ToArray();
     }
+
+    private static double Remaining(ActiveEnchantmentRecord record, double now)
+        => record.Duration < 0d
+            ? double.PositiveInfinity
+            : Math.Max(0d, record.StartTime + record.Duration - now);
 
     private static PluginSpellInfo Project(SpellMetadata meta) => new(
         meta.SpellId,
@@ -867,7 +911,18 @@ internal class RuntimeAutomationSurface
             ?? Vital(kind).Maximum;
     }
 
-    public IReadOnlyList<PluginActiveEnchantment> ActiveEnchantments => _enchantments;
+    public IReadOnlyList<PluginActiveEnchantment> ActiveEnchantments
+    {
+        get { RefreshEnchantmentTime(); return _enchantments; }
+    }
+
+    private IReadOnlyList<PluginActiveEnchantment> _timedEnchantments =
+        Array.Empty<PluginActiveEnchantment>();
+
+    public IReadOnlyList<PluginActiveEnchantment> TimedEnchantments
+    {
+        get { RefreshEnchantmentTime(); return _timedEnchantments; }
+    }
 
     public IReadOnlyList<PluginSkillInfo> Skills
     {
@@ -1077,7 +1132,7 @@ internal class RuntimeAutomationSurface
             return 0d;
         return spellbook.OnCooldown(
             cooldownId,
-            runtime.Clock.SimulationTimeSeconds,
+            EnchantmentTime,
             out double remaining)
                 ? Math.Max(0d, remaining)
                 : 0d;
@@ -1464,6 +1519,96 @@ internal class RuntimeAutomationSurface
             : result with { DebugSamples = samples.ToArray() };
 
     // ── INavigationAutomation ─────────────────────────────────────────────
+    bool INavigationAutomation.GenerateNearbyNavdata()
+    {
+        GameRuntime? runtime;
+        lock (_gate) runtime = _runtime;
+        var snapshot = ((INavigationAutomation)this).Snapshot;
+        return runtime is not null && snapshot.IsAvailable && !snapshot.IsPortalSpace
+            && runtime.NavigationOwner.GenerateNearby(runtime.Generation, snapshot.Position.CellId);
+    }
+    void INavigationAutomation.CancelNavdataGeneration()
+    {
+        lock (_gate) _runtime?.NavigationOwner.CancelGeneration();
+    }
+    PluginNavigationGenerationStatus INavigationAutomation.NavdataGenerationStatus
+    {
+        get
+        {
+            GameRuntime? runtime;
+            lock (_gate) runtime = _runtime;
+            if (runtime is null) return new(false, 0, 0, "Not in world.");
+            var status = runtime.NavigationOwner.GenerationStatus();
+            return new(status.Running, status.Completed, status.Total, status.Message);
+        }
+    }
+    IReadOnlyList<PluginWorldLine> INavigationAutomation.CaptureWalkableMesh(bool enabled)
+    {
+        GameRuntime? runtime;
+        lock (_gate) runtime = _runtime;
+        if (runtime is null) return [];
+        var snapshot = ((INavigationAutomation)this).Snapshot;
+        var p = snapshot.Position;
+        var center = new System.Numerics.Vector3((float)(p.EastWest * 240d + 24468d),
+            (float)(p.NorthSouth * 240d + 24468d), (float)(p.Elevation * 240d));
+        var edges = runtime.NavigationOwner.CapturePreview(runtime.Generation, p.CellId, center,
+            enabled && snapshot.IsAvailable && !snapshot.IsPortalSpace);
+        PluginNavigationPosition Position(System.Numerics.Vector3 point) => new(0,
+            (point.X - 24468d) / 240d, (point.Y - 24468d) / 240d,
+            (point.Z + 0.08d) / 240d, 0, p.IsOutdoor);
+        return edges.Select(edge => new PluginWorldLine(Position(edge.Start), Position(edge.End), 0x40FF80u)
+        { WidthMeters = 0.08f, FollowTerrain = false }).ToArray();
+    }
+
+    PluginNavigationPathResult INavigationAutomation.FindPath(
+        in PluginNavigationPosition destination,
+        double horizontalToleranceMeters,
+        double verticalToleranceMeters)
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        PluginNavigationSnapshot current = ((INavigationAutomation)this).Snapshot;
+        if (runtime is null || !current.IsAvailable || current.IsPortalSpace)
+            return new(PluginNavigationPathStatus.Unavailable, 0, []);
+        if (!double.IsFinite(horizontalToleranceMeters)
+            || !double.IsFinite(verticalToleranceMeters)
+            || horizontalToleranceMeters <= 0 || verticalToleranceMeters <= 0)
+            return new(PluginNavigationPathStatus.InvalidPosition, runtime.NavigationOwner.Revision, []);
+        static System.Numerics.Vector3 Absolute(PluginNavigationPosition position) => new(
+            (float)(position.EastWest * 240d + 24468d),
+            (float)(position.NorthSouth * 240d + 24468d),
+            (float)(position.Elevation * 240d));
+        NavigationPathResult result = runtime.NavigationOwner.Find(runtime.Generation,
+            current.Position.CellId, destination.CellId, Absolute(current.Position), Absolute(destination),
+            (float)horizontalToleranceMeters, (float)verticalToleranceMeters);
+        PluginNavigationPathStatus status = result.Status switch
+        {
+            NavigationPathStatus.Complete => PluginNavigationPathStatus.Complete,
+            NavigationPathStatus.InvalidPosition => PluginNavigationPathStatus.InvalidPosition,
+            NavigationPathStatus.StartOutsideMesh => PluginNavigationPathStatus.StartOutsideMesh,
+            NavigationPathStatus.GoalOutsideMesh => PluginNavigationPathStatus.GoalOutsideMesh,
+            NavigationPathStatus.Unreachable => PluginNavigationPathStatus.Unreachable,
+            NavigationPathStatus.CapacityExceeded => PluginNavigationPathStatus.CapacityExceeded,
+            NavigationPathStatus.MissingTiles => PluginNavigationPathStatus.MissingTiles,
+            NavigationPathStatus.CorruptTiles => PluginNavigationPathStatus.CorruptTiles,
+            NavigationPathStatus.Loading => PluginNavigationPathStatus.Loading,
+            NavigationPathStatus.SearchLimitReached => PluginNavigationPathStatus.SearchLimitReached,
+            _ => PluginNavigationPathStatus.Unavailable,
+        };
+        var corners = new PluginNavigationPosition[result.Corners.Count];
+        for (int index = 0; index < corners.Length; index++)
+        {
+            System.Numerics.Vector3 point = result.Corners[index];
+            // Intermediate corners are geometry points, not asserted cell memberships.
+            bool last = index == corners.Length - 1;
+            corners[index] = new PluginNavigationPosition(last ? destination.CellId : 0u,
+                (point.X - 24468d) / 240d, (point.Y - 24468d) / 240d,
+                point.Z / 240d, 0f, last && destination.IsOutdoor);
+        }
+        return new(status, runtime.NavigationOwner.Revision, corners);
+    }
+
     PluginNavigationSnapshot INavigationAutomation.Snapshot
     {
         get
@@ -2786,6 +2931,26 @@ internal class RuntimeAutomationSurface
             : result.ToArray();
     }
 
+    public bool CurrentContentsReady
+    {
+        get
+        {
+            GameRuntime? runtime;
+            lock (_gate) runtime = _runtime;
+            if (runtime is null || !IsAvailable) return false;
+            uint root = runtime.InventoryOwner.ExternalContainers.CurrentContainerId;
+            if (root == 0u) return false;
+            ClientObjectTable objects = runtime.InventoryOwner.Objects;
+            foreach (uint id in CaptureContainerIds(objects, root))
+            {
+                if (objects.Get(id) is not { } item
+                    || string.IsNullOrEmpty(item.Name) || item.WeenieClassId == 0u)
+                    return false;
+            }
+            return true;
+        }
+    }
+
     public IReadOnlyList<PluginInventoryItem> CaptureCurrentContents()
     {
         GameRuntime? runtime;
@@ -2896,7 +3061,9 @@ internal class RuntimeAutomationSurface
                 & PublicWeenieFlags.Corpse) != 0;
         bool currentContent = root != 0u
             && CaptureContainerIds(objects, root).Contains(objectId);
-        if (item is null || (!corpse && !currentContent))
+        bool owned = TryGetOwned(objects, runtime.PlayerIdentity.ServerGuid,
+            objectId, out _);
+        if (item is null || (!corpse && !currentContent && !owned))
         {
             return new(PluginItemCommandStatus.InvalidItem);
         }
@@ -3041,6 +3208,8 @@ internal class RuntimeAutomationSurface
             AttackType = item.Properties.GetInt((uint)PropertyInt.AttackType),
             WeaponType = item.Properties.GetInt((uint)PropertyInt.WeaponType),
             BoosterVital = item.Properties.GetInt((uint)PropertyInt.BoosterEnum),
+            AmmoType = item.AmmoType ?? (uint)Math.Max(0,
+                item.Properties.GetInt((uint)PropertyInt.AmmoType)),
             BoostValue = item.Properties.GetInt((uint)PropertyInt.BoostValue),
             HealKitModifier = item.Properties.GetFloat(
                 (uint)PropertyFloat.HealkitMod),
@@ -3067,6 +3236,7 @@ internal class RuntimeAutomationSurface
             ItemCurrentMana = item.Properties.GetInt((uint)PropertyInt.ItemCurMana),
             ItemMaximumMana = item.Properties.GetInt((uint)PropertyInt.ItemMaxMana),
             Workmanship = item.Workmanship,
+            NumTimesTinkered = item.Properties.GetInt((uint)PropertyInt.NumTimesTinkered),
             MaterialType = item.MaterialType ?? 0u,
             ObjectClass = ClassifyObject(item),
             Palettes = ProjectPalettes(runtime, item.ObjectId),
@@ -3328,6 +3498,21 @@ internal class RuntimeAutomationSurface
     }
 
     // ── IEnchantmentAutomation ──────────────────────────────────────────
+    public void ForgetReported(uint targetObjectId = 0u)
+    {
+        lock (_gate)
+        {
+            // Consume the old receipt so polling cannot restore a forgotten cast.
+            _trackedCastCompletionRevision = _cast?.LastCompletion.Revision ?? 0;
+            if (targetObjectId == 0u)
+                _trackedEnchantments.Clear();
+            else
+                foreach (var key in _trackedEnchantments.Keys
+                    .Where(key => key.Target == targetObjectId).ToArray())
+                    _trackedEnchantments.Remove(key);
+        }
+    }
+
     public IReadOnlyList<PluginTrackedEnchantment> Capture(uint targetObjectId)
     {
         if (targetObjectId == 0u)
@@ -3656,6 +3841,16 @@ internal class RuntimeAutomationSurface
         return new(PluginCombatCommandStatus.Stopped);
     }
 
+    public IDisposable? AcquireCombatControl()
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        return runtime is not null && IsAvailable
+            ? runtime.ActionOwner.AcquireCombatControl()
+            : null;
+    }
+
     private bool SelectExplicitTarget(uint targetObjectId)
     {
         GameRuntime? runtime;
@@ -3717,5 +3912,6 @@ internal class RuntimeAutomationSurface
         _knownCombatSpells = Array.Empty<PluginSpellInfo>();
         _enchantments = Array.Empty<PluginActiveEnchantment>();
         _peers.Dispose();
+        _timedEnchantments = Array.Empty<PluginActiveEnchantment>();
     }
 }

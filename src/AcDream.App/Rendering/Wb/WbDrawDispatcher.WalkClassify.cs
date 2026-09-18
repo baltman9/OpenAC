@@ -239,7 +239,9 @@ public sealed partial class WbDrawDispatcher
         uint lookInCellId = 0,
         WalkBuildingSelection? buildingSelection = null,
         Matrix4x4 buildingPartTransform = default,
-        List<WalkCachedPart>? retainedParts = null)
+        List<WalkCachedPart>? retainedParts = null,
+        Vector3 buildingViewerPosition = default,
+        Vector3 buildingSortCenter = default)
     {
         ArgumentNullException.ThrowIfNull(batches);
         ArgumentNullException.ThrowIfNull(selectionParts);
@@ -378,6 +380,12 @@ public sealed partial class WbDrawDispatcher
                 }
 
                 Matrix4x4 model = meshRef.PartTransform * entity.RootWorld;
+                if (buildingSelection is WalkBuildingSelection selectedBuilding)
+                {
+                    model = WalkBuildingDrawTransform.Resolve(
+                        model, buildingSortCenter, buildingViewerPosition,
+                        selectedBuilding.Mode);
+                }
                 bool visible = ResolvePartVisible(
                     lookInViews,
                     lookInRouteIndex,

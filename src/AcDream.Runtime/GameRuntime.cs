@@ -483,6 +483,7 @@ public sealed class GameRuntime
     public RuntimeWorldEnvironmentState EnvironmentOwner { get; }
     public RuntimeWorldTransitState TransitOwner { get; }
     public RuntimeGenerationReset GenerationReset { get; }
+    internal RuntimeNavigationState NavigationOwner { get; } = new();
     public RuntimePlacementProjectionChannel Placements =>
         EntityObjects.Placements;
 
@@ -578,8 +579,11 @@ public sealed class GameRuntime
 
     public void ResetGeneration(
         RuntimeGenerationToken retiringGeneration,
-        IRuntimeGenerationResetHost host) =>
+        IRuntimeGenerationResetHost host)
+    {
+        NavigationOwner.Reset();
         GenerationReset.Reset(retiringGeneration, host);
+    }
 
     public IDisposable Subscribe(IRuntimeEventObserver observer)
     {
@@ -802,6 +806,9 @@ public sealed class GameRuntime
                 StopSession();
                 return Session.CaptureOwnership().IsConverged;
             case 3:
+                NavigationOwner.Bind(null);
+                if (!NavigationOwner.IsQuiescent)
+                    return false;
                 GenerationReset.DrainPending();
                 TransitOwner.ResetSession();
                 return TransitOwner.CaptureOwnership().IsSessionIdle;

@@ -22,4 +22,8 @@
     <ProjectReference Include="..\AcDream.Platform\AcDream.Platform.csproj" />
     <ProjectReference Include="..\AcDream.Plugin.Abstractions\AcDream.Plugin.Abstractions.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="DotRecast.Core" />
+    <PackageReference Include="DotRecast.Detour" />
+  </ItemGroup>
 </Project>

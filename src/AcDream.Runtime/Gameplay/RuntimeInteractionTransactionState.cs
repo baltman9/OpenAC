@@ -39,9 +39,25 @@ public readonly record struct RuntimePendingUse(
     ItemUseRequestReservation? Reservation,
     RuntimeInteractionApproachToken ApproachToken);
 
+/// <summary>
+/// Who asked for an appraisal. The request and the reply are the same wire
+/// exchange either way; what differs is whether anything is meant to be put
+/// in front of the player when the reply lands.
+/// </summary>
+public enum RuntimeAppraisalOrigin
+{
+    /// <summary>The player asked — through Assess, a double-click, or a
+    /// window that is already open.</summary>
+    Player,
+
+    /// <summary>A plugin asked, for its own reading of the object.</summary>
+    Automation,
+}
+
 public readonly record struct RuntimeAppraisalResponseAcceptance(
     bool Accepted,
-    bool FirstResponse);
+    bool FirstResponse,
+    RuntimeAppraisalOrigin Origin = RuntimeAppraisalOrigin.Player);
 
 public readonly record struct RuntimeItemUseCompletion(
     long Revision,
@@ -100,6 +116,8 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
     private uint _lastUseTargetId;
     private uint _awaitingAppraisalId;
     private uint _currentAppraisalId;
+    private RuntimeAppraisalOrigin _awaitingAppraisalOrigin;
+    private RuntimeAppraisalOrigin _currentAppraisalOrigin;
     private RuntimePendingPickup? _pendingPickup;
     private ulong _nextPickupToken;
     private RuntimePendingUse? _pendingUse;
@@ -120,6 +138,10 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
     public InventoryTransactionState Inventory => _inventory;
     public uint AwaitingAppraisalId => _awaitingAppraisalId;
     public uint CurrentAppraisalId => _currentAppraisalId;
+    public RuntimeAppraisalOrigin AwaitingAppraisalOrigin =>
+        _awaitingAppraisalOrigin;
+    public RuntimeAppraisalOrigin CurrentAppraisalOrigin =>
+        _currentAppraisalOrigin;
     public int OutboundCount => _outbound.Count;
     public bool HasPendingPickup => _pendingPickup is not null;
     public bool HasPendingUse => _pendingUse is not null;
@@ -260,9 +282,16 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
             IncrementRevision();
     }
 
+    /// <summary>
+    /// Asks the server to appraise an object. <paramref name="origin"/> says
+    /// who wants it: the same request goes out either way, and it is carried
+    /// through to the reply so a presentation layer can tell an appraisal the
+    /// player asked for from one a plugin asked for on its own account.
+    /// </summary>
     public bool TryRequestAppraisal(
         uint objectId,
-        Action<uint> sendAppraisal)
+        Action<uint> sendAppraisal,
+        RuntimeAppraisalOrigin origin = RuntimeAppraisalOrigin.Player)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(sendAppraisal);
@@ -279,7 +308,9 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         }
 
         uint previousAwaiting = _awaitingAppraisalId;
+        RuntimeAppraisalOrigin previousOrigin = _awaitingAppraisalOrigin;
         _awaitingAppraisalId = objectId;
+        _awaitingAppraisalOrigin = origin;
         IncrementRevision();
         try
         {
@@ -292,6 +323,7 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
                 && _awaitingAppraisalId == objectId)
             {
                 _awaitingAppraisalId = previousAwaiting;
+                _awaitingAppraisalOrigin = previousOrigin;
                 if (acquiredBusy)
                     _inventory.CompleteUse(0u);
                 IncrementRevision();
@@ -317,21 +349,32 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         {
             _awaitingAppraisalId = 0u;
             _currentAppraisalId = objectId;
+            _currentAppraisalOrigin = _awaitingAppraisalOrigin;
+            _awaitingAppraisalOrigin = RuntimeAppraisalOrigin.Player;
             _inventory.CompleteUse(0u);
             IncrementRevision();
         }
 
         return new RuntimeAppraisalResponseAcceptance(
             Accepted: true,
-            FirstResponse: firstResponse);
+            FirstResponse: firstResponse,
+            Origin: _currentAppraisalOrigin);
     }
 
+    /// <summary>
+    /// Asks again for the appraisal already in hand. Only the player's own:
+    /// this is what keeps an open examination window's numbers current, and a
+    /// plugin's reading of some object elsewhere is not the window's to renew.
+    /// </summary>
     public bool RefreshCurrentAppraisal(Action<uint> sendAppraisal)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(sendAppraisal);
-        if (_currentAppraisalId == 0u)
+        if (_currentAppraisalId == 0u
+            || _currentAppraisalOrigin != RuntimeAppraisalOrigin.Player)
+        {
             return false;
+        }
         sendAppraisal(_currentAppraisalId);
         return true;
     }
@@ -347,6 +390,8 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
             _inventory.CompleteUse(0u);
         _awaitingAppraisalId = 0u;
         _currentAppraisalId = 0u;
+        _awaitingAppraisalOrigin = RuntimeAppraisalOrigin.Player;
+        _currentAppraisalOrigin = RuntimeAppraisalOrigin.Player;
         IncrementRevision();
         sendAppraisal(0u);
         return true;
@@ -688,6 +733,8 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         LastItemUseCompletion = default;
         _awaitingAppraisalId = 0u;
         _currentAppraisalId = 0u;
+        _awaitingAppraisalOrigin = RuntimeAppraisalOrigin.Player;
+        _currentAppraisalOrigin = RuntimeAppraisalOrigin.Player;
         _outbound.Clear();
         _pendingPickup = null;
         _pendingUse = null;

@@ -264,7 +264,21 @@ public sealed class AppraisalUiController : IRetainedPanelController
     }
 
     public AppraisalView ActiveView => _activeView;
-    public uint CurrentObjectId => _interaction.CurrentAppraisalId;
+
+    /// <summary>
+    /// What this window is showing — which is not the same question as which
+    /// appraisal the client last asked the server for. A plugin's appraisal
+    /// travels the same wire exchange without ever being presented, so the
+    /// answer comes from the page on screen and not from the request slot.
+    /// The portrait in the creature page renders whatever this names.
+    /// </summary>
+    public uint CurrentObjectId => _activeView switch
+    {
+        AppraisalView.Item => _itemObjectId,
+        AppraisalView.Creature => _creatureObjectId,
+        AppraisalView.Character => _characterObjectId,
+        _ => 0u,
+    };
 
     public static AppraisalUiController? Bind(
         ImportedLayout layout,
@@ -406,6 +420,15 @@ public sealed class AppraisalUiController : IRetainedPanelController
             _interaction.AcceptAppraisalResponse(appraisal.Guid);
         if (!acceptance.Accepted)
             return false;
+
+        // An appraisal a plugin asked for is answered, not shown. The object's
+        // own numbers were already updated by the time this runs; what this
+        // window is for is the player's examination, and the player did not
+        // ask. Presenting it here would throw the window open — and swap what
+        // is in it — every time a plugin read an object, which is several
+        // times a corpse.
+        if (acceptance.Origin == RuntimeAppraisalOrigin.Automation)
+            return true;
 
         ClientObject? obj = _objects.Get(appraisal.Guid);
         if (obj is null)

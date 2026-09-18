@@ -58,8 +58,48 @@ public enum PluginNavigationCommandStatus
     Rejected,
 }
 
+public enum PluginNavigationPathStatus
+{
+    Unavailable,
+    Loading,
+    Complete,
+    MissingTiles,
+    CorruptTiles,
+    InvalidPosition,
+    StartOutsideMesh,
+    GoalOutsideMesh,
+    Unreachable,
+    CapacityExceeded,
+    SearchLimitReached,
+}
+
+public readonly record struct PluginNavigationPathResult(
+    PluginNavigationPathStatus Status,
+    long MeshRevision,
+    IReadOnlyList<PluginNavigationPosition> Corners);
+
+public readonly record struct PluginNavigationGenerationStatus(
+    bool Running, int Completed, int Total, string Message);
+
 public interface INavigationAutomation
 {
+    bool GenerateNearbyNavdata() => false;
+    void CancelNavdataGeneration() { }
+    PluginNavigationGenerationStatus NavdataGenerationStatus =>
+        new(false, 0, 0, "Navigation generation is unavailable on this host.");
+    /// <summary>Nearby walkable polygon edges; disabled releases visualization-only geometry.</summary>
+    IReadOnlyList<PluginWorldLine> CaptureWalkableMesh(bool enabled = true) => [];
+    /// <summary>
+    /// Plan from the current position using prepared traversable geometry.
+    /// Tolerances are metres; only Complete results contain a traversable full route.
+    /// A destination CellId of zero denotes coordinates without known cell membership.
+    /// </summary>
+    PluginNavigationPathResult FindPath(
+        in PluginNavigationPosition destination,
+        double horizontalToleranceMeters = 1d,
+        double verticalToleranceMeters = 1.5d) =>
+        new(PluginNavigationPathStatus.Unavailable, 0L, []);
+
     PluginNavigationSnapshot Snapshot { get; }
 
     bool TryGetObject(uint objectId, out PluginNavigationObject value);

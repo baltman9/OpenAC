@@ -738,6 +738,12 @@ public sealed class RuntimeItemInteraction : IDisposable
         _runtimeTransactions.TryRequestAppraisal(objectId, _sendExamine);
     }
 
+    /// <summary>
+    /// A plugin's own appraisal. It is the same request the player's Assess
+    /// sends, and it is marked as the plugin's so that nothing is put in front
+    /// of the player when the answer comes back: a plugin reading an object is
+    /// not the player examining one.
+    /// </summary>
     public bool TryAppraiseForAutomation(uint objectId)
     {
         if (objectId == 0u
@@ -746,7 +752,10 @@ public sealed class RuntimeItemInteraction : IDisposable
         {
             return false;
         }
-        return _runtimeTransactions.TryRequestAppraisal(objectId, _sendExamine);
+        return _runtimeTransactions.TryRequestAppraisal(
+            objectId,
+            _sendExamine,
+            RuntimeAppraisalOrigin.Automation);
     }
 
     public AppraisalResponseAcceptance AcceptAppraisalResponse(uint objectId)
@@ -758,7 +767,8 @@ public sealed class RuntimeItemInteraction : IDisposable
             StateChanged?.Invoke();
         return new AppraisalResponseAcceptance(
             acceptance.Accepted,
-            acceptance.FirstResponse);
+            acceptance.FirstResponse,
+            acceptance.Origin);
     }
 
     public bool RefreshCurrentAppraisal()
@@ -1781,7 +1791,8 @@ public sealed class RuntimeItemInteraction : IDisposable
 
     public readonly record struct AppraisalResponseAcceptance(
         bool Accepted,
-        bool FirstResponse);
+        bool FirstResponse,
+        RuntimeAppraisalOrigin Origin = RuntimeAppraisalOrigin.Player);
 
     private static void DispatchAll(Action? listeners, List<Exception> failures)
     {

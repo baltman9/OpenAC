@@ -137,6 +137,8 @@ public sealed class RuntimeCombatAttackState : IDisposable
     }
 
     public AttackHeight RequestedHeight { get; private set; } = AttackHeight.Medium;
+    internal bool AutomationControlled { get; set; }
+    private bool AutoRepeatAllowed => !AutomationControlled && _operations.AutoRepeatAttack;
     public float DesiredPower { get; private set; } = InitialDesiredPower;
     public bool AttackRequestInProgress => _attackRequestInProgress;
     public bool AttackServerResponsePending => _attackServerResponsePending;
@@ -363,7 +365,7 @@ public sealed class RuntimeCombatAttackState : IDisposable
             return;
         }
 
-        if (_operations.AutoRepeatAttack)
+        if (AutoRepeatAllowed)
             _repeatAttacking = true;
         _attackServerResponsePending = setServerPending;
     }
@@ -392,7 +394,7 @@ public sealed class RuntimeCombatAttackState : IDisposable
         // matches the bar setting; the server keeps swinging at the level it
         // already holds.
         if (!_attackRequestInProgress
-            && _operations.AutoRepeatAttack
+            && AutoRepeatAllowed
             && _repeatAttacking
             && Math.Abs(_requestedAttackPower - DesiredPower) > 0.01f)
         {
@@ -400,7 +402,7 @@ public sealed class RuntimeCombatAttackState : IDisposable
             ExecuteAttack(RequestedHeight, setServerPending: false);
         }
 
-        if (!_operations.AutoRepeatAttack || !_repeatAttacking)
+        if (!AutoRepeatAllowed || !_repeatAttacking)
         {
             _repeatAttacking = false;
             ResetPowerBar();

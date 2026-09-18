@@ -55,6 +55,7 @@ own licenses. Each license text ships inside the package.
 | Avalonia, Avalonia.Desktop, Avalonia.Themes.Fluent | MIT |
 | Chorizite.Core, Chorizite.DatReaderWriter | MIT |
 | Arch | Apache-2.0 |
+| DotRecast.Core, DotRecast.Detour, DotRecast.Recast, DotRecast.Recast.Toolset | Zlib (https://github.com/ikpil/DotRecast) |
 | Serilog, Serilog.Sinks.Console | Apache-2.0 |
 | SixLabors.ImageSharp | Six Labors Split License (Apache-2.0 terms for open-source use) |
 | BCnEncoder.Net, BCnEncoder.Net.ImageSharp | MIT OR Unlicense |

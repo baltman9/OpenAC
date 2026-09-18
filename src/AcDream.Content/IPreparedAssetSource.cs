@@ -163,7 +163,8 @@ internal static class PreparedAssetRequestContract
 /// </summary>
 public sealed partial class PakPreparedAssetSource :
     IPreparedAssetSource,
-    IPreparedCollisionSource
+    IPreparedCollisionSource,
+    IPreparedNavigationSource
 {
     private readonly PakReader _reader;
     private readonly Action<string>? _diagnosticSink;

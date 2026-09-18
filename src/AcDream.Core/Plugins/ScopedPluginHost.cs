@@ -13,6 +13,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     private readonly ScopedPluginCommandRegistry _commands;
     private readonly ScopedLootClassifierRegistry _lootClassifiers;
     private bool _disposed;
+    private readonly ScopedWorldLines _worldLines;
 
     internal ScopedPluginHost(
         IPluginHost inner,
@@ -20,6 +21,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         string pluginDisplayName)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+        _worldLines = new ScopedWorldLines(inner.WorldLines);
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginDisplayName);
         _pluginId = pluginId;
@@ -42,6 +44,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     public IEvents Events => _events;
     public ISelectionService Selection => _selection;
     public IUiRegistry Ui => _ui;
+    public IPluginWorldLines WorldLines => _worldLines;
     public IPluginStorage Storage => _storage;
     public IPluginStorage VtankProfiles => _inner.VtankProfiles;
     public IPluginCommandRegistry Commands => _commands;
@@ -101,10 +104,30 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             return;
         _disposed = true;
         _events.Dispose();
+        _worldLines.Dispose();
         _selection.Dispose();
         _ui.Dispose();
         _commands.Dispose();
         _lootClassifiers.Dispose();
+    }
+
+    private sealed class ScopedWorldLines(IPluginWorldLines inner) : IPluginWorldLines, IDisposable
+    {
+        private readonly List<IPluginWorldLineLayer> _layers = [];
+        private bool _disposed;
+        public IPluginWorldLineLayer? CreateLayer()
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var layer = inner.CreateLayer();
+            if (layer is not null) _layers.Add(layer);
+            return layer;
+        }
+        public void Dispose()
+        {
+            _disposed = true;
+            foreach (var layer in _layers) layer.Dispose();
+            _layers.Clear();
+        }
     }
 
     private sealed class ScopedLootClassifierRegistry(

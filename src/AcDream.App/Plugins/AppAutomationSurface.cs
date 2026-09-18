@@ -13,6 +13,10 @@ namespace AcDream.App.Plugins;
 /// </summary>
 internal sealed class AppAutomationSurface : RuntimeAutomationSurface
 {
+    protected override double EnchantmentTime =>
+        System.Diagnostics.Stopwatch.GetTimestamp()
+        / (double)System.Diagnostics.Stopwatch.Frequency;
+
     public AppAutomationSurface()
         : this(events: null)
     {

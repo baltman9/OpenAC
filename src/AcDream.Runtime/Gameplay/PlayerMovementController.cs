@@ -1622,26 +1622,67 @@ public sealed class PlayerMovementController
 
             var p = new AcDream.Core.Physics.Motion.MovementParameters();
 
+            // Stop under the existing run hold before releasing that hold.
+            // Releasing it first re-applies a still-held forward command as a
+            // walk, inserting an unwanted walking transition before the stop.
+            if (input.IsPersistentCommand && !input.Forward && !input.Backward
+                && _motion.RawState.ForwardCommand is
+                    MotionCommand.WalkForward or MotionCommand.WalkBackward)
+            {
+                StopMotionAtPhysicsObjectBoundary(_motion.RawState.ForwardCommand, p);
+                motionEdgeFired = true;
+            }
+
             if (input.Run != _prevRunHeld)
             {
                 _motion.set_hold_run(input.Run, interrupt: true);
                 motionEdgeFired = true;
             }
 
-            if (input.Forward && !_prevForwardHeld)
-            { DoMotionAtPhysicsObjectBoundary(MotionCommand.WalkForward, p); motionEdgeFired = true; }
-            else if (input.Backward && !_prevBackwardHeld && !input.Forward)
-            { DoMotionAtPhysicsObjectBoundary(MotionCommand.WalkBackward, p); motionEdgeFired = true; }
-            if (!input.Forward && _prevForwardHeld)
+            if (input.IsPersistentCommand)
             {
-                if (input.Backward)
-                    DoMotionAtPhysicsObjectBoundary(MotionCommand.WalkBackward, p);
-                else
-                    StopMotionAtPhysicsObjectBoundary(MotionCommand.WalkForward, p);
-                motionEdgeFired = true;
+                // A retained automation command replaces the whole directional
+                // intent. Raw motion can differ from the previous input after
+                // initial publication or a server update, so reconcile the
+                // command with the motion that is actually active.
+                uint desiredForward = input.Forward
+                    ? MotionCommand.WalkForward
+                    : input.Backward
+                        ? MotionCommand.WalkBackward
+                        : MotionCommand.Ready;
+                uint activeForward = _motion.RawState.ForwardCommand;
+                bool activeIsDirectional = activeForward is
+                    MotionCommand.WalkForward or MotionCommand.WalkBackward;
+
+                if (activeIsDirectional && activeForward != desiredForward)
+                {
+                    StopMotionAtPhysicsObjectBoundary(activeForward, p);
+                    motionEdgeFired = true;
+                }
+                if (desiredForward != MotionCommand.Ready
+                    && activeForward != desiredForward)
+                {
+                    DoMotionAtPhysicsObjectBoundary(desiredForward, p);
+                    motionEdgeFired = true;
+                }
             }
-            else if (!input.Backward && _prevBackwardHeld && !input.Forward)
-            { StopMotionAtPhysicsObjectBoundary(MotionCommand.WalkBackward, p); motionEdgeFired = true; }
+            else
+            {
+                if (input.Forward && !_prevForwardHeld)
+                { DoMotionAtPhysicsObjectBoundary(MotionCommand.WalkForward, p); motionEdgeFired = true; }
+                else if (input.Backward && !_prevBackwardHeld && !input.Forward)
+                { DoMotionAtPhysicsObjectBoundary(MotionCommand.WalkBackward, p); motionEdgeFired = true; }
+                if (!input.Forward && _prevForwardHeld)
+                {
+                    if (input.Backward)
+                        DoMotionAtPhysicsObjectBoundary(MotionCommand.WalkBackward, p);
+                    else
+                        StopMotionAtPhysicsObjectBoundary(MotionCommand.WalkForward, p);
+                    motionEdgeFired = true;
+                }
+                else if (!input.Backward && _prevBackwardHeld && !input.Forward)
+                { StopMotionAtPhysicsObjectBoundary(MotionCommand.WalkBackward, p); motionEdgeFired = true; }
+            }
 
             (uint? desiredSidestep, bool sidestepUsesRunHold) =
                 DesiredInputSidestep(input, _mouseLookActive);

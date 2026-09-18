@@ -23,6 +23,15 @@ IBakeProgressSink? progress = command.ProgressJson
     : null;
 try
 {
+    if (command.NavigationOnly)
+        return NavigationBakeRunner.Run(new NavigationBakeOptions
+        {
+            DatDirectory = command.DatDirectory,
+            OutputPath = command.OutputPath,
+            Threads = command.Threads,
+            LandblockFilter = command.LandblockFilter,
+            Progress = progress,
+        });
     return BakeRunner.Run(new BakeOptions
     {
         DatDir = command.DatDirectory,

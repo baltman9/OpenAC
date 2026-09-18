@@ -43,6 +43,40 @@ public readonly record struct RuntimeActionOwnershipSnapshot(
 public sealed class RuntimeActionState : IDisposable
 {
     private bool _disposed;
+    private readonly HashSet<CombatControlLease> _combatControlLeases = [];
+
+    public IDisposable AcquireCombatControl()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var lease = new CombatControlLease(this);
+        _combatControlLeases.Add(lease);
+        CombatTarget.AutomationControlled = true;
+        CombatAttack.AutomationControlled = true;
+        if (_combatControlLeases.Count == 1)
+            CombatAttack.AbortAutomaticAttack();
+        return lease;
+    }
+
+    private void ReleaseCombatControl(CombatControlLease lease)
+    {
+        if (!_combatControlLeases.Remove(lease) || _combatControlLeases.Count != 0)
+            return;
+        CombatTarget.AutomationControlled = false;
+        CombatAttack.AutomationControlled = false;
+    }
+
+    private void ResetCombatControl()
+    {
+        _combatControlLeases.Clear();
+        CombatTarget.AutomationControlled = false;
+        CombatAttack.AutomationControlled = false;
+    }
+
+    private sealed class CombatControlLease(RuntimeActionState owner) : IDisposable
+    {
+        private RuntimeActionState? _owner = owner;
+        public void Dispose() => Interlocked.Exchange(ref _owner, null)?.ReleaseCombatControl(this);
+    }
     private bool _internalSubscriptionsAttached;
     private long _selectionRevision;
     private long _combatRevision;
@@ -152,6 +186,7 @@ public sealed class RuntimeActionState : IDisposable
     public void ResetSession()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        ResetCombatControl();
         List<Exception>? failures = null;
         Try(Transactions.ResetSession, ref failures);
         Try(Interaction.ResetSession, ref failures);
@@ -172,6 +207,7 @@ public sealed class RuntimeActionState : IDisposable
     {
         if (_disposed)
             return;
+        ResetCombatControl();
 
         List<Exception>? failures = null;
         try

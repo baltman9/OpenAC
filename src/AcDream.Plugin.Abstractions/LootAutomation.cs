@@ -37,6 +37,8 @@ public interface ILootAutomation
     bool IsBusy => false;
     uint RequestedContainerId => 0u;
     uint CurrentContainerId => 0u;
+    /// <summary>All listed contents have arrived with their basic item descriptions.</summary>
+    bool CurrentContentsReady => true;
     PluginItemUseCompletion LastItemUseCompletion => default;
     PluginInventoryCompletion LastInventoryCompletion => default;
     PluginAppraisalState Appraisal => default;

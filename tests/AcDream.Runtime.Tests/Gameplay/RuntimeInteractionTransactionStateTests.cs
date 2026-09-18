@@ -220,6 +220,53 @@ public sealed class RuntimeInteractionTransactionStateTests
         Assert.Equal(0u, sent[^1]);
     }
 
+    /// <summary>
+    /// An appraisal carries who asked for it all the way to the reply, and a
+    /// plugin's is not the examination window's to renew: the periodic refresh
+    /// that keeps an open window's numbers current declines while the
+    /// appraisal in hand belongs to a plugin, and picks up again the moment
+    /// the player asks for one of their own.
+    ///
+    /// Mutation: drop the origin from the acceptance (or from the refresh's
+    /// test) and a plugin reading an object silently becomes the thing the
+    /// window keeps re-asking the server about.
+    /// </summary>
+    [Fact]
+    public void AnAppraisalRemembersWhoAskedAndOnlyThePlayersIsRefreshed()
+    {
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+        var sent = new List<uint>();
+
+        Assert.True(state.TryRequestAppraisal(
+            Item,
+            sent.Add,
+            RuntimeAppraisalOrigin.Automation));
+        Assert.Equal(
+            RuntimeAppraisalOrigin.Automation,
+            state.AwaitingAppraisalOrigin);
+
+        RuntimeAppraisalResponseAcceptance answered =
+            state.AcceptAppraisalResponse(Item);
+        Assert.True(answered.Accepted);
+        Assert.True(answered.FirstResponse);
+        Assert.Equal(RuntimeAppraisalOrigin.Automation, answered.Origin);
+        Assert.Equal(Item, state.CurrentAppraisalId);
+        Assert.Equal(0, inventory.BusyCount);
+
+        Assert.False(state.RefreshCurrentAppraisal(sent.Add));
+        Assert.Equal(new[] { Item }, sent);
+
+        // The player asks for one of their own, and the window is back in
+        // charge of what it is showing.
+        Assert.True(state.TryRequestAppraisal(Container, sent.Add));
+        Assert.Equal(
+            RuntimeAppraisalOrigin.Player,
+            state.AcceptAppraisalResponse(Container).Origin);
+        Assert.True(state.RefreshCurrentAppraisal(sent.Add));
+        Assert.Equal(new[] { Item, Container, Container }, sent);
+    }
+
     [Fact]
     public void AppraisalTransportFailureRollsBackOnlyItsBusyReference()
     {

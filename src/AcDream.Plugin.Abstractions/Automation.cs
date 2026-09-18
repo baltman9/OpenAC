@@ -177,6 +177,10 @@ public interface ICharacterInfo
     /// </summary>
     IReadOnlyList<PluginActiveEnchantment> ActiveEnchantments { get; }
 
+    /// <summary>Timed spell buffs, including those temporarily suppressed by
+    /// a stronger equipped effect. Equipment enchantments are excluded.</summary>
+    IReadOnlyList<PluginActiveEnchantment> TimedEnchantments => ActiveEnchantments;
+
     bool TryGetSkill(uint skillId, out PluginSkillInfo skill);
 }
 

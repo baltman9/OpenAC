@@ -9,6 +9,7 @@ public enum PakAssetType : byte {
     CellStructureCollision = 6,
     EnvCellTopology = 7,
     TexturePayload = 8,
+    NavigationTile = 9,
 }
 
 public static class PakKey {

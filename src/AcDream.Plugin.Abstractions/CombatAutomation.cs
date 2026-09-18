@@ -93,6 +93,12 @@ public readonly record struct PluginCombatCommandResult(
 
 public interface ICombatAutomation
 {
+    /// <summary>
+    /// Temporarily disables automatic target replacement and repeat attacks.
+    /// Dispose when the caller stops directing combat; saved options are unchanged.
+    /// </summary>
+    IDisposable? AcquireCombatControl() => null;
+
     PluginCombatSnapshot Snapshot { get; }
 
     IReadOnlyList<PluginCombatTarget> CaptureHostileTargets(float maximumDistance);

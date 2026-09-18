@@ -10,6 +10,9 @@ public readonly record struct PluginTrackedEnchantment(
 
 public interface IEnchantmentAutomation
 {
+    /// <summary>Forget locally inferred timers; zero clears every reported target.</summary>
+    void ForgetReported(uint targetObjectId = 0u) { }
+
     IReadOnlyList<PluginTrackedEnchantment> Capture(uint targetObjectId) =>
         Array.Empty<PluginTrackedEnchantment>();
 

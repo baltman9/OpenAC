@@ -171,6 +171,8 @@ public sealed class RetailFrameWalk
             _degradation?.ActiveMultiplier ?? _fixedDegradeMultiplier ?? 0f,
             degradesDisabled: ctx.BuildingDegradesDisabled,
             keepDistantBuildings: ctx.KeepDistantBuildings);
+        if (BuildingDrawTrace.Matches(building.PositionCellId))
+            BuildingDrawTrace.Write($"selected=0x{selection.GfxObjId:X8} level={selection.Level} mode={selection.Mode} keepDistant={ctx.KeepDistantBuildings}");
         if (selection.GfxObjId == 0)
             return;
 
@@ -181,7 +183,10 @@ public sealed class RetailFrameWalk
         // well keeps its interior cells out of the frame's visible set, instead
         // of leaving the stairs and furniture hanging in the air until the
         // heavier shell catches up.
-        if (!ctx.IsBuildingShellDrawable(selection.GfxObjId))
+        bool shellDrawable = ctx.IsBuildingShellDrawable(selection.GfxObjId);
+        if (BuildingDrawTrace.Matches(building.PositionCellId))
+            BuildingDrawTrace.Write($"meshDrawable={shellDrawable}");
+        if (!shellDrawable)
             return;
 
         sink.OnBuildingTurn(building);

@@ -47,6 +47,7 @@ public readonly record struct PluginInventoryItem(
     public int WieldDifficulty { get; init; }
     public int AttackType { get; init; }
     public int WeaponType { get; init; }
+    public uint AmmoType { get; init; }
     public int BoosterVital { get; init; }
     public int BoostValue { get; init; }
     public double HealKitModifier { get; init; }
@@ -67,6 +68,7 @@ public readonly record struct PluginInventoryItem(
     public int ItemCurrentMana { get; init; }
     public int ItemMaximumMana { get; init; }
     public float Workmanship { get; init; }
+    public int NumTimesTinkered { get; init; }
     public uint MaterialType { get; init; }
     public PluginObjectClass ObjectClass { get; init; }
     public IReadOnlyList<PluginPaletteInfo> Palettes { get; init; } =
