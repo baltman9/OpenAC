@@ -1007,7 +1007,6 @@ internal sealed class HeadlessSessionHost : IDisposable
         IRuntimeDirectWorldProjection? worldProjection = null;
         if (_contentLease is { } content)
         {
-            Runtime.NavigationOwner.Bind(content.PreparedAssets as AcDream.Content.IPreparedNavigationSource);
             _firstEntryDrive ??= new RuntimeFirstEntryDriveController(
                 Runtime.EntityObjects,
                 Runtime.Clock,

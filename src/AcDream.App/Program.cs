@@ -173,8 +173,7 @@ var host = new AppPluginHost(
     lootClassifiers,
     new FilePluginStorage(
         runtimeOptions.VtankProfileDirectoryOverride
-            ?? VtankProfilesDefault.Resolve(applicationPaths.DataDirectory)),
-    window.WorldLines);
+            ?? VtankProfilesDefault.Resolve(applicationPaths.DataDirectory)));
 GraphicalPluginSession pluginSession = GraphicalPluginSession.Create(
     applicationPaths,
     runtimeOptions.Plugins,

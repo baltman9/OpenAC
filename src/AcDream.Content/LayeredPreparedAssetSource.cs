@@ -5,15 +5,12 @@ namespace AcDream.Content;
 
 public sealed class LayeredPreparedAssetSource :
     IPreparedAssetSource,
-    IPreparedCollisionSource,
-    IPreparedNavigationSource
+    IPreparedCollisionSource
 {
     private IPreparedAssetSource? _baseAssets;
     private IPreparedAssetSource? _overlayAssets;
     private IPreparedCollisionSource? _baseCollision;
     private IPreparedCollisionSource? _overlayCollision;
-    private IPreparedNavigationSource? _baseNavigation;
-    private IPreparedNavigationSource? _overlayNavigation;
 
     public LayeredPreparedAssetSource(
         IPreparedAssetSource baseSource,
@@ -35,14 +32,6 @@ public sealed class LayeredPreparedAssetSource :
         _overlayCollision = overlaySource as IPreparedCollisionSource
             ?? throw new ArgumentException(
                 "The overlay source must expose prepared collision payloads.",
-                nameof(overlaySource));
-        _baseNavigation = baseSource as IPreparedNavigationSource
-            ?? throw new ArgumentException(
-                "The base source must expose prepared navigation payloads.",
-                nameof(baseSource));
-        _overlayNavigation = overlaySource as IPreparedNavigationSource
-            ?? throw new ArgumentException(
-                "The overlay source must expose prepared navigation payloads.",
                 nameof(overlaySource));
         _baseAssets = baseSource;
         _overlayAssets = overlaySource;
@@ -73,23 +62,6 @@ public sealed class LayeredPreparedAssetSource :
             IPreparedCollisionSource overlay = Require(_overlayCollision);
             PreparedCollisionSourceStats left = baseSource.CollisionStats;
             PreparedCollisionSourceStats right = overlay.CollisionStats;
-            return new(
-                left.Probes + right.Probes,
-                left.Reads + right.Reads,
-                left.Loaded + right.Loaded,
-                left.Missing + right.Missing,
-                left.Corrupt + right.Corrupt);
-        }
-    }
-
-    public PreparedNavigationSourceStats NavigationStats
-    {
-        get
-        {
-            IPreparedNavigationSource baseSource = Require(_baseNavigation);
-            IPreparedNavigationSource overlay = Require(_overlayNavigation);
-            PreparedNavigationSourceStats left = baseSource.NavigationStats;
-            PreparedNavigationSourceStats right = overlay.NavigationStats;
             return new(
                 left.Probes + right.Probes,
                 left.Reads + right.Reads,
@@ -212,30 +184,6 @@ public sealed class LayeredPreparedAssetSource :
             : overlay;
     }
 
-    public PreparedAssetPresence ProbeNavigation(uint canonicalLandblockId)
-    {
-        PreparedAssetPresence overlay =
-            Require(_overlayNavigation).ProbeNavigation(canonicalLandblockId);
-        return overlay == PreparedAssetPresence.Missing
-            ? Require(_baseNavigation).ProbeNavigation(canonicalLandblockId)
-            : overlay;
-    }
-
-    public PreparedNavigationReadResult ReadNavigation(
-        uint canonicalLandblockId,
-        CancellationToken cancellationToken = default)
-    {
-        PreparedNavigationReadResult overlay =
-            Require(_overlayNavigation).ReadNavigation(
-                canonicalLandblockId,
-                cancellationToken);
-        return overlay.Status == PreparedAssetReadStatus.Missing
-            ? Require(_baseNavigation).ReadNavigation(
-                canonicalLandblockId,
-                cancellationToken)
-            : overlay;
-    }
-
     public void Dispose()
     {
         IPreparedAssetSource? overlay = Interlocked.Exchange(
@@ -246,8 +194,6 @@ public sealed class LayeredPreparedAssetSource :
             null);
         _overlayCollision = null;
         _baseCollision = null;
-        _overlayNavigation = null;
-        _baseNavigation = null;
 
         List<Exception>? failures = null;
         DisposeOne(overlay, ref failures);

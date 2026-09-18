@@ -111,7 +111,6 @@ public sealed class GameWindow :
     private AcDream.App.Interaction.WorldSelectionQuery? _worldSelectionQuery;
     private AcDream.App.Interaction.SelectionInteractionController? _selectionInteractions;
     private DebugLineRenderer? _debugLines;
-    public AcDream.App.Plugins.PluginWorldLineStore WorldLines { get; } = new();
     private readonly AcDream.App.Rendering.WorldSceneDebugState
         _worldSceneDebugState = new();
 
@@ -756,15 +755,11 @@ public sealed class GameWindow :
     }
 
     void IGameWindowContentEffectsAudioPublication.PublishPreparedAssetSource(
-        IPreparedAssetSource value)
-    {
+        IPreparedAssetSource value) =>
         PublishCompositionOwner(
             ref _preparedAssets,
             value,
             "prepared asset source");
-        _runtime.NavigationOwner.ConfigureLocalGeneration(_options.DatDir);
-        _runtime.NavigationOwner.Bind(value as IPreparedNavigationSource);
-    }
 
     void IGameWindowContentEffectsAudioPublication.PublishMagicCatalog(
         MagicCatalog value)
@@ -1482,8 +1477,7 @@ public sealed class GameWindow :
                         _updateFrameClock,
                         _frameGraphs,
                         Console.WriteLine,
-                        _renderPackDiagnostics,
-                        WorldLines),
+                        _renderPackDiagnostics),
                     this).Compose(
                         platformResult,
                         hostInputCamera,

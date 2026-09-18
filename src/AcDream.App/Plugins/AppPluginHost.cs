@@ -14,8 +14,7 @@ public sealed class AppPluginHost : IPluginHost
         IPluginStorage? storage = null,
         IPluginCommandRegistry? commands = null,
         IPluginLootClassifierRegistry? lootClassifiers = null,
-        IPluginStorage? vtankProfiles = null,
-        IPluginWorldLines? worldLines = null)
+        IPluginStorage? vtankProfiles = null)
     {
         Log = log;
         State = state;
@@ -28,11 +27,9 @@ public sealed class AppPluginHost : IPluginHost
         LootClassifiers = lootClassifiers
             ?? NoOpPluginLootClassifierRegistry.Instance;
         VtankProfiles = vtankProfiles ?? NoOpPluginStorage.Instance;
-        WorldLines = worldLines ?? NoOpPluginWorldLines.Instance;
     }
 
     public bool HasUi => true;
-    public IPluginWorldLines WorldLines { get; }
     public IPluginLogger Log { get; }
     public IGameState State { get; }
     public IEvents Events { get; }

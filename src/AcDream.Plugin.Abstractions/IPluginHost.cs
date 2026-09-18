@@ -10,7 +10,6 @@ public interface IPluginHost
     IEvents Events { get; }
     ISelectionService Selection { get; }
     IUiRegistry Ui { get; }
-    IPluginWorldLines WorldLines => NoOpPluginWorldLines.Instance;
     IPluginCommandRegistry Commands => NoOpPluginCommandRegistry.Instance;
     /// <summary>
     /// Durable storage scoped by the host to this plugin's manifest id.

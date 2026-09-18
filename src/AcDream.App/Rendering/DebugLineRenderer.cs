@@ -18,8 +18,6 @@ public sealed class DebugLineRenderer : IDisposable
 
     private readonly ICurrentGpuFrameSource _frameSource;
     private readonly IGpuPipeline _pipeline;
-    private readonly IGpuDevice _device;
-    private readonly Dictionary<int, IGpuPipeline> _worldPipelines = [];
 
     private readonly List<float> _buffer = new(4096);
     private int _vertexCount;
@@ -27,7 +25,6 @@ public sealed class DebugLineRenderer : IDisposable
     internal DebugLineRenderer(IGpuDevice device, ICurrentGpuFrameSource frameSource, string shaderDir)
     {
         ArgumentNullException.ThrowIfNull(device);
-        _device = device;
         _frameSource = frameSource ?? throw new ArgumentNullException(nameof(frameSource));
         ArgumentException.ThrowIfNullOrWhiteSpace(shaderDir);
 
@@ -152,59 +149,8 @@ public sealed class DebugLineRenderer : IDisposable
         encoder.Draw((uint)_vertexCount, 1, 0, 0);
     }
 
-    internal void AddTriangle(Vector3 a, Vector3 b, Vector3 c, Vector3 color)
-    {
-        AddVertex(a, color);
-        AddVertex(b, color);
-        AddVertex(c, color);
-    }
-
-    private void AddVertex(Vector3 position, Vector3 color)
-    {
-        _buffer.Add(position.X); _buffer.Add(position.Y); _buffer.Add(position.Z);
-        _buffer.Add(color.X); _buffer.Add(color.Y); _buffer.Add(color.Z);
-        _vertexCount++;
-    }
-
-    internal void FlushWorld(IGpuPassEncoder encoder, Matrix4x4 viewProjection, int width, int height)
-    {
-        if (_vertexCount == 0 || encoder.Pass.Depth is null) return;
-        int samples = encoder.Pass.SampleCount;
-        if (!_worldPipelines.TryGetValue(samples, out var pipeline))
-        {
-            pipeline = _device.CreatePipeline(new GpuPipelineDescription
-            {
-                Name = "world-line-solid",
-                Shaders = new GpuShaderSet("debug_line"),
-                VertexLayout = VertexLayout,
-                Topology = GpuPrimitiveTopology.TriangleList,
-                Blend = GpuBlendMode.None,
-                Depth = GpuDepthState.OpaqueDefault,
-                Cull = GpuCullMode.None,
-                SampleCount = samples,
-            });
-            _worldPipelines.Add(samples, pipeline);
-        }
-        IGpuFrame frame = _frameSource.CurrentFrame
-            ?? throw new InvalidOperationException("World lines require an active frame.");
-        encoder.BindPipeline(pipeline);
-        encoder.SetViewport(0, 0, width, height);
-        encoder.SetScissor(0, 0, width, height);
-        encoder.SetDepthWrite(true);
-        encoder.SetStencil(GpuStencilState.Default);
-        GpuPushConstants constants = GpuPushConstants.Default;
-        constants.ViewProjection = viewProjection;
-        encoder.SetPushConstants(constants);
-        var allocation = frame.AllocateRing(_buffer.Count * sizeof(float), GpuRingUsage.Vertex);
-        System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_buffer).CopyTo(allocation.AsSpan<float>());
-        encoder.BindVertexBuffer(0, allocation.Buffer, allocation.OffsetBytes);
-        encoder.Draw((uint)_vertexCount, 1, 0, 0);
-    }
-
     public void Dispose()
     {
-        foreach (var pipeline in _worldPipelines.Values) pipeline.Dispose();
-        _worldPipelines.Clear();
         _pipeline.Dispose();
     }
 }

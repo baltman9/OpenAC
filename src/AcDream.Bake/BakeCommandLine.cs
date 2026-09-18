@@ -8,15 +8,14 @@ internal sealed record BakeCommandLineOptions(
     HashSet<uint>? IdFilter,
     HashSet<uint>? LandblockFilter,
     int Threads,
-    bool ProgressJson,
-    bool NavigationOnly = false);
+    bool ProgressJson);
 
 internal static class BakeCommandLine
 {
     internal const string Usage =
         "usage: acdream-bake --dat-dir <path> [--out <file>] "
         + "[--ids 0xId,0xId,...] [--landblocks 0xId,...] "
-        + "[--threads <n>] [--progress-json] [--navigation-only]\n"
+        + "[--threads <n>] [--progress-json]\n"
         + "       acdream-bake --help";
 
     public static bool IsHelpRequest(IReadOnlyList<string> args)
@@ -40,7 +39,6 @@ internal static class BakeCommandLine
         HashSet<uint>? landblockFilter = null;
         int threads = Environment.ProcessorCount;
         bool progressJson = false;
-        bool navigationOnly = false;
 
         for (int i = 0; i < args.Count; i++)
         {
@@ -72,9 +70,6 @@ internal static class BakeCommandLine
                 case "--progress-json":
                     progressJson = true;
                     break;
-                case "--navigation-only":
-                    navigationOnly = true;
-                    break;
                 default:
                     error.WriteLine($"unrecognized argument: {args[i]}");
                     options = null;
@@ -89,22 +84,14 @@ internal static class BakeCommandLine
             return false;
         }
 
-        if (navigationOnly && idFilter is not null)
-        {
-            error.WriteLine("--navigation-only uses --landblocks, not --ids");
-            options = null;
-            return false;
-        }
-        outputPath ??= Path.Combine(datDirectory,
-            navigationOnly ? "acdream-navigation.pak" : "acdream.pak");
+        outputPath ??= Path.Combine(datDirectory, "acdream.pak");
         options = new BakeCommandLineOptions(
             datDirectory,
             outputPath,
             idFilter,
             landblockFilter,
             threads,
-            progressJson,
-            navigationOnly);
+            progressJson);
         return true;
     }
 

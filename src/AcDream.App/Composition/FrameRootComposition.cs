@@ -55,8 +55,7 @@ internal sealed record FrameRootDependencies(
     GameFrameGraphSlot FrameGraphs,
     Action<string> Log,
     AcDream.App.Rendering.Packs.DeferredRenderPackDiagnosticsSource?
-        RenderPackDiagnostics = null,
-    AcDream.App.Plugins.PluginWorldLineStore? WorldLines = null)
+        RenderPackDiagnostics = null)
 {
     public RuntimeLocalPlayerMovementState PlayerController =>
         Runtime.MovementOwner;
@@ -512,11 +511,7 @@ internal sealed class FrameRootCompositionPhase
                         : renderPackSelection.ApplyAtFrameBoundary,
                     live.RenderSceneShadow,
                     live.DrawDispatcher,
-                    foundation.Terrain,
-                    d.WorldLines is null ? null : new PluginWorldLineRenderer(
-                        d.WorldLines, foundation.DebugLines,
-                        new RuntimeWorldFrameCameraSource(host.CameraController, session.LocalTeleport.ApplyViewPlane),
-                        d.WorldOrigin, d.PhysicsEngine));
+                    foundation.Terrain);
         }
         Fault(FrameRootCompositionPoint.WorldRendererCreated);
         WorldLifecycleAutomationController? lifecycleAutomation = null;
