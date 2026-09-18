@@ -126,7 +126,24 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
         ("ID_Chat_TellToOlthoi",   "Tell to Olthoi Chat",   ChatChannelKind.Olthoi),
     };
 
-    private string ChannelButtonLabel(ChatChannelKind k) => k switch
+    private readonly Dictionary<ChatChannelKind, string> _channelButtonLabels = new();
+
+    /// <summary>
+    /// The menu asks for its caption on every draw of the chat window, and
+    /// resolving one reads the interface string table. A channel's caption
+    /// does not change while the window lives, so each is resolved once.
+    /// </summary>
+    private string ChannelButtonLabel(ChatChannelKind k)
+    {
+        if (_channelButtonLabels.TryGetValue(k, out string? resolved))
+            return resolved;
+
+        resolved = ResolveChannelButtonLabel(k);
+        _channelButtonLabels[k] = resolved;
+        return resolved;
+    }
+
+    private string ResolveChannelButtonLabel(ChatChannelKind k) => k switch
     {
         ChatChannelKind.Say        => S("ID_Chat_ChatTargetMenu", "Chat"),
         ChatChannelKind.Tell       => S("ID_Chat_ChatTargetMenuSelected", "Tell"),

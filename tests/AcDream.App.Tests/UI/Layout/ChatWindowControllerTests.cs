@@ -137,6 +137,38 @@ public class ChatWindowControllerTests
 
     // ── CT-C1: the unseen-text indicator ────────────────────────────────
 
+
+    /// <summary>
+    /// The chat-target menu asks for its caption on every draw of the window,
+    /// and resolving one reads the interface string table. A channel's
+    /// caption does not change while the window lives, so it is resolved once
+    /// and the same one is handed back afterwards.
+    /// </summary>
+    [Fact]
+    public void ChannelButtonCaption_IsResolvedOncePerChannel()
+    {
+        var (rootInfo, layout, vm) = BuildTestTree();
+        var bus = new CaptureBus();
+        int lookups = 0;
+        ChatWindowController? ctrl = ChatWindowController.Bind(
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex,
+            chatStrings: key =>
+            {
+                lookups++;
+                return new string(key.ToCharArray());
+            });
+        Assert.NotNull(ctrl);
+        Func<string>? caption = ctrl!.Menu.ButtonLabelProvider;
+        Assert.NotNull(caption);
+
+        string first = caption!();
+        int afterFirst = lookups;
+        string second = caption();
+
+        Assert.Same(first, second);
+        Assert.Equal(afterFirst, lookups);
+    }
+
     private static ChatWindowController BindController()
     {
         var (rootInfo, layout, vm) = BuildTestTree();
