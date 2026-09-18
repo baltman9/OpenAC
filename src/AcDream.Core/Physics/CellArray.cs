@@ -39,6 +39,16 @@ public sealed class CellArray : ICollection<uint>, IReadOnlyCollection<uint>
 
     public void CopyTo(uint[] array, int arrayIndex) => _order.CopyTo(array, arrayIndex);
 
-    public IEnumerator<uint> GetEnumerator() => _order.GetEnumerator();
+    /// <summary>
+    /// Walks the ids in the order they were added. The enumerator is the
+    /// list's own, returned by value: a cell array is walked several times
+    /// per collision step, and handing it back through the interface boxed
+    /// one enumerator every time. The interface implementations below still
+    /// box, for callers that hold a cell array as a collection.
+    /// </summary>
+    public List<uint>.Enumerator GetEnumerator() => _order.GetEnumerator();
+
+    IEnumerator<uint> IEnumerable<uint>.GetEnumerator() => _order.GetEnumerator();
+
     IEnumerator IEnumerable.GetEnumerator() => _order.GetEnumerator();
 }

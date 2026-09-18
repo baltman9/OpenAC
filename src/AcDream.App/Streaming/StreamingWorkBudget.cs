@@ -208,11 +208,11 @@ public readonly record struct StreamingWorkDiagnostics(
 
 public sealed class StreamingWorkMeter
 {
-    private readonly StreamingWorkBudget _budget;
     private readonly Func<long> _timestamp;
     private readonly long _frequency;
-    private readonly long _start;
-    private readonly bool _destinationReservationActive;
+    private StreamingWorkBudget _budget;
+    private long _start;
+    private bool _destinationReservationActive;
     private StreamingWorkCost _used;
     private StreamingWorkCost _destinationUsed;
     private StreamingWorkCost _nonDestinationUsed;
@@ -255,13 +255,48 @@ public sealed class StreamingWorkMeter
         ArgumentNullException.ThrowIfNull(timestamp);
         if (timestampFrequency <= 0)
             throw new ArgumentOutOfRangeException(nameof(timestampFrequency));
-        budget.Validate();
 
-        _budget = budget;
         _timestamp = timestamp;
         _frequency = timestampFrequency;
-        _start = timestamp();
+        Restart(budget, destinationReservationActive);
+    }
+
+    /// <summary>
+    /// Points the meter at a new frame's budget and forgets the last
+    /// frame's accounting, so one meter can serve every streaming tick
+    /// instead of one being allocated per tick. A newly constructed meter
+    /// goes through this same reset, which is what makes a restarted meter
+    /// report what a fresh one would.
+    /// </summary>
+    internal void Restart(
+        StreamingWorkBudget budget,
+        bool destinationReservationActive)
+    {
+        budget.Validate();
+        _budget = budget;
         _destinationReservationActive = destinationReservationActive;
+        _start = _timestamp();
+        _used = default;
+        _destinationUsed = default;
+        _nonDestinationUsed = default;
+        _lane = default;
+        _destinationElapsedTicks = 0L;
+        _nonDestinationElapsedTicks = 0L;
+        _activeOperationStart = 0L;
+        _maximumOperationMilliseconds = 0d;
+        _maximumOperationStage = null;
+        _operations = 0;
+        _completed = 0;
+        _yields = 0;
+        _overruns = 0;
+        _oversizedProgress = 0;
+        _failures = 0;
+        _frameOverrunRecorded = false;
+        _reservationActive = false;
+        _ensuredProgressGranted = false;
+        _activeStage = null;
+        _lastStage = null;
+        _lastLimit = default;
     }
 
     internal LaneScope EnterLane(StreamingWorkLane lane)

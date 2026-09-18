@@ -56,4 +56,55 @@ public class CellArrayTests
         Assert.Equal(1, count);
         Assert.Equal(new[] { 7u }, ro.ToArray());
     }
+
+    /// <summary>
+    /// A cell array is walked several times per collision step, so the
+    /// enumerator it hands a foreach must not be an allocation: the public
+    /// one is the list's own, returned by value.
+    /// </summary>
+    [Fact]
+    public void WalkingACellArrayDirectlyAllocatesNothing()
+    {
+        var cells = new CellArray();
+        for (uint id = 1; id <= 64; id++)
+            cells.Add(0xA9B40000u | id);
+
+        ulong warm = Sum(cells);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        ulong walked = Sum(cells);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(warm, walked);
+        Assert.Equal(0L, allocated);
+    }
+
+    /// <summary>The direct walk is the same walk as the collection one.</summary>
+    [Fact]
+    public void WalkingACellArrayDirectlyMatchesWalkingItAsACollection()
+    {
+        var cells = new CellArray();
+        cells.Add(0xA9B40170u);
+        cells.Add(0xA9B40031u);
+        cells.Add(0xA9B40171u);
+        cells.Add(0xA9B40031u);
+
+        var direct = new List<uint>();
+        foreach (uint id in cells)
+            direct.Add(id);
+
+        var asCollection = new List<uint>();
+        foreach (uint id in (IEnumerable<uint>)cells)
+            asCollection.Add(id);
+
+        Assert.Equal(new[] { 0xA9B40170u, 0xA9B40031u, 0xA9B40171u }, direct);
+        Assert.Equal(direct, asCollection);
+    }
+
+    private static ulong Sum(CellArray cells)
+    {
+        ulong total = 0;
+        foreach (uint id in cells)
+            total += id;
+        return total;
+    }
 }
