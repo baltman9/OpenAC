@@ -2190,7 +2190,19 @@ internal sealed class RuntimeAutomationSurface
         uint playerId = runtime.PlayerIdentity.ServerGuid;
         if (playerId == 0u)
             return Array.Empty<PluginEquipmentItem>();
-        ClientObjectTable objects = runtime.InventoryOwner.Objects;
+        return BuildOwnedEquipment(runtime.InventoryOwner.Objects, playerId);
+    }
+
+    /// <summary>
+    /// Everything the player owns that can be worn or wielded, in the order
+    /// the contract promises: what is equipped first, then by name, then by
+    /// object id. "The first wand" means the held one when any wand is held,
+    /// and two wands of one name always come back in the same order.
+    /// </summary>
+    internal static List<PluginEquipmentItem> BuildOwnedEquipment(
+        ClientObjectTable objects,
+        uint playerId)
+    {
         var built = new List<PluginEquipmentItem>();
         foreach (ClientObject item in objects.Objects)
         {
@@ -2235,17 +2247,22 @@ internal sealed class RuntimeAutomationSurface
                     (uint)PropertyFloat.IgnoreArmor) > 0d,
             });
         }
-        built.Sort(static (left, right) =>
-        {
-            int equipped = right.IsEquipped.CompareTo(left.IsEquipped);
-            if (equipped != 0)
-                return equipped;
-            int name = string.CompareOrdinal(left.Name, right.Name);
-            return name != 0
-                ? name
-                : left.ObjectId.CompareTo(right.ObjectId);
-        });
+        built.Sort(CompareEquipmentOrder);
         return built;
+    }
+
+    /// <summary>Equipped first, then by name, then by object id.</summary>
+    internal static int CompareEquipmentOrder(
+        PluginEquipmentItem left,
+        PluginEquipmentItem right)
+    {
+        int equipped = right.IsEquipped.CompareTo(left.IsEquipped);
+        if (equipped != 0)
+            return equipped;
+        int name = string.CompareOrdinal(left.Name, right.Name);
+        return name != 0
+            ? name
+            : left.ObjectId.CompareTo(right.ObjectId);
     }
 
     public PluginEquipmentCommandResult Equip(
