@@ -63,6 +63,7 @@
     <Style Selector="Border.chip.capability TextBlock"><Setter Property="Foreground" Value="#8FB8C9" /></Style>
     <Style Selector="Border.chip.beta"><Setter Property="Background" Value="#262E33" /><Setter Property="BorderBrush" Value="#7C8F99" /></Style>
     <Style Selector="Border.chip.beta TextBlock"><Setter Property="Foreground" Value="#A9BBC5" /></Style>
+    <Style Selector="ProgressBar.buttonspinner"><Setter Property="Width" Value="52" /><Setter Property="Height" Value="3" /><Setter Property="MinWidth" Value="52" /><Setter Property="MinHeight" Value="3" /></Style>
     <Style Selector="Border.plugincard"><Setter Property="Background" Value="#141E24" /><Setter Property="BorderBrush" Value="#35434B" /><Setter Property="BorderThickness" Value="1" /><Setter Property="CornerRadius" Value="3" /><Setter Property="Margin" Value="0,0,0,6" /></Style>
     <Style Selector="Border.plugintile"><Setter Property="Width" Value="32" /><Setter Property="Height" Value="32" /><Setter Property="CornerRadius" Value="4" /><Setter Property="Background" Value="#1F2C34" /><Setter Property="VerticalAlignment" Value="Center" /></Style>
     <Style Selector="Border.plugintile TextBlock"><Setter Property="Foreground" Value="#A9BBC5" /><Setter Property="FontSize" Value="13" /><Setter Property="FontWeight" Value="SemiBold" /><Setter Property="HorizontalAlignment" Value="Center" /><Setter Property="VerticalAlignment" Value="Center" /></Style>
@@ -761,9 +762,19 @@
                      IsVisible="{Binding Plugins.InstallDialog.HasError}" TextWrapping="Wrap" />
           <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
             <Button x:Name="InstallCancelButton" Content="Cancel" IsCancel="True" Command="{Binding Plugins.InstallDialog.CancelCommand}" />
-            <Button x:Name="InstallConfirmButton" Content="{Binding Plugins.InstallDialog.ConfirmLabel}" Classes="primary" IsDefault="True"
+            <Button x:Name="InstallConfirmButton" Classes="primary" IsDefault="True"
                     Command="{Binding Plugins.InstallDialog.ConfirmCommand}"
-                    AutomationProperties.Name="Confirm plugin install" />
+                    AutomationProperties.Name="Confirm plugin install">
+              <Panel>
+                <TextBlock Text="{Binding Plugins.InstallDialog.ConfirmLabel}"
+                           IsVisible="{Binding !Plugins.InstallDialog.IsBusy}" VerticalAlignment="Center" />
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
+                            IsVisible="{Binding Plugins.InstallDialog.IsBusy}">
+                  <ProgressBar Classes="buttonspinner" IsIndeterminate="True" />
+                  <TextBlock Text="{Binding Plugins.InstallDialog.BusyLabel}" VerticalAlignment="Center" />
+                </StackPanel>
+              </Panel>
+            </Button>
           </StackPanel>
         </Grid>
       </Border>

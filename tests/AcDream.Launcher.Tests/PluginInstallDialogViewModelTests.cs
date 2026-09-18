@@ -11,6 +11,51 @@ public sealed class PluginInstallDialogViewModelTests
         new("Local ACE", "acct-b", "+Second", "+Second (acct-b@Local ACE)"),
     ];
 
+    /// <summary>The confirm button swaps its label for a spinner while the work runs: on a slow
+    /// link or a large plugin, a dead button reads as a hang. The download and unzip happen
+    /// inside Confirm with the dialog still open, so IsBusy has to cover that whole await.</summary>
+    [Fact]
+    public async Task ConfirmStaysBusyForTheWholeInstallSoTheButtonCanShowASpinner()
+    {
+        var dialog = new PluginInstallDialogViewModel();
+        var started = new TaskCompletionSource();
+        var release = new TaskCompletionSource();
+        dialog.Open(
+            "shaneedwards/openac-plugin-hello",
+            "edwards.hello",
+            "Hello",
+            isListed: true,
+            isUpdate: false,
+            null,
+            Characters,
+            async (_, _) =>
+            {
+                started.SetResult();
+                await release.Task;
+                return new PluginInstallResult("edwards.hello", "0.1.0", WasUpdate: false);
+            },
+            (_, _) => { });
+
+        Assert.False(dialog.IsBusy);
+        Assert.Equal("Install", dialog.ConfirmLabel);
+        Assert.Equal("Installing\u2026", dialog.BusyLabel);
+
+        Task confirm = dialog.ConfirmCommand.ExecuteAsync();
+        await started.Task;
+
+        // Mid-install: the dialog is still up, busy, and neither button can be pressed again.
+        Assert.True(dialog.IsBusy);
+        Assert.True(dialog.IsOpen);
+        Assert.False(dialog.ConfirmCommand.CanExecute(null));
+        Assert.False(dialog.CancelCommand.CanExecute(null));
+
+        release.SetResult();
+        await confirm;
+
+        Assert.False(dialog.IsBusy);
+        Assert.False(dialog.IsOpen);
+    }
+
     [Fact]
     public async Task DefaultChoiceIsNoneAndConfirmWritesNoCharacterList()
     {

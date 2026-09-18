@@ -121,6 +121,7 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
                 OnPropertyChanged(nameof(ShowEnableChoice));
                 OnPropertyChanged(nameof(ShowKeepEnabledChoice));
                 OnPropertyChanged(nameof(ConfirmLabel));
+                OnPropertyChanged(nameof(BusyLabel));
             }
         }
     }
@@ -189,6 +190,11 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
     }
 
     public string ConfirmLabel => IsUpdate && CapabilitiesChanged ? "Update and allow" : "Install";
+
+    /// <summary>What the confirm button says while the work is actually running: a download and
+    /// unzip over a slow link or a large plugin takes long enough that a dead button reads as a
+    /// hang. Present tense, matching the launcher's other in-flight wording.</summary>
+    public string BusyLabel => IsUpdate ? "Updating…" : "Installing…";
 
     /// <summary>The responsibility notice every install and update dialog shows, every time
     /// (L-313): no wording here says or implies OpenAC reviews plugins, listed or not.</summary>
