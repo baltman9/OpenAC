@@ -27,7 +27,7 @@ public sealed class LandblockBuildFactory
         ArgumentNullException.ThrowIfNull(heightTable);
         if (heightTable.Length < 256)
             throw new ArgumentException(
-                "The retail terrain height table must contain at least 256 entries.",
+                "The terrain height table must contain at least 256 entries.",
                 nameof(heightTable));
         _heightTable = (float[])heightTable.Clone();
         _dumpSceneryZ = dumpSceneryZ;

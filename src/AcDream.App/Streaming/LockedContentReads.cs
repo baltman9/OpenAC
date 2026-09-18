@@ -176,7 +176,10 @@ internal sealed class LockedContentReads : IDatReaderWriter
             _gate = gate;
         }
 
-        public DatDatabase Db => _inner.Db;
+        // A build reads through the gated members only; the raw database is never
+        // handed out, so a future direct read cannot slip past the gate.
+        public DatDatabase Db => throw new NotSupportedException(
+            "The gated content source does not expose the raw database.");
 
         public int Iteration
         {
