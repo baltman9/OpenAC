@@ -71,8 +71,10 @@ internal sealed class FarLandscapeDrawCache(
         /// <summary>The entry's opaque commands, built from
         /// <see cref="Opaque"/> and handed to the stream in runs of visible
         /// batches. Every batch has a slot, visible or not, so the block does
-        /// not depend on where the camera is looking.</summary>
-        public readonly OrderedDrawCommandBlock Block = new();
+        /// not depend on where the camera is looking. The array set behind
+        /// it comes from the cache's pool and goes back there with the
+        /// entry.</summary>
+        public OrderedDrawCommandBlock Block = new();
         public bool BlockValid;
         public int BlockClassification;
         /// <summary>Advances whenever anything the block is built from
@@ -91,6 +93,7 @@ internal sealed class FarLandscapeDrawCache(
     }
 
     private readonly Dictionary<CellKey, Entry> _entries = new();
+    private readonly OrderedDrawCommandBlockPool _blocks = new();
     private readonly List<CellKey> _expired = new();
     private readonly List<WbDrawDispatcher.WalkClassifiedSelectionPart> _selectionScratch = new();
     private readonly List<AlphaOrder> _alphaOrderScratch = new();
@@ -105,9 +108,19 @@ internal sealed class FarLandscapeDrawCache(
     /// <summary>How many times an entry's command block was rebuilt.</summary>
     internal int BlockBuildCount { get; private set; }
     /// <summary>How many times a block rebuild had to take new arrays. A
-    /// rebuild that fits in the arrays the entry already holds takes
-    /// none.</summary>
-    internal int BlockArrayAllocationCount { get; private set; }
+    /// rebuild that fits in the arrays the entry already holds takes none,
+    /// and one that fits a set an earlier entry left behind takes that
+    /// instead of allocating.</summary>
+    internal int BlockArrayAllocationCount => _blocks.AllocationCount;
+
+    /// <summary>How many block rebuilds took their arrays from the pool
+    /// instead of allocating.</summary>
+    internal int BlockArrayReuseCount => _blocks.ReuseCount;
+
+    /// <summary>Commands the pooled array sets hold room for: the arrays
+    /// kept alive between the entry that released them and the entry that
+    /// takes them next.</summary>
+    internal int PooledBlockCapacity => _blocks.ParkedCapacity;
 
     /// <summary>Commands the entries' blocks can hold, and commands they
     /// carry. Equal means the arrays are sized to their contents with no
@@ -139,6 +152,10 @@ internal sealed class FarLandscapeDrawCache(
 
     internal void Clear()
     {
+        // The entries go, their arrays stay: a generation change replaces
+        // every entry at once and the replacements want the same arrays.
+        foreach (Entry entry in _entries.Values)
+            _blocks.Park(entry.Block);
         _entries.Clear();
         _expired.Clear();
         _alphaOrderScratch.Clear();
@@ -174,7 +191,10 @@ internal sealed class FarLandscapeDrawCache(
                 _expired.Add(key);
         }
         foreach (CellKey key in _expired)
-            _entries.Remove(key);
+        {
+            if (_entries.Remove(key, out Entry? departed))
+                _blocks.Park(departed.Block);
+        }
     }
 
     internal bool TryAppend(
@@ -324,8 +344,8 @@ internal sealed class FarLandscapeDrawCache(
 
     private void BuildBlock(Entry entry, uint firstCell)
     {
-        if (entry.Block.EnsureCapacity(entry.Opaque.Count))
-            BlockArrayAllocationCount++;
+        if (entry.Block.Capacity < entry.Opaque.Count)
+            entry.Block = _blocks.Exchange(entry.Block, entry.Opaque.Count);
         for (int i = 0; i < entry.Opaque.Count; i++)
         {
             BatchRef item = entry.Opaque[i];

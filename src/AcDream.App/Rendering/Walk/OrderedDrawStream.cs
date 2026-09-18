@@ -72,11 +72,18 @@ internal sealed class OrderedDrawCommandBlock
     /// that fits in what the block already holds takes nothing at all. There
     /// is deliberately no growth slack and no resize: the build overwrites
     /// every slot it asked for, so carrying the old contents across is wasted
-    /// work, and slack is gen2 garbage that the next entry to come and go on
-    /// the route has to churn again. Eleven arrays per entry doubling their
-    /// way up left a hundred and forty to two hundred and eighty megabytes of
-    /// gen2 garbage on the measured route, which only a rare gen2 collection
-    /// reclaims and which shows up in managed heap and private bytes.
+    /// work, and slack is gen2 garbage that the next producer to come and go
+    /// on the route has to churn again. Eleven arrays per producer doubling
+    /// their way up left a hundred and forty to two hundred and eighty
+    /// megabytes of gen2 garbage on the measured route, which only a rare
+    /// gen2 collection reclaims and which shows up in managed heap and
+    /// private bytes.
+    ///
+    /// A block handed a set that an earlier producer left in a pool can hold
+    /// more than it was asked for. That is why <see cref="Count"/>, not
+    /// <see cref="Capacity"/>, says how much of the block carries commands:
+    /// every read of the contents is bounded by it, so a slot beyond the
+    /// count is never seen whatever an earlier owner left in it.
     /// </summary>
     public bool EnsureCapacity(int capacity)
     {

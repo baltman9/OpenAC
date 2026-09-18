@@ -164,6 +164,73 @@ public sealed partial class WalkStaticStreamPopulatorTests
     }
 
     /// <summary>
+    /// A generation change replaces every cached entry at once. The arrays
+    /// the departing entries held are the arrays the arriving ones want, so
+    /// a replacement at stable totals allocates nothing after the first
+    /// generation; without the pool each generation allocated its own, and
+    /// the departed sets became garbage no frame ever reclaims cheaply.
+    /// </summary>
+    [Fact]
+    public void RetainedCells_ReplacingAGenerationTakesTheDepartedEntriesBlockArrays()
+    {
+        using var fx = new DispatcherFixture();
+        InstallRetainedMesh(fx);
+        var world = new RetainedWorld();
+        world.Set(RetainedRecord(1), RetainedRecord(2), RetainedRecord(3));
+        var cache = new FarLandscapeDrawCache(fx.Dispatcher, world);
+
+        _ = AppendRetainedFrame(fx, cache);
+        Assert.Equal(1, cache.BlockArrayAllocationCount);
+        Assert.Equal(0, cache.BlockArrayReuseCount);
+        Assert.Equal(3, cache.TotalBlockCommands);
+
+        for (int generation = 2; generation <= 5; generation++)
+        {
+            world.RetainedContext = (
+                RenderSceneGeneration.FromRaw((ulong)generation),
+                world.RetainedContext.TupleLandblockId);
+            _ = AppendRetainedFrame(fx, cache);
+
+            Assert.Equal(1, cache.BlockArrayAllocationCount);
+            Assert.Equal(generation - 1, cache.BlockArrayReuseCount);
+            Assert.Equal(3, cache.TotalBlockCommands);
+            Assert.Equal(3, cache.TotalBlockCapacity);
+            Assert.Equal(0, cache.PooledBlockCapacity);
+        }
+    }
+
+    /// <summary>
+    /// A set taken from the pool can be larger than its new owner needs and
+    /// still carries the commands of the entry that released it. What the
+    /// entry hands the stream is bounded by its own command count, so the
+    /// stream is the one a cache built from scratch produces.
+    /// </summary>
+    [Fact]
+    public void RetainedCells_AnEntryOnAPooledArraySetEmitsOnlyItsOwnCommands()
+    {
+        using var fx = new DispatcherFixture();
+        InstallRetainedMesh(fx);
+        var world = new RetainedWorld();
+        world.Set(RetainedRecord(1), RetainedRecord(2), RetainedRecord(3));
+        var cache = new FarLandscapeDrawCache(fx.Dispatcher, world);
+        var views = new RetainedViews();
+
+        _ = AppendRetainedFrame(fx, cache, views);
+        Assert.Equal(3, cache.TotalBlockCommands);
+
+        world.RetainedContext = (
+            RenderSceneGeneration.FromRaw(2ul),
+            world.RetainedContext.TupleLandblockId);
+        world.Set(RetainedRecord(4));
+        AssertMatchesFullRebuild(fx, world, cache, views, "a smaller generation");
+
+        Assert.Equal(1, cache.BlockArrayAllocationCount);
+        Assert.Equal(1, cache.BlockArrayReuseCount);
+        Assert.Equal(1, cache.TotalBlockCommands);
+        Assert.Equal(3, cache.TotalBlockCapacity);
+    }
+
+    /// <summary>
     /// The exactness pin for the retained command block: a cache that keeps
     /// and patches its commands must produce, every frame, the stream a cache
     /// built from scratch that frame produces -- through moves, a geometry
