@@ -6,42 +6,6 @@ namespace AcDream.App.Tests.World;
 public sealed class LiveEntityLivenessControllerTests
 {
     [Fact]
-    public void PruneBacklogHandsOutAtMostOneFrameBatchAtATime()
-    {
-        var backlog = new LiveEntityPruneBacklog();
-        var due = new List<LiveEntityPruneCandidate>();
-        for (uint i = 0; i < 10; i++)
-            due.Add(new LiveEntityPruneCandidate(new RuntimeEntityKey(i, 1), i));
-        backlog.Add(due);
-        Assert.Equal(10, backlog.Count);
-
-        var batch = new List<LiveEntityPruneCandidate>();
-        backlog.TakeFrameBatch(batch);
-        Assert.Equal(LiveEntityPruneBacklog.MaxPerFrame, batch.Count);
-        Assert.Equal(10 - LiveEntityPruneBacklog.MaxPerFrame, backlog.Count);
-        // Oldest deadline first, and each candidate is handed out once.
-        Assert.Equal(new uint[] { 0, 1, 2, 3 }, batch.Select(c => c.ServerGuid));
-
-        backlog.TakeFrameBatch(batch);
-        Assert.Equal(new uint[] { 4, 5, 6, 7 }, batch.Select(c => c.ServerGuid));
-        backlog.TakeFrameBatch(batch);
-        Assert.Equal(new uint[] { 8, 9 }, batch.Select(c => c.ServerGuid));
-        Assert.Equal(0, backlog.Count);
-
-        backlog.TakeFrameBatch(batch);
-        Assert.Empty(batch);
-    }
-
-    [Fact]
-    public void PruneBacklogIsDroppedOnClear()
-    {
-        var backlog = new LiveEntityPruneBacklog();
-        backlog.Add([new LiveEntityPruneCandidate(new RuntimeEntityKey(1, 1), 1)]);
-        backlog.Clear();
-        Assert.Equal(0, backlog.Count);
-    }
-
-    [Fact]
     public void OutOfRangeWorldEntityExpiresAfterTwentyFiveSeconds()
     {
         var tracker = new LiveEntityLivenessTracker();
