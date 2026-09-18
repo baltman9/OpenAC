@@ -560,6 +560,9 @@ internal sealed partial class NavigationWalkController
     /// <summary>Narrates a detail only a debugging listener wants.</summary>
     private void Detail(string line) => Narration?.Invoke(line);
 
+    private static string Inv(FormattableString text)
+        => text.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
     private static string Point(Vector3 at) =>
         string.Create(System.Globalization.CultureInfo.InvariantCulture, $"({at.X:0.0}, {at.Y:0.0}, {at.Z:0.0})");
 
@@ -817,9 +820,8 @@ internal sealed partial class NavigationWalkController
             Detail($"{(request.Walk ? "Walk" : "Route")} {(request.Onto ? "onto" : "to")} {Label(request)}: {CollisionOf(request.ObjectId, goal)}");
         if (Narration is not null && _body.TrySample(out NavigationWalkBodySample start))
         {
-            Detail(
-                $"{(request.Walk ? "Walk" : "Route")} {(request.Onto ? "onto" : "to")} {Label(request)}: from {Point(start.Position)} in cell 0x{start.CellId:X8} "
-                + $"toward {Point(goal)}, within {request.ArrivalMeters:0.##} m");
+            Detail(Inv(
+                $"{(request.Walk ? "Walk" : "Route")} {(request.Onto ? "onto" : "to")} {Label(request)}: from {Point(start.Position)} in cell 0x{start.CellId:X8} toward {Point(goal)}, within {request.ArrivalMeters:0.##} m"));
         }
         _active = request;
         Route = null;
@@ -889,7 +891,7 @@ internal sealed partial class NavigationWalkController
                     End(
                         active,
                         NavigationWalkState.NoRoute,
-                        $"the goal lies too far outside this dungeon, {HorizontalDistance(sample.Position, active.Goal):0} m away");
+                        Inv($"the goal lies too far outside this dungeon, {HorizontalDistance(sample.Position, active.Goal):0} m away"));
                 }
                 return;
             }
@@ -1097,15 +1099,13 @@ internal sealed partial class NavigationWalkController
         {
             Vector3 takeoff = driver.Legs[driver.LegIndex - 1];
             Vector3 landing = driver.Legs[driver.LegIndex];
-            Say(
-                $"Walk to {Label(active)}: leaping from {takeoff.Z:0.0} m to {landing.Z:0.0} m, "
-                + $"{HorizontalDistance(takeoff, landing):0.0} m on");
+            Say(Inv(
+                $"Walk to {Label(active)}: leaping from {takeoff.Z:0.0} m to {landing.Z:0.0} m, {HorizontalDistance(takeoff, landing):0.0} m on"));
         }
         else if (wasLeaping && !driver.IsLeaping && driver.State == RuntimeRouteDriveState.Driving)
         {
-            Say(
-                $"Walk to {Label(active)}: the leap landed at {sample.Position.Z:0.0} m, "
-                + $"{driver.LandingError:0.0} m from where it was planned, after sliding {driver.LandingSlide:0.0} m");
+            Say(Inv(
+                $"Walk to {Label(active)}: the leap landed at {sample.Position.Z:0.0} m, {driver.LandingError:0.0} m from where it was planned, after sliding {driver.LandingSlide:0.0} m"));
         }
 
         switch (driver.State)
@@ -1147,7 +1147,7 @@ internal sealed partial class NavigationWalkController
             case RuntimeRouteDriveState.LandedElsewhere:
                 _driver = null;
                 active.Builds = 0;
-                string elsewhere = $"the leap landed at {sample.Position.Z:0.0} m, {driver.LandingError:0.0} m from where it was planned, after sliding {driver.LandingSlide:0.0} m; planning on from there";
+                string elsewhere = Inv($"the leap landed at {sample.Position.Z:0.0} m, {driver.LandingError:0.0} m from where it was planned, after sliding {driver.LandingSlide:0.0} m; planning on from there");
                 Publish(active, NavigationWalkState.Planning, elsewhere, float.NaN);
                 Say($"Walk to {Label(active)}: {elsewhere}");
                 break;
@@ -1551,10 +1551,10 @@ internal sealed partial class NavigationWalkController
         float away = HorizontalDistance(sample.Position, active.Goal);
         if (active.Stages >= MaximumStages)
         {
-            End(active, NavigationWalkState.NoRoute, $"the goal was still {away:0} m away after {active.Stages} stages");
+            End(active, NavigationWalkState.NoRoute, Inv($"the goal was still {away:0} m away after {active.Stages} stages"));
             return;
         }
-        string next = $"stage {active.Stages} walked; planning the next toward the goal, {away:0} m away";
+        string next = Inv($"stage {active.Stages} walked; planning the next toward the goal, {away:0} m away");
         Publish(active, NavigationWalkState.Planning, next, float.NaN);
         Say($"Walk to {Label(active)}: {next}");
     }
@@ -1882,9 +1882,8 @@ internal sealed partial class NavigationWalkController
         _grid = grid;
         _gridDungeon = _buildingDungeon;
         NavGridBuildReport report = grid.Report;
-        Say(
-            $"Navmesh: {report.Nodes} standing points ({report.ClearNodes} clear) over {grid.Size:0} m "
-            + $"from {grid.LandblockIds.Count} landblocks in {report.Milliseconds:0} ms");
+        Say(Inv(
+            $"Navmesh: {report.Nodes} standing points ({report.ClearNodes} clear) over {grid.Size:0} m from {grid.LandblockIds.Count} landblocks in {report.Milliseconds:0} ms"));
     }
 
     private void CollectRoute()
@@ -1919,7 +1918,7 @@ internal sealed partial class NavigationWalkController
                 .Select(leap => new RuntimeRouteLeap(leap.LegIndex - skipped, leap.Power, leap.Run))];
             _driver = Drive(requester, new RuntimeRouteDriver(onward, leaps, takeOverMoves: true, canCutAlong: CornerCuts()));
             if (requester.Follow)
-                Detail($"Follow {Label(requester)}: planned again toward the player on the way, {detour.Length:0.0} m");
+                Detail(Inv($"Follow {Label(requester)}: planned again toward the player on the way, {detour.Length:0.0} m"));
             else
                 Say($"Walk to {Label(requester)}: planned a way around a creature or player on the route");
             return;
@@ -1982,9 +1981,8 @@ internal sealed partial class NavigationWalkController
             }
             return;
         }
-        Say(
-            $"Route: {route.Legs.Count - 1} legs, {route.Length:0.0} m, "
-            + $"{route.Expansions} expansions in {route.Milliseconds:0} ms");
+        Say(Inv(
+            $"Route: {route.Legs.Count - 1} legs, {route.Length:0.0} m, {route.Expansions} expansions in {route.Milliseconds:0} ms"));
         if (Narration is not null)
         {
             const int shown = 24;
@@ -2004,7 +2002,7 @@ internal sealed partial class NavigationWalkController
                 : left;
             if (before - left < MinimumStageProgress)
             {
-                End(requester, NavigationWalkState.NoRoute, $"no way on toward the goal was found; it is {before:0} m away");
+                End(requester, NavigationWalkState.NoRoute, Inv($"no way on toward the goal was found; it is {before:0} m away"));
                 return;
             }
             if (!requester.Walk)
@@ -2012,7 +2010,7 @@ internal sealed partial class NavigationWalkController
                 End(
                     requester,
                     NavigationWalkState.Planned,
-                    $"a route was found for the first {route.Length:0} m; the rest is planned on the way");
+                    Inv($"a route was found for the first {route.Length:0} m; the rest is planned on the way"));
                 return;
             }
             _driver = Drive(requester, new RuntimeRouteDriver(route.Legs, LeapsOf(route), canCutAlong: CornerCuts()));
@@ -2099,9 +2097,8 @@ internal sealed partial class NavigationWalkController
         Route = null;
         if (Narration is not null && _body.TrySample(out NavigationWalkBodySample start))
         {
-            Detail(
-                $"Follow {Label(request)}: from {Point(start.Position)} in cell 0x{start.CellId:X8}, keeping within "
-                + $"{request.ArrivalMeters:0.##} m; {CollisionOf(request.ObjectId, start.Position)}");
+            Detail(Inv(
+                $"Follow {Label(request)}: from {Point(start.Position)} in cell 0x{start.CellId:X8}, keeping within {request.ArrivalMeters:0.##} m; {CollisionOf(request.ObjectId, start.Position)}"));
         }
         if (!_goals.TryLocate(request.ObjectId, out Vector3 leader))
         {
@@ -2184,9 +2181,8 @@ internal sealed partial class NavigationWalkController
             if (HorizontalDistance(sample.Position, leader) > FollowTeleportReach)
             {
                 active.Asleep = true;
-                Say(
-                    $"Follow {Label(active)}: the player was moved out of reach, {HorizontalDistance(sample.Position, leader):0} m away, "
-                    + "with no portal beside them; waiting until they come back within reach");
+                Say(Inv(
+                    $"Follow {Label(active)}: the player was moved out of reach, {HorizontalDistance(sample.Position, leader):0} m away, with no portal beside them; waiting until they come back within reach"));
             }
             RestartFollow(active);
         }
@@ -2201,12 +2197,12 @@ internal sealed partial class NavigationWalkController
             if (gone > FollowTeleportReach)
             {
                 StopDriving();
-                Publish(active, NavigationWalkState.Waiting, $"the player is out of reach, {gone:0} m away; waiting for them to come back", float.NaN);
+                Publish(active, NavigationWalkState.Waiting, Inv($"the player is out of reach, {gone:0} m away; waiting for them to come back"), float.NaN);
                 return true;
             }
             active.Asleep = false;
             RestartFollow(active);
-            Say($"Follow {Label(active)}: the player is back within reach, {gone:0} m away; following");
+            Say(Inv($"Follow {Label(active)}: the player is back within reach, {gone:0} m away; following"));
         }
 
         // A player with no floor under them is in the air, as mid-jump: planning toward them
@@ -2267,10 +2263,10 @@ internal sealed partial class NavigationWalkController
             bool climbed = MathF.Abs(leader.Z - active.SettledLeader.Z) > FollowClimbMeters;
             if (!movedAcross && !climbed)
             {
-                Publish(active, NavigationWalkState.Walking, $"keeping behind {Label(active)}, {away:0.0} m away", away);
+                Publish(active, NavigationWalkState.Walking, Inv($"keeping behind {Label(active)}, {away:0.0} m away"), away);
                 return true;
             }
-            Detail($"Follow {Label(active)}: the player moved to {Point(leader)}, {away:0.0} m away; following");
+            Detail(Inv($"Follow {Label(active)}: the player moved to {Point(leader)}, {away:0.0} m away; following"));
             RestartFollow(active);
         }
         if (!wasSeen || active.WaitingToSee)

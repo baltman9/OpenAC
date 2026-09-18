@@ -150,6 +150,20 @@ public sealed class VividTargetIndicatorLayoutTests
     }
 
     [Fact]
+    public void ComputeTint_serverBlipColor_winsOverTheDescriptionBits()
+    {
+        // An NPC (no player bit, no vendor bit) whose description carries the
+        // server's radar blip color: the indicator follows the radar, not white.
+        var target = new VividTargetInfo(
+            default, 0f, ItemType: 0x10u, ObjectDescriptionFlags: 0u, RadarBlipColor: 8);
+
+        RadarBlipColors.Rgba tint = VividTargetIndicatorController.ComputeTint(
+            target, default);
+
+        Assert.Equal(RadarBlipColors.Yellow, tint);
+    }
+
+    [Fact]
     public void ComputeTint_adminFellowshipMember_isFellowshipGreen()
     {
         var target = new VividTargetInfo(

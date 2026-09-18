@@ -905,6 +905,35 @@ public class InventoryControllerTests
     }
 
     [Fact]
+    public void SideBagCell_capacityBar_hiddenWhileEmpty()
+    {
+        var (layout, _, containers, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedBag(objects, 0xC, slot: 0, itemsCapacity: 24);                 // an empty side bag
+        Bind(layout, objects);
+
+        Assert.Equal(-1f, containers.GetItem(0)!.CapacityFill);
+    }
+
+    [Fact]
+    public void MainPackCell_capacityBar_hiddenWhileEmpty_thenAppearsWithFirstItem()
+    {
+        var (layout, _, _, top, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = Player,
+            Type = ItemType.Creature,
+            ItemsCapacity = 102,
+        });
+        Bind(layout, objects);
+        Assert.Equal(-1f, top.GetItem(0)!.CapacityFill);
+
+        SeedContained(objects, 0xA0u, Player, slot: 0);
+        Assert.Equal(1f / 102f, top.GetItem(0)!.CapacityFill);
+    }
+
+    [Fact]
     public void LooseGridItem_hasNoCapacityBar()
     {
         var (layout, grid, _, _, _, _, _, _) = BuildLayout();
