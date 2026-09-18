@@ -51,6 +51,83 @@ public sealed class NavigationWalkControllerTests
         Assert.InRange(report.RemainingMeters, 0f, arrivalMeters + 0.05f);
     }
 
+
+    /// <summary>
+    /// The grid outlives a walk by <see cref="NavigationWalkController.GridIdleSeconds"/>
+    /// and no longer: a bot that walked once and then stood still is not
+    /// charged a dungeon's grid for the rest of its session.
+    /// Mutation: drop the idle release from <c>Tick</c> and the grid is still
+    /// there after the window.
+    /// </summary>
+    [Fact]
+    public void TheGridIsLetGoAfterTheIdleWindowWithoutAWalk()
+    {
+        var body = new SimulatedBody(new Vector3(40f, 40f, 0f));
+        var walk = new NavigationWalkController(FlatWorld(), body, new Goals { [Target] = new Vector3(60f, 75f, 0f) });
+        int released = 0;
+        walk.GridReleased += () => released++;
+
+        walk.WalkTo(Target);
+        RunUntilSettled(walk, body);
+        Assert.NotNull(walk.Grid);
+
+        TickFor(walk, (float)NavigationWalkController.GridIdleSeconds - 1f);
+        Assert.NotNull(walk.Grid);
+        Assert.Equal(0, released);
+
+        TickFor(walk, 2f);
+        Assert.Null(walk.Grid);
+        Assert.Equal(1, released);
+    }
+
+    /// <summary>A walk inside the window keeps the grid and starts the clock over when it ends.</summary>
+    [Fact]
+    public void AWalkInsideTheIdleWindowKeepsTheGridAndRestartsTheClock()
+    {
+        var body = new SimulatedBody(new Vector3(40f, 40f, 0f));
+        var walk = new NavigationWalkController(
+            FlatWorld(),
+            body,
+            new Goals { [Target] = new Vector3(60f, 75f, 0f), [Target + 1u] = new Vector3(45f, 45f, 0f) });
+        int released = 0;
+        walk.GridReleased += () => released++;
+
+        walk.WalkTo(Target);
+        RunUntilSettled(walk, body);
+        TickFor(walk, 20f);
+        walk.WalkTo(Target + 1u);
+        RunUntilSettled(walk, body);
+        NavGrid? kept = walk.Grid;
+        Assert.NotNull(kept);
+        Assert.Equal(0, released);
+
+        TickFor(walk, 20f);
+        Assert.Same(kept, walk.Grid);
+
+        TickFor(walk, 11f);
+        Assert.Null(walk.Grid);
+        Assert.Equal(1, released);
+    }
+
+    /// <summary>The debug view pins the grid; turning it off starts the idle clock.</summary>
+    [Fact]
+    public void TheDebugViewPinsTheGridUntilItIsTurnedOff()
+    {
+        var body = new SimulatedBody(new Vector3(40f, 40f, 0f));
+        var walk = new NavigationWalkController(FlatWorld(), body, new Goals { [Target] = new Vector3(60f, 75f, 0f) })
+        {
+            ShowGrid = true,
+        };
+
+        walk.WalkTo(Target);
+        RunUntilSettled(walk, body);
+        TickFor(walk, 45f);
+        Assert.NotNull(walk.Grid);
+
+        walk.ShowGrid = false;
+        TickFor(walk, 31f);
+        Assert.Null(walk.Grid);
+    }
     [Fact]
     public void AWalkAskedForInTheAirWaitsHoweverLongTheCharacterIsAloftAndPlansFromWhereItLands()
     {

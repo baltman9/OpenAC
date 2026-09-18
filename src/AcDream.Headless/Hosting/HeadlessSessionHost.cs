@@ -344,6 +344,12 @@ internal sealed class HeadlessSessionHost : IDisposable
                         navigationContent.Dats,
                         navigationDatLock,
                         cellId));
+                // A dead grid is tens to hundreds of megabytes the runtime
+                // will not collect on its own while the bot idles; a headless
+                // session has nothing to lose by collecting the moment the
+                // controller lets one go. See the research note on navigation
+                // cost.
+                navigationWalk.GridReleased += static () => GC.Collect();
             }
             pluginSession = HeadlessPluginSession.Create(
                 runtime,

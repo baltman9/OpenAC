@@ -95,7 +95,7 @@ Each layer knows only the one below it. The contract is plain .NET so plugins bu
 
 **Reports.** Every request gets a sequence number and a report the controller publishes under a lock, so plugins and chat commands read it from any thread. A newer request replaces the one under way, and its report carries the higher number.
 
-**Lifetimes.** A grid is kept for the next walk nearby and let go once what it was built over unloads. A walk ends on arrival, when it cannot finish, when something stops it, or when the player's own movement input takes the character. A follow never ends by itself.
+**Lifetimes.** A grid is kept for the next walk nearby and let go once what it was built over unloads, or once 30 seconds pass with no walk needing it (the debug view pins it while it is on); the next walk rebuilds one in well under a second. A walk ends on arrival, when it cannot finish, when something stops it, or when the player's own movement input takes the character. A follow never ends by itself.
 
 ## Design decisions
 
@@ -304,7 +304,7 @@ Reports are snapshots, safe to read on any plugin tick. Check that `Sequence` is
 | Creatures and players | Passed around where there is room, and through where going around would scrape walls. A walk looks ahead for one stepping onto its route and plans around it without stopping. One that stops the walk gets two chances to move aside before the walk plans around it. A hostile monster is planned around at once. |
 | Waiting | While a plugin's `PauseGoToWhile` names a need, an attack is under way, or a movement intent is held, the walk stops where it stands. Once nothing has needed the character for 1.5 s, it plans again from there. |
 | In the air | A walk asked for while the character is jumping or falling waits for it to land, then plans from where it came down. |
-| Memory | A grid is kept between walks so the next walk nearby reuses it, and let go once none of what it was built over is loaded, as when the character portals away. |
+| Memory | A grid is kept between walks so the next walk nearby reuses it, and let go once none of what it was built over is loaded, as when the character portals away, or after 30 seconds without a walk; a headless session collects the moment it is let go. |
 
 ## Arriving
 

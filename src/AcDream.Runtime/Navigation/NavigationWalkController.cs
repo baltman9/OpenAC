@@ -508,6 +508,19 @@ internal sealed partial class NavigationWalkController
     private bool _classifiedSealed;
     private long _tick;
     private double _seconds;
+
+    /// <summary>
+    /// How long the grid kept between walks outlives the last walk. A bot
+    /// that walked once and then stood still has no use for the hundred
+    /// megabytes a dungeon's grid can hold, and the next walk rebuilds one in
+    /// well under a second.
+    /// </summary>
+    internal const double GridIdleSeconds = 30d;
+
+    /// <summary>Raised when the grid is let go, whichever way; the headless host collects on it.</summary>
+    public event Action? GridReleased;
+
+    private double _gridIdleSince = double.NaN;
     private Vector3 _stillAt;
     private double _stillSince = double.NaN;
     private long _viewRetryTick;
@@ -696,6 +709,7 @@ internal sealed partial class NavigationWalkController
 
         if (_active is { } active)
         {
+            _gridIdleSince = double.NaN;
             if (!inWorld)
                 End(active, NavigationWalkState.Lost, "the character left the world");
             else if (PlayerTookTheCharacter(active, sample))
@@ -705,6 +719,7 @@ internal sealed partial class NavigationWalkController
             return;
         }
         ReleaseUnloadedGrid();
+        ReleaseIdleGrid();
         if (inWorld && ShowGrid)
             KeepViewGrid(sample);
     }
@@ -1776,6 +1791,35 @@ internal sealed partial class NavigationWalkController
             return;
         _grid = null;
         _gridDungeon = 0u;
+        _gridIdleSince = double.NaN;
+        GridReleased?.Invoke();
+    }
+
+    /// <summary>
+    /// Lets go of the grid once no walk has needed it for
+    /// <see cref="GridIdleSeconds"/>. The clock starts when the controller
+    /// is next idle with a grid in hand and stops whenever a walk is active;
+    /// the debug view pins the grid while it is on.
+    /// </summary>
+    private void ReleaseIdleGrid()
+    {
+        if (_grid is null || _building is not null || ShowGrid)
+        {
+            _gridIdleSince = double.NaN;
+            return;
+        }
+        if (double.IsNaN(_gridIdleSince))
+        {
+            _gridIdleSince = _seconds;
+            return;
+        }
+        if (_seconds - _gridIdleSince < GridIdleSeconds)
+            return;
+        _grid = null;
+        _gridDungeon = 0u;
+        _gridIdleSince = double.NaN;
+        Say($"Navmesh: let the grid go after {GridIdleSeconds:0} s without a walk");
+        GridReleased?.Invoke();
     }
 
     private bool IsStale(NavGrid grid, uint dungeon)
