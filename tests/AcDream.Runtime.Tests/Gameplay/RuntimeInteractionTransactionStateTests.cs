@@ -202,7 +202,9 @@ public sealed class RuntimeInteractionTransactionStateTests
 
         Assert.True(state.TryRequestAppraisal(Item, sent.Add));
         Assert.True(state.TryRequestAppraisal(Container, sent.Add));
-        Assert.Equal(1, inventory.BusyCount);
+        // Looking at something occupies neither the character nor the one
+        // inventory request slot, so no appraisal raises the busy count.
+        Assert.Equal(0, inventory.BusyCount);
         Assert.False(state.AcceptAppraisalResponse(Item).Accepted);
 
         RuntimeAppraisalResponseAcceptance first =
@@ -475,7 +477,9 @@ public sealed class RuntimeInteractionTransactionStateTests
         Assert.Equal(
             AppraisalRequestOrigin.User,
             state.AwaitingAppraisalOrigin);
-        Assert.Equal(1, inventory.BusyCount);
+        // An appraisal never raises the busy count: see the replacement
+        // test above.
+        Assert.Equal(0, inventory.BusyCount);
 
         // The user's own assess still completes normally -- it was never
         // touched by the refused Automation request.

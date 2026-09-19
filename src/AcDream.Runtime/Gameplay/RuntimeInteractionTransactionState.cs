@@ -383,14 +383,16 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         if (objectId == _lastCompletedAppraisalId)
             _lastCompletedAppraisalId = 0u;
 
+        // An appraisal does NOT raise the inventory busy count. Looking at
+        // something occupies neither the character nor the one inventory
+        // request slot, and the awaiting-appraisal id below is what keeps
+        // appraisals in order with each other. Counting it as busy starved
+        // everything else -- an automation that appraises as it walks kept
+        // the count raised almost continuously, and wields, casts and item
+        // uses could never begin.
         uint epoch = _clearEpoch;
-        bool acquiredBusy = _awaitingAppraisalId == 0u;
-        if (acquiredBusy)
-        {
-            _inventory.IncrementBusyCount();
-            if (_disposed || epoch != _clearEpoch)
-                return false;
-        }
+        if (_disposed)
+            return false;
 
         uint previousAwaiting = _awaitingAppraisalId;
         AppraisalRequestOrigin previousOrigin = _awaitingAppraisalOrigin;
@@ -409,8 +411,6 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
             {
                 _awaitingAppraisalId = previousAwaiting;
                 _awaitingAppraisalOrigin = previousOrigin;
-                if (acquiredBusy)
-                    _inventory.CompleteUse(0u);
                 IncrementRevision();
             }
             throw;
@@ -469,7 +469,6 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
             _lastCompletedAppraisalId = objectId;
             if (retargetsCurrent)
                 _currentAppraisalId = objectId;
-            _inventory.CompleteUse(0u);
             IncrementRevision();
         }
 
@@ -511,8 +510,6 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         if (_awaitingAppraisalId == 0u && _currentAppraisalId == 0u)
             return false;
 
-        if (_awaitingAppraisalId != 0u)
-            _inventory.CompleteUse(0u);
         _awaitingAppraisalId = 0u;
         _awaitingAppraisalOrigin = default;
         _currentAppraisalId = 0u;
