@@ -2114,15 +2114,21 @@ internal sealed class RuntimeAutomationSurface
         AcDream.Core.Net.Messages.CreateObject.ServerPosition? position) =>
         RuntimeWorldObjectProjection.ConvertPosition(position);
 
+    /// <summary>
+    /// Whether a cast this session issued is still outstanding. It used to
+    /// answer from the inventory transaction count, which an appraisal or a
+    /// pickup raises as readily as a cast: an automation that appraises as
+    /// it goes then reads as permanently mid-cast, and every rule that
+    /// casts is refused for ever.
+    /// </summary>
     public bool IsCasting
     {
         get
         {
-            GameRuntime? runtime;
+            RuntimeSpellCastState? cast;
             lock (_gate)
-                runtime = _runtime;
-            return runtime is not null
-                && runtime.InventoryOwner.Transactions.BusyCount > 0;
+                cast = _cast;
+            return cast?.PendingSpellId is not null;
         }
     }
 

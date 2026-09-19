@@ -52,6 +52,34 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
         Assert.Equal("That cannot be used.", result.Notice);
     }
 
+    /// <summary>
+    /// The casting flag means a cast this session issued is still
+    /// outstanding. It once answered from the inventory transaction count,
+    /// which an appraisal or a pickup raises as readily as a cast -- so an
+    /// automation that appraises as it walks read as permanently mid-cast,
+    /// its cast gate answered Busy for ever, and every rule that casts was
+    /// refused on every pass. Mutation: answer from
+    /// <c>Transactions.BusyCount &gt; 0</c> again and the appraisal reads as
+    /// a cast.
+    /// </summary>
+    [Fact]
+    public void IsCastingIsACastInFlightAndNotAPendingInventoryRequest()
+    {
+        var (runtime, commands) = CreateRealSession();
+        using var runtimeDisposal = runtime;
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        commands.Start(runtime.Generation);
+
+        Assert.False(surface.Magic.IsCasting);
+
+        // An appraisal, a pickup or any other request in flight: the count
+        // is up, but no spell is on its way.
+        runtime.InventoryOwner.Transactions.IncrementBusyCount();
+
+        Assert.False(surface.Magic.IsCasting);
+    }
+
     [Fact]
     public void UsingAWorldObjectThePluginDoesNotOwnRoutesThroughTheWalkToUsePath()
     {
