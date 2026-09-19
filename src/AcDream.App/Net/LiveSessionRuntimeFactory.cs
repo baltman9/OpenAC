@@ -24,6 +24,7 @@ using AcDream.Core.Social;
 using AcDream.Core.Spells;
 using AcDream.Core.World;
 using AcDream.Content;
+using AcDream.Content.Skills;
 using AcDream.Runtime;
 using AcDream.Runtime.Entities;
 using AcDream.Runtime.Gameplay;

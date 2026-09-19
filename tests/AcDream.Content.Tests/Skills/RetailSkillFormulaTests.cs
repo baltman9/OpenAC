@@ -1,11 +1,11 @@
 using System.Collections.Frozen;
-using AcDream.App.Net;
+using AcDream.Content.Skills;
 using AcDream.Core.CharGen;
 using DatReaderWriter.DBObjs;
 using DatReaderWriter.Enums;
 using DatReaderWriter.Types;
 
-namespace AcDream.App.Tests.Net;
+namespace AcDream.Content.Tests.Skills;
 
 public sealed class RetailSkillFormulaTests
 {
@@ -128,10 +128,12 @@ public sealed class RetailSkillFormulaTests
 
         uint result = resolver.Resolve(
             skillId,
+            advancementClass: 2u,
             new Dictionary<uint, uint> { [firstAttributeId] = 8u });
 
         Assert.Equal(3u, result);
-        Assert.Equal(0u, resolver.Resolve(0x999u, new Dictionary<uint, uint>()));
+        Assert.Equal(0u, resolver.Resolve(
+            0x999u, advancementClass: 2u, new Dictionary<uint, uint>()));
     }
 
     [Fact]

@@ -789,7 +789,7 @@ public sealed class LiveSessionEventRouterTests
             new LiveCharacterSessionBindings(
                 new CombatState(),
                 character,
-                ResolveSkillFormulaBonus: (skillId, attrs) =>
+                ResolveSkillFormulaBonus: (skillId, status, attrs) =>
                     skillId == 24u && attrs.TryGetValue(3u, out uint quickness)
                         ? quickness / 2u
                         : 0u,

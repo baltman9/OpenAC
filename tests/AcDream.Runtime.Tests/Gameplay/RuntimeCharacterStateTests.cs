@@ -811,7 +811,7 @@ public sealed class RuntimeCharacterStateTests
     {
         SpellTable table = SpellTableWith((1u, "Quickness Self", 0u));
         using var state = new RuntimeCharacterState(table);
-        state.LocalPlayer.SkillFormulaBonusResolver = (skillId, attrs) =>
+        state.LocalPlayer.SkillFormulaBonusResolver = (skillId, status, attrs) =>
             skillId == RuntimeCharacterState.RunSkillId
             && attrs.TryGetValue(3u, out uint quickness)
                 ? quickness

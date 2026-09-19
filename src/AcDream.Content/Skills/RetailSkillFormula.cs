@@ -2,9 +2,15 @@ using AcDream.Core.CharGen;
 using DatReaderWriter.DBObjs;
 using DatReaderWriter.Types;
 
-namespace AcDream.App.Net;
+namespace AcDream.Content.Skills;
 
-internal static class RetailSkillFormula
+/// <summary>
+/// The shared skill arithmetic both hosts read: a skill's attribute-derived
+/// term, the character-creation score, and the tooltip text that spells the
+/// formula out. It lives here rather than beside a window so that a
+/// windowless session reads exactly the same numbers as a graphical one.
+/// </summary>
+public static class RetailSkillFormula
 {
     public static bool TryCalculate(
         SkillFormula formula,
@@ -162,10 +168,24 @@ internal static class RetailSkillFormula
     }
 }
 
-internal sealed class LiveSkillCreditResolver(SkillTable? skillTable)
+/// <summary>
+/// Turns a live character's attributes into the attribute-derived part of a
+/// skill's level, using the formula the game data authors for that skill.
+/// </summary>
+public sealed class LiveSkillCreditResolver(SkillTable? skillTable)
 {
+    /// <param name="skillId">The skill being scored.</param>
+    /// <param name="advancementClass">
+    /// How far the character has taken the skill — untrained, trained or
+    /// specialized. A skill the character has not taken far enough to be
+    /// allowed to use contributes nothing.
+    /// </param>
+    /// <param name="attributeCurrents">
+    /// The character's current attribute values, keyed by attribute id.
+    /// </param>
     public uint Resolve(
         uint skillId,
+        uint advancementClass,
         IReadOnlyDictionary<uint, uint> attributeCurrents)
     {
         ArgumentNullException.ThrowIfNull(attributeCurrents);
@@ -177,6 +197,12 @@ internal sealed class LiveSkillCreditResolver(SkillTable? skillTable)
         {
             return 0u;
         }
+
+        // A skill the character may not use yet scores nothing at all: the
+        // data says how far a character must have taken this skill before it
+        // counts, and below that line there is no attribute credit.
+        if (advancementClass < skillBase.MinLevel)
+            return 0u;
 
         SkillFormula formula = skillBase.Formula;
         attributeCurrents.TryGetValue(
@@ -195,8 +221,13 @@ internal sealed class LiveSkillCreditResolver(SkillTable? skillTable)
     }
 }
 
-internal sealed class ChargenSkillScoreResolver(ChargenOptions options)
+/// <summary>
+/// The character-creation counterpart: scores a skill from the attribute
+/// values the player is still choosing, before any character exists.
+/// </summary>
+public sealed class ChargenSkillScoreResolver(ChargenOptions options)
 {
+    /// <summary>Scores <paramref name="skillId"/> at the given level.</summary>
     public uint Resolve(
         uint skillId,
         ChargenAttributeValues attributes,

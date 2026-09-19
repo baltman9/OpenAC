@@ -46,7 +46,7 @@ public sealed record LiveInventorySessionBindings(
 public sealed record LiveCharacterSessionBindings(
     CombatState Combat,
     RuntimeCharacterState Character,
-    Func<uint, IReadOnlyDictionary<uint, uint>, uint>? ResolveSkillFormulaBonus,
+    Func<uint, uint, IReadOnlyDictionary<uint, uint>, uint>? ResolveSkillFormulaBonus,
     Action<int, int>? OnSkillsUpdated,
     Action<GameEvents.CharacterConfirmationRequest>? OnConfirmationRequest,
     Action<GameEvents.CharacterConfirmationDone>? OnConfirmationDone,

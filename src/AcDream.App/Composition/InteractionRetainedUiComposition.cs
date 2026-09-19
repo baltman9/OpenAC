@@ -12,6 +12,7 @@ using AcDream.App.UI;
 using AcDream.App.UI.Layout;
 using AcDream.App.World;
 using AcDream.Content;
+using AcDream.Content.Skills;
 using AcDream.Core.Chat;
 using AcDream.Core.Combat;
 using AcDream.Core.Items;

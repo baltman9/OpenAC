@@ -543,7 +543,7 @@ public sealed class GameEventWiringTests
 
         GameEventWiring.WireAll(dispatcher, items, combat, spellbook, chat, local,
             onSkillsUpdated: (run, _) => callbackRun = run,
-            resolveSkillFormulaBonus: (skillId, attrs) =>
+            resolveSkillFormulaBonus: (skillId, status, attrs) =>
             {
                 Assert.Equal(24u, skillId);
                 Assert.Equal(50u, attrs[1u]);

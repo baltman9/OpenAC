@@ -6,6 +6,7 @@ using AcDream.Core.Player;
 using AcDream.Runtime.Gameplay;
 using DatReaderWriter;
 using AcDream.Content;
+using AcDream.Content.Skills;
 
 namespace AcDream.App.UI.Layout;
 
