@@ -1153,13 +1153,115 @@ public sealed class RuntimePhysicsState : IDisposable
         _objectTableHostResolver = resolver;
     }
 
+    /// <summary>
+    /// The body the movement machinery may ask about an entity by id, made on
+    /// first demand for anything live that has not been given one yet.
+    /// </summary>
+    /// <remarks>
+    /// A walk the server orders at a THING rather than a place has to ask that
+    /// thing where it is, over and over, for as long as the walk lasts. Ask an
+    /// id with no body and there is nothing to ask, and the walk quietly
+    /// becomes a walk to wherever the order happened to be written - which is
+    /// stale the moment the thing moves, and for a corpse or a creature a
+    /// couple of metres off it means the character never arrives at all.
+    /// <para>
+    /// Making the body here rather than at one host is what lets both hosts
+    /// answer that question. A host with more to say about its entities may
+    /// bind a richer maker; it is used in place of this one.
+    /// </para>
+    /// </remarks>
     public AcDream.Core.Physics.Motion.IPhysicsObjHost? ResolveObjectTableHost(
         uint serverGuid)
     {
         EnsureNotDisposed();
         if (_objectTableHostResolver is { } resolver)
             return resolver(serverGuid);
-        return TryGetPhysicsHost(serverGuid, out var host) ? host : null;
+        if (TryGetPhysicsHost(serverGuid, out var host))
+            return host;
+        return CreateObjectTableHost(serverGuid);
+    }
+
+    /// <summary>
+    /// The smallest body that can answer "where are you, and how fast": where
+    /// the entity is and how it is moving, and nothing else. It is installed
+    /// on the entity, so a later, fuller body rebinds this one rather than
+    /// replacing it, and every watcher already holding it keeps working.
+    /// </summary>
+    private AcDream.Core.Physics.Motion.IPhysicsObjHost? CreateObjectTableHost(
+        uint serverGuid)
+    {
+        if (!Entities.TryGetActive(serverGuid, out RuntimeEntityRecord record)
+            || (record.FinalPhysicsState & PhysicsStateFlags.Hidden) != 0
+            || !TryGetObjectTablePosition(record, out Position position))
+        {
+            return null;
+        }
+
+        Position lastKnown = position;
+        double Now() =>
+            _gameClock?.SimulationTimeSeconds ?? UtcNowSeconds;
+        var host = new EntityPhysicsHost(
+            serverGuid,
+            getPosition: () =>
+                TryGetObjectTablePosition(record, out Position current)
+                    ? lastKnown = current
+                    : lastKnown,
+            getVelocity: () =>
+                record.PhysicsBody?.Velocity
+                    ?? System.Numerics.Vector3.Zero,
+            getRadius: static () => 0f,
+            inContact: () => record.PhysicsBody?.InContact ?? true,
+            minterpMaxSpeed: static () => null,
+            curTime: Now,
+            physicsTimerTime: Now,
+            getObjectA: ResolveObjectTableHost,
+            handleUpdateTarget: static _ => { },
+            interruptCurrentMovement: static () => { });
+        InstallPhysicsHost(record, host);
+        return host;
+    }
+
+    /// <summary>
+    /// Where an entity is, in the frame the local character's own body is
+    /// measured in: its simulated body when it has one, else the server's last
+    /// word carried into that frame. False when neither is available, which is
+    /// the one case an order to follow it cannot be honoured.
+    /// </summary>
+    private bool TryGetObjectTablePosition(
+        RuntimeEntityRecord record,
+        out Position position)
+    {
+        if (record.PhysicsBody is { } body)
+        {
+            uint cellId = body.CellPosition.ObjCellId != 0u
+                ? body.CellPosition.ObjCellId
+                : record.FullCellId;
+            position = new Position(cellId, body.Position, body.Orientation);
+            return true;
+        }
+
+        if (record.Snapshot.Position is { } wire
+            && TryGetWorldFrameOffset(
+                wire.LandblockId,
+                out float offsetX,
+                out float offsetY))
+        {
+            position = new Position(
+                wire.LandblockId,
+                new System.Numerics.Vector3(
+                    wire.PositionX + offsetX,
+                    wire.PositionY + offsetY,
+                    wire.PositionZ),
+                new System.Numerics.Quaternion(
+                    wire.RotationX,
+                    wire.RotationY,
+                    wire.RotationZ,
+                    wire.RotationW));
+            return true;
+        }
+
+        position = default;
+        return false;
     }
 
     public bool ClearRemoteMotion(RuntimeEntityRecord record)
