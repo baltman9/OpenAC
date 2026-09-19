@@ -5,6 +5,7 @@ using AcDream.Headless.Plugins;
 using AcDream.Headless.Policies;
 using AcDream.Plugin.Abstractions;
 using AcDream.Content.CharGen;
+using AcDream.Content.Skills;
 using AcDream.Core.Chat;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
@@ -1172,6 +1173,60 @@ internal sealed class HeadlessSessionHost : IDisposable
                 ModifyAllegianceStoragePermission:
                     session.SendModifyAllegianceStoragePermission));
 
+    /// <summary>The game-data file every host reads skill formulas from.</summary>
+    private const uint SkillTableFileId = 0x0E000004u;
+
+    /// <summary>
+    /// The one owner of a windowless session's skill arithmetic, built from
+    /// the same game data the graphical client reads.
+    /// </summary>
+    private Func<uint, uint, IReadOnlyDictionary<uint, uint>, uint>?
+        CreateSkillFormulaBonusResolver()
+    {
+        if (_contentLease is not { } content)
+            return null;
+        if (!content.Dats.TryGet<DatReaderWriter.DBObjs.SkillTable>(
+                SkillTableFileId,
+                out var skillTable))
+        {
+            skillTable = null;
+        }
+
+        return new LiveSkillCreditResolver(skillTable).Resolve;
+    }
+
+    /// <summary>
+    /// The windowless half of the character bindings. The skill-formula
+    /// resolver is the load-bearing part: without it every skill the server
+    /// sends loses its attribute-derived term, so a bot reads its own skills
+    /// far below what the server credits it with.
+    /// </summary>
+    internal LiveCharacterSessionBindings CreateCharacterBindings() =>
+        new(
+            Runtime.ActionOwner.Combat,
+            Runtime.CharacterOwner,
+            ResolveSkillFormulaBonus: CreateSkillFormulaBonusResolver(),
+            OnSkillsUpdated: null,
+            OnConfirmationRequest: request =>
+            {
+                Console.WriteLine(
+                    $"[fa6-diag] OnConfirmationRequest received type="
+                    + $"{request.Type} context={request.ContextId} "
+                    + $"text='{request.Message}'");
+                _pendingConfirmation = request;
+                _pluginSession.Host.RaiseConfirmationRequested(
+                    new PluginConfirmation(
+                        request.ContextId,
+                        (int)request.Type,
+                        request.Message));
+            },
+            OnConfirmationDone: HandleConfirmationDone,
+            ClientTime: () =>
+                Runtime.Clock.SimulationTimeSeconds,
+            OnMovementStatsUpdated: null,
+            OnCharacterOptionsChanged: (_, _) =>
+                _optionsSeeder?.NoteOptionsSeeded());
+
     private ILiveSessionEventRouting CreateEventRoute(
         AcDream.Core.Net.WorldSession session)
     {
@@ -1266,30 +1321,7 @@ internal sealed class HeadlessSessionHost : IDisposable
                     Runtime.InventoryOwner.Objects
                         .Get(Runtime.PlayerIdentity.ServerGuid)?.Name
                     ?? string.Empty),
-            new LiveCharacterSessionBindings(
-                Runtime.ActionOwner.Combat,
-                Runtime.CharacterOwner,
-                ResolveSkillFormulaBonus: null,
-                OnSkillsUpdated: null,
-                OnConfirmationRequest: request =>
-                {
-                    Console.WriteLine(
-                        $"[fa6-diag] OnConfirmationRequest received type="
-                        + $"{request.Type} context={request.ContextId} "
-                        + $"text='{request.Message}'");
-                    _pendingConfirmation = request;
-                    _pluginSession.Host.RaiseConfirmationRequested(
-                        new PluginConfirmation(
-                            request.ContextId,
-                            (int)request.Type,
-                            request.Message));
-                },
-                OnConfirmationDone: HandleConfirmationDone,
-                ClientTime: () =>
-                    Runtime.Clock.SimulationTimeSeconds,
-                OnMovementStatsUpdated: null,
-                OnCharacterOptionsChanged: (_, _) =>
-                    _optionsSeeder?.NoteOptionsSeeded()),
+            CreateCharacterBindings(),
             new LiveSocialSessionBindings(
                 Runtime.CommunicationOwner.Chat,
                 Runtime.CommunicationOwner.TurbineChat,
