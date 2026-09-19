@@ -133,6 +133,36 @@ public sealed class HeadlessItemAutomationTests
         Assert.Equal(new[] { prize }, h.Pickups);
     }
 
+    /// <summary>
+    /// The wield-busy signal means an equipment switch is in flight and
+    /// nothing else. It once also answered true whenever any inventory
+    /// request was pending, and an appraisal is one of those: an automation
+    /// that appraises as it goes then reads as permanently mid-wield, and
+    /// everything that waits for a free hand waits for ever. Mutation: put
+    /// <c>|| !CanBeginRequest</c> back and the appraisal reads as a wield.
+    /// </summary>
+    [Fact]
+    public void EquipmentBusy_IsAWieldInFlightAndNotAPendingAppraisal()
+    {
+        const uint item = 0x50000A01u;
+        var h = new Harness();
+        h.Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = item,
+            Type = ItemType.Misc,
+            ContainerId = Player,
+        });
+
+        Assert.False(h.Automation.EquipmentBusy);
+
+        // An appraisal in flight is one of these: the count is up and no
+        // new request can begin, but no hand is occupied.
+        h.Runtime.InventoryOwner.Transactions.IncrementBusyCount();
+        Assert.False(h.Runtime.InventoryOwner.Transactions.CanBeginRequest);
+
+        Assert.False(h.Automation.EquipmentBusy);
+    }
+
     [Fact]
     public void TryIdentify_OwnedItemSendsTheAppraisal()
     {

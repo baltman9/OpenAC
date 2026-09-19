@@ -1330,8 +1330,16 @@ public sealed class RuntimeItemInteraction : IDisposable
             : _autoWield.TryWield(item, requestedMask);
     }
 
-    public bool IsAutoWieldBusy =>
-        _autoWield.IsBusy || !_transactions.CanBeginRequest;
+    /// <summary>
+    /// Whether an equipment switch is in flight -- that and nothing else.
+    /// It once also answered true whenever ANY inventory request was
+    /// pending, which made it true almost continuously for an automation
+    /// that appraises as it goes, and every consumer read that as "the
+    /// character is mid-wield". A wield attempted while a request is
+    /// pending is refused at dispatch anyway, so the readiness check
+    /// belongs there and not in this signal.
+    /// </summary>
+    public bool IsAutoWieldBusy => _autoWield.IsBusy;
 
     public void NotifyExplicitCombatModeRequest()
         => _autoWield.NotifyExplicitCombatModeRequest();

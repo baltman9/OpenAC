@@ -291,9 +291,10 @@ internal sealed class HeadlessItemAutomation
 
     private bool AutoWieldIdle => _autoWield?.IsBusy != true;
 
-    internal bool EquipmentBusy =>
-        _autoWield?.IsBusy == true
-        || !_runtime.InventoryOwner.Transactions.CanBeginRequest;
+    /// <summary>An equipment switch in flight, and nothing else: see the
+    /// window host's own wield-busy signal for why a pending inventory
+    /// request does not belong here.</summary>
+    internal bool EquipmentBusy => _autoWield?.IsBusy == true;
 
     // The surface requires this bound; not supported on headless yet.
     /// <summary>
