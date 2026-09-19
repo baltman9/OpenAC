@@ -57,8 +57,14 @@ public readonly record struct PluginEquipmentItem(
     /// </summary>
     public uint AmmoType { get; init; }
 
-    /// <summary>How many of the item this stack holds; at least one.</summary>
+    /// <summary>How many of the item this stack holds; zero for an empty stack.</summary>
     public int StackSize { get; init; } = 1;
+
+    /// <summary>
+    /// The object's category as classified by the client;
+    /// <see cref="PluginObjectClass.Unknown"/> when unavailable.
+    /// </summary>
+    public PluginObjectClass ObjectClass { get; init; }
 
     /// <summary>The weapon category the item belongs to; zero when it is not a weapon.</summary>
     public int WeaponType { get; init; }

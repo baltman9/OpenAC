@@ -2294,7 +2294,8 @@ internal sealed class RuntimeAutomationSurface
                 AmmoType = item.AmmoType ?? (uint)Math.Max(
                     0,
                     item.Properties.GetInt((uint)PropertyInt.AmmoType)),
-                StackSize = Math.Max(1, item.StackSize),
+                StackSize = item.StackSize,
+                ObjectClass = ClassifyObject(item),
                 WeaponType = item.Properties.GetInt(
                     (uint)PropertyInt.WeaponType),
                 Cleaving = item.Properties.GetInt(

@@ -15,6 +15,32 @@ namespace AcDream.Headless.Tests;
 public sealed class HeadlessPluginApiSurfaceTests
 {
     [Fact]
+    public void HeadlessHostEquipmentProjectsClassAndExplicitZeroStack()
+    {
+        var (runtime, commands) = NewRealSession();
+        using GameRuntime runtimeDisposal = runtime;
+        using var host = NewHost(runtime);
+        commands.Start(runtime.Generation);
+        const uint itemId = 0x700000ACu;
+        runtime.InventoryOwner.Objects.AddOrUpdate(new AcDream.Core.Items.ClientObject
+        {
+            ObjectId = itemId,
+            Name = "Empty bow stack",
+            Type = AcDream.Core.Items.ItemType.MissileWeapon,
+            ValidLocations = AcDream.Core.Items.EquipMask.Held,
+            ContainerId = 0x50000001u,
+            StackSize = 0,
+        });
+        IPluginHost pluginHost = host;
+
+        PluginEquipmentItem item = Assert.Single(
+            pluginHost.Automation.Equipment.CaptureOwnedEquipment(),
+            item => item.ObjectId == itemId);
+        Assert.Equal(PluginObjectClass.MissileWeapon, item.ObjectClass);
+        Assert.Equal(0, item.StackSize);
+    }
+
+    [Fact]
     public void ChatReceivedFiresInOrderWithTheTextClassAndCombatKind()
     {
         using GameRuntime runtime = NewRuntime();

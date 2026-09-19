@@ -4,6 +4,7 @@ using AcDream.Runtime.Plugins;
 using AcDream.Core.Chat;
 using AcDream.Core.Combat;
 using AcDream.Core.Plugins;
+using AcDream.Core.Selection;
 using AcDream.Core.Spells;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
@@ -18,6 +19,39 @@ namespace AcDream.App.Tests.Plugins;
 
 public sealed class RuntimeAutomationSurfacePluginApiTests
 {
+    /// <summary>
+    /// Mutation: omit ObjectClass or clamp zero in BuildOwnedEquipment;
+    /// the plugin host then loses weapon-class or empty-stack information.
+    /// </summary>
+    [Fact]
+    public void GraphicalHostEquipmentProjectsClassAndExplicitZeroStack()
+    {
+        var (runtime, commands) = CreateRealSession();
+        using var runtimeDisposal = runtime;
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        commands.Start(runtime.Generation);
+        const uint itemId = 0x700000ABu;
+        runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = itemId,
+            Name = "Empty bow stack",
+            Type = ItemType.MissileWeapon,
+            ValidLocations = EquipMask.Held,
+            ContainerId = 0x50000001u,
+            StackSize = 0,
+        });
+        IPluginHost host = new AppPluginHost(
+            new TestPluginLogger(), new WorldGameState(), new WorldEvents(),
+            new SelectionState(), NoOpUiRegistry.Instance, surface);
+
+        PluginEquipmentItem item = Assert.Single(
+            host.Automation.Equipment.CaptureOwnedEquipment(),
+            item => item.ObjectId == itemId);
+        Assert.Equal(PluginObjectClass.MissileWeapon, item.ObjectClass);
+        Assert.Equal(0, item.StackSize);
+    }
+
     [Fact]
     public void MapWorldObjectUseOutcomeMapsEveryOutcomeToItsPluginStatus()
     {
@@ -944,6 +978,13 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
         public void Tick(WorldSession session) { }
 
         public void DisposeSession(WorldSession session) => session.Dispose();
+    }
+
+    private sealed class TestPluginLogger : IPluginLogger
+    {
+        public void Info(string message) { }
+        public void Warn(string message) { }
+        public void Error(string message, Exception? error = null) { }
     }
 
     private sealed class NoOpTransport : IWorldSessionTransport

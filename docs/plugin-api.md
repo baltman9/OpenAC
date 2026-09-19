@@ -690,6 +690,10 @@ placeholders rather than wired to real state:
 - `Dialogs.Answer` is real when the headless session was configured with a
   confirmation route; otherwise it returns `false` like any host with
   nothing bound.
+- `Equipment.CaptureOwnedEquipment()` reports each item's `ObjectClass`
+  (or `Unknown` if classification is unavailable) and actual `StackSize`,
+  including an explicitly empty stack. `EquippedLocation` is the current
+  slot; `ValidLocations` describes allowed slots.
 - `Trade` and `Vendor` are real on both hosts: the same shared adapter binds
   over the same `GameRuntime`, so a headless bot sees identical state and
   sends the identical wire commands a graphical plugin would.
@@ -704,6 +708,6 @@ placeholders rather than wired to real state:
   console's own `/quit` and a SIGINT/SIGTERM end every session in the
   process at once.
 - Everything else on `IAutomationSurface` not named above --
-  `Combat`/`Equipment`/`Items`/`Loot`/`Fellowship`/`Enchantments`/
+  `Combat`/`Items`/`Loot`/`Fellowship`/`Enchantments`/
   `Navigation`/`WorldTime`/`Network`/`Recovery`/`Projectile`/`Selection`
   automation -- is still the interface's inert `NoOp` default on headless.
