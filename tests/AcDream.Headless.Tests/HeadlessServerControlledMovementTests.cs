@@ -92,6 +92,33 @@ public sealed class HeadlessServerControlledMovementTests
             $"the character followed the old position: {after:0.00} m out");
     }
 
+    /// <summary>
+    /// Asking the character to face a heading while the server is walking it
+    /// somewhere ends that walk. This is not a window-less trait: the request
+    /// takes control back from the server and cancels whatever it had running,
+    /// in the one movement owner both hosts share, so a character driven by
+    /// automation that re-faces its quarry loses the approach on either host.
+    /// Recorded here because it is the obvious suspect for "the character
+    /// never closed the distance" and it is NOT the reason.
+    /// </summary>
+    [Fact]
+    public void FacingSomethingDuringAServerWalkEndsThatWalkOnEitherHost()
+    {
+        using var world = new Fixture();
+
+        Assert.True(RuntimeServerControlledLocalMovement.TryApply(
+            world.Runtime,
+            MoveToObjectOrder()));
+        world.Advance(seconds: 0.5f);
+        Assert.True(world.Controller.Movement.MoveTo!.IsMovingTo());
+
+        Assert.True(world.Controller.RequestTurnToHeading(90f));
+
+        Assert.Equal(
+            MovementType.TurnToHeading,
+            world.Controller.Movement.MoveTo!.MovementTypeState);
+    }
+
     // -- the order ---------------------------------------------------------
 
     private static WorldSession.EntityMotionUpdate MoveToObjectOrder() =>
