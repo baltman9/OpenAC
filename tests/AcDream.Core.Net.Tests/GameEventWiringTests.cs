@@ -1395,6 +1395,35 @@ public sealed class GameEventWiringTests
         Assert.Equal(2, items.Get(0x50000B01u)!.ContainerSlot);
     }
 
+    /// <summary>
+    /// Mutation pin: require the failure wire id to equal the pending shop
+    /// id; both packet-shaped failures then leave the request pending.
+    /// </summary>
+    [Theory]
+    [InlineData(0u)]
+    [InlineData(0x50000001u)]
+    public void WireAll_ShopFailureUsesPendingRequestDespiteWireId(uint wireId)
+    {
+        var (dispatcher, items, _, _, _) = MakeAll();
+        using var transactions = new InventoryTransactionState(items);
+        const uint vendorId = 0x40001000u;
+        PendingInventoryRequest? failed = null;
+        transactions.RequestFailed += (request, _) => failed = request;
+        Assert.True(transactions.TryDispatch(InventoryRequestKind.Shop,
+            vendorId, static () => true));
+
+        byte[] payload = new byte[8];
+        BinaryPrimitives.WriteUInt32LittleEndian(payload, wireId);
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4), 0x2u);
+        GameEventEnvelope? envelope = GameEventEnvelope.TryParse(
+            WrapEnvelope(GameEventType.InventoryServerSaveFailed, payload));
+        dispatcher.Dispatch(envelope!.Value);
+
+        Assert.False(transactions.HasPendingRequest);
+        Assert.Equal(vendorId, failed?.ItemId);
+        Assert.Equal(InventoryRequestKind.Shop, failed?.Kind);
+    }
+
     [Fact]
     public void WireAll_InventoryPutObjInContainer_ConfirmsOptimisticMove_soNoRollback()
     {

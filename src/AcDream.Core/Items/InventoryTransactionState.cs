@@ -11,6 +11,7 @@ public enum InventoryRequestKind
     SplitToWorld,
     Wield,
     Give,
+    Shop,
 }
 
 public readonly record struct PendingInventoryRequest(
@@ -44,6 +45,7 @@ public sealed class ItemUseRequestReservation
 public sealed class InventoryTransactionState : IDisposable
 {
     private readonly ClientObjectTable _objects;
+    private readonly VendorState? _vendor;
     private ulong _nextRequestToken;
     private ulong _useReservationGeneration;
     private PendingInventoryRequest? _pendingRequest;
@@ -51,14 +53,19 @@ public sealed class InventoryTransactionState : IDisposable
     private long _dispatchFailureCount;
     private bool _disposed;
 
-    public InventoryTransactionState(ClientObjectTable objects)
+    public InventoryTransactionState(
+        ClientObjectTable objects,
+        VendorState? vendor = null)
     {
         _objects = objects ?? throw new ArgumentNullException(nameof(objects));
+        _vendor = vendor;
         _objects.ObjectMoved += OnObjectMoved;
         _objects.MoveRequestFailed += OnMoveFailed;
         _objects.ObjectRemoved += OnObjectRemoved;
         _objects.StackSizeUpdated += OnStackSizeUpdated;
         _objects.Cleared += OnObjectsCleared;
+        if (_vendor is not null)
+            _vendor.Changed += OnVendorChanged;
     }
 
     public event Action? StateChanged;
@@ -255,6 +262,8 @@ public sealed class InventoryTransactionState : IDisposable
             return;
         _disposed = true;
         _objects.Cleared -= OnObjectsCleared;
+        if (_vendor is not null)
+            _vendor.Changed -= OnVendorChanged;
         _objects.StackSizeUpdated -= OnStackSizeUpdated;
         _objects.ObjectRemoved -= OnObjectRemoved;
         _objects.MoveRequestFailed -= OnMoveFailed;
@@ -297,8 +306,29 @@ public sealed class InventoryTransactionState : IDisposable
             CompleteInventoryResponse(move.ItemId, move.Item);
     }
 
+    private void OnVendorChanged(VendorTransition transition)
+    {
+        if (transition.Kind is not (VendorStateTransitionKind.Opened
+            or VendorStateTransitionKind.Refreshed)
+            || _pendingRequest is not { Kind: InventoryRequestKind.Shop } pending
+            || pending.ItemId != transition.VendorId)
+            return;
+
+        _pendingRequest = null;
+        Dispatch(RequestCompleted, pending);
+        DispatchStateChanged();
+    }
+
     private void OnMoveFailed(MoveRequestFailure failure)
     {
+        if (_pendingRequest is { Kind: InventoryRequestKind.Shop } shop)
+        {
+            _pendingRequest = null;
+            Dispatch(RequestFailed, shop, failure.WeenieError);
+            DispatchStateChanged();
+            return;
+        }
+
         uint itemId = failure.ItemId;
         // While a request is pending, a move failure is about that request
         // whatever guid the wire carries (the server may send none, or the
@@ -321,6 +351,7 @@ public sealed class InventoryTransactionState : IDisposable
         ClientObject? identity)
     {
         if (_pendingRequest is not { } request
+            || request.Kind == InventoryRequestKind.Shop
             || request.ItemId != itemId
             || !MatchesIdentity(request.ItemIdentity, itemId, identity))
         {

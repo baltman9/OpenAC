@@ -193,6 +193,10 @@ public sealed class RuntimeInteractionTransactionStateTests
         Assert.Equal(0u, snapshot.LastUseTargetId);
     }
 
+    /// <summary>
+    /// Mutation pin: omit the first appraisal's busy-reference increment;
+    /// the replacement request no longer retains one reference.
+    /// </summary>
     [Fact]
     public void AppraisalReplacementKeepsOneBusyReferenceAndExactCurrentId()
     {
@@ -202,9 +206,7 @@ public sealed class RuntimeInteractionTransactionStateTests
 
         Assert.True(state.TryRequestAppraisal(Item, sent.Add));
         Assert.True(state.TryRequestAppraisal(Container, sent.Add));
-        // Looking at something occupies neither the character nor the one
-        // inventory request slot, so no appraisal raises the busy count.
-        Assert.Equal(0, inventory.BusyCount);
+        Assert.Equal(1, inventory.BusyCount);
         Assert.False(state.AcceptAppraisalResponse(Item).Accepted);
 
         RuntimeAppraisalResponseAcceptance first =
@@ -477,9 +479,7 @@ public sealed class RuntimeInteractionTransactionStateTests
         Assert.Equal(
             AppraisalRequestOrigin.User,
             state.AwaitingAppraisalOrigin);
-        // An appraisal never raises the busy count: see the replacement
-        // test above.
-        Assert.Equal(0, inventory.BusyCount);
+        Assert.Equal(1, inventory.BusyCount);
 
         // The user's own assess still completes normally -- it was never
         // touched by the refused Automation request.

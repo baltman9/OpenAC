@@ -46,6 +46,7 @@ public sealed class ItemInteractionControllerTests
         public readonly CombatState Combat = new();
         public readonly StackSplitQuantityState SplitQuantity = new();
         public readonly InventoryTransactionState SharedTransactions;
+        public readonly VendorState Vendor = new();
         public readonly RuntimeInteractionTransactionState RuntimeTransactions;
         public uint SelectedObject;
         public bool NonCombatMode;
@@ -73,7 +74,7 @@ public sealed class ItemInteractionControllerTests
                 ItemsCapacity = 24,
             });
             Objects.MoveItem(Pack, Player, 0);
-            SharedTransactions = new InventoryTransactionState(Objects);
+            SharedTransactions = new InventoryTransactionState(Objects, Vendor);
             RuntimeTransactions = new RuntimeInteractionTransactionState(
                 SharedTransactions);
 
@@ -2939,7 +2940,7 @@ public sealed class ItemInteractionControllerTests
     }
 
     [Fact]
-    public void TryBuy_CompleteUse_ReleasesTheReservationAndReenablesFurtherRequests()
+    public void TryBuy_OnlyMatchingVendorResponseReenablesFurtherRequests()
     {
         var h = new Harness();
         Assert.True(h.Controller.TryBuy(0x40001000u, 0x50002000u, 1, 0u));
@@ -2948,7 +2949,10 @@ public sealed class ItemInteractionControllerTests
         h.Controller.CompleteUse(0);
 
         Assert.Equal(0, h.Controller.BusyCount);
-        // The gate is free again -- a second Buy can now proceed.
+        Assert.True(h.SharedTransactions.HasPendingRequest);
+        Assert.False(h.Controller.TryBuy(0x40001000u, 0x50002001u, 1, 0u));
+        h.Vendor.Apply(0x40001000u, default, []);
+        Assert.False(h.SharedTransactions.HasPendingRequest);
         Assert.True(h.Controller.TryBuy(0x40001000u, 0x50002001u, 1, 0u));
         Assert.Equal(2, h.Buys.Count);
     }
@@ -3126,7 +3130,7 @@ public sealed class ItemInteractionControllerTests
     }
 
     [Fact]
-    public void TrySell_CompleteUse_ReleasesTheReservationAndReenablesFurtherRequests()
+    public void TrySell_MatchingVendorResponseReenablesFurtherRequests()
     {
         var h = new Harness();
         Assert.True(h.Controller.TrySell(
@@ -3136,6 +3140,9 @@ public sealed class ItemInteractionControllerTests
         h.Controller.CompleteUse(0);
 
         Assert.Equal(0, h.Controller.BusyCount);
+        Assert.False(h.Controller.TrySell(
+            0x40001000u, new (int Amount, uint ItemGuid)[] { (1, 0x50003001u) }));
+        h.Vendor.Apply(0x40001000u, default, []);
         Assert.True(h.Controller.TrySell(
             0x40001000u, new (int Amount, uint ItemGuid)[] { (1, 0x50003001u) }));
         Assert.Equal(2, h.Sells.Count);

@@ -311,7 +311,8 @@ public sealed class VendorUiControllerTests
 
             ItemInteraction = new RuntimeItemInteraction(
                 Objects,
-                new RuntimeInteractionTransactionState(new InventoryTransactionState(Objects)),
+                new RuntimeInteractionTransactionState(
+                    new InventoryTransactionState(Objects, State)),
                 new InteractionState(),
                 playerGuid: static () => PlayerGuid,
                 sendUse: null,
@@ -1110,7 +1111,7 @@ public sealed class VendorUiControllerTests
     }
 
     [Fact]
-    public void BuyButton_DisablesTheInstantAPurchaseIsInFlight_AndReenablesOnCompletion()
+    public void BuyButton_ReenablesOnMatchingVendorResponse()
     {
         var h = new Harness();
         h.State.Apply(VendorGuid, Profile(), new[]
@@ -1128,6 +1129,12 @@ public sealed class VendorUiControllerTests
         Assert.False(h.BuyButton.Enabled);
 
         h.ItemInteraction.CompleteUse(0);
+
+        Assert.False(h.BuyButton.Enabled);
+        h.State.Apply(VendorGuid, Profile(), new[]
+        {
+            new VendorShopItem(ArmorItemGuid, -1, 2u, "Chainmail", (uint)ItemType.Armor, 200u, 500),
+        });
 
         Assert.True(h.BuyButton.Enabled);
     }

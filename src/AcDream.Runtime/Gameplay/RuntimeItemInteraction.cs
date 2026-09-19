@@ -293,26 +293,8 @@ public sealed class RuntimeItemInteraction : IDisposable
         if (!EnsureInventoryRequestReady())
             return false;
 
-        ItemUseRequestReservation reservation = BeginUseRequestReservation();
-        bool dispatched;
-        try
-        {
-            dispatched = _sendBuy(vendorGuid, itemGuid, amount, alternateCurrencyId);
-        }
-        catch
-        {
-            reservation.CancelBeforeDispatch();
-            throw;
-        }
-
-        if (!dispatched)
-        {
-            reservation.CancelBeforeDispatch();
-            return false;
-        }
-
-        reservation.MarkDispatched();
-        return true;
+        return DispatchShop(vendorGuid,
+            () => _sendBuy(vendorGuid, itemGuid, amount, alternateCurrencyId));
     }
 
     public bool TryBuyAll(
@@ -325,26 +307,8 @@ public sealed class RuntimeItemInteraction : IDisposable
         if (!EnsureInventoryRequestReady())
             return false;
 
-        ItemUseRequestReservation reservation = BeginUseRequestReservation();
-        bool dispatched;
-        try
-        {
-            dispatched = _sendBuyAll(vendorGuid, items, alternateCurrencyId);
-        }
-        catch
-        {
-            reservation.CancelBeforeDispatch();
-            throw;
-        }
-
-        if (!dispatched)
-        {
-            reservation.CancelBeforeDispatch();
-            return false;
-        }
-
-        reservation.MarkDispatched();
-        return true;
+        return DispatchShop(vendorGuid,
+            () => _sendBuyAll(vendorGuid, items, alternateCurrencyId));
     }
 
     public bool TrySell(
@@ -356,27 +320,30 @@ public sealed class RuntimeItemInteraction : IDisposable
         if (!EnsureInventoryRequestReady())
             return false;
 
-        ItemUseRequestReservation reservation = BeginUseRequestReservation();
-        bool dispatched;
-        try
-        {
-            dispatched = _sendSell(vendorGuid, items);
-        }
-        catch
-        {
-            reservation.CancelBeforeDispatch();
-            throw;
-        }
-
-        if (!dispatched)
-        {
-            reservation.CancelBeforeDispatch();
-            return false;
-        }
-
-        reservation.MarkDispatched();
-        return true;
+        return DispatchShop(vendorGuid,
+            () => _sendSell(vendorGuid, items));
     }
+
+    private bool DispatchShop(uint vendorGuid, Func<bool> send) =>
+        _transactions.TryDispatch(InventoryRequestKind.Shop, vendorGuid, () =>
+        {
+            ItemUseRequestReservation reservation = BeginUseRequestReservation();
+            try
+            {
+                if (!send())
+                {
+                    reservation.CancelBeforeDispatch();
+                    return false;
+                }
+                reservation.MarkDispatched();
+                return true;
+            }
+            catch
+            {
+                reservation.CancelBeforeDispatch();
+                throw;
+            }
+        });
 
     public void ReportPendingBackpackPlacementConflict()
     {
