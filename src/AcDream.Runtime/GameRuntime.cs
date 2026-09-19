@@ -584,6 +584,48 @@ public sealed class GameRuntime
             Fellowship.Snapshot,
             Allegiance.Snapshot);
 
+    /// <summary>
+    /// One pass of the character's target bookkeeping, for a host that has no
+    /// pass of its own over every body in sight.
+    /// </summary>
+    /// <remarks>
+    /// Two passes are owed each frame while a walk is following something.
+    /// The character's own pass gives up on a thing that never answered. The
+    /// followed thing's pass is what tells the character it has moved: it
+    /// compares where it is now against what it last told its watchers, and
+    /// speaks up once the difference matters. Without that second pass the
+    /// walk keeps aiming at the one position it was given when the walk began,
+    /// and a creature that steps aside is never caught.
+    /// <para>
+    /// A host that draws the world runs both passes over everything it
+    /// animates; this is the same work, narrowed to the two bodies a
+    /// window-less host actually needs.
+    /// </para>
+    /// </remarks>
+    public void HandleLocalPlayerTargeting()
+    {
+        ObjectDisposedException.ThrowIf(_disposeRequested || _disposed, this);
+        uint player = PlayerIdentity.ServerGuid;
+        if (player == 0u
+            || !EntityObjects.Physics.TryGetPhysicsHost(player, out var self)
+            || self is not EntityPhysicsHost localBody)
+        {
+            return;
+        }
+
+        localBody.HandleTargetting();
+
+        uint sought =
+            MovementOwner.Controller?.Movement.MoveTo?.TopLevelObjectId ?? 0u;
+        if (sought == 0u || sought == player)
+            return;
+        if (EntityObjects.Physics.ResolveObjectTableHost(sought)
+            is EntityPhysicsHost soughtBody)
+        {
+            soughtBody.HandleTargetting();
+        }
+    }
+
     public RuntimeLocalPlayerFrameController CreateLocalPlayerFrameController(
         IRuntimeLocalPlayerFrameHost host,
         IRuntimeMovementInputSource input)

@@ -58,9 +58,8 @@ internal sealed class HeadlessLocalPlayerFrameHost
                 : 0u;
     }
 
-    public void HandleTargeting()
-    {
-    }
+    // The runtime owns both halves of this; the host only says when.
+    public void HandleTargeting() => _runtime.HandleLocalPlayerTargeting();
 
     public bool IsHidden
     {

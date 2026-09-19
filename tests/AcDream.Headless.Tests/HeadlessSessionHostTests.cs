@@ -3345,7 +3345,7 @@ public sealed class HeadlessSessionHostTests
         Assert.NotNull(runtime.MovementOwner.Controller);
     }
 
-    private sealed class CollisionGenerationCommittingNeighborhood(
+    internal sealed class CollisionGenerationCommittingNeighborhood(
         GameRuntime runtime) : IHeadlessCollisionNeighborhood
     {
         public void CenterOn(uint fullCellId) =>
@@ -3360,7 +3360,7 @@ public sealed class HeadlessSessionHostTests
         public bool IsQuiescent => true;
     }
 
-    private static void CommitSyntheticCollisionGeneration(
+    internal static void CommitSyntheticCollisionGeneration(
         GameRuntime runtime,
         uint landblockId)
     {
@@ -3446,7 +3446,7 @@ public sealed class HeadlessSessionHostTests
         Assert.Equal(command, movement.CommandInput);
     }
 
-    private static LiveSessionHost CreateInertLiveSessionHost()
+    internal static LiveSessionHost CreateInertLiveSessionHost()
     {
         var controller = new LiveSessionController(
             new ThrowingLiveSessionOperations());
@@ -3855,7 +3855,7 @@ public sealed class HeadlessSessionHostTests
         }
     }
 
-    private static AcDream.Runtime.Session.RuntimeFirstEntryDriveController
+    internal static AcDream.Runtime.Session.RuntimeFirstEntryDriveController
         CreateFirstEntryDrive(GameRuntime runtime) => new(
             runtime.EntityObjects,
             runtime.Clock,
@@ -3879,7 +3879,7 @@ public sealed class HeadlessSessionHostTests
             () => runtime.CharacterOwner.UsePositionFromServer,
             () => null);
 
-    private sealed class LoadedSetupCollisionSource
+    internal sealed class LoadedSetupCollisionSource
         : AcDream.Content.IPreparedCollisionSource
     {
         public AcDream.Content.PreparedAssetPresence ProbeCollision(
