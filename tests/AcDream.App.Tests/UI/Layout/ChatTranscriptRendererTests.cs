@@ -9,6 +9,39 @@ namespace AcDream.App.Tests.UI.Layout;
 
 public class ChatTranscriptRendererTests
 {
+    [Theory]
+    [InlineData("go to 28.5S, 59.3E", 59.3, -28.5)]
+    [InlineData("28.5S, 59.3E", 59.3, -28.5)]
+    public void CoordinateText_ParsesCompassCoordinates(string text, double expectedEastWest, double expectedNorthSouth)
+    {
+        Assert.True(ChatTextTag.TryParseCoordinatePair(text.Replace("go to ", string.Empty), out double eastWest, out double northSouth));
+        Assert.Equal(expectedEastWest, eastWest);
+        Assert.Equal(expectedNorthSouth, northSouth);
+    }
+
+    [Fact]
+    public void CoordinateTag_ParsesInvariantWorldCoordinates()
+    {
+        var spans = ChatTagMarkup.Parse("Go <COORD:World:12.5,-3.25> here");
+
+        ChatTextTag tag = Assert.Single(spans, s => s.Tag is not null).Tag!.Value;
+        tag = tag with { Data = "12.5N, 3.25E" };
+        Assert.True(tag.TryGetCoordinate(out double eastWest, out double northSouth));
+        Assert.Equal(3.25, eastWest);
+        Assert.Equal(12.5, northSouth);
+    }
+
+    [Theory]
+    [InlineData("COORD:World:12.5", false)]
+    [InlineData("COORD:Other:12.5,3", false)]
+    [InlineData("COORD:World:12.5,not-a-number", false)]
+    public void CoordinateTag_RejectsMalformedValues(string tagText, bool expected)
+    {
+        ChatTextTag tag = new("COORD", tagText.Contains(":World:") ? "World" : "Other", tagText.Contains(":World:") ? tagText[(tagText.IndexOf(":World:", StringComparison.Ordinal) + 7)..] : "12.5,3");
+
+        Assert.Equal(expected, tag.TryGetCoordinate(out _, out _));
+    }
+
     private static float MeasureByCharCount(string s) => s.Length;
 
     [Fact]
