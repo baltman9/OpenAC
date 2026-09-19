@@ -109,6 +109,80 @@ public sealed class RuntimePhysicsStateTests
         handleUpdateTarget: static _ => { },
         interruptCurrentMovement: static () => { });
 
+    /// <summary>
+    /// A walk the server orders at a THING has to ask that thing where it is,
+    /// over and over, for as long as the walk lasts -- so anything live and
+    /// visible must be able to answer, on either host, whether or not it has
+    /// been given a full body. The smallest body that can answer is made on
+    /// first demand and installed, so the next question gets the same one and
+    /// a fuller body arriving later rebinds it.
+    ///
+    /// Mutation: answer only for entities that already hold a body and the
+    /// first answer here is null.
+    /// </summary>
+    [Fact]
+    public void AnEntityWithNoBodyOfItsOwnIsGivenOneToBeFollowedBy()
+    {
+        using var lifetime = new RuntimeEntityObjectLifetime();
+        RuntimeEntityRecord record =
+            lifetime.Entities.AddActive(Spawn(0x70000111u, 1));
+        lifetime.Entities.SetFullCell(record, 0x01010001u, 0x0101FFFFu);
+        lifetime.Entities.SetPhysicsBody(
+            record,
+            FollowableBody(record, new Vector3(11f, 22f, 5f)));
+        Assert.Null(record.PhysicsHost);
+
+        IPhysicsObjHost? host =
+            lifetime.Physics.ResolveObjectTableHost(record.ServerGuid);
+
+        Assert.NotNull(host);
+        Assert.Same(host, record.PhysicsHost);
+        Assert.Same(
+            host,
+            lifetime.Physics.ResolveObjectTableHost(record.ServerGuid));
+    }
+
+    /// <summary>
+    /// Nothing is made for an entity the client is not showing. A hidden
+    /// thing is not somewhere the character can be sent, and giving it a body
+    /// would put it in the way of everything that asks the world what is
+    /// there.
+    ///
+    /// Mutation: drop the hidden test and the answer stops being null.
+    /// </summary>
+    [Fact]
+    public void AHiddenEntityIsGivenNoBodyToBeFollowedBy()
+    {
+        using var lifetime = new RuntimeEntityObjectLifetime();
+        RuntimeEntityRecord record =
+            lifetime.Entities.AddActive(Spawn(0x70000112u, 1));
+        lifetime.Entities.SetFullCell(record, 0x01010001u, 0x0101FFFFu);
+        lifetime.Entities.SetFinalPhysicsState(
+            record,
+            PhysicsStateFlags.Hidden);
+        lifetime.Entities.SetPhysicsBody(
+            record,
+            FollowableBody(record, new Vector3(11f, 22f, 5f)));
+
+        Assert.Null(lifetime.Physics.ResolveObjectTableHost(record.ServerGuid));
+        Assert.Null(record.PhysicsHost);
+    }
+
+    private static PhysicsBody FollowableBody(
+        RuntimeEntityRecord record,
+        Vector3 position)
+    {
+        var body = new PhysicsBody
+        {
+            Position = position,
+            Orientation = Quaternion.Identity,
+            InWorld = true,
+            TransientState = TransientStateFlags.Active,
+        };
+        body.SnapToCell(record.FullCellId, position, position);
+        return body;
+    }
+
     [Fact]
     public void CanonicalRecordAndPhysicsOwnerOwnRemoteComponentAndWorksets()
     {
