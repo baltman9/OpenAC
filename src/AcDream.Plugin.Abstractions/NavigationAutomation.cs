@@ -130,6 +130,13 @@ public readonly record struct PluginNavigationSnapshot(
     /// has been confirmed yet.
     /// </summary>
     public ulong ConfirmedPositionRevision { get; init; }
+
+    /// <summary>
+    /// A host-local monotonic revision for this complete navigation snapshot.
+    /// It changes whenever any snapshot field changes and is useful for
+    /// consumers that need to coalesce updates without comparing all fields.
+    /// </summary>
+    public ulong Revision { get; init; }
 }
 
 /// <summary>
@@ -345,6 +352,20 @@ public readonly record struct PluginGoToReport(
     public uint BlockedByObjectId { get; init; }
 
     /// <summary>
+    /// A monotonically increasing revision for this report stream. It changes
+    /// whenever the reported walk sequence or state changes, allowing an event
+    /// consumer to reject duplicate or stale reports.
+    /// </summary>
+    public long Revision { get; init; }
+
+    /// <summary>
+    /// The current navigation state, repeated here as a stable event discriminator.
+    /// This is equal to <see cref="State"/> and exists so consumers can inspect
+    /// a report without relying on positional record members.
+    /// </summary>
+    public PluginGoToState CurrentState => State;
+
+    /// <summary>
     /// Who asked for the walk under way: a plugin's id, or "player" for a chat command;
     /// null once no walk is under way.
     /// </summary>
@@ -383,6 +404,19 @@ public enum PluginNavigationCommandStatus
 /// </summary>
 public interface INavigationAutomation
 {
+    /// <summary>
+    /// Raised when the current navigation snapshot changes. Handlers run on
+    /// the same thread as <see cref="IEvents.Tick"/>. Hosts that do not
+    /// provide navigation leave this event inert. A subscription does not
+    /// replay the current snapshot; read <see cref="Snapshot"/> first when an
+    /// initial value is required.
+    /// </summary>
+    event Action<PluginNavigationSnapshot> SnapshotChanged
+    {
+        add { }
+        remove { }
+    }
+
     /// <summary>
     /// The player's current movement state. Its <c>IsAvailable</c> is false
     /// when no session is in the world.

@@ -37,6 +37,8 @@ internal sealed class RuntimeAutomationSurface
     private readonly LocalPluginPeerRegistry _peers;
     private readonly string[] _peerTags;
     private double _peerHeartbeatRemaining;
+    private long _lastNavigationSequence;
+    private PluginGoToState _lastNavigationState;
 
     private GameRuntime? _runtime;
     private AcDream.Runtime.Gameplay.RuntimeTradeAutomation? _tradeAutomation;
@@ -669,12 +671,28 @@ internal sealed class RuntimeAutomationSurface
     private void OnPeerTick(double elapsedSeconds)
     {
         Poll();
+        _navigation.PublishSnapshotChanged();
+        PublishNavigationChange();
 
         _peerHeartbeatRemaining -= Math.Max(0d, elapsedSeconds);
         if (_peerHeartbeatRemaining > 0d)
             return;
         _peerHeartbeatRemaining = PeerHeartbeatSeconds;
         PublishPeerSnapshot();
+    }
+
+    private void PublishNavigationChange()
+    {
+        WorldEvents? events = _pluginEvents;
+        if (events is null)
+            return;
+        PluginGoToReport report = _navigation.GoToReport;
+        if (report.Revision == 0L
+            || report.Revision == _lastNavigationSequence)
+            return;
+        _lastNavigationSequence = report.Revision;
+        _lastNavigationState = report.State;
+        events.FireNavigationChanged(report);
     }
 
     private void PublishPeerSnapshot()

@@ -723,6 +723,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         private readonly List<Action> _logoffRegistrations = [];
         private readonly List<Action<string>> _localPlayerDiedRegistrations = [];
         private readonly List<Action<PluginObjectChange>> _objectChangedRegistrations = [];
+        private readonly List<Action<PluginGoToReport>> _navigationChangedRegistrations = [];
         private readonly List<Action<uint>> _containerOpenedRegistrations = [];
         private readonly List<Action<uint>> _containerClosedRegistrations = [];
         private readonly List<Action<PluginConfirmation>> _confirmationRequestedRegistrations = [];
@@ -964,6 +965,44 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             }
         }
 
+        public event Action<PluginGoToReport> NavigationChanged
+        {
+            add
+            {
+                ArgumentNullException.ThrowIfNull(value);
+                try
+                {
+                    inner.NavigationChanged += value;
+                }
+                catch
+                {
+                    try { inner.NavigationChanged -= value; }
+                    catch { }
+                    throw;
+                }
+                lock (_gate)
+                {
+                    if (!_disposed)
+                    {
+                        _navigationChangedRegistrations.Add(value);
+                        return;
+                    }
+                }
+
+                try { inner.NavigationChanged -= value; }
+                catch { }
+                throw new ObjectDisposedException(nameof(ScopedEvents));
+            }
+            remove
+            {
+                if (value is null)
+                    return;
+                inner.NavigationChanged -= value;
+                lock (_gate)
+                    _navigationChangedRegistrations.Remove(value);
+            }
+        }
+
         public event Action<uint> ContainerOpened
         {
             add
@@ -1086,6 +1125,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             Action[] logoffRegistrations;
             Action<string>[] localPlayerDiedRegistrations;
             Action<PluginObjectChange>[] objectChangedRegistrations;
+            Action<PluginGoToReport>[] navigationChangedRegistrations;
             Action<uint>[] containerOpenedRegistrations;
             Action<uint>[] containerClosedRegistrations;
             Action<PluginConfirmation>[] confirmationRequestedRegistrations;
@@ -1106,6 +1146,8 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
                 _localPlayerDiedRegistrations.Clear();
                 objectChangedRegistrations = _objectChangedRegistrations.ToArray();
                 _objectChangedRegistrations.Clear();
+                navigationChangedRegistrations = _navigationChangedRegistrations.ToArray();
+                _navigationChangedRegistrations.Clear();
                 containerOpenedRegistrations = _containerOpenedRegistrations.ToArray();
                 _containerOpenedRegistrations.Clear();
                 containerClosedRegistrations = _containerClosedRegistrations.ToArray();
@@ -1148,6 +1190,12 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             for (int index = objectChangedRegistrations.Length - 1; index >= 0; index--)
             {
                 try { inner.ObjectChanged -= objectChangedRegistrations[index]; }
+                catch { }
+            }
+
+            for (int index = navigationChangedRegistrations.Length - 1; index >= 0; index--)
+            {
+                try { inner.NavigationChanged -= navigationChangedRegistrations[index]; }
                 catch { }
             }
 
