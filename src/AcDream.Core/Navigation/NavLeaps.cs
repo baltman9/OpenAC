@@ -189,9 +189,12 @@ internal sealed class NavLeapFinder
     /// <summary>
     /// How far short of its takeoff, or past it, a body may stop before it jumps. Measured live
     /// over sixty leaps, a body charges a median 0.05 m from its takeoff and nine in ten within
-    /// 0.20 m, so a leap is kept that still lands from three times the usual miss.
+    /// 0.20 m, so a leap is kept that still lands from three times the usual miss. It is also
+    /// how near its planned takeoff a body counts as standing at it, which a caller asking for
+    /// a leap to be aimed again says with the <c>atItsTakeoff</c> of
+    /// <see cref="AimFrom(Vector3, Vector3, bool, bool, out string?)"/>.
     /// </summary>
-    private const float TakeoffSlack = 0.15f;
+    public const float TakeoffSlack = 0.15f;
 
     /// <summary>
     /// What each meter a landing may move costs a takeoff, in meters, when takeoffs are

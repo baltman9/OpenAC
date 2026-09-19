@@ -786,6 +786,7 @@ public sealed partial class RuntimeRouteDriverTests
 
         private long _sequence;
         private RuntimeMoveChannelSnapshot _travel;
+        private RuntimeMoveChannelSnapshot _strafe;
         private RuntimeMoveChannelSnapshot _turn;
         private float _turnRemaining;
         private float _chargeLeft = -1f;
@@ -857,11 +858,11 @@ public sealed partial class RuntimeRouteDriverTests
             new(
                 new Vector3(Position, Height),
                 Heading,
-                new RuntimeScriptedMoveSnapshot(_travel, default, _turn, 0, _chargeLeft >= 0f),
+                new RuntimeScriptedMoveSnapshot(_travel, _strafe, _turn, 0, _chargeLeft >= 0f),
                 InPortalSpace,
                 Airborne,
                 Turning,
-                _slideLeft <= 0f && !Airborne,
+                _slideLeft <= 0f && !Airborne && _strafe.State != RuntimeScriptedMoveState.Moving,
                 WalkStopMeters,
                 RunStopMeters);
 
@@ -877,6 +878,8 @@ public sealed partial class RuntimeRouteDriverTests
         {
             if (_travel.State == RuntimeScriptedMoveState.Moving)
                 _travel = _travel with { State = RuntimeScriptedMoveState.Interrupted };
+            if (_strafe.State == RuntimeScriptedMoveState.Moving)
+                _strafe = _strafe with { State = RuntimeScriptedMoveState.Interrupted };
             if (_turn.State == RuntimeScriptedMoveState.Moving)
                 _turn = _turn with { State = RuntimeScriptedMoveState.Interrupted };
         }
@@ -898,7 +901,12 @@ public sealed partial class RuntimeRouteDriverTests
                     TravelsBegunWhileCharging++;
                 if (_slideLeft > 0f)
                     TravelsBegunWhileSliding++;
-                _travel = new RuntimeMoveChannelSnapshot(++_sequence, RuntimeScriptedMoveState.Moving, travel, 0f, 0f);
+                // The client puts a move on the channel its direction belongs to, so a sidestep
+                // runs on the strafe channel beside a walk and a stopped walk never stops it.
+                if (travel.Channel == RuntimeMoveChannel.Strafe)
+                    _strafe = new RuntimeMoveChannelSnapshot(++_sequence, RuntimeScriptedMoveState.Moving, travel, 0f, 0f);
+                else
+                    _travel = new RuntimeMoveChannelSnapshot(++_sequence, RuntimeScriptedMoveState.Moving, travel, 0f, 0f);
             }
             if (step.Turn is { } turn)
             {
@@ -999,19 +1007,36 @@ public sealed partial class RuntimeRouteDriverTests
                 Position += new Vector2(MathF.Sin(slideRadians), MathF.Cos(slideRadians)) * _slideSpeed * (_slideLeft / _slideTotal) * seconds;
                 _slideLeft -= seconds;
             }
+            // A sidestep runs on its own channel, square to the body's heading, and goes on
+            // beside a walk rather than in place of one.
+            if (_strafe.State == RuntimeScriptedMoveState.Moving)
+            {
+                float sideways = Heading * MathF.PI / 180f;
+                Vector2 aside = _strafe.Request.Direction == RuntimeMoveDirection.StrafeLeft
+                    ? new Vector2(-MathF.Cos(sideways), MathF.Sin(sideways))
+                    : new Vector2(MathF.Cos(sideways), -MathF.Sin(sideways));
+                float stepSpeed = _strafe.Request.Pace == RuntimeMovePace.Run ? RunSpeed : WalkSpeed;
+                float stepped = stepSpeed * seconds;
+                if (_strafe.Request.Amount > 0f)
+                    stepped = MathF.Min(stepped, _strafe.Request.Amount - _strafe.Covered);
+                if (!Stuck)
+                    Position += aside * stepped;
+                _strafe = _strafe with
+                {
+                    Covered = _strafe.Covered + stepped,
+                    ElapsedSeconds = _strafe.ElapsedSeconds + seconds,
+                };
+                if (_strafe.Request.Amount > 0f && _strafe.Covered >= _strafe.Request.Amount)
+                    _strafe = _strafe with { State = RuntimeScriptedMoveState.Completed };
+            }
             if (_travel.State != RuntimeScriptedMoveState.Moving)
                 return;
             float speed = _travel.Request.Pace == RuntimeMovePace.Run ? RunSpeed : WalkSpeed;
             float radians = Heading * MathF.PI / 180f;
-            // A sidestep goes square to the body's heading, and a move asked for a distance
-            // stops once it has covered it.
-            var along = _travel.Request.Direction switch
-            {
-                RuntimeMoveDirection.StrafeLeft => new Vector2(-MathF.Cos(radians), MathF.Sin(radians)),
-                RuntimeMoveDirection.StrafeRight => new Vector2(MathF.Cos(radians), -MathF.Sin(radians)),
-                RuntimeMoveDirection.Backward => new Vector2(-MathF.Sin(radians), -MathF.Cos(radians)),
-                _ => new Vector2(MathF.Sin(radians), MathF.Cos(radians)),
-            };
+            // A move asked for a distance stops once it has covered it.
+            var along = _travel.Request.Direction == RuntimeMoveDirection.Backward
+                ? new Vector2(-MathF.Sin(radians), -MathF.Cos(radians))
+                : new Vector2(MathF.Sin(radians), MathF.Cos(radians));
             float moved = speed * seconds;
             if (_travel.Request.Amount > 0f)
                 moved = MathF.Min(moved, _travel.Request.Amount - _travel.Covered);

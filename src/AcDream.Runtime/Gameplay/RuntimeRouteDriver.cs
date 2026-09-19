@@ -1,4 +1,5 @@
 using System.Numerics;
+using AcDream.Core.Navigation;
 
 namespace AcDream.Runtime.Gameplay;
 
@@ -76,6 +77,12 @@ public readonly record struct RuntimeLeapApproach(
 
     /// <summary>Where the body stood as the jump charged.</summary>
     public Vector2 ChargedAt { get; init; }
+
+    /// <summary>Where the body stood as the jump charged, with its height: what a leap flown from here has to be replayed from.</summary>
+    public Vector3 ChargedFrom { get; init; }
+
+    /// <summary>The spot the leap was flown at, where that is not the landing the route planned; null where it is.</summary>
+    public Vector3? FlownAt { get; init; }
 
     /// <summary>The power and pace the route planned the leap at.</summary>
     public float PlannedPower { get; init; }
@@ -247,6 +254,7 @@ public sealed class RuntimeRouteDriver
     private bool _started;
     private long _travelBaseline;
     private long _turnBaseline;
+    private long _strafeBaseline;
     private LeapPhase _phase;
     private float _takeoffHeight;
 
@@ -351,6 +359,15 @@ public sealed class RuntimeRouteDriver
     /// </summary>
     public const float NoAimTakeoffRadius = 0.1f;
 
+    /// <summary>
+    /// How near the takeoff the route planned a leap from a body stands to be at that takeoff.
+    /// A leap aimed again from inside it is kept the way the route's own leap is, without the
+    /// check that a landing narrower than the body still holds the body when the leap leaves a
+    /// little off, so it is the very slack the planner checks its own leaps through and no
+    /// wider: from farther the check is what keeps a leap off a rock it would come down beside.
+    /// </summary>
+    public const float AtItsTakeoffRadius = NavLeapFinder.TakeoffSlack;
+
     public RuntimeRouteDriveState State { get; private set; } = RuntimeRouteDriveState.Driving;
 
     /// <summary>The index in <see cref="Legs"/> of the leg end the body is heading for.</summary>
@@ -397,6 +414,9 @@ public sealed class RuntimeRouteDriver
     /// <summary>Whether the last leap faced was charged and flown, rather than left to walk back to its takeoff first.</summary>
     public bool LeapFlew { get; private set; }
 
+    /// <summary>Whether the leap last charged came down: false for one that never left the ground.</summary>
+    public bool LeapLanded => _touchedDown;
+
     /// <summary>Where the body was as the last leap came down.</summary>
     public Vector3 LandingTouchdown { get; private set; }
 
@@ -440,10 +460,12 @@ public sealed class RuntimeRouteDriver
             _started = true;
             _travelBaseline = Baseline(sample.Moves.Travel);
             _turnBaseline = Baseline(sample.Moves.Turn);
+            _strafeBaseline = Baseline(sample.Moves.Strafe);
         }
 
         RuntimeMoveChannelSnapshot travel = sample.Moves.Travel;
         RuntimeMoveChannelSnapshot turn = sample.Moves.Turn;
+        RuntimeMoveChannelSnapshot strafe = sample.Moves.Strafe;
         bool travelIsOurs = travel.Sequence > _travelBaseline;
         bool turnIsOurs = turn.Sequence > _turnBaseline;
         bool travelling = travelIsOurs && travel.State == RuntimeScriptedMoveState.Moving;
@@ -455,7 +477,8 @@ public sealed class RuntimeRouteDriver
         if (sample.InPortalSpace)
             return Finish(RuntimeRouteDriveState.Lost, travelling, turning);
         if ((travelIsOurs && travel.State == RuntimeScriptedMoveState.Interrupted)
-            || (turnIsOurs && turn.State == RuntimeScriptedMoveState.Interrupted))
+            || (turnIsOurs && turn.State == RuntimeScriptedMoveState.Interrupted)
+            || (strafe.Sequence > _strafeBaseline && strafe.State == RuntimeScriptedMoveState.Interrupted))
         {
             _phase = LeapPhase.None;
             State = RuntimeRouteDriveState.Interrupted;
@@ -477,10 +500,27 @@ public sealed class RuntimeRouteDriver
             _settling = _cutting.Pace;
             _cutting = default;
         }
+        // A sidestep runs to its end before the spot it steps onto counts as reached: a turn
+        // or a walk begun across one spoils it. It goes out on a strafe channel of its own, so
+        // that is where it is watched, and not on the travel channel the legs are walked on.
+        if (_sidestepTo is { } stepping
+            && StillStepping(sample, position, stepping, travelling, turning, out RuntimeRouteDriveStep onward))
+        {
+            return onward;
+        }
         if (_walkingBack is { } back)
         {
             if (Vector2.Distance(position, back) > MathF.Max(NoAimTakeoffRadius, stopMeters > 0f ? stopMeters + (stepped / 2f) : 0f))
             {
+                // A gap a forward move overshoots is stepped across sideways, as the step onto a
+                // takeoff is: asked to walk 0.25 m back the body moves 0.76 m, past the takeoff
+                // it went back for and off the far side of a rock top.
+                if (Sidestep(position, back, sample, travelling, turning) is { } stepBack)
+                {
+                    if (stepBack.Travel is not null)
+                        _approach = _approach with { Sidesteps = _approach.Sidesteps + 1, BegunAt = position };
+                    return stepBack;
+                }
                 float offBack = SignedDegrees(CompassHeading(back - position) - sample.HeadingDegrees);
                 if (MathF.Abs(offBack) > TurnInPlaceDegrees)
                     return new RuntimeRouteDriveStep(Turn: turning ? null : TurnBy(offBack, RuntimeMovePace.Walk), StopTravel: travelling);
@@ -492,15 +532,6 @@ public sealed class RuntimeRouteDriver
                     Turn: !turning && MathF.Abs(offBack) > SteerToleranceDegrees ? TurnBy(offBack, RuntimeMovePace.Walk) : null);
             }
             _walkingBack = null;
-        }
-        if (_sidestepping)
-        {
-            if (travelling && travel.Request.Direction
-                is RuntimeMoveDirection.StrafeLeft or RuntimeMoveDirection.StrafeRight)
-            {
-                return default;
-            }
-            _sidestepping = false;
         }
         LeapFromHere(sample, position, travelling);
         if (_cutting.Pace is null)
@@ -605,6 +636,7 @@ public sealed class RuntimeRouteDriver
         if (State != RuntimeRouteDriveState.Driving)
             return default;
         _phase = LeapPhase.None;
+        _sidestepTo = null;
         State = RuntimeRouteDriveState.Interrupted;
         return new RuntimeRouteDriveStep(StopTravel: _started, StopTurn: _started);
     }
@@ -639,7 +671,7 @@ public sealed class RuntimeRouteDriver
                         sample.Position,
                         landing,
                         leap.Run,
-                        Vector2.Distance(position, Flat(_legs[LegIndex - 1])) <= TakeoffRadius);
+                        Vector2.Distance(position, Flat(_legs[LegIndex - 1])) <= AtItsTakeoffRadius);
 
                     // Nothing says the landing the route planned is the only one this spot can
                     // reach: where no leap at it is kept, a leap from here onto the same floor is
@@ -654,11 +686,14 @@ public sealed class RuntimeRouteDriver
                     // No leap from where the body came to rest is kept, and it stands off its
                     // takeoff: it goes back to the takeoff rather than fly the planned leap from
                     // the wrong spot.
-                    if (_aimLeapFrom is not null
-                        && _aim is null
-                        && Vector2.Distance(position, Flat(_legs[LegIndex - 1])) > NoAimTakeoffRadius)
+                    float offTakeoff = Vector2.Distance(position, Flat(_legs[LegIndex - 1]));
+                    if (_aimLeapFrom is not null && _aim is null && offTakeoff > NoAimTakeoffRadius)
                     {
-                        if (_approach.Adjustments < MostTakeoffAdjustments)
+                        // Going back is worth it only for a gap some move this client makes can
+                        // close: nothing it does moves the body less than a shortest sidestep,
+                        // so for anything shorter the walk plans again instead of stepping back
+                        // and forth over the takeoff until its tries run out.
+                        if (_approach.Adjustments < MostTakeoffAdjustments && offTakeoff > ShortestSidestepMeters)
                         {
                             // Walked straight back to rather than by stepping back a leg: the takeoff can
                             // be where the leap before came down, whose own leg is that leap.
@@ -668,17 +703,14 @@ public sealed class RuntimeRouteDriver
                             return default;
                         }
 
-                        // The body kept no leap from where it stands and could not get back to its
+                        // The body kept no leap from where it stands and cannot get back to its
                         // takeoff: on a rock top narrower than the body, a walk back slides along
-                        // the edge and never arrives. Within the takeoff's own radius the planned
-                        // leap still holds, so it flies; from farther the walk plans again rather
-                        // than fly it from the wrong spot, as one flown from 3.13 m off did before
-                        // coming down short and falling 17.9 m.
-                        if (Vector2.Distance(position, Flat(_legs[LegIndex - 1])) > TakeoffRadius)
-                        {
-                            State = RuntimeRouteDriveState.Blocked;
-                            return new RuntimeRouteDriveStep(StopTravel: travelling);
-                        }
+                        // the edge and never arrives. The leap the route planned holds only from
+                        // that takeoff, so the walk plans again from here rather than fly it from
+                        // the wrong spot, as one flown from 0.29 m off did before coming down
+                        // beyond its rock and falling 160 m.
+                        State = RuntimeRouteDriveState.Blocked;
+                        return new RuntimeRouteDriveStep(StopTravel: travelling);
                     }
                 }
                 float error = SignedDegrees(CompassHeading(Flat(landing) - position) - sample.HeadingDegrees);
@@ -698,6 +730,8 @@ public sealed class RuntimeRouteDriver
                 {
                     TakeoffError = Vector2.Distance(position, Flat(_legs[LegIndex - 1])),
                     ChargedAt = position,
+                    ChargedFrom = sample.Position,
+                    FlownAt = _flyAt,
                     FacingError = -error,
                     PlannedPower = leap.Power,
                     PlannedRun = leap.Run,
@@ -764,6 +798,7 @@ public sealed class RuntimeRouteDriver
         _flyAt = null;
         _cutting = default;
         _settling = null;
+        _sidestepTo = null;
         State = state;
         return new RuntimeRouteDriveStep(StopTravel: travelling, StopTurn: turning);
     }
@@ -807,7 +842,7 @@ public sealed class RuntimeRouteDriver
                 sample.Position,
                 _legs[leap],
                 _leaps[leap].Run,
-                Vector2.Distance(position, Flat(_legs[leap - 1])) <= TakeoffRadius) is null)
+                Vector2.Distance(position, Flat(_legs[leap - 1])) <= AtItsTakeoffRadius) is null)
             return;
         float skipped = 0f;
         Vector2 from = position;
@@ -836,12 +871,18 @@ public sealed class RuntimeRouteDriver
             return false;
         }
         var position = new Vector2(sample.Position.X, sample.Position.Y);
-        return Vector2.Distance(position, Flat(_legs[index])) <= ShortestRunUpMeters
+        // On the takeoff's own floor, as a leap taken from anywhere on it is: another floor
+        // a step away in plan can lie below or above this one, and a leap kept from there
+        // would carry the body off it in place of the walk to the takeoff.
+        bool onItsFloor = _sameFloor?.Invoke(sample.Position, _legs[index])
+            ?? MathF.Abs(sample.Position.Z - _legs[index].Z) <= LeapFromHereHeight;
+        return onItsFloor
+            && Vector2.Distance(position, Flat(_legs[index])) <= ShortestRunUpMeters
             && _aimLeapFrom(
                 sample.Position,
                 _legs[index + 1],
                 leap.Run,
-                Vector2.Distance(position, Flat(_legs[index])) <= TakeoffRadius) is not null;
+                Vector2.Distance(position, Flat(_legs[index])) <= AtItsTakeoffRadius) is not null;
     }
 
     private bool Reached(Vector2 position, int index, float stopMeters)
@@ -881,8 +922,44 @@ public sealed class RuntimeRouteDriver
     /// when the spot is farther than a walk's own shortest carry, or so near that a sidestep
     /// would not move at all.
     /// </summary>
-    /// <summary>Whether the body is part way through a sidestep, which runs to its end before the leg it steps onto counts as reached.</summary>
-    private bool _sidestepping;
+    /// <summary>The spot a sidestep under way steps onto, which it runs to before that spot counts as reached; null while none is.</summary>
+    private Vector2? _sidestepTo;
+
+    /// <summary>What the strafe channel stood at as a sidestep was asked for, so the move that follows it is known to be the one asked for.</summary>
+    private long _sidestepAsked = -1;
+
+    /// <summary>
+    /// Whether a sidestep is still to run, and what to send while it is. A sidestep goes out on
+    /// the strafe channel, not the travel channel the legs are walked on, so it is watched
+    /// there: while the client still holds ours the drive sends nothing, and one the client
+    /// never took up is asked for again, the way a walk is renewed, rather than left for the
+    /// leg's own turn and travel to move the body off the spot.
+    /// </summary>
+    private bool StillStepping(
+        in RuntimeRouteDriveSample sample,
+        Vector2 position,
+        Vector2 spot,
+        bool travelling,
+        bool turning,
+        out RuntimeRouteDriveStep step)
+    {
+        step = default;
+        RuntimeMoveChannelSnapshot strafe = sample.Moves.Strafe;
+        if (strafe.Sequence > _sidestepAsked)
+        {
+            if (strafe.State == RuntimeScriptedMoveState.Moving)
+                return true;
+            _sidestepTo = null;
+            return false;
+        }
+        if (Sidestep(position, spot, sample, travelling, turning) is { } again)
+        {
+            step = again;
+            return true;
+        }
+        _sidestepTo = null;
+        return false;
+    }
 
     private RuntimeRouteDriveStep? Sidestep(
         Vector2 position,
@@ -903,7 +980,8 @@ public sealed class RuntimeRouteDriver
             return new RuntimeRouteDriveStep(Turn: turning ? null : TurnBy(error, RuntimeMovePace.Walk), StopTravel: travelling);
         if (travelling || turning)
             return default(RuntimeRouteDriveStep);
-        _sidestepping = true;
+        _sidestepTo = spot;
+        _sidestepAsked = sample.Moves.Strafe.Sequence;
         return new RuntimeRouteDriveStep(
             Travel: new RuntimeMoveRequest(
                 right ? RuntimeMoveDirection.StrafeRight : RuntimeMoveDirection.StrafeLeft,
