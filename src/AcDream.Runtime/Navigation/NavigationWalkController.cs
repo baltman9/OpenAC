@@ -576,8 +576,10 @@ internal sealed partial class NavigationWalkController
     private static string Inv(FormattableString text)
         => text.ToString(System.Globalization.CultureInfo.InvariantCulture);
     /// <summary>
-    /// Where the planner's own flight puts the leap just flown down and at rest, flown from where the
-    /// body charged toward its landing at the power and pace it was flown at.
+    /// Where the planner's own flight puts the leap just flown down and at rest: flown from exactly
+    /// where the body charged, at the power and pace it was flown at, toward the spot it was aimed
+    /// at, which for a leap aimed onward is that spot and not the landing the route planned. Only
+    /// the leap that was flown can be replayed against what it did.
     /// </summary>
     private string ModelledTouchdown(RuntimeRouteDriver driver)
     {
@@ -590,8 +592,8 @@ internal sealed partial class NavigationWalkController
         {
             return string.Empty;
         }
-        Vector3 end = driver.Legs[landing];
-        var start = new Vector3(approach.ChargedAt, driver.Legs[approach.Leg].Z);
+        Vector3 end = approach.FlownAt ?? driver.Legs[landing];
+        Vector3 start = approach.ChargedFrom;
         bool run = approach.Aimed?.Run ?? approach.PlannedRun;
         if (_aimFinder is not { } cached || !ReferenceEquals(cached.Grid, grid) || cached.Ability != ability)
             _aimFinder = cached = (grid, ability, new NavLeapFinder(grid, ability));
@@ -1198,7 +1200,9 @@ internal sealed partial class NavigationWalkController
             Say(Inv(
                 $"Walk to {Label(active)}: the leap landed at {sample.Position.Z:0.0} m, {driver.LandingError:0.0} m from where it was planned, after sliding {driver.LandingSlide:0.0} m"));
         }
-        if (wasLeaping && !driver.IsLeaping && driver.LeapFlew && sample.Airborne is false && driver.State != RuntimeRouteDriveState.Interrupted)
+        // Only a leap that came down has a landing to measure: one that never left the ground
+        // ends the drive with nothing of its own to say.
+        if (wasLeaping && !driver.IsLeaping && driver.LeapLanded && sample.Airborne is false && driver.State != RuntimeRouteDriveState.Interrupted)
         {
             Detail(string.Create(
                 System.Globalization.CultureInfo.InvariantCulture,
@@ -1962,19 +1966,18 @@ internal sealed partial class NavigationWalkController
         var goal = new Vector2(active.Goal.X, active.Goal.Y);
         foreach (ShadowEntry entry in _physics.ShadowObjects.AllEntriesForDebug())
         {
-            if (grid.ObjectIds.Contains(entry.EntityId)
-                || Vector2.Distance(new Vector2(entry.Position.X, entry.Position.Y), goal)
-                    > GoalObjectReach + entry.Radius
-                || !_goals.StandsStill(entry.EntityId))
-            {
+            if (grid.ObjectIds.Contains(entry.EntityId) || !_goals.StandsStill(entry.EntityId))
                 continue;
-            }
+            // How near the goal a part comes is measured from its footprint and never from
+            // the position it is registered at: a part's collision can sit well off that
+            // position, and the radius kept beside it is its model's own, measured about the
+            // model's middle rather than about where the part stands.
             NavAvoidance footprint = NavGeometry.FootprintOf(entry, _physics.DataCache);
-            if (Vector2.Distance(new Vector2(footprint.Centre.X, footprint.Centre.Y), goal)
-                <= footprint.Radius + body.Radius)
-            {
+            float fromGoal = Vector2.Distance(new Vector2(footprint.Centre.X, footprint.Centre.Y), goal);
+            if (fromGoal > GoalObjectReach + footprint.Radius)
+                continue;
+            if (fromGoal <= footprint.Radius + body.Radius)
                 return true;
-            }
         }
         return false;
     }
