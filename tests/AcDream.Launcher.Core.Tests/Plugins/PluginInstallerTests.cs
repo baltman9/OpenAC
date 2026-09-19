@@ -424,6 +424,62 @@ public sealed class PluginInstallerTests
     }
 
     [Fact]
+    public async Task AFolderThatAppearsDuringTheDownloadIsRefusedAndLeftAlone()
+    {
+        using var fixture = new Fixture();
+        var release = fixture.BuildRelease(Id, "0.1.0");
+        fixture.RegisterRelease(Repo, release);
+        string handPlaced = Path.Combine(fixture.Paths.PluginsDirectory, Id);
+        Uri zipUri = GitHubReleaseLocator.TaggedAsset(Repo, release.Tag, release.ZipName);
+        fixture.Handler.OnRequest = uri =>
+        {
+            if (uri == zipUri)
+            {
+                Directory.CreateDirectory(handPlaced);
+                File.WriteAllText(Path.Combine(handPlaced, "mine.txt"), "placed by hand");
+            }
+        };
+
+        LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(() =>
+            fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null));
+
+        Assert.Contains("launcher didn't install it", error.Message, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(handPlaced, "mine.txt")));
+        Assert.Null(fixture.RecordStore.Find(Id));
+    }
+
+    [Fact]
+    public async Task AManifestSavedWithAByteOrderMarkInstalls()
+    {
+        using var fixture = new Fixture();
+        var release = fixture.BuildRelease(Id, "0.1.0", manifestByteOrderMark: true);
+        fixture.RegisterRelease(Repo, release);
+
+        PluginInstallResult result = await fixture.Installer.InstallOrUpdateAsync(
+            Repo, release.Tag, null, null);
+
+        Assert.Equal("0.1.0", result.Version);
+    }
+
+    [Fact]
+    public async Task TheSameRepositorySpelledInAnotherCaseIsAnUpdate()
+    {
+        using var fixture = new Fixture();
+        var first = fixture.BuildRelease(Id, "0.1.0");
+        fixture.RegisterRelease(Repo, first);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, first.Tag, null, null);
+
+        string otherCase = Repo.ToUpperInvariant();
+        var second = fixture.BuildRelease(Id, "0.2.0");
+        fixture.RegisterRelease(otherCase, second);
+        PluginInstallResult result = await fixture.Installer.InstallOrUpdateAsync(
+            otherCase, second.Tag, null, null);
+
+        Assert.True(result.WasUpdate);
+        Assert.Equal("0.2.0", fixture.RecordStore.Find(Id)!.Version);
+    }
+
+    [Fact]
     public async Task InstallRefusedWhenIdCollidesWithAManualPlugin()
     {
         using var fixture = new Fixture();
@@ -1036,10 +1092,15 @@ public sealed class PluginInstallerTests
             string id,
             string version,
             string? entryDll = null,
-            byte[]? icon = null)
+            byte[]? icon = null,
+            bool manifestByteOrderMark = false)
         {
             entryDll ??= id + ".dll";
             byte[] manifestBytes = Encoding.UTF8.GetBytes(ManifestJson(id, version, entryDll));
+            if (manifestByteOrderMark)
+            {
+                manifestBytes = [.. Encoding.UTF8.Preamble, .. manifestBytes];
+            }
             List<(string Name, byte[] Content, int? UnixAttributes)> entries =
             [
                 ("plugin.json", manifestBytes, null),
@@ -1150,6 +1211,9 @@ public sealed class PluginInstallerTests
 
         public readonly List<Uri> Requests = [];
 
+        /// <summary>Runs as each request arrives, so a test can change the disk mid-install.</summary>
+        public Action<Uri>? OnRequest;
+
         public void EnqueueRedirect(Uri from, Uri to) => Route(from).Enqueue(Redirect(to));
 
         public void EnqueueOk(Uri uri, byte[] body) => Route(uri).Enqueue(Ok(body));
@@ -1164,6 +1228,7 @@ public sealed class PluginInstallerTests
             Uri uri = request.RequestUri
                 ?? throw new InvalidOperationException("Test request has no URI.");
             Requests.Add(uri);
+            OnRequest?.Invoke(uri);
             if (_routes.TryGetValue(uri.AbsoluteUri, out Queue<HttpResponseMessage>? queue)
                 && queue.Count > 0)
             {

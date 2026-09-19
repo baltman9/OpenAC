@@ -202,6 +202,13 @@ public sealed record LauncherPluginManifest(
                 $"id '{Id}' does not match the required namespaced pattern");
         }
 
+        // The id names the install folder, and Windows reads "nul.anything" as a device.
+        if (PortablePathRules.IsWindowsDeviceName(Id))
+        {
+            throw new LauncherPluginManifestException(
+                $"id '{Id}' starts with a name Windows reserves for a device");
+        }
+
         if (!LauncherVersion.TryParse(Version, out _))
         {
             throw new LauncherPluginManifestException(
@@ -235,7 +242,8 @@ public sealed record LauncherPluginManifest(
 
     /// <summary>Whether <paramref name="id"/> matches the namespaced pattern <see cref="ValidateForInstall"/>
     /// requires, reused wherever an id is trusted enough to name a storage path (L-318).</summary>
-    public static bool HasValidInstallId(string id) => IdPattern.IsMatch(id);
+    public static bool HasValidInstallId(string id) =>
+        IdPattern.IsMatch(id) && !PortablePathRules.IsWindowsDeviceName(id);
 
     /// <summary>Whether a release tag names this manifest's own version, so "latest" can't drift
     /// between the manifest fetch and the asset downloads that follow it.</summary>

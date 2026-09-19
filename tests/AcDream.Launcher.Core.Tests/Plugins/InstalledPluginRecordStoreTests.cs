@@ -162,6 +162,32 @@ public sealed class InstalledPluginRecordStoreTests : IDisposable
         Assert.Throws<LauncherUpdateException>(() => store.Load());
     }
 
+    [Theory]
+    [InlineData("../../app")]
+    [InlineData("C:/Users/someone/Documents")]
+    [InlineData("nul.hello")]
+    [InlineData("hello")]
+    public void ARecordIdThatCouldNotNameAnInstallFolderIsRejected(string id)
+    {
+        string path = Path.Combine(_root, "app", "plugins-installed.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, $$"""
+            {
+              "schemaVersion": 1,
+              "plugins": [
+                { "id": "{{id}}", "repo": "shaneedwards/openac-plugin-hello",
+                  "source": "listed", "version": "0.1.0", "tag": "v0.1.0",
+                  "zipSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "installedAt": "2026-01-01T00:00:00Z", "pending": null }
+              ]
+            }
+            """);
+
+        var store = new InstalledPluginRecordStore(path);
+        Assert.Throws<LauncherUpdateException>(() => store.Load());
+        Assert.Empty(store.Records);
+    }
+
     [Fact]
     public void UnsupportedSchemaVersionIsRejected()
     {

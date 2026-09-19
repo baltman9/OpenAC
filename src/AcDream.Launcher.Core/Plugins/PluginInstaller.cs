@@ -103,8 +103,13 @@ public sealed class PluginInstaller
         LauncherPluginManifest manifest;
         try
         {
-            manifest = LauncherPluginManifest.Parse(
-                Encoding.UTF8.GetString(manifestDocument.Content));
+            // Every read of an installed plugin.json drops a byte-order mark, so the published
+            // copy is read the same way; otherwise a file the checker accepts fails to install.
+            ReadOnlySpan<byte> manifestBytes = manifestDocument.Content;
+            if (manifestBytes.StartsWith(Encoding.UTF8.Preamble))
+                manifestBytes = manifestBytes[Encoding.UTF8.Preamble.Length..];
+
+            manifest = LauncherPluginManifest.Parse(Encoding.UTF8.GetString(manifestBytes));
             manifest.ValidateForInstall();
         }
         catch (LauncherPluginCapabilityVersionException ex)
@@ -151,7 +156,7 @@ public sealed class PluginInstaller
 
         InstalledPluginRecord? existingRecord = _recordStore.Find(manifest.Id);
         bool isUpdate = existingRecord is not null
-            && string.Equals(existingRecord.Repo, repo, StringComparison.Ordinal);
+            && string.Equals(existingRecord.Repo, repo, StringComparison.OrdinalIgnoreCase);
 
         if (existingRecord is not null && !isUpdate)
         {
@@ -174,16 +179,7 @@ public sealed class PluginInstaller
         }
 
         string targetDirectory = Path.Combine(_paths.PluginsDirectory, manifest.Id);
-        if (existingRecord is null && Directory.Exists(targetDirectory))
-        {
-            // The full path stays out of the player-facing message; the inner exception keeps it
-            // for diagnostics.
-            throw new LauncherUpdateException(
-                $"A folder named {manifest.Id} is already in your plugins folder, and the "
-                + "launcher didn't install it. Move or delete that folder, then try again.",
-                new LauncherUpdateException(
-                    $"'{targetDirectory}' already exists and is not a launcher-managed plugin."));
-        }
+        RefuseUnmanagedFolder(existingRecord, manifest.Id, targetDirectory);
 
         if (isUpdate)
         {
@@ -274,6 +270,10 @@ public sealed class PluginInstaller
 
             using (lease)
             {
+                // Asked again now that nothing else can change the folder: a copy placed by hand
+                // while the download ran must not be swapped out as if it were the old version.
+                RefuseUnmanagedFolder(existingRecord, manifest.Id, targetDirectory);
+
                 SwapIntoPlace(
                     manifest.Id,
                     repo,
@@ -605,6 +605,23 @@ public sealed class PluginInstaller
         TryDeleteIfEmpty(Path.Combine(_paths.PluginsDirectory, ".trash"));
     }
 
+    private static void RefuseUnmanagedFolder(
+        InstalledPluginRecord? existingRecord,
+        string id,
+        string targetDirectory)
+    {
+        if (existingRecord is not null || !Directory.Exists(targetDirectory))
+            return;
+
+        // The full path stays out of the player-facing message; the inner exception keeps it
+        // for diagnostics.
+        throw new LauncherUpdateException(
+            $"A folder named {id} is already in your plugins folder, and the "
+            + "launcher didn't install it. Move or delete that folder, then try again.",
+            new LauncherUpdateException(
+                $"'{targetDirectory}' already exists and is not a launcher-managed plugin."));
+    }
+
     private void Upsert(InstalledPluginRecord record)
     {
         int index = _recordStore.Records.FindIndex(
@@ -647,7 +664,7 @@ public sealed class PluginInstaller
         catalog is not null
         && catalog.Plugins.Any(entry =>
             string.Equals(entry.Id, id, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(entry.Repo, repo, StringComparison.Ordinal))
+            && string.Equals(entry.Repo, repo, StringComparison.OrdinalIgnoreCase))
             ? PluginInstallSource.Listed
             : PluginInstallSource.Unlisted;
 

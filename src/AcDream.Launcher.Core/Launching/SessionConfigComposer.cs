@@ -324,7 +324,14 @@ public static class SessionConfigComposer
         var allowed = new List<string>(checkedIds.Count);
         foreach (string id in checkedIds)
         {
-            if (effective.IsBlocked(id, version: null))
+            // A block can name single versions, so it is judged against the installed one. An id
+            // with no readable version stays on the strict side: any block on it applies.
+            LauncherVersion? installedVersion =
+                inventoryById.TryGetValue(id, out InstalledPluginInfo? installed)
+                && LauncherVersion.TryParse(installed.Version, out LauncherVersion? parsed)
+                    ? parsed
+                    : null;
+            if (effective.IsBlocked(id, installedVersion))
             {
                 statusLines.Add($"Plugin '{id}' is blocked and was not loaded.");
                 continue;

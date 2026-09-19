@@ -290,6 +290,44 @@ public sealed class SessionConfigComposerTests
             composed.PluginStatusLines);
     }
 
+    [Theory]
+    [InlineData("0.1.0", true)]
+    [InlineData("0.0.9", false)]
+    public void ABlockOnOneVersionFiltersOnlyThatInstalledVersion(string blockedVersion, bool filtered)
+    {
+        using var plugins = new TempPluginRoot();
+        plugins.WriteFolder("edwards.hello", writeEntryDll: true);   // installs version 0.1.0
+        CharacterProfile character = Character(LaunchMode.Gui);
+        character.Plugins = ["edwards.hello"];
+        PluginCatalog catalog = PluginCatalog.Parse($$"""
+            {
+              "schemaVersion": 1,
+              "plugins": [
+                { "id": "edwards.hello", "name": "Hello", "author": "Shane Edwards",
+                  "description": "Says hello.", "repo": "shaneedwards/openac-plugin-hello" }
+              ],
+              "blocked": [
+                { "id": "edwards.hello", "versions": ["{{blockedVersion}}"], "reason": "test" }
+              ]
+            }
+            """);
+
+        ComposedSessionConfig composed = SessionConfigComposer.Compose(
+            Server(),
+            Account(),
+            character,
+            Install,
+            plugins.Paths,
+            sessionId: "session-version-block",
+            catalog: catalog);
+
+        JsonObject session = SingleSession(composed);
+        Assert.Equal(
+            filtered ? [] : ["edwards.hello"],
+            session["plugins"]!.AsArray().Select(node => (string?)node));
+        Assert.Equal(filtered ? 1 : 0, composed.PluginStatusLines.Count);
+    }
+
     [Fact]
     public void WithNoCatalogAndNoCacheConfiguredPluginsAreNotFiltered()
     {

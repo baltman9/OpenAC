@@ -109,6 +109,7 @@ public sealed partial class LauncherWindowViewModel
         var placed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var wrongHostDisplayNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var refusedDisplayNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var blockedDisplayNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         LauncherPluginHostKind host = character.LaunchMode == LaunchMode.Headless
             ? LauncherPluginHostKind.Headless
             : LauncherPluginHostKind.Graphical;
@@ -116,7 +117,7 @@ public sealed partial class LauncherWindowViewModel
         if (_pluginInventory is not null)
         {
             IEnumerable<InstalledPluginInfo> installed = _pluginInventory
-                .Build(clientResolution: null, catalog: null)
+                .Build(clientResolution: null, Plugins.CurrentCatalog)
                 .OrderBy(info => info.DisplayName, StringComparer.OrdinalIgnoreCase);
             foreach (InstalledPluginInfo info in installed)
             {
@@ -132,6 +133,13 @@ public sealed partial class LauncherWindowViewModel
                 if (info.Refusal is not null || info.HasDuplicate)
                 {
                     refusedDisplayNames[info.Id] = info.DisplayName;
+                    continue;
+                }
+
+                // A blocked plugin is dropped at launch, so it is not offered as a working choice.
+                if (info.Blocked is not null)
+                {
+                    blockedDisplayNames[info.Id] = info.DisplayName;
                     continue;
                 }
 
@@ -159,7 +167,9 @@ public sealed partial class LauncherWindowViewModel
                 ? $"{installedName} (not available for this mode)"
                 : refusedDisplayNames.TryGetValue(id, out string? refusedName)
                     ? $"{refusedName} (refused)"
-                    : $"{id} (missing)";
+                    : blockedDisplayNames.TryGetValue(id, out string? blockedName)
+                        ? $"{blockedName} (blocked)"
+                        : $"{id} (missing)";
             CharacterPluginChoices.Add(new CharacterPluginChoiceViewModel(
                 id, displayName, isChecked: true, isMissing: true));
         }

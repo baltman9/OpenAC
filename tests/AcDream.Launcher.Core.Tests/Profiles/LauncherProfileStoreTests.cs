@@ -73,6 +73,21 @@ public sealed class LauncherProfileStoreTests : IDisposable
     }
 
     [Fact]
+    public void SaveNeverWritesAnUnsetAccountRowSelection()
+    {
+        var store = new LauncherProfileStore(_filePath);
+        store.Load();
+        store.AddServer("Local ACE", "127.0.0.1", 9000);
+        store.AddAccount("Local ACE", "testaccount", "pw");
+
+        store.Save();
+
+        string saved = File.ReadAllText(_filePath);
+        Assert.DoesNotContain("selectedCharacter", saved);
+        Assert.DoesNotContain("selectedLaunchMode", saved);
+    }
+
+    [Fact]
     public void ShowBetaPluginsRoundTrips()
     {
         var store = new LauncherProfileStore(_filePath);

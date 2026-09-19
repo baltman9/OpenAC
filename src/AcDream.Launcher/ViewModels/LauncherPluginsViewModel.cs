@@ -445,6 +445,10 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
 
     private LauncherPluginComposition? _composition;
     private Func<ClientVersionResolution?> _clientVersionResolver = () => null;
+
+    /// <summary>The plugin list as last checked, so another view can judge a block the same way
+    /// this panel does. Null until a check has produced one.</summary>
+    internal PluginCatalog? CurrentCatalog => _composition?.CurrentCatalog;
     private CancellationTokenSource? _cancellation;
     private DateTimeOffset? _listAgeUtc;
     private readonly Dictionary<string, DiscoverDetails> _discoverDetailsCache =

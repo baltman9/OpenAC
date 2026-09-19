@@ -133,6 +133,14 @@ public sealed class InstalledPluginRecordStore
                     $"'{FilePath}' has an installed-plugin record with a missing id or repo.");
             }
 
+            // A record id names the folder that Remove and Recover move and delete, so it is held
+            // to the same rule as the id of a manifest being installed.
+            if (!LauncherPluginManifest.HasValidInstallId(record.Id))
+            {
+                throw new LauncherUpdateException(
+                    $"'{FilePath}' has an installed-plugin record with an id that is not a plugin id.");
+            }
+
             if (!ids.Add(record.Id))
             {
                 throw new LauncherUpdateException(
