@@ -187,7 +187,7 @@
                               <TextBlock Grid.Column="4" Text="{Binding Status}" VerticalAlignment="Center" Margin="0,2,0,0" Classes="muted" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Status}" />
                               <Button Grid.Column="5" Content="Play" Classes="primary" Classes.ready="{Binding CanPlay}" Command="{Binding PlayCommand}" IsVisible="{Binding !IsActive}" VerticalAlignment="Center" HorizontalAlignment="Stretch" ToolTip.Tip="{Binding DisabledReason}" />
                               <Button Grid.Column="5" Content="Stop" Command="{Binding StopCommand}" IsVisible="{Binding IsActive}" VerticalAlignment="Center" HorizontalAlignment="Stretch" />
-                              <Button Grid.Column="6" Content="···" Padding="4" Command="{Binding OptionsCommand}" VerticalAlignment="Center" AutomationProperties.Name="Character options" />
+                              <Button Grid.Column="6" Content="···" Padding="4" Command="{Binding OptionsCommand}" VerticalAlignment="Center" AutomationProperties.Name="Plugins and logon commands" ToolTip.Tip="Plugins and logon commands" />
                               <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="6" Text="{Binding LaunchError}" IsVisible="{Binding HasLaunchError}" Foreground="#FFB0A0" TextWrapping="Wrap" FontSize="12" Margin="0,3,0,3" />
                             </Grid>
                           </Border>
@@ -648,8 +648,8 @@
             KeyboardNavigation.TabNavigation="Cycle" KeyDown="OnModalKeyDown" AutomationProperties.Name="Character options dialog">
       <Border Classes="card" Margin="24" MaxWidth="720" VerticalAlignment="Stretch">
         <Grid RowDefinitions="Auto,Auto,*,Auto,*,Auto,Auto" RowSpacing="8">
-          <TextBlock Text="{Binding SelectionTitle}" FontSize="22" />
-          <TextBlock Grid.Row="1" Text="Plugins · only checked plugins load" Classes="muted" />
+          <TextBlock Text="{Binding RowOptionsTitle}" FontSize="22" />
+          <TextBlock Grid.Row="1" Text="{Binding RowOptionsPluginsCaption}" Classes="muted" TextWrapping="Wrap" />
           <ScrollViewer Grid.Row="2" x:Name="CharacterPluginsPanel" Focusable="True" ScrollViewer.VerticalScrollBarVisibility="Auto">
             <ItemsControl ItemsSource="{Binding CharacterPluginChoices}">
               <ItemsControl.ItemTemplate>
@@ -660,8 +660,8 @@
               </ItemsControl.ItemTemplate>
             </ItemsControl>
           </ScrollViewer>
-          <TextBlock Grid.Row="3" Text="Logon commands · one command per line" Classes="muted" />
-          <TextBox Grid.Row="4" Text="{Binding CharacterLoginCommandsText, Mode=TwoWay}" AcceptsReturn="True" ScrollViewer.VerticalScrollBarVisibility="Auto" />
+          <TextBlock Grid.Row="3" Text="Logon commands · one command per line" Classes="muted" IsVisible="{Binding ShowRowLogonCommands}" />
+          <TextBox Grid.Row="4" Text="{Binding CharacterLoginCommandsText, Mode=TwoWay}" AcceptsReturn="True" IsVisible="{Binding ShowRowLogonCommands}" ScrollViewer.VerticalScrollBarVisibility="Auto" />
           <TextBlock Grid.Row="5" Text="{Binding LastError}" Foreground="#FFB0A0" TextWrapping="Wrap" />
           <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
             <Button Content="Cancel" Command="{Binding CloseDesktopDialogCommand}" />

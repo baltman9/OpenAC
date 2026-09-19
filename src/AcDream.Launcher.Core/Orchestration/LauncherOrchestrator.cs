@@ -382,6 +382,23 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
                 selectedCharacter,
                 selectedLaunchMode));
 
+    /// <summary>What a launch to the character screen may load. The character is picked inside the
+    /// client, after the plugin list is already fixed, so only a plugin every character on the
+    /// account has opted into is safe: whoever is picked, it is one they enabled.</summary>
+    internal static List<string> PluginsEnabledForEveryCharacter(AccountProfile account)
+    {
+        if (account.Characters.Count == 0)
+        {
+            return [];
+        }
+
+        return [.. account.Characters[0].Plugins
+            .Where(id => !string.Equals(id, "none", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(id => account.Characters.All(character =>
+                character.Plugins.Contains(id, StringComparer.OrdinalIgnoreCase)))];
+    }
+
     /// <summary>Launcher-wide beta discovery setting.</summary>
     public void SetShowBetaPlugins(bool value) =>
         MutateProfiles(() => _profileStore.SetShowBetaPlugins(value));
@@ -434,7 +451,7 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
                 {
                     Name = string.Empty,
                     LaunchMode = LaunchMode.GuiSelect,
-                    Plugins = [],
+                    Plugins = PluginsEnabledForEveryCharacter(account),
                     LoginCommands = [],
                 };
             }

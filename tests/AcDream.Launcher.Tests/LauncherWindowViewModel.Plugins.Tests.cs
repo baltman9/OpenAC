@@ -290,6 +290,98 @@ public sealed partial class LauncherWindowViewModelTests
             Assert.Single(viewModel.CharacterPluginChoices).DisplayName);
     }
 
+    [Fact]
+    public void ARowSetToTheCharacterScreenOpensTheSameDialogAndEnablesForEveryCharacter()
+    {
+        using var fixture = new PluginChecklistFixture();
+        fixture.WriteManifest("plugin.both", ["graphical", "headless"]);
+        fixture.WriteManifest("plugin.graphical", ["graphical"]);
+        using var orchestrator = new FakeLauncherOrchestrator
+        {
+            ServersOverride =
+            [
+                new LauncherServerSnapshot("Local ACE", "127.0.0.1", 9000,
+                [
+                    new LauncherAccountSnapshot("Local ACE", "testaccount",
+                    [
+                        new LauncherCharacterSnapshot(
+                            "Local ACE", "testaccount", "+One", "0x50000001",
+                            LaunchMode.Gui, ["plugin.both", "other.kept"], [], false, "Ready"),
+                        new LauncherCharacterSnapshot(
+                            "Local ACE", "testaccount", "+Two", "0x50000002",
+                            LaunchMode.Headless, [], ["/hello"], false, "Ready"),
+                    ],
+                    HasRunningActivity: false,
+                    ActivityStatus: "Ready"),
+                ]),
+            ],
+        };
+        using var viewModel = CreateInitialized(orchestrator, pluginInventory: fixture.Inventory);
+
+        LauncherAccountServerRowViewModel row = viewModel.Accounts[0].Servers[0];
+        row.OptionsCommand.Execute(null);
+
+        Assert.True(viewModel.IsCharacterOptionsOpen);
+        Assert.False(viewModel.TextEditor.IsOpen);
+        Assert.True(viewModel.IsAccountRowOptions);
+        Assert.False(viewModel.ShowRowLogonCommands);
+        CharacterPluginChoiceViewModel both = Assert.Single(
+            viewModel.CharacterPluginChoices, choice => choice.Id == "plugin.both");
+        Assert.False(both.IsChecked);
+        Assert.Equal("plugin.both (on 1 of 2 characters)", both.DisplayName);
+        CharacterPluginChoiceViewModel graphical = Assert.Single(
+            viewModel.CharacterPluginChoices, choice => choice.Id == "plugin.graphical");
+
+        both.IsChecked = true;
+        graphical.IsChecked = true;
+        viewModel.SaveRowOptionsCommand.Execute(null);
+
+        // +One gains the graphical plugin and keeps everything else; +Two, a headless character,
+        // gains only the plugin that supports headless, and the dialog says what it left out.
+        Assert.Equal(2, orchestrator.SettingsUpdates.Count);
+        Assert.Equal(
+            ["plugin.both", "other.kept", "plugin.graphical"],
+            orchestrator.SettingsUpdates.Single(update => update.Item3 == "+One").Item5);
+        Assert.Equal(
+            ["plugin.both"],
+            orchestrator.SettingsUpdates.Single(update => update.Item3 == "+Two").Item5);
+        Assert.Contains("plugin.graphical for +Two", viewModel.LastError, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnUntouchedPartlyEnabledPluginIsLeftAsItIs()
+    {
+        using var fixture = new PluginChecklistFixture();
+        fixture.WriteManifest("plugin.both", ["graphical", "headless"]);
+        using var orchestrator = new FakeLauncherOrchestrator
+        {
+            ServersOverride =
+            [
+                new LauncherServerSnapshot("Local ACE", "127.0.0.1", 9000,
+                [
+                    new LauncherAccountSnapshot("Local ACE", "testaccount",
+                    [
+                        new LauncherCharacterSnapshot(
+                            "Local ACE", "testaccount", "+One", "0x50000001",
+                            LaunchMode.Gui, ["plugin.both"], [], false, "Ready"),
+                        new LauncherCharacterSnapshot(
+                            "Local ACE", "testaccount", "+Two", "0x50000002",
+                            LaunchMode.Gui, [], [], false, "Ready"),
+                    ],
+                    HasRunningActivity: false,
+                    ActivityStatus: "Ready"),
+                ]),
+            ],
+        };
+        using var viewModel = CreateInitialized(orchestrator, pluginInventory: fixture.Inventory);
+
+        viewModel.Accounts[0].Servers[0].OptionsCommand.Execute(null);
+        viewModel.SaveRowOptionsCommand.Execute(null);
+
+        Assert.Empty(orchestrator.SettingsUpdates);
+        Assert.False(viewModel.IsCharacterOptionsOpen);
+    }
+
     private sealed class PluginChecklistFixture : IDisposable
     {
         private readonly string _root = Path.Combine(

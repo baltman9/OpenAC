@@ -36,9 +36,10 @@ Removing a server removes its saved characters. Keep server names unchanged
 to retain their character settings. If profiles change while an editor is open,
 reopen the editor before saving.
 
-Use a named character row's **…** action to choose which installed plugins
-load for it (see **Plugins** below) and to edit one-command-per-line logon
-commands. **Logon commands** in the bottom bar provides the complete
+A row's **…** action always opens the same dialog: which installed plugins load
+for that row (see **Plugins** below). With a named character chosen it edits that
+character, including its one-command-per-line logon commands. With **Character
+select** chosen it edits every character on the account at once. **Logon commands** in the bottom bar provides the complete
 structured command list for bulk editing.
 
 ## Plugins
@@ -93,7 +94,10 @@ characters; an update carries no such choice, since it can only affect a
 plugin already enabled where it was chosen before. A character's own **…**
 action opens a checklist of installed plugins compatible with its launch
 mode; only checked plugins load, and a blank list loads nothing, bundled
-plugins included. Existing profiles are not migrated: anyone who relied on a
+plugins included. A row set to **Character select** picks its character inside
+the client, after the plugin list is already fixed, so it loads only the plugins
+every character on that account has enabled; its **…** action ticks a plugin for
+all of them in one step. Existing profiles are not migrated: anyone who relied on a
 plugin loading by default, MossTank included, must tick it once.
 
 A blocked plugin (listed as unsafe by the curated list) shows a red

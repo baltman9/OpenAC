@@ -65,7 +65,8 @@ public sealed partial class LauncherWindowViewModel
         CloseDesktopDialogCommand = new RelayCommand(CloseDesktopDialogs);
         SaveRowOptionsCommand = new RelayCommand(() =>
         {
-            SaveCharacterSettings();
+            if (_rowOptionsAccount is { } account) SaveAccountPluginChoices(account);
+            else SaveCharacterSettings();
             if (!HasError) IsCharacterOptionsOpen = false;
         }, () => IsCharacterOptionsOpen && !IsBusy);
     }
@@ -166,7 +167,21 @@ public sealed partial class LauncherWindowViewModel
 
     private void OpenAccountRowOptions(LauncherAccountServerRowViewModel row)
     {
-        if (row.CharacterName is null) { OpenTextEditor(LauncherTextEditorKind.Users); return; }
+        // The button opens this one dialog whatever the row's character box says. A row set to the
+        // character screen has no single character to edit, so it edits the account's characters
+        // together; accounts themselves are edited from "Edit accounts".
+        if (row.CharacterName is null)
+        {
+            var key = (row.ServerName, row.AccountName);
+            if (FindAccountSnapshot(key) is not { } account) return;
+            SetRowOptionsAccount(key);
+            LoadAccountPluginChoices(account);
+            LastError = null;
+            IsCharacterOptionsOpen = true;
+            return;
+        }
+
+        SetRowOptionsAccount(null);
         SelectedNode = Servers.FirstOrDefault(server => server.ServerName == row.ServerName)?.Children
             .FirstOrDefault(account => account.AccountName == row.AccountName)?.Children
             .FirstOrDefault(character => character.CharacterName == row.CharacterName);
