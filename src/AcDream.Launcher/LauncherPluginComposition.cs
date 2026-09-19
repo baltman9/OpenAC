@@ -47,7 +47,7 @@ internal sealed record PluginCheckOutcome(
     IReadOnlyDictionary<string, PluginUpdateAvailability> UpdatesAvailable,
     IReadOnlyDictionary<string, string> UpdateWithheldReasons);
 
-/// <summary>Composition root for the launcher's plugin install feature (L-300, L-308, L-309),
+/// <summary>Composition root for the launcher's plugin install feature,
 /// beside <see cref="LauncherUpdateComposition"/>. Builds the release client, the installer, the
 /// inventory and the record store; runs recovery once at start; and owns the Check pipeline, which
 /// both the start-of-launcher check and "Refresh list" share, and which never blocks launching.</summary>
@@ -92,7 +92,7 @@ internal sealed class LauncherPluginComposition : IDisposable
     public PluginInstaller Installer { get; }
 
     /// <summary>The catalog from the most recent successful or cache-backed Check, for filtering
-    /// blocked ids out of the next launched session (L-302).</summary>
+    /// blocked ids out of the next launched session.</summary>
     public PluginCatalog? CurrentCatalog { get; private set; }
 
     public static LauncherPluginComposition Create(ApplicationPathSet paths, Uri listUri)
@@ -154,7 +154,7 @@ internal sealed class LauncherPluginComposition : IDisposable
             paths, listUri, httpClient, releaseClient, recordStore, inventory, installer);
     }
 
-    /// <summary>The launch-time Recovery pipeline (L-309), run once before the inventory is first
+    /// <summary>The launch-time Recovery pipeline, run once before the inventory is first
     /// read.</summary>
     public void Recover() => Installer.Recover();
 
@@ -226,7 +226,7 @@ internal sealed class LauncherPluginComposition : IDisposable
         var installedIds = new HashSet<string>(
             installed.Select(info => info.Id),
             StringComparer.OrdinalIgnoreCase);
-        // A plugin blocked for every version is a dead end (L-314): omit it before it ever costs
+        // A plugin blocked for every version is a dead end: omit it before it ever costs
         // Discover's per-plugin plugin.json request. A version-specific block still needs that
         // request to know the latest version, so it stays listed here and is judged afterward.
         IReadOnlyList<PluginDiscoverEntry> discover = catalog is null
@@ -242,7 +242,7 @@ internal sealed class LauncherPluginComposition : IDisposable
     }
 
     /// <summary>Re-checks one already-installed plugin against the most recent Check's catalog,
-    /// for a user action on that plugin alone (the beta toggle, L-319) rather than the full pass
+    /// for a user action on that plugin alone (the beta toggle) rather than the full pass
     /// every other trigger shares.</summary>
     public async Task<PluginSingleCheckResult> CheckSingleAsync(
         string id,
@@ -295,7 +295,7 @@ internal sealed class LauncherPluginComposition : IDisposable
         }
 
         // Rate-limited, unavailable, an invalid manifest and a prerelease latest are all silent
-        // here (L-319): none of them is a newer release actually being withheld.
+        // here: none of them is a newer release actually being withheld.
         if (result.Status != PluginReleaseResolveStatus.Success)
         {
             return PluginUpdateCheck.None;

@@ -31,7 +31,7 @@ public sealed record PluginReleaseFetchResult(
 /// <summary>Fetches the small documents the plugin pipeline reads over HTTPS: the plugin list, a
 /// release's <c>plugin.json</c>, and its <c>.sha256</c>. Reuses
 /// <see cref="VerifiedArtifactDownloader.SendWithValidatedRedirectsAsync"/> for redirect handling and
-/// <see cref="ReleaseManifestClient.RequireTransport"/> for transport checks (L-307).</summary>
+/// <see cref="ReleaseManifestClient.RequireTransport"/> for transport checks.</summary>
 public sealed class PluginReleaseClient
 {
     public const int MaximumDocumentBytes = 256 * 1024;
@@ -47,7 +47,7 @@ public sealed class PluginReleaseClient
         new(new HttpClient(handler));
 
     /// <summary><paramref name="maximumBytes"/> defaults to <see cref="MaximumDocumentBytes"/>; the
-    /// releases Atom feed (L-319) is the one caller that passes its own, larger cap.</summary>
+    /// releases Atom feed is the one caller that passes its own, larger cap.</summary>
     public async Task<PluginReleaseFetchResult> FetchDocumentAsync(
         Uri url,
         CancellationToken cancellationToken = default,

@@ -4,7 +4,7 @@ using AcDream.Launcher.Core.Updates;
 namespace AcDream.Launcher.Core.Plugins;
 
 /// <summary>Which of a repo's releases <see cref="PluginReleaseResolver.ResolveAsync"/> may offer.
-/// <see cref="Beta"/> also reads the repo's releases Atom feed for a prerelease (L-319).</summary>
+/// <see cref="Beta"/> also reads the repo's releases Atom feed for a prerelease.</summary>
 public enum PluginReleaseChannel
 {
     Stable,
@@ -48,7 +48,7 @@ public sealed record PluginReleaseResolveResult(
 /// <summary>Both candidates one <see cref="PluginReleaseResolver.ResolveCandidatesAsync"/> pass
 /// found: the stable latest, fetched every time, and the highest feed prerelease, fetched only when
 /// the caller asked for <see cref="PluginReleaseChannel.Beta"/>. <see cref="For"/> reproduces
-/// <see cref="PluginReleaseResolver.ResolveAsync"/>'s own precedence (L-319) so a caller that already
+/// <see cref="PluginReleaseResolver.ResolveAsync"/>'s own precedence so a caller that already
 /// has both never needs to resolve again to change its mind about which channel it wants.</summary>
 public sealed record PluginReleaseCandidates(
     PluginReleaseResolveResult Stable,
@@ -78,11 +78,11 @@ public sealed record PluginReleaseCandidates(
     }
 }
 
-/// <summary>Resolves a repo's release (L-308) to its tag and manifest, the one place
+/// <summary>Resolves a repo's release to its tag and manifest, the one place
 /// <c>LauncherPluginComposition.EvaluateUpdateAsync</c>,
 /// <c>LauncherPluginsViewModel.RefreshDiscoverDetailsAsync</c> and <c>AddFromUrlAsync</c> agree: the
-/// release tag must name the manifest's own version (L-310), and a latest whose version carries a
-/// SemVer prerelease part is refused rather than offered (L-319). <c>PluginInstaller.InstallOrUpdateAsync</c>
+/// release tag must name the manifest's own version, and a latest whose version carries a
+/// SemVer prerelease part is refused rather than offered. <c>PluginInstaller.InstallOrUpdateAsync</c>
 /// takes its tag pinned from whichever of those already resolved it, so install never re-resolves
 /// latest itself. On <see cref="PluginReleaseChannel.Beta"/>, the result is the higher by precedence
 /// of that same stable latest and the highest prerelease on the repo's releases feed; a feed that is
@@ -91,7 +91,7 @@ public sealed record PluginReleaseCandidates(
 /// hides a beta that did resolve.</summary>
 public sealed class PluginReleaseResolver
 {
-    /// <summary>The releases feed's own cap (L-319), independent of
+    /// <summary>The releases feed's own cap, independent of
     /// <see cref="PluginReleaseClient.MaximumDocumentBytes"/>: a 10-entry feed carries full release
     /// notes and runs well past it.</summary>
     private const long FeedMaximumBytes = 1024 * 1024;
@@ -105,7 +105,7 @@ public sealed class PluginReleaseResolver
 
     /// <summary>Resolves the stable latest and, on <see cref="PluginReleaseChannel.Beta"/>, the
     /// feed's highest prerelease too, so a caller that wants to offer both channels (Discover's
-    /// per-row picker, L-319 amendment) does so from one pass rather than resolving twice. The stable
+    /// per-row picker) does so from one pass rather than resolving twice. The stable
     /// fetch always runs; the beta fetch runs only for <see cref="PluginReleaseChannel.Beta"/>, so
     /// request counts for either channel match <see cref="ResolveAsync"/>'s own, unchanged.</summary>
     public async Task<PluginReleaseCandidates> ResolveCandidatesAsync(

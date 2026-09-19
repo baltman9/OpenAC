@@ -5,7 +5,7 @@ using AcDream.Launcher.Core.Updates;
 namespace AcDream.Launcher.ViewModels;
 
 /// <summary>Who to enable a newly installed plugin for. Install itself never writes a character's
-/// plugin list (L-300); only a non-<see cref="None"/> choice does, and only after install
+/// plugin list; only a non-<see cref="None"/> choice does, and only after install
 /// succeeds.</summary>
 public enum PluginEnableChoice
 {
@@ -37,7 +37,7 @@ public sealed class PluginCharacterChoiceViewModel(PluginCharacterOption option)
 }
 
 /// <summary>One capability chip on the install dialog: the author's claim, attributed rather than
-/// verified (L-300). <paramref name="isNew"/> marks a capability an update adds beyond what the
+/// verified. <paramref name="isNew"/> marks a capability an update adds beyond what the
 /// installed version already declared, so a player skimming the list sees what changed.</summary>
 public sealed class PluginCapabilityChipViewModel(
     LauncherPluginCapabilityDeclaration declaration, bool isNew = false)
@@ -69,7 +69,7 @@ public sealed class PluginCapabilityChipViewModel(
 
 /// <summary>The overlay a Discover row's Install (or "Add from URL") opens, in the existing
 /// <c>IsOpen</c> idiom. Repo URLs are shown as text only: nothing here opens a browser or runs
-/// downloaded code (L-300).</summary>
+/// downloaded code.</summary>
 public sealed class PluginInstallDialogViewModel : ObservableObject
 {
     private readonly Func<bool> _canInteract;
@@ -130,7 +130,7 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
 
     /// <summary>The release version this dialog offers, carried from whichever caller resolved it
     /// (the update check, Discover's own details, or Add from URL), so the notice can name a
-    /// pre-release offer (L-319).</summary>
+    /// pre-release offer.</summary>
     public string? OfferedVersion { get; private set; }
 
     public bool IsOfferedPrerelease =>
@@ -196,8 +196,7 @@ public sealed class PluginInstallDialogViewModel : ObservableObject
     /// hang. Present tense, matching the launcher's other in-flight wording.</summary>
     public string BusyLabel => IsUpdate ? "Updating…" : "Installing…";
 
-    /// <summary>The responsibility notice every install and update dialog shows, every time
-    /// (L-313): no wording here says or implies OpenAC reviews plugins, listed or not.</summary>
+    /// <summary>The responsibility notice every install and update dialog shows, every time: no wording here says or implies OpenAC reviews plugins, listed or not.</summary>
     public string WarningText
     {
         get

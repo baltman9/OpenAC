@@ -12,9 +12,9 @@ public sealed class LauncherProfileDocument
     // Null identifies documents created before the shared user list was introduced.
     public List<LauncherUser>? Users { get; set; }
 
-    /// <summary>Offers a beta-only plugin in Discover and Add from URL (L-319 amendment). Omitted
+    /// <summary>Offers a beta-only plugin in Discover and Add from URL. Omitted
     /// when false, its default, so an off document stays byte-identical for an older launcher; on,
-    /// one refuses it as the caveat in L-315.</summary>
+    /// one refuses it.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool ShowBetaPlugins { get; set; }
 }

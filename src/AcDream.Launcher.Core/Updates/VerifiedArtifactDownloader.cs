@@ -54,7 +54,7 @@ public sealed class VerifiedArtifactDownloader
     }
 
     /// <summary>Downloads an artifact whose exact size isn't known up front, rejecting anything past
-    /// <paramref name="maximumBytes"/>. The SHA-256 check is the integrity guarantee (L-307).</summary>
+    /// <paramref name="maximumBytes"/>. The SHA-256 check is the integrity guarantee.</summary>
     public async Task<VerifiedArtifactDownload> DownloadAsync(
         Uri url,
         string sha256,
@@ -87,7 +87,7 @@ public sealed class VerifiedArtifactDownloader
     /// <summary>The stream/hash/write/cleanup core both download modes share: an exact
     /// <paramref name="exactSize"/> enforces itself as a hard byte count and a mismatched
     /// <c>Content-Length</c> header fails fast; its absence falls back to
-    /// <paramref name="maximumBytes"/> as a ceiling only, the L-307 mode the plugin client
+    /// <paramref name="maximumBytes"/> as a ceiling only, the mode the plugin client
     /// uses.</summary>
     private async Task<VerifiedArtifactDownload> DownloadCoreAsync(
         Uri url,

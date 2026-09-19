@@ -502,7 +502,7 @@ public sealed partial class LauncherWindowViewModelTests
         viewModel.ConfigurePlugins(composition, () => null);
         await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
 
-        // Nothing has asked Discover to resolve anything yet, so the row stays hidden (L-320).
+        // Nothing has asked Discover to resolve anything yet, so the row stays hidden.
         Assert.Empty(viewModel.Plugins.Discover);
 
         await viewModel.Plugins.RefreshDiscoverDetailsAsync();
@@ -1210,7 +1210,7 @@ public sealed partial class LauncherWindowViewModelTests
         await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
 
         // Not blocked at the list-check stage (the block only names an older version), so it stays
-        // hidden until its release resolves, exactly like an unblocked listing would (L-320).
+        // hidden until its release resolves, exactly like an unblocked listing would.
         Assert.Empty(viewModel.Plugins.Discover);
 
         await viewModel.Plugins.RefreshDiscoverDetailsAsync();
@@ -2506,7 +2506,7 @@ public sealed partial class LauncherWindowViewModelTests
         using var viewModel = CreateInitialized(orchestrator);
         viewModel.ConfigurePlugins(composition, () => null);
         await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
-        // A row only shows once its release resolves (L-320), so by the time Install can be
+        // A row only shows once its release resolves, so by the time Install can be
         // pressed at all, its capabilities are already loaded.
         await viewModel.Plugins.RefreshDiscoverDetailsAsync();
 
@@ -2671,7 +2671,7 @@ public sealed partial class LauncherWindowViewModelTests
         Assert.True(updated.UpdateAvailable);
         Assert.Equal("0.2.0-beta.1", updated.UpdateVersion);
 
-        // A single-plugin re-check (L-319), never the full list Check the toggle would otherwise pay for.
+        // A single-plugin re-check, never the full list Check the toggle would otherwise pay for.
         Assert.Equal(1, handler.Requests.Count(uri => uri == PluginListUri));
     }
 
@@ -2836,7 +2836,7 @@ public sealed partial class LauncherWindowViewModelTests
         Assert.False(viewModel.Plugins.ShowBetaPlugins);
         await viewModel.Plugins.RefreshDiscoverDetailsAsync();
         // Stable is unavailable and beta is off, so the release never resolves and the row
-        // stays hidden (L-320), not merely blank.
+        // stays hidden, not merely blank.
         Assert.Empty(viewModel.Plugins.Discover);
 
         viewModel.Plugins.AddFromUrlText = "https://github.com/" + repo;

@@ -245,8 +245,7 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
         RaiseStateChanged();
     }
 
-    /// <summary>The plugin list the next launched session composes its allow-list against
-    /// (L-302). Set by <c>LauncherPluginComposition</c> after each Check pass.</summary>
+    /// <summary>The plugin list the next launched session composes its allow-list against. Set by <c>LauncherPluginComposition</c> after each Check pass.</summary>
     public void SetPluginCatalog(PluginCatalog? catalog)
     {
         lock (_gate)
@@ -383,7 +382,7 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
                 selectedCharacter,
                 selectedLaunchMode));
 
-    /// <summary>Launcher-wide beta discovery setting (L-319 amendment).</summary>
+    /// <summary>Launcher-wide beta discovery setting.</summary>
     public void SetShowBetaPlugins(bool value) =>
         MutateProfiles(() => _profileStore.SetShowBetaPlugins(value));
 

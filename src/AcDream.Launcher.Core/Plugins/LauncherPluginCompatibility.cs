@@ -4,8 +4,7 @@ using AcDream.Launcher.Core.Updates;
 namespace AcDream.Launcher.Core.Plugins;
 
 /// <summary>Checks a launcher-read manifest's declared client versions and hosts against the
-/// installed client. Reason strings match <c>AcDream.Core.Plugins.PluginHostCompatibility</c>
-/// (L-303), except for the client-not-installed case, which that host never sees.</summary>
+/// installed client. Reason strings match <c>AcDream.Core.Plugins.PluginHostCompatibility</c>, except for the client-not-installed case, which that host never sees.</summary>
 public static class LauncherPluginCompatibility
 {
     public const string ClientNotInstalled = "client not installed";

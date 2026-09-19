@@ -7,11 +7,11 @@ namespace AcDream.Launcher.Core.Plugins;
 public sealed record PluginInstallResult(string Id, string Version, bool WasUpdate);
 
 /// <summary>Install, update, remove and recovery for launcher-managed plugins, following the plan's
-/// Install/update, Remove and Recovery pipelines (L-300, L-306, L-307, L-308, L-309, L-310). Every
+/// Install/update, Remove and Recovery pipelines. Every
 /// write under <see cref="ApplicationPathSet.PluginsDirectory"/> happens under
 /// <see cref="UpdateSessionBarrier.TryAcquireExclusive"/>. Install never writes a character's plugin
 /// list; that write goes through <see cref="AcDream.Launcher.Core.Orchestration.ILauncherOrchestrator.UpdateCharacterSettings"/>
-/// instead (L-300).</summary>
+/// instead.</summary>
 public sealed class PluginInstaller
 {
     /// <summary>The refusal shown when a running session (or another update) holds the barrier.</summary>
@@ -143,7 +143,7 @@ public sealed class PluginInstaller
         string? incompatibility = PluginInventory.EvaluateVersionCompatibility(
             manifest,
             clientResolution?.Version);
-        // "Client not installed" is informational, not a refusal (L-303): nothing can run yet
+        // "Client not installed" is informational, not a refusal: nothing can run yet
         // to be incompatible with, so blocking here would only stop the very first install.
         if (incompatibility is not null
             && !string.Equals(
@@ -298,7 +298,7 @@ public sealed class PluginInstaller
         }
     }
 
-    /// <summary>Sets a launcher-managed plugin's channel (L-319), under the same exclusive lease as
+    /// <summary>Sets a launcher-managed plugin's channel, under the same exclusive lease as
     /// every other record write. Returns the updated record so the toggle can reflect it without
     /// waiting for the next Check pass.</summary>
     public InstalledPluginRecord SetChannel(string id, PluginReleaseChannel channel)
@@ -361,8 +361,7 @@ public sealed class PluginInstaller
     }
 
     /// <summary>Removes a Direct install by its folder rather than its manifest id, which
-    /// <see cref="LauncherPluginManifest.Parse"/> never validates and so could name anything
-    /// (L-318). Never touches a launcher-managed or bundled plugin.</summary>
+    /// <see cref="LauncherPluginManifest.Parse"/> never validates and so could name anything. Never touches a launcher-managed or bundled plugin.</summary>
     public void RemoveDirect(string directory, bool deleteStorage)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
@@ -449,7 +448,7 @@ public sealed class PluginInstaller
                     string id = IdFromTrashPath(trashDirectory);
                     string original = Path.Combine(_paths.PluginsDirectory, id);
                     // Record-less trash is a Direct removal, never a managed one; resurrecting it
-                    // would undo a removal that already succeeded (L-318).
+                    // would undo a removal that already succeeded.
                     if (!Directory.Exists(original) && _recordStore.Find(id) is not null)
                     {
                         Directory.Move(trashDirectory, original);
@@ -540,7 +539,7 @@ public sealed class PluginInstaller
         PluginReleaseChannel? explicitChannel)
     {
         var pending = new PendingPluginInstall(newVersion, newTag, newZipSha256);
-        // The channel follows the version just fetched (L-319 amendment): a prerelease always lands
+        // The channel follows the version just fetched: a prerelease always lands
         // on beta; a stable release keeps whatever channel an existing record already carries, so a
         // beta player's update to stable never downgrades them off the channel. A caller-supplied
         // channel (Discover's per-row picker) wins over both: picking Beta on a plugin whose newest

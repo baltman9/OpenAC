@@ -7,7 +7,7 @@ using AcDream.Launcher.Core.Updates;
 namespace AcDream.Launcher.Core.Plugins;
 
 /// <summary>Host facility an entry assembly declares in <c>plugin.json</c>. Mirrors
-/// <c>AcDream.Core.Plugins.PluginKind</c> (L-303).</summary>
+/// <c>AcDream.Core.Plugins.PluginKind</c>.</summary>
 public enum LauncherPluginKind
 {
     Gameplay,
@@ -15,7 +15,7 @@ public enum LauncherPluginKind
 }
 
 /// <summary>Runtime a manifest declares support for via <c>hosts</c>. Mirrors
-/// <c>AcDream.Core.Plugins.PluginHostKind</c> (L-303).</summary>
+/// <c>AcDream.Core.Plugins.PluginHostKind</c>.</summary>
 public enum LauncherPluginHostKind
 {
     Graphical,
@@ -54,7 +54,7 @@ public static class LauncherPluginCapabilityVocabulary
 }
 
 /// <summary>The version core (<c>MAJOR.MINOR.PATCH</c>) a host field or the installed client names.
-/// Mirrors <c>AcDream.Core.Plugins.PluginHostVersion</c> (L-303).</summary>
+/// Mirrors <c>AcDream.Core.Plugins.PluginHostVersion</c>.</summary>
 public readonly record struct LauncherPluginHostVersion(int Major, int Minor, int Patch)
     : IComparable<LauncherPluginHostVersion>
 {
@@ -114,7 +114,7 @@ public readonly record struct LauncherPluginHostVersion(int Major, int Minor, in
     }
 }
 
-/// <summary>The launcher's own reader for <c>plugin.json</c> (L-303). Fields and defaults match
+/// <summary>The launcher's own reader for <c>plugin.json</c>. Fields and defaults match
 /// <c>AcDream.Core.Plugins.PluginManifest</c>; a parity test pins the two readers together.</summary>
 public sealed record LauncherPluginManifest(
     string Id,
@@ -193,7 +193,7 @@ public sealed record LauncherPluginManifest(
 
     /// <summary>The install-only rules a downloaded manifest must additionally satisfy: a namespaced
     /// id, a strict SemVer version, and a declared <see cref="MinHostVersion"/> and
-    /// <see cref="Hosts"/> (L-310).</summary>
+    /// <see cref="Hosts"/>.</summary>
     public void ValidateForInstall()
     {
         if (!IdPattern.IsMatch(Id))
@@ -241,7 +241,7 @@ public sealed record LauncherPluginManifest(
     }
 
     /// <summary>Whether <paramref name="id"/> matches the namespaced pattern <see cref="ValidateForInstall"/>
-    /// requires, reused wherever an id is trusted enough to name a storage path (L-318).</summary>
+    /// requires, reused wherever an id is trusted enough to name a storage path.</summary>
     public static bool HasValidInstallId(string id) =>
         IdPattern.IsMatch(id) && !PortablePathRules.IsWindowsDeviceName(id);
 
@@ -423,7 +423,7 @@ public sealed record LauncherPluginManifest(
     }
 
     /// <summary>Rejects a manifest that repeats a property name anywhere in the document, matching
-    /// <c>AcDream.Core.Plugins.PluginManifest</c>'s own reader (L-311): an install decision should
+    /// <c>AcDream.Core.Plugins.PluginManifest</c>'s own reader: an install decision should
     /// never hinge on which of two conflicting property spellings a JSON writer happened to put
     /// last.</summary>
     private static void RejectDuplicateProperties(string json)

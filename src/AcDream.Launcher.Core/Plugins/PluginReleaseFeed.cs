@@ -14,7 +14,7 @@ public sealed class PluginReleaseFeedException : Exception
     public PluginReleaseFeedException(string message, Exception inner) : base(message, inner) { }
 }
 
-/// <summary>Reads a repo's <c>releases.atom</c> feed (L-319) for the highest-precedence prerelease
+/// <summary>Reads a repo's <c>releases.atom</c> feed for the highest-precedence prerelease
 /// published there. A <c>link</c> only counts when it is a direct child of an <c>entry</c> (never
 /// the feed itself, a <c>title</c>, or inside <c>content</c>) and names, on <c>github.com</c> over
 /// https with no query or fragment, exactly <c>/&lt;owner&gt;/&lt;repo&gt;/releases/tag/&lt;tag&gt;</c>
@@ -30,7 +30,7 @@ public static class PluginReleaseFeed
 
     /// <summary>The highest prerelease on the feed for <paramref name="repo"/>, or null when it has
     /// none. Malformed XML or a DTD throws <see cref="PluginReleaseFeedException"/>; the resolver
-    /// treats that the same as no beta this time (L-319).</summary>
+    /// treats that the same as no beta this time.</summary>
     public static PluginFeedRelease? HighestPrerelease(byte[] content, string repo)
     {
         ArgumentNullException.ThrowIfNull(content);

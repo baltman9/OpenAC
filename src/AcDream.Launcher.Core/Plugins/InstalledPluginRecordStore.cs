@@ -6,7 +6,7 @@ using AcDream.Platform;
 
 namespace AcDream.Launcher.Core.Plugins;
 
-/// <summary>Whether a plugin's repo appeared in the curated list (L-308) at install time.</summary>
+/// <summary>Whether a plugin's repo appeared in the curated list at install time.</summary>
 public enum PluginInstallSource
 {
     Listed,
@@ -14,7 +14,7 @@ public enum PluginInstallSource
 }
 
 /// <summary>The target of an in-flight swap (pipeline step 6), written before the folder move so
-/// recovery can reconcile a crash between the move and the record write (L-309).</summary>
+/// recovery can reconcile a crash between the move and the record write.</summary>
 public sealed record PendingPluginInstall(string Version, string Tag, string ZipSha256);
 
 /// <summary>One launcher-managed plugin. <see cref="Version"/>, <see cref="Tag"/> and
@@ -30,22 +30,22 @@ public sealed record InstalledPluginRecord(
     DateTimeOffset InstalledAt,
     PendingPluginInstall? Pending)
 {
-    /// <summary>Tolerates a record written before L-313 dropped the acknowledgement checkbox; the
+    /// <summary>Tolerates a record written before the acknowledgement checkbox was dropped; the
     /// launcher never sets it, and <see cref="InstalledPluginRecordStore.Load"/> clears it so a
     /// save never carries an old value forward.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTimeOffset? WarningAcceptedAt { get; init; }
 
-    /// <summary>The channel <see cref="PluginInstaller.SetChannel"/> last wrote (L-319). Omitted
+    /// <summary>The channel <see cref="PluginInstaller.SetChannel"/> last wrote. Omitted
     /// when <see cref="PluginReleaseChannel.Stable"/>, its default, so a stable record stays
     /// byte-identical and an older build (before beta existed) still reads it; a <c>beta</c> record
-    /// is refused by one, as the caveat in L-315.</summary>
+    /// is refused by one.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public PluginReleaseChannel Channel { get; init; }
 }
 
 /// <summary><c>DataDirectory/app/plugins-installed.json</c>: the record of every plugin the launcher
-/// itself installed (L-309). Load/save follow <c>LauncherProfileStore</c>'s temp-file-and-rename,
+/// itself installed. Load/save follow <c>LauncherProfileStore</c>'s temp-file-and-rename,
 /// owner-only idiom.</summary>
 public sealed class InstalledPluginRecordStore
 {

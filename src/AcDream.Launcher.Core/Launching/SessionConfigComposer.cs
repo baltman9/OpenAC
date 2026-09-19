@@ -261,8 +261,7 @@ public static class SessionConfigComposer
         Write(ComposeProbe(server, account, install, paths, sessionId));
 
     /// <summary>Blank means none, and always sends an explicit list, so a downloaded plugin never
-    /// loads until a character opts in (L-300, L-302). Also enforces the Direct install checks
-    /// (L-318): the client applies none of its own, so this is the only place a refused or
+    /// loads until a character opts in. Also enforces the Direct install checks: the client applies none of its own, so this is the only place a refused or
     /// duplicated id is kept out of a session.</summary>
     private static (List<string> Allowed, IReadOnlyList<string> StatusLines) ComposePluginAllowList(
         IReadOnlyList<string> configured,
@@ -270,7 +269,7 @@ public static class SessionConfigComposer
         ApplicationPathSet paths)
     {
         if (configured.Count == 0)
-            return ([], []);                                // blank: load none (L-302)
+            return ([], []);                                // blank: load none
 
         if (configured.Count == 1
             && string.Equals(configured[0], "none", StringComparison.OrdinalIgnoreCase))

@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace AcDream.Launcher.Core.Plugins;
 
 /// <summary>Builds and parses the <c>github.com/.../releases/.../download/...</c> URLs the plugin
-/// pipeline uses. No <c>api.github.com</c> call is ever made (L-308).</summary>
+/// pipeline uses. No <c>api.github.com</c> call is ever made.</summary>
 public static class GitHubReleaseLocator
 {
     private const string Host = "github.com";
@@ -46,8 +46,8 @@ public static class GitHubReleaseLocator
             $"releases/download/{Uri.EscapeDataString(tag)}/{Uri.EscapeDataString(assetName)}");
     }
 
-    /// <summary>The repo's releases Atom feed, the only no-setup way to see a prerelease (L-308,
-    /// L-319): <c>releases/latest</c> skips them and the REST API is forbidden.</summary>
+    /// <summary>The repo's releases Atom feed, the only no-setup way to see a prerelease:
+    /// <c>releases/latest</c> skips them and the REST API is forbidden.</summary>
     public static Uri ReleasesFeed(string repo) => BuildUri(repo, "releases.atom");
 
     /// <summary>Parses an <c>https://github.com/{owner}/{repo}</c> URL a user typed in. Nothing else

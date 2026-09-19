@@ -11,8 +11,7 @@ public enum InstalledPluginSource
     Bundled,
 }
 
-/// <summary>One row of the Installed view, built by reading <c>plugin.json</c> files only
-/// (L-303).</summary>
+/// <summary>One row of the Installed view, built by reading <c>plugin.json</c> files only.</summary>
 public sealed record InstalledPluginInfo(
     string Id,
     string DisplayName,
@@ -30,8 +29,7 @@ public sealed record InstalledPluginInfo(
 
 /// <summary>Builds the Installed view and the character checklist by scanning
 /// <c>DataDirectory/plugins</c> and, when a client is installed, its bundled
-/// <c>&lt;client&gt;/plugins</c>, cross-referenced against <see cref="InstalledPluginRecordStore"/>
-/// (L-303, L-309, L-318). A Direct row (an unzipped folder with no matching record) is checked
+/// <c>&lt;client&gt;/plugins</c>, cross-referenced against <see cref="InstalledPluginRecordStore"/>. A Direct row (an unzipped folder with no matching record) is checked
 /// against <see cref="DirectInstallCheck"/> every time the inventory is built.</summary>
 public sealed class PluginInventory
 {
@@ -58,7 +56,7 @@ public sealed class PluginInventory
         var claimedDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // A record's own folder is placed first and unconditionally, so a stray folder sharing its
-        // id can never take the managed row by sorting ahead of it (L-318).
+        // id can never take the managed row by sorting ahead of it.
         foreach (InstalledPluginRecord record in _recordStore.Records)
         {
             string ownDirectory = Path.Combine(_paths.PluginsDirectory, record.Id);
@@ -156,7 +154,7 @@ public sealed class PluginInventory
                 info = info with { Conflict = true };
             }
 
-            // The client loads no copy of a duplicated id (L-318): every Direct copy is refused, and
+            // The client loads no copy of a duplicated id: every Direct copy is refused, and
             // a surviving managed or bundled copy is flagged, because the collision is real either way.
             if (occurrencesById.GetValueOrDefault(info.Id) > 1)
             {

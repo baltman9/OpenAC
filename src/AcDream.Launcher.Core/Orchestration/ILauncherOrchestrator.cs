@@ -34,14 +34,13 @@ public interface ILauncherOrchestrator : IDisposable
         string installationStatus) =>
         SetInstallRecord(installRecord);
 
-    /// <summary>The catalog the next launched session filters blocked ids against (L-302). A
+    /// <summary>The catalog the next launched session filters blocked ids against. A
     /// no-op default, since most fakes never exercise a launched session's plugin allow-list.</summary>
     void SetPluginCatalog(PluginCatalog? catalog)
     {
     }
 
-    /// <summary>Launcher-wide: offers a beta-only plugin in Discover and Add from URL when true
-    /// (L-319 amendment). A no-op default, since most fakes never exercise it.</summary>
+    /// <summary>Launcher-wide: offers a beta-only plugin in Discover and Add from URL when true. A no-op default, since most fakes never exercise it.</summary>
     void SetShowBetaPlugins(bool value)
     {
     }

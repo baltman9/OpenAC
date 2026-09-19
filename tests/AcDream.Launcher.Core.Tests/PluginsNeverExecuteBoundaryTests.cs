@@ -2,7 +2,7 @@ using System.Runtime.CompilerServices;
 
 namespace AcDream.Launcher.Core.Tests;
 
-/// <summary>Pins the L-300 guarantee that nothing plugin-related loads, reflects over, or starts a
+/// <summary>Pins the guarantee that nothing plugin-related loads, reflects over, or starts a
 /// downloaded file. A source-text scan needs no project reference to the paths it checks, so it
 /// catches the launcher UI files once they exist too.</summary>
 public sealed class PluginsNeverExecuteBoundaryTests

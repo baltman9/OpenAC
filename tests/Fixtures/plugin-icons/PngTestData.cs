@@ -5,7 +5,7 @@ using System.Text;
 namespace AcDream.Tests.Fixtures.PluginIcons;
 
 /// <summary>Real 64x64 PNGs (correct CRC32 and zlib IDAT) plus a builder for every header rule
-/// refusal, shared between the launcher and the client's independent parity checks (L-317, L-303).</summary>
+/// refusal, shared between the launcher and the client's independent parity checks.</summary>
 internal static class PngTestData
 {
     internal const int Extent = 64;

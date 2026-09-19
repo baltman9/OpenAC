@@ -195,7 +195,7 @@ public sealed class SessionConfigComposerTests
     [Fact]
     public void UnconfiguredPluginsExplicitlyLoadNone()
     {
-        // L-302: a blank list means none, not "every plugin loads".
+        // A blank list means none, not "every plugin loads".
         CharacterProfile character = Character(LaunchMode.Gui);
         character.Plugins = [];
         character.LoginCommands = [];

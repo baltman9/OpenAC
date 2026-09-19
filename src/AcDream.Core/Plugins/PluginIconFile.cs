@@ -12,8 +12,8 @@ public sealed class PluginIconException : Exception
     public PluginIconException(string message) : base(message) { }
 }
 
-/// <summary>The client's own copy of the <c>icon.png</c> header rules (L-317). Written apart
-/// from <c>LauncherPluginIcon</c> because neither project may reference the other (L-303); a
+/// <summary>The client's own copy of the <c>icon.png</c> header rules. Written apart
+/// from <c>LauncherPluginIcon</c> because neither project may reference the other; a
 /// parity test pins the two to the same verdicts. Unlike the launcher, this side also decodes
 /// the file, so a header that passes here can still fail to decode and fall back to no icon.</summary>
 public static class PluginIconFile

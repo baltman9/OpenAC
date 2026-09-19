@@ -18,9 +18,9 @@ public sealed record PluginCatalogEntry(
     string Description,
     string Repo);
 
-/// <summary>The launcher's published plugin list (<c>plugins.json</c>, L-308). Strict parsing
+/// <summary>The launcher's published plugin list (<c>plugins.json</c>). Strict parsing
 /// mirrors <see cref="ReleaseManifestClient"/>: unknown members and duplicate properties (compared
-/// case-insensitively, as in <c>plugin.json</c>, L-311) are rejected.</summary>
+/// case-insensitively, as in <c>plugin.json</c>) are rejected.</summary>
 public sealed record PluginCatalog(
     int SchemaVersion,
     IReadOnlyList<PluginCatalogEntry> Plugins,
@@ -28,7 +28,7 @@ public sealed record PluginCatalog(
 {
     public const int CurrentSchemaVersion = 1;
 
-    /// <summary>The proof-of-concept list release (L-308). One constant, so moving it to Erik's
+    /// <summary>The proof-of-concept list release. One constant, so moving it to Erik's
     /// account later is a one-line change.</summary>
     public static Uri ProductionListUri { get; } =
         GitHubReleaseLocator.LatestAsset("shaneedwards/openac-plugins", "plugins.json");
@@ -54,7 +54,7 @@ public sealed record PluginCatalog(
     }
 
     /// <summary>True only for a block covering every version ("*"); a version-specific block needs
-    /// the latest version fetched before it can be judged (L-314).</summary>
+    /// the latest version fetched before it can be judged.</summary>
     public bool IsBlockedForAllVersions(string id)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);

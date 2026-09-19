@@ -314,8 +314,8 @@ public sealed partial class LauncherWindowViewModelTests
         await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
         await viewModel.Plugins.RefreshDiscoverDetailsAsync();
 
-        // The mismatch already fails the release resolve itself (L-310), so the row stays hidden
-        // (L-320) well before Discover's own icon check would ever run.
+        // The mismatch already fails the release resolve itself, so the row stays hidden
+        // well before Discover's own icon check would ever run.
         Assert.Empty(viewModel.Plugins.Discover);
         Assert.False(Directory.Exists(Path.Combine(fixture.Paths.CacheDirectory, "plugin-icons")));
     }
@@ -353,8 +353,8 @@ public sealed partial class LauncherWindowViewModelTests
         await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
         await viewModel.Plugins.RefreshDiscoverDetailsAsync();
 
-        // An unparsable version fails the release resolve itself (L-310), so the row stays hidden
-        // (L-320) well before Discover's own icon check would ever run.
+        // An unparsable version fails the release resolve itself, so the row stays hidden
+        // well before Discover's own icon check would ever run.
         Assert.Empty(viewModel.Plugins.Discover);
         Assert.False(Directory.Exists(Path.Combine(fixture.Paths.CacheDirectory, "plugin-icons")));
     }

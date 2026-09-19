@@ -31,7 +31,7 @@ internal static class PluginMonogram
     }
 }
 
-/// <summary>One channel's resolved release for a Discover row (L-319 amendment): what its picker
+/// <summary>One channel's resolved release for a Discover row: what its picker
 /// option would install and display if chosen, cached alongside the row so switching the picker
 /// never re-fetches.</summary>
 internal readonly record struct DiscoverChannelOption(
@@ -79,7 +79,7 @@ public sealed class PluginDiscoverRowViewModel(
 
     /// <summary>Shown for every row whenever Show beta plugins is on: opting a plugin into Beta is a
     /// durable subscription to its prereleases, useful before the first one ever ships, so visibility
-    /// never depends on whether this plugin happens to have one today (L-319 amendment).</summary>
+    /// never depends on whether this plugin happens to have one today.</summary>
     public bool ShowChannelPicker => _showChannelPicker;
 
     public string SelectedChannelLabel
@@ -111,7 +111,7 @@ public sealed class PluginDiscoverRowViewModel(
 
     /// <summary>Why Install is refused for the selected channel, or null when it can proceed. Only
     /// meaningful once a resolve pass has run; a row with neither channel resolved is not shown at
-    /// all (L-320).</summary>
+    /// all.</summary>
     public string? ChannelUnavailableText => SelectedOption is not null
         ? null
         : _selectedChannel == PluginReleaseChannel.Beta
@@ -126,7 +126,7 @@ public sealed class PluginDiscoverRowViewModel(
         SetProperty(ref _showChannelPicker, value, nameof(ShowChannelPicker));
 
     /// <summary>Registers both candidates one resolve pass found, cached alongside the row so
-    /// switching the picker never re-fetches (L-319 amendment). Reapplies whichever channel is
+    /// switching the picker never re-fetches. Reapplies whichever channel is
     /// currently selected, so a re-check never silently drops the choice someone made.</summary>
     internal void SetChannelOptions(DiscoverChannelOption? stable, DiscoverChannelOption? beta)
     {
@@ -174,8 +174,7 @@ public sealed class PluginDiscoverRowViewModel(
         InstallCommand.NotifyCanExecuteChanged();
     }
 
-    /// <summary>Whether the release resolver has found a usable release for this listed plugin
-    /// (L-320): the row exists from the moment the curated list loads, but only counts toward
+    /// <summary>Whether the release resolver has found a usable release for this listed plugin: the row exists from the moment the curated list loads, but only counts toward
     /// Discover, search, and the shown list once this is true.</summary>
     internal bool IsVisible { get; set; }
 
@@ -364,16 +363,16 @@ public sealed class PluginInstalledRowViewModel(
     public RelayCommand? UpdateCommand { get; } = updateCommand;
     public RelayCommand? RemoveCommand { get; } = removeCommand;
 
-    /// <summary>Launcher-managed only (L-319): Direct and Bundled plugins have no channel.</summary>
+    /// <summary>Launcher-managed only: Direct and Bundled plugins have no channel.</summary>
     public bool ShowBetaToggle { get; } = showBetaToggle;
 
     public string BetaToggleAutomationName { get; } = $"Beta updates for {displayName}";
 
     /// <summary>Whether the installed release itself carries a SemVer prerelease part, regardless
-    /// of the plugin's channel (a beta-channel plugin reads stable most of the time, per L-319).</summary>
+    /// of the plugin's channel (a beta-channel plugin reads stable most of the time).</summary>
     public bool IsPrerelease { get; } = isPrerelease;
 
-    /// <summary>The card corner's own channel label (L-319 amendment): quiet metadata about what
+    /// <summary>The card corner's own channel label: quiet metadata about what
     /// the plugin will fetch next, shown only for a beta-channel, launcher-managed plugin while Show
     /// beta plugins is on. A stable-channel plugin shows nothing there; the "beta install" chip
     /// already covers what a prerelease install has, so the corner never repeats it for Stable.</summary>
@@ -437,7 +436,7 @@ public sealed class PluginInstalledRowViewModel(
 
 /// <summary>Discover/Installed, Refresh list, Add from URL, and the install and remove dialogs
 /// (plan, "MainWindow.axaml and view models"). Repo URLs are text only; nothing here opens a
-/// browser, loads an assembly, or starts a process (L-300).</summary>
+/// browser, loads an assembly, or starts a process.</summary>
 public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
 {
     private readonly ILauncherOrchestrator _orchestrator;
@@ -551,7 +550,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         || fields.Any(field => field is not null && field.Contains(filter, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Rebuilds the two shown lists from the full ones: Installed by the search alone,
-    /// Discover by the search over only the rows whose release has resolved (L-320).</summary>
+    /// Discover by the search over only the rows whose release has resolved.</summary>
     private void ApplyFilters()
     {
         string installedFilter = _installedFilter.Trim();
@@ -685,7 +684,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Set while <see cref="RefreshDiscoverDetailsAsync"/> is resolving rows that have
-    /// never resolved before (L-320): true only until the first one becomes visible, or until the
+    /// never resolved before: true only until the first one becomes visible, or until the
     /// whole pass finishes finding none, whichever comes first.</summary>
     public bool IsDiscoverChecking => _isDiscoverChecking;
 
@@ -693,7 +692,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         ? "Checking 1 plugin…"
         : $"Checking {_discoverPendingCount} plugins…";
 
-    /// <summary>Set for the panel, not per-row (L-320): a rate-limited or unreachable release fetch
+    /// <summary>Set for the panel, not per-row: a rate-limited or unreachable release fetch
     /// still leaves its row hidden, but is worth explaining once rather than leaving the list merely
     /// short.</summary>
     public string? DiscoverStatusLine
@@ -718,7 +717,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ShowDiscoverEmptyText));
     }
 
-    /// <summary>Launcher-wide (L-319 amendment): offers a beta-only repo in Discover and Add from
+    /// <summary>Launcher-wide: offers a beta-only repo in Discover and Add from
     /// URL when on, persisted through the orchestrator like every other launcher setting. Off keeps
     /// every resolve on <see cref="PluginReleaseChannel.Stable"/>, exactly as before the setting
     /// existed. Toggling re-runs Discover's own details for the rows already showing, never a full
@@ -746,7 +745,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
                 row.Compatibility = null;
                 row.SetShowChannelPicker(value);
                 row.ClearChannelOptions();
-                // The new channel's own resolve decides visibility (L-320); a row stays hidden
+                // The new channel's own resolve decides visibility; a row stays hidden
                 // until it does, same as the first time the list loaded.
                 row.IsVisible = false;
             }
@@ -756,7 +755,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>What Discover's own details and Add from URL resolve with (L-319 amendment).</summary>
+    /// <summary>What Discover's own details and Add from URL resolve with.</summary>
     private PluginReleaseChannel DiscoverChannel =>
         ShowBetaPlugins ? PluginReleaseChannel.Beta : PluginReleaseChannel.Stable;
 
@@ -880,7 +879,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
 
     private void ApplyOutcome(PluginCheckOutcome outcome)
     {
-        // The catalog the next launched session filters blocked ids against (L-302), regardless
+        // The catalog the next launched session filters blocked ids against, regardless
         // of whether this pass fetched fresh or fell back to the cache.
         _orchestrator.SetPluginCatalog(outcome.Catalog);
 
@@ -923,7 +922,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
             {
                 row.Icon = cached.Icon;
                 row.SetChannelOptions(cached.Stable, cached.Beta);
-                // Already resolved this session (L-320): shown right away, no re-checking wait.
+                // Already resolved this session: shown right away, no re-checking wait.
                 row.IsVisible = true;
             }
 
@@ -939,7 +938,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Builds one Installed row from the inventory and its update check, reused by both a
-    /// full Check pass and a single-plugin re-check after the beta toggle (L-319).</summary>
+    /// full Check pass and a single-plugin re-check after the beta toggle.</summary>
     private PluginInstalledRowViewModel BuildInstalledRow(
         InstalledPluginInfo info, PluginUpdateAvailability? availability, string? withheldReason)
     {
@@ -1000,7 +999,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         return row;
     }
 
-    /// <summary>The beta toggle's own write (L-319): sets the channel under the installer's
+    /// <summary>The beta toggle's own write: sets the channel under the installer's
     /// exclusive lease, then re-checks that one plugin (never the full pass every other trigger
     /// runs) and rebuilds its row with the fresh result. A lease refusal reverts the toggle and is
     /// shown the way Remove shows it.</summary>
@@ -1074,7 +1073,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
     /// <summary>Opening Discover's own request (plan, "Request budget"): one <c>plugin.json</c> per
     /// listed, not-installed plugin still missing its details, cached here so switching tabs never
     /// re-fetches it. A listed plugin shows only once this resolves it to a usable release for the
-    /// current channel (L-320); rows appear one at a time, in the curated list's own order, as each
+    /// current channel; rows appear one at a time, in the curated list's own order, as each
     /// finishes.</summary>
     internal async Task RefreshDiscoverDetailsAsync()
     {
@@ -1111,7 +1110,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
                     manifest.Version, out LauncherVersion? parsed)
                     ? parsed
                     : null;
-                // A version-specific block (L-314) can only be judged once the latest version is
+                // A version-specific block can only be judged once the latest version is
                 // known; a wildcard block never reaches here, since the Check pipeline already hid it.
                 if (_composition.CurrentCatalog?.IsBlocked(row.Id, remoteVersion) != true)
                 {
@@ -1183,12 +1182,12 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
     /// line, the same as <see cref="PluginReleaseResolveStatus.RateLimited"/>. <see cref="Candidates"/>
     /// carries both the stable and (on <see cref="PluginReleaseChannel.Beta"/>) the beta resolve, so
     /// <see cref="ApplyDiscoverDetailsAsync"/> can offer the row's channel picker both options from
-    /// this one pass (L-319 amendment); non-null whenever a resolve was actually attempted.</summary>
+    /// this one pass; non-null whenever a resolve was actually attempted.</summary>
     private readonly record struct ManifestFetch(
         LauncherPluginManifest? Manifest, string? Tag, string? ErrorMessage,
         PluginReleaseResolveStatus? Status, PluginReleaseCandidates? Candidates);
 
-    /// <summary>Resolves through the plugin's channel (L-319), the same as the update check and
+    /// <summary>Resolves through the plugin's channel, the same as the update check and
     /// Discover's background pass, so a beta plugin's Discover details and install/update consent
     /// always reflect the beta release rather than the last stable one.</summary>
     private async Task<ManifestFetch> FetchPluginManifestAsync(string repo, CancellationToken cancellationToken)
@@ -1235,7 +1234,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
     /// shared cache and, when the row is still on Discover, onto the row itself: the stable option
     /// always, and the beta option (<see cref="PluginReleaseCandidates.For"/>, so it never disagrees
     /// with the resolver's own precedence) only while Show beta plugins is on, since that is the only
-    /// time the feed was even read (L-319 amendment).</summary>
+    /// time the feed was even read.</summary>
     private async Task ApplyDiscoverDetailsAsync(
         string pluginId, string repo, LauncherPluginManifest manifest, string tag,
         PluginReleaseCandidates candidates, CancellationToken cancellationToken)
@@ -1284,7 +1283,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         DiscoverChannelOption? Beta,
         Bitmap? Icon);
 
-    /// <summary>The Discover-side half of the icon rule (plan, L-317): the tag the manifest fetch
+    /// <summary>The Discover-side half of the icon rule: the tag the manifest fetch
     /// resolved to must name this exact version, so a plain 200 with no redirect (no tag) or a
     /// release that moved between the manifest and asset fetch never reaches the disk cache or the
     /// network. The disk cache is tried first, keyed the same way <see cref="_iconCache"/> is.</summary>
@@ -1455,7 +1454,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Discover's Install button: pins to whichever channel the row's own picker currently
-    /// has selected (L-319 amendment), read from the row itself rather than a fresh cache lookup, so
+    /// has selected, read from the row itself rather than a fresh cache lookup, so
     /// what was shown is what installs.</summary>
     private void OpenDiscoverInstallDialog(PluginDiscoverEntry entry, PluginDiscoverRowViewModel row)
     {
@@ -1477,12 +1476,12 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
     /// <summary>Opens the install/update dialog for a repo. <paramref name="pinnedTag"/> is the
     /// release tag whichever caller already resolved (the update check, Discover's own details, or
     /// Add from URL); when Discover hasn't fetched details yet, it is null and Confirm resolves
-    /// latest itself instead of the install ever doing so (L-319). <paramref name="offeredVersion"/>
-    /// travels the same way, so the dialog's notice can name a pre-release offer (L-319).
+    /// latest itself instead of the install ever doing so. <paramref name="offeredVersion"/>
+    /// travels the same way, so the dialog's notice can name a pre-release offer.
     /// <paramref name="capabilities"/> is the declared list when already known; <see langword="null"/>
     /// means it still needs fetching, and <paramref name="loadCapabilities"/> is the fetch to run for
-    /// it (L-316). <paramref name="channel"/> is the channel the player chose for this install
-    /// (Discover's per-row picker, L-319 amendment); omitted for update and Add from URL, which keep
+    /// it. <paramref name="channel"/> is the channel the player chose for this install
+    /// (Discover's per-row picker); omitted for update and Add from URL, which keep
     /// today's version-inferred channel.</summary>
     private void OpenInstallDialog(
         string repo,
@@ -1593,8 +1592,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         };
     }
 
-    /// <summary>The install dialog's only profile write, and only for the characters chosen there
-    /// (L-300). Reuses the same <see cref="ILauncherOrchestrator.UpdateCharacterSettings"/> path the
+    /// <summary>The install dialog's only profile write, and only for the characters chosen there. Reuses the same <see cref="ILauncherOrchestrator.UpdateCharacterSettings"/> path the
     /// character options dialog saves through, so every write to a character's plugin list goes
     /// through the orchestrator's own lock. Runs after the dialog has already closed (install
     /// succeeded), so any trouble here is reported on the panel, not the dialog.</summary>
@@ -1767,7 +1765,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
                         break;
                     }
 
-                    // Blocked for "*" or for this fetched version (L-314): refuse the same way,
+                    // Blocked for "*" or for this fetched version: refuse the same way,
                     // rather than opening a dialog whose Install could only fail.
                     LauncherVersion? manifestVersion = LauncherVersion.TryParse(
                         manifest.Version, out LauncherVersion? parsedVersion)
@@ -1860,7 +1858,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         StripFromEveryCharacter(target.Id);
     }
 
-    /// <summary>The remove dialog's own profile write (L-312): every character still holding the
+    /// <summary>The remove dialog's own profile write: every character still holding the
     /// removed id loses it, so reinstalling it never inherits an old enable. Reuses the same
     /// <see cref="ILauncherOrchestrator.UpdateCharacterSettings"/> path <see cref="EnableForCharacters"/>
     /// saves through. Runs after <see cref="PluginInstaller.Remove"/> has already succeeded, so trouble

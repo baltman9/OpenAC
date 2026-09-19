@@ -9,9 +9,8 @@ namespace AcDream.Headless.Tests;
 
 /// <summary>Pins <see cref="LauncherPluginManifest"/>, the launcher's own <c>plugin.json</c> reader, to
 /// <see cref="PluginManifest"/>, the client's, on every manifest in <c>samples/</c>, a MossTank-shaped
-/// fixture, and a corpus covering the L-300-era host fields. Also pins
-/// <see cref="LauncherPluginApiRange"/> to <see cref="AcDream.Plugin.Abstractions.PluginApi"/>
-/// (L-303).</summary>
+/// fixture, and a corpus covering the earlier host fields. Also pins
+/// <see cref="LauncherPluginApiRange"/> to <see cref="AcDream.Plugin.Abstractions.PluginApi"/>.</summary>
 public sealed class PluginManifestParityTests
 {
     [Fact]
@@ -100,7 +99,7 @@ public sealed class PluginManifestParityTests
     }
 
     /// <summary>Both readers reject a repeated property name anywhere in the document, with the
-    /// same message (L-311).</summary>
+    /// same message.</summary>
     [Theory]
     [MemberData(nameof(DuplicatePropertyCorpus))]
     public void BothReadersRejectADuplicatePropertyWithTheSameMessage(string json, string expectedMessage)
@@ -114,7 +113,7 @@ public sealed class PluginManifestParityTests
         Assert.Equal(expectedMessage, launcherError.Message);
     }
 
-    /// <summary>Refusing a prerelease latest (L-319) is a resolver policy, not a manifest rule: both
+    /// <summary>Refusing a prerelease latest is a resolver policy, not a manifest rule: both
     /// readers still parse a plugin version with a SemVer prerelease part.</summary>
     [Fact]
     public void BothReadersAcceptAPrereleasePluginVersion()

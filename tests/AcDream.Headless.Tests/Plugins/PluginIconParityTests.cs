@@ -5,7 +5,7 @@ using AcDream.Tests.Fixtures.PluginIcons;
 namespace AcDream.Headless.Tests.Plugins;
 
 /// <summary>Both sides read the same header rules for icon.png, but neither may reference the
-/// other's project (L-303, L-317); this runs the shared corpus through both and requires the
+/// other's project; this runs the shared corpus through both and requires the
 /// same verdict.</summary>
 public sealed class PluginIconParityTests
 {

@@ -3,7 +3,7 @@ using AcDream.Launcher.Core.Updates;
 namespace AcDream.Launcher.Core.Plugins;
 
 /// <summary>Checks a hand-unzipped plugin folder against every install rule that needs no GitHub
-/// release (L-318): links and reparse points, regular files only, the extractor's path rules, the
+/// release: links and reparse points, regular files only, the extractor's path rules, the
 /// extraction limits, the content policy, <see cref="LauncherPluginManifest.ValidateForInstall"/>,
 /// and the icon rules.</summary>
 public static class DirectInstallCheck

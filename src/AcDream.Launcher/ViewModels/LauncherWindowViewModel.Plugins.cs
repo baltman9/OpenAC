@@ -175,7 +175,7 @@ public sealed partial class LauncherWindowViewModel
         }
     }
 
-    /// <summary>Blank means none (L-302): unchecking every plugin saves an empty list, not the old
+    /// <summary>Blank means none: unchecking every plugin saves an empty list, not the old
     /// literal "none" sentinel a free-text box once needed.</summary>
     private IReadOnlyList<string> CheckedCharacterPluginIds() =>
         [.. CharacterPluginChoices.Where(choice => choice.IsChecked).Select(choice => choice.Id)];

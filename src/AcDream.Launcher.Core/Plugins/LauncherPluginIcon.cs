@@ -5,7 +5,7 @@ using AcDream.Launcher.Core.Updates;
 
 namespace AcDream.Launcher.Core.Plugins;
 
-/// <summary>The header rules for a plugin's optional <c>icon.png</c> (L-317). Checks only the PNG
+/// <summary>The header rules for a plugin's optional <c>icon.png</c>. Checks only the PNG
 /// container, so a valid header can still hide corrupt pixel data; that is left to whichever side
 /// actually decodes the file.</summary>
 public static class LauncherPluginIcon
