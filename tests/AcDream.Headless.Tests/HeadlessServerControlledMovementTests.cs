@@ -1,4 +1,7 @@
+using System.Collections.Immutable;
 using System.Numerics;
+using AcDream.Content;
+using AcDream.Content.Pak;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
@@ -32,6 +35,9 @@ public sealed class HeadlessServerControlledMovementTests
     private const uint Player = 0x50000101u;
     private const uint Target = 0x80000DADu;
     private const float DistanceToObject = 1.8f;
+
+    /// <summary>The authored shape both fixture entities are built from.</summary>
+    private const uint SetupId = 0x02000001u;
 
     /// <summary>The character's start, in metres inside its landblock.</summary>
     private static readonly Vector3 PlayerStart = new(96f, 97f, 0f);
@@ -119,9 +125,48 @@ public sealed class HeadlessServerControlledMovementTests
             world.Controller.Movement.MoveTo!.MovementTypeState);
     }
 
+    /// <summary>
+    /// The gap the order asks for is between the two bodies' SIDES, not
+    /// between their middles: the server sets it from its own use radius and
+    /// measures it cylinder to cylinder. A creature wider than that gap can
+    /// therefore never be reached at all if its girth is taken as nothing —
+    /// the character keeps walking into a thing it is already touching and the
+    /// charge never finishes, which is what a swing at a big creature does.
+    /// Mutation: report a flat zero girth for an entity's body and this fails,
+    /// with the character stopped a little over half a metre from the middle
+    /// of a creature one and a fifth metres wide.
+    /// </summary>
+    [Fact]
+    public void AWalkToSomethingWiderThanTheGapStopsAtItsSide()
+    {
+        const float girth = 1.2f;
+        const float gap = 0.6f;
+        using var world = new Fixture(targetGirth: girth);
+
+        Assert.True(RuntimeServerControlledLocalMovement.TryApply(
+            world.Runtime,
+            MoveToObjectOrder(distanceToObject: gap)));
+
+        world.Advance(seconds: 8f);
+
+        float after = world.DistanceToTarget();
+        Assert.True(
+            after >= girth,
+            $"the character walked inside the creature: {after:0.00} m from "
+                + "its middle");
+        Assert.True(
+            after <= OwnGirth + girth + gap + 0.5f,
+            $"the character stopped {after:0.00} m out, well short of the gap "
+                + "the order asked for");
+    }
+
+    /// <summary>The girth the windowless host gives the local character.</summary>
+    private const float OwnGirth = 0.48f;
+
     // -- the order ---------------------------------------------------------
 
-    private static WorldSession.EntityMotionUpdate MoveToObjectOrder() =>
+    private static WorldSession.EntityMotionUpdate MoveToObjectOrder(
+        float distanceToObject = DistanceToObject) =>
         new(
             Guid: Player,
             MotionState: new CreateObject.ServerMotionState(
@@ -136,7 +181,7 @@ public sealed class HeadlessServerControlledMovementTests
                     OriginX: TargetStart.X,
                     OriginY: TargetStart.Y,
                     OriginZ: TargetStart.Z,
-                    DistanceToObject: DistanceToObject,
+                    DistanceToObject: distanceToObject,
                     MinDistance: 0f,
                     FailDistance: 50f,
                     WalkRunThreshold: 15f,
@@ -157,9 +202,10 @@ public sealed class HeadlessServerControlledMovementTests
         private readonly LiveSessionHost _inertSession;
         private readonly RuntimeLocalPlayerFrameController _frame;
         private readonly RuntimeEntityRecord _target;
+        private readonly OneAuthoredShape? _shapes;
         private ushort _targetPositionSequence = 1;
 
-        internal Fixture()
+        internal Fixture(float targetGirth = 0f)
         {
             _credential = new HeadlessCredentialSecret("fixture", "password");
             _host = new HeadlessSessionHost(
@@ -173,6 +219,11 @@ public sealed class HeadlessServerControlledMovementTests
 
             Runtime = _host.Runtime;
             Runtime.PlayerIdentity.ServerGuid = Player;
+            if (targetGirth > 0f)
+            {
+                _shapes = new OneAuthoredShape(SetupId, targetGirth);
+                Runtime.EntityObjects.Physics.BindSetupCollisionSource(_shapes);
+            }
 
             RuntimeFirstEntryDriveController firstEntry =
                 HeadlessSessionHostTests.CreateFirstEntryDrive(Runtime);
@@ -277,6 +328,66 @@ public sealed class HeadlessServerControlledMovementTests
         {
             _host.Dispose();
             _credential.Dispose();
+            _shapes?.Dispose();
+        }
+    }
+
+    /// <summary>One authored shape, for one id, and nothing else.</summary>
+    private sealed class OneAuthoredShape : IPreparedCollisionSource
+    {
+        private readonly uint _id;
+        private readonly FlatSetupCollision _setup;
+
+        internal OneAuthoredShape(uint id, float radius)
+        {
+            _id = id;
+            _setup = new FlatSetupCollision(
+                ImmutableArray<FlatCollisionCylinder>.Empty,
+                ImmutableArray<FlatCollisionSphere>.Empty,
+                height: radius * 2f,
+                radius,
+                stepUpHeight: 0f,
+                stepDownHeight: 0f);
+        }
+
+        public PreparedAssetPresence ProbeCollision(
+            PakAssetType type,
+            uint sourceFileId) =>
+            sourceFileId == _id
+                ? PreparedAssetPresence.Available
+                : PreparedAssetPresence.Missing;
+
+        public PreparedCollisionReadResult<FlatSetupCollision>
+            ReadSetupCollision(
+                uint sourceFileId,
+                CancellationToken cancellationToken = default) =>
+            sourceFileId == _id
+                ? PreparedCollisionReadResult<FlatSetupCollision>.Loaded(_setup)
+                : PreparedCollisionReadResult<FlatSetupCollision>.Missing;
+
+        public PreparedCollisionReadResult<FlatGfxObjCollisionAsset>
+            ReadGfxObjCollision(
+                uint sourceFileId,
+                CancellationToken cancellationToken = default) =>
+            PreparedCollisionReadResult<FlatGfxObjCollisionAsset>.Missing;
+
+        public PreparedCollisionReadResult<FlatCellStructureCollisionAsset>
+            ReadCellStructureCollision(
+                uint sourceFileId,
+                CancellationToken cancellationToken = default) =>
+            PreparedCollisionReadResult<FlatCellStructureCollisionAsset>
+                .Missing;
+
+        public PreparedCollisionReadResult<FlatEnvCellTopology>
+            ReadEnvCellTopology(
+                uint sourceFileId,
+                CancellationToken cancellationToken = default) =>
+            PreparedCollisionReadResult<FlatEnvCellTopology>.Missing;
+
+        public PreparedCollisionSourceStats CollisionStats => default;
+
+        public void Dispose()
+        {
         }
     }
 

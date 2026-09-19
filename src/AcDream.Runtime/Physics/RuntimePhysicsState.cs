@@ -1153,6 +1153,53 @@ public sealed class RuntimePhysicsState : IDisposable
         _objectTableHostResolver = resolver;
     }
 
+    private AcDream.Content.IPreparedCollisionSource? _setupCollisionSource;
+
+    /// <summary>
+    /// Where the minimal body reads an entity's authored cylinder from, on a
+    /// host that has no richer body maker of its own. Without it an entity's
+    /// girth is unknown and the body answers zero, which is the honest answer
+    /// but a poor one: a walk that must finish "within arm's reach" of a thing
+    /// measures to that thing's SIDE, not to the line through its middle.
+    /// </summary>
+    public void BindSetupCollisionSource(
+        AcDream.Content.IPreparedCollisionSource? source)
+    {
+        EnsureNotDisposed();
+        _setupCollisionSource = source;
+    }
+
+    /// <summary>
+    /// How wide an entity is, in metres, measured the way everything that
+    /// compares two bodies measures it: the girth its authored shape declares,
+    /// grown or shrunk by the scale the server gave this particular one.
+    /// Zero when the shape is not to hand.
+    /// </summary>
+    internal float EntityRadius(RuntimeEntityRecord record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        uint setupId = record.Snapshot.Physics?.SetupTableId
+            ?? record.Snapshot.SetupTableId
+            ?? 0u;
+        if (setupId == 0u)
+            return 0f;
+        FlatSetupCollision? setup = DataCache.GetFlatSetup(setupId);
+        if (setup is null && _setupCollisionSource is { } source)
+        {
+            AcDream.Content.PreparedCollisionReadResult<FlatSetupCollision>
+                read = source.ReadSetupCollision(setupId);
+            if (read.Status
+                == AcDream.Content.PreparedAssetReadStatus.Loaded)
+                setup = read.Data;
+        }
+        if (setup is null)
+            return 0f;
+        float scale = record.Snapshot.Physics?.Scale
+            ?? record.Snapshot.ObjScale
+            ?? 1f;
+        return setup.Radius * (scale > 0f ? scale : 1f);
+    }
+
     /// <summary>
     /// The body the movement machinery may ask about an entity by id, made on
     /// first demand for anything live that has not been given one yet.
@@ -1209,7 +1256,7 @@ public sealed class RuntimePhysicsState : IDisposable
             getVelocity: () =>
                 record.PhysicsBody?.Velocity
                     ?? System.Numerics.Vector3.Zero,
-            getRadius: static () => 0f,
+            getRadius: () => EntityRadius(record),
             inContact: () => record.PhysicsBody?.InContact ?? true,
             minterpMaxSpeed: static () => null,
             curTime: Now,
@@ -2111,6 +2158,7 @@ public sealed class RuntimePhysicsState : IDisposable
         CellCommitted = null;
         _collisionGenerationCommittedObservers.Clear();
         _objectTableHostResolver = null;
+        _setupCollisionSource = null;
         _disposed = true;
     }
 

@@ -1246,6 +1246,12 @@ internal sealed class HeadlessSessionHost : IDisposable
         IRuntimeDirectWorldProjection? worldProjection = null;
         if (_contentLease is { } content)
         {
+            // Without a window there is no richer body maker, so the shared
+            // physics owner is told where authored cylinders come from: a walk
+            // ordered at a creature has to know how wide that creature is, or
+            // it measures to the line through its middle and can never finish.
+            Runtime.EntityObjects.Physics.BindSetupCollisionSource(
+                content.PreparedCollision);
             _firstEntryDrive ??= new RuntimeFirstEntryDriveController(
                 Runtime.EntityObjects,
                 Runtime.Clock,

@@ -168,6 +168,130 @@ public sealed class RuntimePhysicsStateTests
         Assert.Null(record.PhysicsHost);
     }
 
+    /// <summary>
+    /// How wide the thing is matters as much as where it is. Everything that
+    /// measures the gap between two bodies measures it side to side, so a body
+    /// that reports no girth is measured to the line through its middle — and
+    /// an order to stop "within arm's reach" of a creature wider than that
+    /// reach can then never be satisfied. The girth is the one its authored
+    /// shape declares, grown by the scale the server gave this one.
+    ///
+    /// Mutation: answer a flat zero for the girth, or drop the scale, and this
+    /// fails.
+    /// </summary>
+    [Fact]
+    public void AnEntityBodyMadeOnDemandReportsItsScaledGirth()
+    {
+        using var lifetime = new RuntimeEntityObjectLifetime();
+        RuntimeEntityRecord record =
+            lifetime.Entities.AddActive(Spawn(0x70000113u, 1));
+        lifetime.Entities.SetFullCell(record, 0x01010001u, 0x0101FFFFu);
+        lifetime.Entities.SetPhysicsBody(
+            record,
+            FollowableBody(record, new Vector3(11f, 22f, 5f)));
+        record.Snapshot = record.Snapshot with { ObjScale = 1.5f };
+        using var shapes = new OneAuthoredShape(
+            0x02000001u,
+            radius: 0.8f,
+            height: 2.4f);
+        lifetime.Physics.BindSetupCollisionSource(shapes);
+
+        IPhysicsObjHost? host =
+            lifetime.Physics.ResolveObjectTableHost(record.ServerGuid);
+
+        Assert.NotNull(host);
+        Assert.Equal(1.2f, host.Radius, 4);
+    }
+
+    /// <summary>
+    /// With no shape to hand the body says so rather than inventing a girth:
+    /// a made-up one would move every arrival test by a made-up amount.
+    /// </summary>
+    [Fact]
+    public void AnEntityBodyWithNoAuthoredShapeToHandReportsNoGirth()
+    {
+        using var lifetime = new RuntimeEntityObjectLifetime();
+        RuntimeEntityRecord record =
+            lifetime.Entities.AddActive(Spawn(0x70000114u, 1));
+        lifetime.Entities.SetFullCell(record, 0x01010001u, 0x0101FFFFu);
+        lifetime.Entities.SetPhysicsBody(
+            record,
+            FollowableBody(record, new Vector3(11f, 22f, 5f)));
+
+        IPhysicsObjHost? host =
+            lifetime.Physics.ResolveObjectTableHost(record.ServerGuid);
+
+        Assert.NotNull(host);
+        Assert.Equal(0f, host.Radius);
+    }
+
+    /// <summary>One authored shape, for one id, and nothing else.</summary>
+    private sealed class OneAuthoredShape
+        : AcDream.Content.IPreparedCollisionSource
+    {
+        private readonly uint _id;
+        private readonly FlatSetupCollision _setup;
+
+        internal OneAuthoredShape(uint id, float radius, float height)
+        {
+            _id = id;
+            _setup = new FlatSetupCollision(
+                System.Collections.Immutable
+                    .ImmutableArray<FlatCollisionCylinder>.Empty,
+                System.Collections.Immutable
+                    .ImmutableArray<FlatCollisionSphere>.Empty,
+                height,
+                radius,
+                stepUpHeight: 0f,
+                stepDownHeight: 0f);
+        }
+
+        public AcDream.Content.PreparedAssetPresence ProbeCollision(
+            AcDream.Content.Pak.PakAssetType type,
+            uint sourceFileId) =>
+            sourceFileId == _id
+                ? AcDream.Content.PreparedAssetPresence.Available
+                : AcDream.Content.PreparedAssetPresence.Missing;
+
+        public AcDream.Content.PreparedCollisionReadResult<FlatSetupCollision>
+            ReadSetupCollision(
+                uint sourceFileId,
+                CancellationToken cancellationToken = default) =>
+            sourceFileId == _id
+                ? AcDream.Content.PreparedCollisionReadResult<FlatSetupCollision>
+                    .Loaded(_setup)
+                : AcDream.Content.PreparedCollisionReadResult<FlatSetupCollision>
+                    .Missing;
+
+        public AcDream.Content.PreparedCollisionReadResult<
+            FlatGfxObjCollisionAsset> ReadGfxObjCollision(
+                uint sourceFileId,
+                CancellationToken cancellationToken = default) =>
+            AcDream.Content.PreparedCollisionReadResult<
+                FlatGfxObjCollisionAsset>.Missing;
+
+        public AcDream.Content.PreparedCollisionReadResult<
+            FlatCellStructureCollisionAsset> ReadCellStructureCollision(
+                uint sourceFileId,
+                CancellationToken cancellationToken = default) =>
+            AcDream.Content.PreparedCollisionReadResult<
+                FlatCellStructureCollisionAsset>.Missing;
+
+        public AcDream.Content.PreparedCollisionReadResult<FlatEnvCellTopology>
+            ReadEnvCellTopology(
+                uint sourceFileId,
+                CancellationToken cancellationToken = default) =>
+            AcDream.Content.PreparedCollisionReadResult<FlatEnvCellTopology>
+                .Missing;
+
+        public AcDream.Content.PreparedCollisionSourceStats CollisionStats =>
+            default;
+
+        public void Dispose()
+        {
+        }
+    }
+
     private static PhysicsBody FollowableBody(
         RuntimeEntityRecord record,
         Vector3 position)
