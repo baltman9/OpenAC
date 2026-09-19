@@ -104,3 +104,16 @@ follow stricter rules than the rest of the client:
 
 Mention the API change in your pull request description so the next
 contract revision can note it.
+
+## Writing a plugin instead
+
+Most people who want to extend OpenAC do not need to change the client at
+all. A plugin is a .NET 10 class library in its own repository, targeting
+`AcDream.Plugin.Abstractions`, and it installs through the launcher without
+any of the above applying to it.
+
+**[docs/plugin-development.md](docs/plugin-development.md)** is the full
+path: setting up the project, what goes in `plugin.json`, what the launcher
+requires before it will install a plugin, how to validate yours before you
+publish, and how to get it listed so other players can find it.
+

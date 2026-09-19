@@ -128,7 +128,7 @@ public sealed partial class LauncherWindowViewModelTests
     }
 
     [Fact]
-    public async Task StartupStatusReportsUpToDateWhenNothingIsAvailable()
+    public async Task StartupStatusStaysEmptyWhenNothingIsAvailable()
     {
         using var orchestrator = new FakeLauncherOrchestrator
         {
@@ -147,11 +147,11 @@ public sealed partial class LauncherWindowViewModelTests
         viewModel.Initialize();
         await viewModel.StartBackgroundInitializationAsync();
 
-        Assert.StartsWith("Up to date", viewModel.OperationStatus, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, viewModel.OperationStatus);
     }
 
     [Fact]
-    public async Task StartupStatusReportsAnAvailableUpdate()
+    public async Task StartupStatusLeavesAnAvailableUpdateToTheBanner()
     {
         using var orchestrator = new FakeLauncherOrchestrator
         {
@@ -170,7 +170,8 @@ public sealed partial class LauncherWindowViewModelTests
         viewModel.Initialize();
         await viewModel.StartBackgroundInitializationAsync();
 
-        Assert.Equal("Update available.", viewModel.OperationStatus);
+        Assert.Equal("", viewModel.OperationStatus);
+        Assert.True(viewModel.ShowUpdateBanner);
     }
 
     [Fact]
@@ -473,13 +474,16 @@ public sealed partial class LauncherWindowViewModelTests
         SelectCharacter(viewModel);
 
         viewModel.CharacterLaunchMode = LaunchMode.Headless;
-        viewModel.CharacterPluginsText = "Plugin.One\nPlugin.Two\nPlugin.One";
+        CharacterPluginChoiceViewModel existingPlugin = Assert.Single(viewModel.CharacterPluginChoices);
+        Assert.Equal("Existing.Plugin", existingPlugin.Id);
+        Assert.True(existingPlugin.IsMissing);
+        Assert.True(existingPlugin.IsChecked);
         viewModel.CharacterLoginCommandsText = " /tell someone, hi \n/vt start\n/tell someone, hi";
         viewModel.SaveCharacterSettingsCommand.Execute(null);
 
         Assert.NotNull(orchestrator.SettingsUpdate);
         Assert.Equal(LaunchMode.Headless, orchestrator.SettingsUpdate.Value.Mode);
-        Assert.Equal(["Plugin.One", "Plugin.Two"], orchestrator.SettingsUpdate.Value.Plugins);
+        Assert.Equal(["Existing.Plugin"], orchestrator.SettingsUpdate.Value.Plugins);
         Assert.Equal(
             ["/tell someone, hi", "/vt start", "/tell someone, hi"],
             orchestrator.SettingsUpdate.Value.Commands);
@@ -907,12 +911,14 @@ public sealed partial class LauncherWindowViewModelTests
 
     private static LauncherWindowViewModel CreateInitialized(
         FakeLauncherOrchestrator orchestrator,
-        ILauncherInstaller? installer = null)
+        ILauncherInstaller? installer = null,
+        AcDream.Launcher.Core.Plugins.PluginInventory? pluginInventory = null)
     {
         var viewModel = new LauncherWindowViewModel(
             orchestrator,
             new ImmediateUiDispatcher(),
-            installer);
+            installer,
+            pluginInventory: pluginInventory);
         viewModel.Initialize();
         return viewModel;
     }
@@ -992,6 +998,8 @@ public sealed partial class LauncherWindowViewModelTests
 
         public (LaunchMode Mode, IReadOnlyList<string> Plugins, IReadOnlyList<string> Commands)? SettingsUpdate { get; private set; }
 
+        public List<(string Server, string Account, string Character, LaunchMode Mode, IReadOnlyList<string> Plugins)> SettingsUpdates { get; } = [];
+
         public (string Server, string Account, string? Character, LaunchMode Mode)? LaunchRequest { get; private set; }
 
         public (string Server, string Account)? ProbeRequest { get; private set; }
@@ -1003,14 +1011,33 @@ public sealed partial class LauncherWindowViewModelTests
         public string InstallationStatus { get; private set; } =
             "No installed client is configured.";
 
-        public void LoadProfiles() => LoadCalled = true;
+        /// <summary>Set by <see cref="SetShowBetaPlugins"/>, the way a real profile store would
+        /// hold it, so a freshly configured view model reads back whatever the last one wrote.</summary>
+        public bool ShowBetaPlugins { get; private set; }
+
+        /// <summary>What the profile file on disk holds, unseen until <see cref="LoadProfiles"/>
+        /// runs, the way the real store starts from an empty document. Null keeps the fake's
+        /// original behaviour: the value is visible at once and loading changes nothing.</summary>
+        public bool? ShowBetaPluginsOnDisk { get; init; }
+
+        public void LoadProfiles()
+        {
+            LoadCalled = true;
+            if (ShowBetaPluginsOnDisk is { } onDisk)
+            {
+                ShowBetaPlugins = onDisk;
+            }
+        }
 
         public LauncherStateSnapshot GetSnapshot() => new(
             ServersOverride ?? [CreateServerSnapshot()],
             [Session],
             Platform,
             IsInstallationReady: InstalledRecord is not null,
-            InstallationStatus);
+            InstallationStatus,
+            ShowBetaPlugins: ShowBetaPlugins);
+
+        public void SetShowBetaPlugins(bool value) => ShowBetaPlugins = value;
 
         public LauncherCapability GetLaunchCapability(LaunchMode mode) =>
             Platform.ForLaunchMode(mode);
@@ -1089,8 +1116,22 @@ public sealed partial class LauncherWindowViewModelTests
             string characterName,
             LaunchMode launchMode,
             IReadOnlyList<string> plugins,
-            IReadOnlyList<string> loginCommands) =>
+            IReadOnlyList<string> loginCommands)
+        {
             SettingsUpdate = (launchMode, plugins, loginCommands);
+            SettingsUpdates.Add((serverName, accountName, characterName, launchMode, plugins));
+        }
+
+        public (string? Character, LaunchMode Mode)? SavedRowSelection { get; private set; }
+
+        public void UpdateAccountSelection(
+            string serverName,
+            string accountName,
+            string? selectedCharacter,
+            LaunchMode selectedLaunchMode)
+        {
+            SavedRowSelection = (selectedCharacter, selectedLaunchMode);
+        }
 
         public void RemoveCharacter(
             string serverName,
