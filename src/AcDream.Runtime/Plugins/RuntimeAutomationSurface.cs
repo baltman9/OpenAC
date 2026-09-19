@@ -1355,6 +1355,13 @@ internal sealed class RuntimeAutomationSurface
     {
         if (delta.Change == RuntimeInventoryChange.Cleared)
             return;
+
+        if (delta.Change == RuntimeInventoryChange.Added
+            && delta.Item.EquipLocation != 0u)
+        {
+            PublishInitialEquipmentPlacement(delta.Item);
+        }
+
         WorldEvents? events = _pluginEvents;
         if (events is null)
             return;
@@ -1368,6 +1375,36 @@ internal sealed class RuntimeAutomationSurface
         events.FireObjectChanged(new PluginObjectChange(
             delta.Item.ObjectId,
             kind));
+    }
+
+    private void PublishInitialEquipmentPlacement(
+        in RuntimeInventoryItemSnapshot item)
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        if (runtime is null)
+            return;
+
+        uint playerId = runtime.PlayerIdentity.ServerGuid;
+        ClientObjectTable objects = runtime.InventoryOwner.Objects;
+        if (playerId == 0u
+            || objects.Get(item.ObjectId) is not { } added
+            || !IsPlayerOwned(added, playerId, objects))
+        {
+            return;
+        }
+
+        Action<PluginEquipmentObservation>? handlers;
+        lock (_gate)
+            handlers = _equipmentPlacementObserved;
+        handlers?.Invoke(new PluginEquipmentObservation(
+            item.ObjectId,
+            item.EquipLocation,
+            IsRemoval: false)
+        {
+            IsInitialPlacement = true,
+        });
     }
 
     void IRuntimeEventObserver.OnChat(in RuntimeChatDelta delta) { }

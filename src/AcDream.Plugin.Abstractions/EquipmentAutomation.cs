@@ -156,14 +156,21 @@ public readonly record struct PluginEquipmentPlacement(
     uint ObjectId,
     uint EquippedLocation);
 
-/// <summary>An authoritative equipment placement or removal receipt.</summary>
+/// <summary>An authoritative equipment placement or removal observation.</summary>
 /// <param name="ObjectId">The object affected by the receipt.</param>
 /// <param name="EquippedLocation">Its exact new location, or zero on removal.</param>
 /// <param name="IsRemoval">Whether the receipt removes the object from equipment.</param>
 public readonly record struct PluginEquipmentObservation(
     uint ObjectId,
     uint EquippedLocation,
-    bool IsRemoval);
+    bool IsRemoval)
+{
+    /// <summary>
+    /// Whether an object entered the world already in this location, rather
+    /// than changing location after it was present.
+    /// </summary>
+    public bool IsInitialPlacement { get; init; }
+}
 
 /// <summary>
 /// Reads what the player owns that can be worn or wielded, and asks the
@@ -202,8 +209,9 @@ public interface IEquipmentAutomation
         Array.Empty<PluginEquipmentPlacement>();
 
     /// <summary>
-    /// Raised only for a server-confirmed placement or removal. Optimistic
-    /// inventory moves and ordinary world movement do not raise this event.
+    /// Raised for a server-confirmed placement or removal, including an item
+    /// that enters the world already equipped. Optimistic inventory moves and
+    /// ordinary world movement do not raise this event.
     /// </summary>
     event Action<PluginEquipmentObservation> PlacementObserved
     {

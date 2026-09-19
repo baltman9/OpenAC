@@ -23,6 +23,11 @@ public sealed class RuntimeLiveEntitySessionControllerTests
     /// nonzero receipt may be accepted.
     /// Mutation executed: <c>update.PackedMotionFlags == 0u was replaced with update.TypeFlags == 0u</c>.
     /// </summary>
+    /// <summary>
+    /// Mutation executed: the <c>RuntimeInventoryChange.Added</c> initial
+    /// placement forwarding block was removed; an equipped object arriving
+    /// after the surface had bound then never reached the equipment tracker.
+    /// </summary>
     [Fact]
     public void SelfMotionReceiptUsesParsedTypeAndPackedWord()
     {
@@ -78,9 +83,12 @@ public sealed class RuntimeLiveEntitySessionControllerTests
     /// Mutation pin: forward every object move as equipment. The optimistic
     /// movement adds an extra receipt before the server-confirmed wield.
     /// Mutation executed: <c>the OnEquipmentObjectMoved origin comparison was inverted from != to ==</c>.
+    /// Mutation executed: the <c>RuntimeInventoryChange.Added</c> initial
+    /// placement forwarding block was removed; an equipped object arriving
+    /// after the surface had bound then never reached the equipment tracker.
     /// </summary>
     [Fact]
-    public void EquipmentSurfacePublishesOnlyAuthoritativePlacementInArrivalOrder()
+    public void EquipmentSurfacePublishesInitialEquippedAndAuthoritativePlacementsInArrivalOrder()
     {
         using StartedRuntime started = StartRuntime();
         GameRuntime runtime = started.Runtime;
@@ -106,8 +114,26 @@ public sealed class RuntimeLiveEntitySessionControllerTests
         var received = new List<PluginEquipmentObservation>();
         equipment.PlacementObserved += received.Add;
 
+        const uint initialId = 0x50000011u;
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = initialId,
+            Name = "Held Sword",
+            ContainerId = playerId,
+            WielderId = playerId,
+            ValidLocations = EquipMask.MeleeWeapon,
+            CurrentlyEquippedLocation = EquipMask.MeleeWeapon,
+        });
+        Assert.Equal(
+            [new PluginEquipmentObservation(
+                initialId, (uint)EquipMask.MeleeWeapon, false)
+            {
+                IsInitialPlacement = true,
+            }],
+            received);
+
         Assert.True(objects.MoveItemOptimistic(itemId, playerId, 0));
-        Assert.Empty(received);
+        Assert.Single(received);
         Assert.True(objects.ApplyConfirmedServerWield(
             itemId, playerId, EquipMask.MeleeWeapon));
         Assert.True(objects.ApplyConfirmedServerMove(
@@ -116,13 +142,18 @@ public sealed class RuntimeLiveEntitySessionControllerTests
         Assert.Equal(
             [
                 new PluginEquipmentObservation(
+                    initialId, (uint)EquipMask.MeleeWeapon, false)
+                {
+                    IsInitialPlacement = true,
+                },
+                new PluginEquipmentObservation(
                     itemId, (uint)EquipMask.MeleeWeapon, false),
                 new PluginEquipmentObservation(itemId, 0u, true),
             ],
             received);
         surface.Unbind();
         objects.ApplyConfirmedServerWield(itemId, playerId, EquipMask.MeleeWeapon);
-        Assert.Equal(2, received.Count);
+        Assert.Equal(3, received.Count);
     }
 
     [Fact]
