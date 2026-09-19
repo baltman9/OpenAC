@@ -1189,6 +1189,13 @@ internal sealed class HeadlessSessionHost : IDisposable
                 SkillTableFileId,
                 out var skillTable))
         {
+            // Said out loud: without the table the resolver answers nothing
+            // for every skill, and a silent nothing looks exactly like a
+            // character whose skills the server never sent.
+            Console.Error.WriteLine(
+                $"warning: skill formulas are unavailable (game-data file "
+                + $"0x{SkillTableFileId:X8} could not be read); every skill "
+                + "total will be left unadjusted.");
             skillTable = null;
         }
 
