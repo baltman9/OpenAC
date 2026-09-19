@@ -37,6 +37,8 @@ internal sealed class RuntimeAutomationSurface
     private readonly LocalPluginPeerRegistry _peers;
     private readonly string[] _peerTags;
     private double _peerHeartbeatRemaining;
+    private long _lastNavigationSequence;
+    private PluginGoToState _lastNavigationState;
 
     private GameRuntime? _runtime;
     private AcDream.Runtime.Gameplay.RuntimeTradeAutomation? _tradeAutomation;
@@ -89,6 +91,7 @@ internal sealed class RuntimeAutomationSurface
     private Func<uint, bool, bool>? _answerConfirmation;
     private Action<ExternalContainerTransition>? _externalContainerChanged;
     private Action<PluginChatMessage>? _chatReceived;
+    private Action<PluginChatLinkClicked>? _chatLinkClicked;
     private SpellTable? _spellCatalogSource;
     private IReadOnlyList<PluginSpellInfo> _allSpells = Array.Empty<PluginSpellInfo>();
     private long _inventoryCompletionRevision;
@@ -668,12 +671,28 @@ internal sealed class RuntimeAutomationSurface
     private void OnPeerTick(double elapsedSeconds)
     {
         Poll();
+        _navigation.PublishSnapshotChanged();
+        PublishNavigationChange();
 
         _peerHeartbeatRemaining -= Math.Max(0d, elapsedSeconds);
         if (_peerHeartbeatRemaining > 0d)
             return;
         _peerHeartbeatRemaining = PeerHeartbeatSeconds;
         PublishPeerSnapshot();
+    }
+
+    private void PublishNavigationChange()
+    {
+        WorldEvents? events = _pluginEvents;
+        if (events is null)
+            return;
+        PluginGoToReport report = _navigation.GoToReport;
+        if (report.Revision == 0L
+            || report.Revision == _lastNavigationSequence)
+            return;
+        _lastNavigationSequence = report.Revision;
+        _lastNavigationState = report.State;
+        events.FireNavigationChanged(report);
     }
 
     private void PublishPeerSnapshot()
@@ -1425,6 +1444,37 @@ internal sealed class RuntimeAutomationSurface
             out double remaining)
                 ? Math.Max(0d, remaining)
                 : 0d;
+    }
+
+    public event Action<PluginChatLinkClicked> LinkClicked
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_gate)
+                _chatLinkClicked += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_gate)
+                _chatLinkClicked -= value;
+        }
+    }
+
+    internal void RaiseChatLinkClicked(PluginChatLinkClicked link)
+    {
+        Action<PluginChatLinkClicked>? handlers;
+        lock (_gate)
+            handlers = _chatLinkClicked;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginChatLinkClicked>)handler)(link); }
+            catch { /* plugin errors do not propagate out of event dispatch */ }
+        }
     }
 
     public event Action<PluginChatMessage> Received

@@ -9,6 +9,29 @@ public class WorldEventsTests
     private static WorldEntitySnapshot S(uint id) => new(id, SourceId: 0x01000000u, Position: Vector3.Zero, Rotation: Quaternion.Identity);
 
     [Fact]
+    public void NavigationChanged_DeliversAndUnsubscribes()
+    {
+        var events = new WorldEvents();
+        var seen = new List<PluginGoToReport>();
+        Action<PluginGoToReport> handler = seen.Add;
+        events.NavigationChanged += handler;
+
+        events.FireNavigationChanged(new PluginGoToReport(4, PluginGoToState.Walking, 9, 12f, 1, "walking")
+        {
+            Revision = 2,
+        });
+        events.NavigationChanged -= handler;
+        events.FireNavigationChanged(new PluginGoToReport(4, PluginGoToState.Arrived, 9, 0f, 1, "arrived")
+        {
+            Revision = 3,
+        });
+
+        var report = Assert.Single(seen);
+        Assert.Equal(2, report.Revision);
+        Assert.Equal(PluginGoToState.Walking, report.CurrentState);
+    }
+
+    [Fact]
     public void FireBeforeAnySubscriber_LateSubscribeReceivesReplay()
     {
         var events = new WorldEvents();

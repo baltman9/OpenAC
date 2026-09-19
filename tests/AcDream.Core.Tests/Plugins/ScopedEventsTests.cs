@@ -46,7 +46,7 @@ public sealed class ScopedEventsTests
         // Every event IEvents declares today. If a new event is added
         // without a matching branch in CreateHandler/Fire below, those
         // helpers throw before this assertion is ever reached.
-        Assert.Equal(9, walked);
+        Assert.Equal(10, walked);
 
         foreach (EventInfo eventInfo in events)
             Fire(inner, eventInfo.Name);
@@ -93,6 +93,8 @@ public sealed class ScopedEventsTests
                 new Action<string>(_ => counter[0]++),
             nameof(IEvents.ObjectChanged) =>
                 new Action<PluginObjectChange>(_ => counter[0]++),
+            nameof(IEvents.NavigationChanged) =>
+                new Action<PluginGoToReport>(_ => counter[0]++),
             nameof(IEvents.ContainerOpened) =>
                 new Action<uint>(_ => counter[0]++),
             nameof(IEvents.ContainerClosed) =>
@@ -127,6 +129,10 @@ public sealed class ScopedEventsTests
             case nameof(IEvents.ObjectChanged):
                 inner.FireObjectChanged(
                     new PluginObjectChange(1u, PluginObjectChangeKind.Created));
+                break;
+            case nameof(IEvents.NavigationChanged):
+                inner.FireNavigationChanged(new PluginGoToReport(
+                    1u, PluginGoToState.Walking, 2u, 1f, 1, "walking"));
                 break;
             case nameof(IEvents.ContainerOpened):
                 inner.FireContainerOpened(1u);

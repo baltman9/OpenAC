@@ -4,6 +4,7 @@ using System.Numerics;
 using AcDream.App.Rendering;
 using AcDream.App.UI;
 using AcDream.Core.Chat;
+using AcDream.Plugin.Abstractions;
 using AcDream.UI.Abstractions;
 using AcDream.UI.Abstractions.Input;
 using AcDream.UI.Abstractions.Panels.Chat;
@@ -106,6 +107,7 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
     private uint _tellTargetGuid;
 
     private Func<string, string?>? _chatStrings;
+    internal Action<PluginChatLinkClicked>? ChatLinkClicked { get; set; }
 
     private string S(string key, string authoredFallback)
         => _chatStrings?.Invoke(key) ?? authoredFallback;
@@ -243,7 +245,7 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
             index >= 0 && index < c._cachedTranscriptRuns.Count
                 ? c._cachedTranscriptRuns[index]
                 : null;
-        c.Transcript.OnCharClick = pos => c.TryStartTellFromTag(pos);
+        c.Transcript.OnCharClick = pos => c.TryHandleTagClick(pos);
 
         // ── Unread indicator ─────────────────────────────────────────────
         c._unreadIndicator = layout.FindElement(UnreadIndicatorId);
@@ -562,7 +564,7 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
         return StoreTranscriptLayout(result, revision, filter, maxW, datFont, debugFont);
     }
 
-    internal bool TryStartTellFromTag(UiText.Pos position)
+    internal bool TryHandleTagClick(UiText.Pos position)
     {
         if (position.Line < 0 || position.Line >= _cachedTranscriptTags.Count)
             return false;
@@ -573,6 +575,15 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
         {
             if (position.Col < start || position.Col >= start + length)
                 continue;
+            if (tag.TryGetCoordinate(out double eastWest, out double northSouth))
+            {
+                ChatLinkClicked?.Invoke(new PluginChatLinkClicked(
+                    PluginChatLinkKind.Coordinate,
+                    $"{northSouth:0.###}{(northSouth < 0 ? 'S' : 'N')}, {eastWest:0.###}{(eastWest < 0 ? 'W' : 'E')}",
+                    new PluginChatCoordinate(eastWest, northSouth)));
+                return true;
+            }
+
             if (!tag.TryGetIidString(out _, out string name) || name.Length == 0)
                 continue;
 
