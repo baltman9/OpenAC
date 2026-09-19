@@ -42,9 +42,8 @@ loads no copy.
 
 ## Publishing for the launcher
 
-The launcher installs plugins from GitHub releases (`shaneedwards/openac-plugins` lists them for
-now). The same stricter contract applies to a plugin folder unzipped by hand into the plugins
-directory: the launcher checks it the same way, since `minHostVersion` and `hosts` are required for
+The launcher installs plugins from GitHub releases (`eriknihlen/openac-plugins` lists them). The
+same stricter contract applies to a plugin folder unzipped by hand into the plugins directory: the launcher checks it the same way, since `minHostVersion` and `hosts` are required for
 any plugin the launcher runs, not only one it downloaded itself. A plugin author who wants a plugin
 installable through the launcher follows a stricter contract than the fields above:
 

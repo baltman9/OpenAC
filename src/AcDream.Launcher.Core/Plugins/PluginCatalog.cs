@@ -28,10 +28,9 @@ public sealed record PluginCatalog(
 {
     public const int CurrentSchemaVersion = 1;
 
-    /// <summary>The proof-of-concept list release. One constant, so moving it to Erik's
-    /// account later is a one-line change.</summary>
+    /// <summary>The published plugin list: the latest release of the list repository.</summary>
     public static Uri ProductionListUri { get; } =
-        GitHubReleaseLocator.LatestAsset("shaneedwards/openac-plugins", "plugins.json");
+        GitHubReleaseLocator.LatestAsset("eriknihlen/openac-plugins", "plugins.json");
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {

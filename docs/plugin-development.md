@@ -197,7 +197,7 @@ that plugin into the Beta channel.
 
 A listed plugin appears in the launcher's **Discover** panel, so players can
 find and install it without being sent a link. The list lives at
-[shaneedwards/openac-plugins](https://github.com/shaneedwards/openac-plugins).
+[eriknihlen/openac-plugins](https://github.com/eriknihlen/openac-plugins).
 
 **To ask for a listing, open an issue on that repository** with your plugin's
 id, display name, author name, a one-line description, and the `owner/name`
