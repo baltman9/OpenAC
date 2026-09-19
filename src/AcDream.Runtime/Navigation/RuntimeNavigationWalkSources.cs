@@ -159,7 +159,9 @@ internal sealed class RuntimeNavigationGoalSource : INavigationGoalSource
     /// <summary>
     /// The server object whose collision edge comes nearest a spot. Live objects
     /// collide under the client's own ids, so each is matched back to its record;
-    /// a door counts as closed while it still collides.
+    /// a door counts as closed while it still collides. A missile in flight blocks
+    /// nothing, as it stands nowhere for <see cref="StandsStill"/>: an arrow or a
+    /// spell's bolt passing a stalled body is not what stopped it.
     /// </summary>
     public bool TryFindBlocker(Vector3 position, float radius, out NavigationBlocker blocker)
     {
@@ -172,7 +174,8 @@ internal sealed class RuntimeNavigationGoalSource : INavigationGoalSource
         foreach (ShadowEntry entry in _entries)
         {
             if (!_runtime.EntityObjects.Entities.TryGetByLocalId(entry.EntityId, out RuntimeEntityRecord record)
-                || record.ServerGuid == player)
+                || record.ServerGuid == player
+                || !StandsAnywhere(record.FinalPhysicsState))
             {
                 continue;
             }
@@ -219,9 +222,17 @@ internal sealed class RuntimeNavigationGoalSource : INavigationGoalSource
         _runtime.EntityObjects.Entities.TryGetByLocalId(entityLocalId, out RuntimeEntityRecord record)
         && record.ServerGuid != _runtime.PlayerIdentity.ServerGuid
         && !record.FinalPhysicsState.HasFlag(PhysicsStateFlags.Ethereal)
-        && !record.FinalPhysicsState.HasFlag(PhysicsStateFlags.Missile)
+        && StandsAnywhere(record.FinalPhysicsState)
         && _runtime.InventoryOwner.Objects.Get(record.ServerGuid) is { } item
         && CanBeStoodOn(item);
+
+    /// <summary>
+    /// Whether an object in this state stands anywhere at all. A missile in flight does not: an
+    /// arrow or a spell's bolt is somewhere else the moment after, so it is neither a wall a
+    /// grid holds, nor something a route keeps out of, nor what stopped a walk that stalled.
+    /// </summary>
+    internal static bool StandsAnywhere(PhysicsStateFlags state) =>
+        !state.HasFlag(PhysicsStateFlags.Missile);
 
     /// <summary>
     /// Whether a grid takes a server object's collision as the floors and walls it is:
@@ -255,7 +266,7 @@ internal sealed class RuntimeNavigationGoalSource : INavigationGoalSource
                 || record.ServerGuid == player
                 || record.ServerGuid == goalObjectId
                 || record.FinalPhysicsState.HasFlag(PhysicsStateFlags.Ethereal)
-                || record.FinalPhysicsState.HasFlag(PhysicsStateFlags.Missile)
+                || !StandsAnywhere(record.FinalPhysicsState)
                 || _runtime.InventoryOwner.Objects.Get(record.ServerGuid) is not { } item
                 || !StandsInTheWay(item))
             {
