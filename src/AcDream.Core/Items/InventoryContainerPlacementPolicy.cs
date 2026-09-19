@@ -105,11 +105,33 @@ public static class InventoryContainerPlacementPolicy
         };
     }
 
+    /// <summary>
+    /// The container-type field an object carries: 0 an ordinary item, 1 a
+    /// pack, 2 a spell focus. A focus holds nothing, but it takes a
+    /// container slot rather than an item slot, which is why
+    /// <see cref="IsContainer"/> counts it as one.
+    /// </summary>
+    private const uint FocusContainerType = 2u;
+
+    /// <summary>
+    /// Whether this object occupies a CONTAINER slot rather than an item
+    /// slot. A spell focus does, so it answers true here even though it can
+    /// hold nothing -- use <see cref="CanHoldItems"/> to ask whether
+    /// something can go inside.
+    /// </summary>
     public static bool IsContainer(ClientObject item)
         => item.ContainerTypeHint != 0u
             || (item.Type & ItemType.Container) != 0
             || item.ItemsCapacity != 0
             || item.ContainersCapacity != 0;
+
+    /// <summary>
+    /// A spell focus. It counts as a container for slot accounting but
+    /// holds nothing, so it is never somewhere an item can go: the server
+    /// refuses any request naming one as the destination.
+    /// </summary>
+    public static bool IsFocus(ClientObject item)
+        => item.ContainerTypeHint == FocusContainerType;
 
     private static int CountItems(ClientObjectTable objects, uint containerId)
     {
