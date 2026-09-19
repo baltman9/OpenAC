@@ -240,6 +240,37 @@ public sealed class RuntimeAutomationSurfaceTests
         Assert.True(completion.IsSuccess);
     }
 
+    /// <summary>
+    /// Mutation executed: project <c>false</c> instead of the inventory
+    /// transaction's pending-request flag in <c>CaptureBusyState</c>; the
+    /// first assertion fails while the request is outstanding.
+    /// </summary>
+    [Fact]
+    public void RecoveryProjectsDispatchedInventoryUntilMatchingAuthoritativeMove()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        const uint itemId = 0x50000124u;
+        runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = itemId,
+            Name = "Stack",
+            StackSize = 10,
+            StackSizeMax = 100,
+        });
+
+        Assert.True(runtime.InventoryOwner.Transactions.TryDispatch(
+            InventoryRequestKind.Move, itemId, static () => true));
+        PluginBusyState pending = surface.Recovery.CaptureBusyState();
+        Assert.True(pending.PendingInventory);
+        Assert.Equal(0, pending.BusyCount);
+
+        Assert.True(runtime.InventoryOwner.Objects.ApplyConfirmedServerMove(
+            itemId, 0x50000001u, newWielderId: 0u));
+        Assert.False(surface.Recovery.CaptureBusyState().PendingInventory);
+    }
+
     [Fact]
     public void RecoveryClearsExactlyOneCanonicalBusyReference()
     {
