@@ -185,6 +185,13 @@ public sealed class RuntimeLiveEntitySessionController
             acknowledgeProjection: null,
             out _,
             out _);
+        if (isLocal
+            && update.MotionState.MovementType == 0
+            && update.PackedMotionFlags == 0u)
+        {
+            _runtime.ActionOwner.CombatMode.RecordQualifiedSelfMotion(
+                _runtime.Clock.SimulationTimeSeconds);
+        }
         // A movement the server drives at this character is an order to walk
         // or turn, and it is the only answer a use out of arm's reach ever
         // gets. A host with a window has always obeyed it.

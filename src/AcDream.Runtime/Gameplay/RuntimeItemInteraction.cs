@@ -1297,6 +1297,15 @@ public sealed class RuntimeItemInteraction : IDisposable
             : _autoWield.TryWield(item, requestedMask);
     }
 
+    public bool TryWieldItemSecondary(uint itemGuid)
+    {
+        if (itemGuid == 0u || _objects.Get(itemGuid) is not { } item)
+            return false;
+        if (!EnsureInventoryRequestReady())
+            return false;
+        return _autoWield.TryWieldSecondary(item);
+    }
+
     /// <summary>
     /// Whether an equipment switch is in flight -- that and nothing else.
     /// It once also answered true whenever ANY inventory request was

@@ -47,6 +47,30 @@ public sealed class HeadlessEquipmentAutomationTests
         Assert.Empty(h.Wields);
     }
 
+    /// <summary>
+    /// Mutation pin: route the secondary request through the ordinary
+    /// requested-mask validator. A melee-only item is rejected for Shield.
+    /// Mutation executed: <c>_autoWield.TryWieldSecondary(item) was replaced with _autoWield.TryWield(item, EquipMask.Shield)</c>.
+    /// </summary>
+    [Fact]
+    public void SecondaryIntentWieldsMeleeOnlyItemInShieldSlot()
+    {
+        var h = new Harness();
+        const uint sword = 0x50000A02u;
+        h.Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = sword,
+            Type = ItemType.MeleeWeapon,
+            ContainerId = Player,
+            ValidLocations = EquipMask.MeleeWeapon,
+        });
+
+        Assert.False(h.Automation.TryEquip(sword, (uint)EquipMask.Shield));
+        Assert.Empty(h.Wields);
+        Assert.True(h.Automation.TryEquipSecondary(sword));
+        Assert.Equal([(sword, (uint)EquipMask.Shield)], h.Wields);
+    }
+
     [Fact]
     public void ExplicitCombatModeRequest_ForwardsToTheBoundAutoWieldController()
     {

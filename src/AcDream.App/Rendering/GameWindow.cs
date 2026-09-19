@@ -995,7 +995,8 @@ public sealed class GameWindow :
                 result.ItemInteraction.TryWieldItem(
                     itemId,
                     (AcDream.Core.Items.EquipMask)requestedLocation),
-            () => result.ItemInteraction.IsAutoWieldBusy);
+            () => result.ItemInteraction.IsAutoWieldBusy,
+            result.ItemInteraction.TryWieldItemSecondary);
         _automation?.BindItems(
             result.ItemInteraction.TryUseItemForAutomation,
             result.ItemInteraction.TryApplyItem,

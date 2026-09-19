@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Net;
 using AcDream.Core.Combat;
 using AcDream.Core.Items;
@@ -5,8 +6,10 @@ using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 using AcDream.Core.Spells;
+using AcDream.Plugin.Abstractions;
 using AcDream.Runtime.Entities;
 using AcDream.Runtime.Gameplay;
+using AcDream.Runtime.Plugins;
 using AcDream.Runtime.Session;
 using AcDream.Runtime.World;
 
@@ -14,6 +17,114 @@ namespace AcDream.Runtime.Tests.Session;
 
 public sealed class RuntimeLiveEntitySessionControllerTests
 {
+    /// <summary>
+    /// Mutation pin: compare the header flag byte to zero instead of the
+    /// packed motion word. The first accepted receipt is lost, and a packed
+    /// nonzero receipt may be accepted.
+    /// Mutation executed: <c>update.PackedMotionFlags == 0u was replaced with update.TypeFlags == 0u</c>.
+    /// </summary>
+    [Fact]
+    public void SelfMotionReceiptUsesParsedTypeAndPackedWord()
+    {
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        const uint playerId = 0x50000005u;
+        runtime.PlayerIdentity.ServerGuid = playerId;
+        using var session = new WorldSession(
+            new IPEndPoint(IPAddress.Loopback, 9000),
+            new FixtureTransport());
+        var controller = new RuntimeLiveEntitySessionController(runtime, session);
+        LiveEntitySessionSink sink = controller.CreateSink();
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+
+        SendMotion(sink, playerId, type: 0, headerFlags: 4, packed: 0);
+        Assert.Equal(1, runtime.ActionOwner.CombatMode.QualifiedSelfMotionRevision);
+        SendMotion(sink, playerId, type: 0, headerFlags: 0, packed: 1);
+        SendMotion(sink, playerId, type: 6, headerFlags: 0, packed: 0);
+        SendMotion(sink, playerId + 1, type: 0, headerFlags: 0, packed: 0);
+        Assert.Equal(1, runtime.ActionOwner.CombatMode.QualifiedSelfMotionRevision);
+        Assert.True(surface.IsAvailable);
+        ICombatAutomation combat = surface.Combat;
+        Assert.Equal(1, combat.Snapshot.QualifiedSelfMotionRevision);
+    }
+
+    private static void SendMotion(
+        LiveEntitySessionSink sink, uint objectId,
+        byte type, byte headerFlags, uint packed)
+    {
+        var body = new byte[24];
+        BinaryPrimitives.WriteUInt32LittleEndian(body, UpdateMotion.Opcode);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(4), objectId);
+        body[16] = type;
+        body[17] = headerFlags;
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(20), packed);
+        UpdateMotion.Parsed parsed = Assert.IsType<UpdateMotion.Parsed>(
+            UpdateMotion.TryParse(body));
+        sink.MotionUpdated(new WorldSession.EntityMotionUpdate(
+            parsed.Guid,
+            parsed.MotionState,
+            parsed.InstanceSequence,
+            parsed.MovementSequence,
+            parsed.ServerControlSequence,
+            parsed.IsAutonomous)
+        {
+            TypeFlags = parsed.TypeFlags,
+            PackedMotionFlags = parsed.PackedMotionFlags,
+        });
+    }
+
+    /// <summary>
+    /// Mutation pin: forward every object move as equipment. The optimistic
+    /// movement adds an extra receipt before the server-confirmed wield.
+    /// Mutation executed: <c>the OnEquipmentObjectMoved origin comparison was inverted from != to ==</c>.
+    /// </summary>
+    [Fact]
+    public void EquipmentSurfacePublishesOnlyAuthoritativePlacementInArrivalOrder()
+    {
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        const uint playerId = 0x50000005u;
+        const uint itemId = 0x50000010u;
+        runtime.PlayerIdentity.ServerGuid = playerId;
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        Assert.True(surface.IsAvailable);
+        IEquipmentAutomation equipment = surface.Equipment;
+        ClientObjectTable objects = runtime.InventoryOwner.Objects;
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = itemId,
+            Name = "Sword",
+            ContainerId = playerId,
+            ValidLocations = EquipMask.MeleeWeapon,
+        });
+        Assert.Equal(
+            objects.Objects.Select(static item => item.ObjectId),
+            equipment.CaptureWorldPlacementsInOrder()
+                .Select(static placement => placement.ObjectId));
+        var received = new List<PluginEquipmentObservation>();
+        equipment.PlacementObserved += received.Add;
+
+        Assert.True(objects.MoveItemOptimistic(itemId, playerId, 0));
+        Assert.Empty(received);
+        Assert.True(objects.ApplyConfirmedServerWield(
+            itemId, playerId, EquipMask.MeleeWeapon));
+        Assert.True(objects.ApplyConfirmedServerMove(
+            itemId, playerId, newWielderId: 0u));
+
+        Assert.Equal(
+            [
+                new PluginEquipmentObservation(
+                    itemId, (uint)EquipMask.MeleeWeapon, false),
+                new PluginEquipmentObservation(itemId, 0u, true),
+            ],
+            received);
+        surface.Unbind();
+        objects.ApplyConfirmedServerWield(itemId, playerId, EquipMask.MeleeWeapon);
+        Assert.Equal(2, received.Count);
+    }
+
     [Fact]
     public void DirectSinkOwnsCanonicalCreateUpdateDeleteWithoutProjection()
     {

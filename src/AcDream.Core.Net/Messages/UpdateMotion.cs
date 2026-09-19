@@ -13,7 +13,11 @@ public static class UpdateMotion
         ushort InstanceSequence,
         ushort MovementSequence,
         ushort ServerControlSequence,
-        bool IsAutonomous);
+        bool IsAutonomous)
+    {
+        public byte TypeFlags { get; init; }
+        public uint? PackedMotionFlags { get; init; }
+    }
 
     /// <summary>
     /// Parse a reassembled UpdateMotion body. <paramref name="body"/> must
@@ -75,12 +79,14 @@ public static class UpdateMotion
             CreateObject.TurnToPathData? turnToPath = null;
             uint? stickyObjectGuid = null;
             List<CreateObject.MotionItem>? commands = null;
+            uint? packedMotionFlags = null;
 
             if (movementType == 0)
             {
                 if (body.Length - pos < 4) return new Parsed(guid, new CreateObject.ServerMotionState(currentStyle, null, MovementType: movementType), instanceSequence, movementSequence, serverControlSequence, isAutonomous);
                 uint packed = BinaryPrimitives.ReadUInt32LittleEndian(body.Slice(pos));
                 pos += 4;
+                packedMotionFlags = packed;
                 uint flags = packed & 0x7Fu;
                 uint numCommands = packed >> 7;
 
@@ -185,7 +191,11 @@ public static class UpdateMotion
                 turnToPath,
                 stickyObjectGuid,
                 (motionFlags & 0x2) != 0),
-                instanceSequence, movementSequence, serverControlSequence, isAutonomous);
+                instanceSequence, movementSequence, serverControlSequence, isAutonomous)
+            {
+                TypeFlags = motionFlags,
+                PackedMotionFlags = packedMotionFlags,
+            };
         }
         catch
         {

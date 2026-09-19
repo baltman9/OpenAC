@@ -108,6 +108,29 @@ public sealed class AutoWieldController : IDisposable
         return TryWield(item, requestedMask, combatModeAfterWield: null);
     }
 
+    public bool TryWieldSecondary(ClientObject item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        _pendingCombatSettlement = null;
+        _combatTransitionObservedDuringSwitch = false;
+        const EquipMask sideCandidates = EquipMask.MeleeWeapon
+            | EquipMask.MissileWeapon | EquipMask.TwoHanded;
+        if ((item.ValidLocations & sideCandidates) == EquipMask.None)
+            return TryWield(item);
+        if (_pendingSwitch is not null)
+            return true;
+        if (item.CurrentlyEquippedLocation == EquipMask.Shield)
+            return false;
+        ClientObject? blocker = GetEquippedObjectAtLocation(
+            EquipMask.Shield, priority: 0, item.ObjectId);
+        return blocker is not null
+            ? BeginWeaponReplacement(item.ObjectId, blocker,
+                EquipMask.Shield, combatModeAfterWield: null,
+                secondaryIntent: true)
+            : SendWield(item, EquipMask.Shield,
+                combatModeAfterWield: null);
+    }
+
     private bool TryWield(
         ClientObject item,
         EquipMask requestedMask,
@@ -222,7 +245,8 @@ public sealed class AutoWieldController : IDisposable
         uint requestedItemId,
         ClientObject blockingItem,
         EquipMask requestedMask,
-        CombatMode? combatModeAfterWield)
+        CombatMode? combatModeAfterWield,
+        bool secondaryIntent = false)
     {
         if (_sendPutItemInContainer is null)
             return false;
@@ -235,7 +259,8 @@ public sealed class AutoWieldController : IDisposable
             requestedItemId,
             blockingItem.ObjectId,
             requestedMask,
-            combatModeAfterWield);
+            combatModeAfterWield,
+            secondaryIntent);
 
         _systemMessage?.Invoke(
             $"Moving {blockingItem.GetAppropriateName()} to your backpack");
@@ -286,10 +311,14 @@ public sealed class AutoWieldController : IDisposable
 
         _pendingSwitch = null;
         if (_objects.Get(pending.RequestedItemId) is { } requested)
-            TryWield(
-                requested,
-                pending.RequestedMask,
-                pending.CombatModeAfterWield);
+        {
+            if (pending.SecondaryIntent)
+                TryWieldSecondary(requested);
+            else
+                TryWield(requested,
+                    pending.RequestedMask,
+                    pending.CombatModeAfterWield);
+        }
     }
 
     private void OnWieldConfirmed(uint itemId)
@@ -520,7 +549,8 @@ public sealed class AutoWieldController : IDisposable
         uint RequestedItemId,
         uint BlockingItemId,
         EquipMask RequestedMask,
-        CombatMode? CombatModeAfterWield);
+        CombatMode? CombatModeAfterWield,
+        bool SecondaryIntent = false);
 
     private readonly record struct PendingCombatSettlement(
         uint ItemId,

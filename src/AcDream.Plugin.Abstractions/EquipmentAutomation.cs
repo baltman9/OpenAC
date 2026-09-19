@@ -149,6 +149,22 @@ public readonly record struct PluginEquipmentCommandResult(
         or PluginEquipmentCommandStatus.Started;
 }
 
+/// <summary>One object's equipment placement as observed in the world.</summary>
+/// <param name="ObjectId">The object's ID.</param>
+/// <param name="EquippedLocation">Its exact current wielded location.</param>
+public readonly record struct PluginEquipmentPlacement(
+    uint ObjectId,
+    uint EquippedLocation);
+
+/// <summary>An authoritative equipment placement or removal receipt.</summary>
+/// <param name="ObjectId">The object affected by the receipt.</param>
+/// <param name="EquippedLocation">Its exact new location, or zero on removal.</param>
+/// <param name="IsRemoval">Whether the receipt removes the object from equipment.</param>
+public readonly record struct PluginEquipmentObservation(
+    uint ObjectId,
+    uint EquippedLocation,
+    bool IsRemoval);
+
 /// <summary>
 /// Reads what the player owns that can be worn or wielded, and asks the
 /// server to equip a chosen item.
@@ -178,6 +194,24 @@ public interface IEquipmentAutomation
         Array.Empty<PluginEquipmentItem>();
 
     /// <summary>
+    /// Current equipment placements in the world object's enumeration order.
+    /// This preserves the order of the underlying object table and includes
+    /// objects without a usable equipment profile.
+    /// </summary>
+    IReadOnlyList<PluginEquipmentPlacement> CaptureWorldPlacementsInOrder() =>
+        Array.Empty<PluginEquipmentPlacement>();
+
+    /// <summary>
+    /// Raised only for a server-confirmed placement or removal. Optimistic
+    /// inventory moves and ordinary world movement do not raise this event.
+    /// </summary>
+    event Action<PluginEquipmentObservation> PlacementObserved
+    {
+        add { }
+        remove { }
+    }
+
+    /// <summary>
     /// Asks the server to wear or wield an owned item, the same way dragging
     /// it onto the character does. Pass zero for
     /// <paramref name="requestedLocation"/> to let the client pick the slot,
@@ -186,5 +220,13 @@ public interface IEquipmentAutomation
     PluginEquipmentCommandResult Equip(
         uint objectId,
         uint requestedLocation = 0u) =>
+        new(PluginEquipmentCommandStatus.Unavailable);
+
+    /// <summary>
+    /// Requests the secondary hand. A melee item can be placed there even
+    /// when its ordinary valid-location mask only lists a weapon slot. The
+    /// client resolves the resulting slot and any blocking item.
+    /// </summary>
+    PluginEquipmentCommandResult EquipSecondary(uint objectId) =>
         new(PluginEquipmentCommandStatus.Unavailable);
 }

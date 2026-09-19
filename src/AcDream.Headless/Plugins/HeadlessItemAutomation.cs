@@ -289,6 +289,18 @@ internal sealed class HeadlessItemAutomation
             && _autoWield.TryWield(item, (EquipMask)mask);
     }
 
+    internal bool TryEquipSecondary(uint itemId)
+    {
+        if (itemId == 0u
+            || _autoWield is null
+            || _autoWield.IsBusy
+            || !_transport.IsInWorld
+            || !_runtime.InventoryOwner.Transactions.CanBeginRequest)
+            return false;
+        return _runtime.InventoryOwner.Objects.Get(itemId) is { } item
+            && _autoWield.TryWieldSecondary(item);
+    }
+
     private bool AutoWieldIdle => _autoWield?.IsBusy != true;
 
     /// <summary>An equipment switch in flight, and nothing else: see the

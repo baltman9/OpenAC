@@ -53,6 +53,7 @@ internal sealed class RuntimeAutomationSurface
     private Func<int, string> _speciesName = static _ => string.Empty;
     private IChargenPaletteColorSource? _paletteColors;
     private Func<uint, uint, bool>? _equip;
+    private Func<uint, bool>? _equipSecondary;
     private Func<bool>? _equipmentBusy;
     private Func<bool>? _requestLogout;
     private Func<bool>? _canRequestLogout;
@@ -91,6 +92,7 @@ internal sealed class RuntimeAutomationSurface
     private Func<uint, bool, bool>? _answerConfirmation;
     private Action<ExternalContainerTransition>? _externalContainerChanged;
     private Action<PluginChatMessage>? _chatReceived;
+    private event Action<PluginEquipmentObservation>? _equipmentPlacementObserved;
     private SpellTable? _spellCatalogSource;
     private IReadOnlyList<PluginSpellInfo> _allSpells = Array.Empty<PluginSpellInfo>();
     private long _inventoryCompletionRevision;
@@ -414,6 +416,9 @@ internal sealed class RuntimeAutomationSurface
                 OnInventoryRequestCompleted;
             runtime.InventoryOwner.Transactions.RequestFailed +=
                 OnInventoryRequestFailed;
+            runtime.InventoryOwner.Objects.ObjectMoved += OnEquipmentObjectMoved;
+            runtime.InventoryOwner.Objects.ObjectRemovalClassified +=
+                OnEquipmentObjectRemoved;
         }
 
         RebuildSpellbook();
@@ -492,13 +497,15 @@ internal sealed class RuntimeAutomationSurface
 
     public void BindEquipment(
         Func<uint, uint, bool> equip,
-        Func<bool> isBusy)
+        Func<bool> isBusy,
+        Func<uint, bool>? equipSecondary = null)
     {
         ArgumentNullException.ThrowIfNull(equip);
         ArgumentNullException.ThrowIfNull(isBusy);
         lock (_gate)
         {
             _equip = equip;
+            _equipSecondary = equipSecondary;
             _equipmentBusy = isBusy;
         }
     }
@@ -640,6 +647,9 @@ internal sealed class RuntimeAutomationSurface
     {
         if (_runtime is { } runtime)
         {
+            runtime.InventoryOwner.Objects.ObjectRemovalClassified -=
+                OnEquipmentObjectRemoved;
+            runtime.InventoryOwner.Objects.ObjectMoved -= OnEquipmentObjectMoved;
             runtime.InventoryOwner.Transactions.RequestFailed -=
                 OnInventoryRequestFailed;
             runtime.InventoryOwner.Transactions.RequestCompleted -=
@@ -2259,6 +2269,49 @@ internal sealed class RuntimeAutomationSurface
         return BuildOwnedEquipment(runtime.InventoryOwner.Objects, playerId);
     }
 
+    public IReadOnlyList<PluginEquipmentPlacement> CaptureWorldPlacementsInOrder()
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        if (runtime is null || !IsAvailable)
+            return Array.Empty<PluginEquipmentPlacement>();
+        return runtime.InventoryOwner.Objects.Objects
+            .Select(static item => new PluginEquipmentPlacement(
+                item.ObjectId, (uint)item.CurrentlyEquippedLocation))
+            .ToArray();
+    }
+
+    event Action<PluginEquipmentObservation> IEquipmentAutomation.PlacementObserved
+    {
+        add { lock (_gate) _equipmentPlacementObserved += value; }
+        remove { lock (_gate) _equipmentPlacementObserved -= value; }
+    }
+
+    private void OnEquipmentObjectMoved(ClientObjectMove move)
+    {
+        if (move.Origin != ClientObjectMoveOrigin.AuthoritativeResponse)
+            return;
+        Action<PluginEquipmentObservation>? handlers;
+        lock (_gate)
+            handlers = _equipmentPlacementObserved;
+        handlers?.Invoke(new PluginEquipmentObservation(
+            move.ItemId,
+            (uint)move.Current.EquipLocation,
+            move.Current.EquipLocation == EquipMask.None));
+    }
+
+    private void OnEquipmentObjectRemoved(ClientObjectRemoval removal)
+    {
+        if (removal.Reason != ClientObjectRemovalReason.LogicalDelete)
+            return;
+        Action<PluginEquipmentObservation>? handlers;
+        lock (_gate)
+            handlers = _equipmentPlacementObserved;
+        handlers?.Invoke(new PluginEquipmentObservation(
+            removal.Object.ObjectId, 0u, true));
+    }
+
     /// <summary>
     /// Everything the player owns that can be worn or wielded, in the order
     /// the contract promises: what is equipped first, then by name, then by
@@ -2363,6 +2416,32 @@ internal sealed class RuntimeAutomationSurface
         if (busy?.Invoke() == true)
             return new(PluginEquipmentCommandStatus.Busy);
         return equip(objectId, requestedLocation)
+            ? new(PluginEquipmentCommandStatus.Started)
+            : new(PluginEquipmentCommandStatus.Refused);
+    }
+
+    public PluginEquipmentCommandResult EquipSecondary(uint objectId)
+    {
+        Func<uint, bool>? equipSecondary;
+        Func<bool>? busy;
+        GameRuntime? runtime;
+        lock (_gate)
+        {
+            equipSecondary = _equipSecondary;
+            busy = _equipmentBusy;
+            runtime = _runtime;
+        }
+        if (equipSecondary is null || runtime is null || !IsAvailable)
+            return new(PluginEquipmentCommandStatus.Unavailable);
+        if (objectId == 0u
+            || runtime.InventoryOwner.Objects.Get(objectId) is not { } item
+            || item.ValidLocations == EquipMask.None)
+            return new(PluginEquipmentCommandStatus.InvalidItem);
+        if (item.CurrentlyEquippedLocation == EquipMask.Shield)
+            return new(PluginEquipmentCommandStatus.AlreadyEquipped);
+        if (busy?.Invoke() == true)
+            return new(PluginEquipmentCommandStatus.Busy);
+        return equipSecondary(objectId)
             ? new(PluginEquipmentCommandStatus.Started)
             : new(PluginEquipmentCommandStatus.Refused);
     }
@@ -3708,6 +3787,10 @@ internal sealed class RuntimeAutomationSurface
                 CompletionRevision = attack.CompletionRevision,
                 CompletionSequence = attack.CompletionSequence,
                 CompletionWeenieError = attack.CompletionWeenieError,
+                QualifiedSelfMotionRevision = runtime.ActionOwner.CombatMode
+                    .QualifiedSelfMotionRevision,
+                QualifiedSelfMotionAgeSeconds = runtime.ActionOwner.CombatMode
+                    .QualifiedSelfMotionAgeSeconds(runtime.Clock.SimulationTimeSeconds),
             };
         }
     }
@@ -3946,6 +4029,7 @@ internal sealed class RuntimeAutomationSurface
                 return;
             _disposed = true;
             _equip = null;
+            _equipSecondary = null;
             _equipmentBusy = null;
             _useItem = null;
             _useWorldObject = null;

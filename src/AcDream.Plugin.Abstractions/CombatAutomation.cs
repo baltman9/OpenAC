@@ -148,6 +148,15 @@ public readonly record struct PluginCombatSnapshot(
     /// accepted.
     /// </summary>
     public uint CompletionWeenieError { get; init; }
+
+    /// <summary>
+    /// Revision of the last local character motion update with animation type
+    /// zero and an empty packed motion word.
+    /// </summary>
+    public long QualifiedSelfMotionRevision { get; init; }
+
+    /// <summary>Seconds since that receipt, or zero before any receipt.</summary>
+    public double QualifiedSelfMotionAgeSeconds { get; init; }
 }
 
 /// <summary>How the client answered a plugin's combat command.</summary>
