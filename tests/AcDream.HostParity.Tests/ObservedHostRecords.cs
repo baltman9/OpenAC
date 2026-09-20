@@ -80,7 +80,9 @@ internal static class ObservedHostRecords
             Part<AcDream.App.Combat.RuntimeCombatTargetOperationsSlot>(),
             Part<AcDream.App.Combat.RuntimeCombatModeOperationsSlot>(),
             Part<AcDream.App.Spells.RuntimeSpellCastOperationsSlot>(),
-            timeSyncDiagnostic: static _ => { });
+            timeSyncDiagnostic: static _ => { },
+            sessionOperations:
+                Part<AcDream.Runtime.Session.ProductionLiveSessionOperations>());
 
     /// <summary>
     /// The windowless host's dependency record with every optional dependency

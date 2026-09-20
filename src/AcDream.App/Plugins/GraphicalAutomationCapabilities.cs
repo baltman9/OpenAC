@@ -201,6 +201,7 @@ internal static class GraphicalAutomationCapabilities
             nameof(GameRuntimeDependencies.SpellCastOperations),
             nameof(GameRuntimeDependencies.Log),
             nameof(GameRuntimeDependencies.TimeSyncDiagnostic),
+            nameof(GameRuntimeDependencies.SessionOperations),
         };
 
     /// <summary>
@@ -213,25 +214,38 @@ internal static class GraphicalAutomationCapabilities
         {
             [nameof(GameRuntimeDependencies.TimeSyncDiagnostic)] =
                 "a launch option turns the sky dump on",
+            [nameof(GameRuntimeDependencies.SessionOperations)] =
+                "a caller handed this client its own way of opening and "
+                + "ticking a world connection; a plain run leaves the runtime "
+                + "to use the shared one",
         };
 
     /// <summary>
     /// Builds the dependency record this host really constructs the runtime
     /// with, so the census reads the code rather than a list beside it.
     /// </summary>
+    /// <remarks>
+    /// The window itself never offers its own session operations. The seam is
+    /// here so that something other than a window can: a client that cannot
+    /// be given a world connection cannot be compared against one that can,
+    /// and for want of it the windowed client had never been driven under a
+    /// test at all.
+    /// </remarks>
     internal static GameRuntimeDependencies BuildRuntimeDependencies(
         AcDream.Runtime.Gameplay.IRuntimeCombatAttackOperations attack,
         AcDream.Runtime.Gameplay.IRuntimeCombatTargetOperations target,
         AcDream.Runtime.Gameplay.IRuntimeCombatModeOperations mode,
         AcDream.Runtime.Gameplay.IRuntimeSpellCastOperations spells,
-        Action<string>? timeSyncDiagnostic) =>
+        Action<string>? timeSyncDiagnostic,
+        ILiveSessionOperations? sessionOperations = null) =>
         new(
             attack,
             target,
             mode,
             spells,
             Log: Console.WriteLine,
-            TimeSyncDiagnostic: timeSyncDiagnostic);
+            TimeSyncDiagnostic: timeSyncDiagnostic,
+            SessionOperations: sessionOperations);
 
     /// <summary>Which live-session host bindings this host fills in.</summary>
     internal static IReadOnlySet<string> DeclaredSessionHostBindings { get; } =
