@@ -229,8 +229,6 @@ public sealed class RuntimeForcePositionRenderCommitTests
             var sink = new RuntimePlacementPresentationSink(
                 Runtime,
                 new RuntimeWorldTransitState(),
-                WorldState,
-                new WorldEvents(),
                 new EntityEffectPoseRegistry(),
                 localShadowSynchronizer,
                 () => PlayerGuid,

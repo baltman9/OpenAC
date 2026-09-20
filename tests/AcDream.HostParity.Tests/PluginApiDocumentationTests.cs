@@ -111,6 +111,29 @@ public sealed class PluginApiDocumentationTests
             + "client can only sometimes supply: " + string.Join(", ", missing));
     }
 
+    /// <summary>
+    /// A list a windowless client answers empty is a difference an author
+    /// meets as silence, so the guide names it too.
+    /// </summary>
+    [Fact]
+    public void TheGuideNamesEveryStateMemberAWindowlessClientCannotAnswer()
+    {
+        string guide = PluginGuide();
+
+        string[] missing = HostParityAllowList.StateMembers
+            .Where(static entry => entry.MissingHost == ParityHost.Windowless)
+            .Select(static entry => entry.Member)
+            .Distinct(StringComparer.Ordinal)
+            .Where(member => !guide.Contains(member, StringComparison.Ordinal))
+            .OrderBy(static member => member, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.True(
+            missing.Length == 0,
+            "The plugin guide does not tell an author about a list a "
+            + "windowless client answers empty: " + string.Join(", ", missing));
+    }
+
     private static string PluginGuide()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

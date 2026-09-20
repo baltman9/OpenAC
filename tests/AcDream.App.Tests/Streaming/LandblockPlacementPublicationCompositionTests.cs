@@ -630,8 +630,7 @@ public sealed class LandblockPlacementPublicationCompositionTests
             var staticPublisher = new LandblockStaticPresentationPublisher(
                 lighting,
                 translucency,
-                new WorldGameState(),
-                new WorldEvents());
+                new WorldGameState());
             var retirement = new LandblockPresentationRetirementOwner(
                 render,
                 PhysicsPublisher,
@@ -822,8 +821,6 @@ public sealed class LandblockPlacementPublicationCompositionTests
             return new RuntimePlacementPresentationSink(
                 Runtime,
                 new RuntimeWorldTransitState(),
-                new WorldGameState(),
-                new WorldEvents(),
                 new EntityEffectPoseRegistry(),
                 new LocalPlayerShadowSynchronizer(
                     Lifetime.Physics.Engine,

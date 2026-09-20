@@ -170,6 +170,33 @@ tracking, on the same thread as `Tick`, in the host's own delivery order.
 
 A bulk container reset carries no single object id and is not reported.
 
+### What is in the world: objects and scenery
+
+`host.State` carries two lists, and they are two different kinds of thing.
+
+```csharp
+foreach (var entity in host.State.Entities) { /* live objects and creatures */ }
+foreach (var piece in host.State.SceneryObjects) { /* trees, rocks, buildings */ }
+```
+
+`State.Entities` is what the world server has told this client about:
+creatures, players, items on the ground, doors, everything a command can
+name. Each entry's `Id` matches the object id every other part of this API
+uses, so a guid out of `Entities` can be selected, used, attacked or
+appraised. `Events.EntitySpawned` fires once for each entry as it appears,
+and a handler attached late is replayed the entries already there before it
+starts receiving new ones, so a plugin never has to poll to catch up. An
+entry leaves the list when the object leaves the world -- deleted, or carried
+into a pack -- and `ObjectChanged` reports that as `Released`.
+
+`State.SceneryObjects` is the fixed decoration that comes with the map rather
+than from the server. Nothing in it has a server identity: these ids are not
+object ids, they never appear in `Entities`, and no command accepts one. Read
+it to understand the shape of the surroundings, and for nothing else.
+
+Both lists are snapshots the host rebuilds rather than collections mutated
+under a reader.
+
 `host.Automation.Objects.Identify(objectId)` requests an appraisal of any
 object present in the object table -- owned inventory, equipped,
 landscape, a vendor listing, or an open container's content -- through
@@ -727,6 +754,15 @@ places a windowless client genuinely has nothing behind the interface:
 - `LootClassifiers` is real, and a classifier published by one plugin can be
   asked for verdicts by another.
 - `Log` writes into the headless diagnostic stream rather than to a window.
+
+### The scenery list is empty
+
+`State.SceneryObjects` is a fact about a drawn world: what the client placed,
+and how far out, is decided by what it is drawing. A client that draws
+nothing answers an empty list. `State.Entities`, `Events.EntitySpawned` and
+the replay a late handler gets are the same on both clients -- one runtime
+producer answers them, keyed on the same object directory -- so only the
+scenery differs.
 
 ### One field a projection cannot fill
 

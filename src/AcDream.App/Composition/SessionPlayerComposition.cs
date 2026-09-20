@@ -487,8 +487,6 @@ internal sealed class SessionPlayerCompositionPhase
             d.ClassificationCache,
             d.EffectPoses,
             live.EquippedChildren,
-            d.WorldGameState,
-            d.WorldEvents,
             d.PhysicsEngine.ShadowObjects,
             content.CollisionBuilder,
             live.ProjectileController,

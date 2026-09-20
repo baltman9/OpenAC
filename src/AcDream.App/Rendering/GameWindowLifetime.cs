@@ -86,6 +86,7 @@ internal sealed record LiveShutdownRoots(
     EquippedChildRenderController? EquippedChildren,
     LiveEntityRuntime? LiveEntities,
     GameRuntime Runtime,
+    AcDream.Runtime.Plugins.RuntimeWorldEntityProjection PluginWorldEntities,
     IDisposable RuntimeHostLease,
     RenderSceneShadowRuntime? RenderSceneShadow,
     LivePresentationRuntimeBindings? PresentationBindings,
@@ -470,6 +471,9 @@ internal static class GameWindowShutdownManifest
             ]),
             new ResourceShutdownStage("game runtime root",
             [
+                Hard(
+                    "plugin world objects",
+                    live.PluginWorldEntities.Dispose),
                 Hard("graphical runtime host lease", live.RuntimeHostLease.Dispose),
                 Hard("game runtime", () => DisposeGameRuntime(live.Runtime)),
             ]),

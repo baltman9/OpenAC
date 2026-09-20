@@ -148,6 +148,22 @@ internal static class HostParityAllowList
     ];
 
     /// <summary>
+    /// Members of the plugin-facing state view one host answers from its own
+    /// store and the other leaves at the interface's empty default.
+    /// </summary>
+    internal static IReadOnlyList<ParityAllowance> StateMembers { get; } =
+    [
+        new("SceneryObjects", ParityHost.Windowless,
+            "The fixed decoration of the landscape is a drawn-world fact: "
+            + "what the client placed, and how far out, follows from what it "
+            + "is drawing, so a client that draws nothing has none of it to "
+            + "report. It carries no server identity and no command names "
+            + "it, which is why it is a list of its own rather than mixed "
+            + "into the objects both clients answer alike.",
+            ParityStage.AnswerItFromOneSource),
+    ];
+
+    /// <summary>
     /// Inputs the plugin surface is built from that one host does not pass.
     /// </summary>
     internal static IReadOnlyList<ParityAllowance> SurfaceInputs { get; } =

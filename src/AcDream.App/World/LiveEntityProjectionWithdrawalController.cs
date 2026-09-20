@@ -1,7 +1,6 @@
 using AcDream.App.Physics;
 using AcDream.App.Rendering.Vfx;
 using AcDream.Core.Physics;
-using AcDream.Core.Plugins;
 
 namespace AcDream.App.World;
 
@@ -9,8 +8,6 @@ internal sealed class LiveEntityProjectionWithdrawalController
 {
     private readonly LiveEntityRuntime _runtime;
     private readonly ProjectileController _projectiles;
-    private readonly WorldGameState _worldState;
-    private readonly WorldEvents _worldEvents;
     private readonly ShadowObjectRegistry _shadows;
     private readonly EntityEffectPoseRegistry _effectPoses;
     private readonly LocalPlayerShadowState _localPlayerShadow;
@@ -18,16 +15,12 @@ internal sealed class LiveEntityProjectionWithdrawalController
     public LiveEntityProjectionWithdrawalController(
         LiveEntityRuntime runtime,
         ProjectileController projectiles,
-        WorldGameState worldState,
-        WorldEvents worldEvents,
         ShadowObjectRegistry shadows,
         EntityEffectPoseRegistry effectPoses,
         LocalPlayerShadowState localPlayerShadow)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _projectiles = projectiles ?? throw new ArgumentNullException(nameof(projectiles));
-        _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
-        _worldEvents = worldEvents ?? throw new ArgumentNullException(nameof(worldEvents));
         _shadows = shadows ?? throw new ArgumentNullException(nameof(shadows));
         _effectPoses = effectPoses ?? throw new ArgumentNullException(nameof(effectPoses));
         _localPlayerShadow = localPlayerShadow
@@ -131,8 +124,6 @@ internal sealed class LiveEntityProjectionWithdrawalController
         bool retainedProjectileShadow = _projectiles.LeaveWorld(record);
         if (!retainedProjectileShadow)
             _shadows.Suspend(entity.Id);
-        _worldState.RemoveById(entity.Id);
-        _worldEvents.ForgetEntity(entity.Id);
         if (record.ServerGuid == localPlayerGuid
             && (!_runtime.TryGetRecord(record.ServerGuid, out LiveEntityRecord current)
                 || ReferenceEquals(current, record)))

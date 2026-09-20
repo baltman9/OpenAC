@@ -4,200 +4,111 @@ using AcDream.Plugin.Abstractions;
 
 namespace AcDream.Core.Tests.Plugins;
 
+/// <summary>
+/// The spawn stream and the replay a late handler gets belong to the one
+/// producer that reads the runtime's object directory; what is tested here is
+/// that this type hands handlers straight to it and keeps none of its own.
+/// The producer's own rules -- replay, exactly-once delivery, order under a
+/// concurrent registration -- are tested where it lives.
+/// </summary>
 public class WorldEventsTests
 {
-    private static WorldEntitySnapshot S(uint id) => new(id, SourceId: 0x01000000u, Position: Vector3.Zero, Rotation: Quaternion.Identity);
+    private static WorldEntitySnapshot S(uint id) => new(
+        id,
+        SourceId: 0x01000000u,
+        Position: Vector3.Zero,
+        Rotation: Quaternion.Identity);
 
     [Fact]
-    public void FireBeforeAnySubscriber_LateSubscribeReceivesReplay()
+    public void Subscribing_HandsTheHandlerToTheProducer()
     {
         var events = new WorldEvents();
-        events.FireEntitySpawned(S(1));
-        events.FireEntitySpawned(S(2));
-        events.FireEntitySpawned(S(3));
-
+        var producer = new RecordingWorldEntities();
+        events.BindWorldEntities(producer);
         var seen = new List<uint>();
-        events.EntitySpawned += e => seen.Add(e.Id);
-
-        Assert.Equal(new uint[] { 1, 2, 3 }, seen);
-    }
-
-    [Fact]
-    public void FireAfterSubscribe_ReachesSubscriber()
-    {
-        var events = new WorldEvents();
-        var seen = new List<uint>();
-        events.EntitySpawned += e => seen.Add(e.Id);
-
-        events.FireEntitySpawned(S(10));
-        events.FireEntitySpawned(S(20));
-
-        Assert.Equal(new uint[] { 10, 20 }, seen);
-    }
-
-    [Fact]
-    public void ReplayPlusLive_DeliversExactlyOnceEach()
-    {
-        var events = new WorldEvents();
-        events.FireEntitySpawned(S(1));  // pre-subscribe
-
-        var seen = new List<uint>();
-        events.EntitySpawned += e => seen.Add(e.Id);  // replay fires 1
-
-        events.FireEntitySpawned(S(2));  // live fires 2
-
-        Assert.Equal(new uint[] { 1, 2 }, seen);
-    }
-
-    [Fact]
-    public void Unsubscribe_StopsLiveDelivery()
-    {
-        var events = new WorldEvents();
-        var seen = new List<uint>();
-        Action<WorldEntitySnapshot> handler = e => seen.Add(e.Id);
+        Action<WorldEntitySnapshot> handler = snapshot => seen.Add(snapshot.Id);
 
         events.EntitySpawned += handler;
-        events.FireEntitySpawned(S(1));
+        producer.Raise(S(1));
+
+        Assert.Same(handler, Assert.Single(producer.Handlers));
+        Assert.Equal([1u], seen);
+    }
+
+    [Fact]
+    public void Unsubscribing_TakesTheHandlerBackOffTheProducer()
+    {
+        var events = new WorldEvents();
+        var producer = new RecordingWorldEntities();
+        events.BindWorldEntities(producer);
+        var seen = new List<uint>();
+        Action<WorldEntitySnapshot> handler = snapshot => seen.Add(snapshot.Id);
+
+        events.EntitySpawned += handler;
+        producer.Raise(S(1));
         events.EntitySpawned -= handler;
-        events.FireEntitySpawned(S(2));
+        producer.Raise(S(2));
 
-        Assert.Equal(new uint[] { 1 }, seen);
+        Assert.Empty(producer.Handlers);
+        Assert.Equal([1u], seen);
     }
 
+    /// <summary>
+    /// Before a host names its producer there is nothing to hear about, and
+    /// subscribing is not an error -- a plugin loaded early must not fail.
+    /// </summary>
     [Fact]
-    public void HandlerThrowsDuringReplay_OtherReplayEntriesStillDelivered()
+    public void WithNoProducerBoundSubscribingIsAcceptedAndSilent()
     {
         var events = new WorldEvents();
-        events.FireEntitySpawned(S(1));
-        events.FireEntitySpawned(S(2));
-        events.FireEntitySpawned(S(3));
-
         var seen = new List<uint>();
-        events.EntitySpawned += e =>
-        {
-            if (e.Id == 2) throw new InvalidOperationException("boom");
-            seen.Add(e.Id);
-        };
+        Action<WorldEntitySnapshot> handler = snapshot => seen.Add(snapshot.Id);
 
-        // No exception propagates out of the += add; 1 and 3 were still delivered.
-        Assert.Contains(1u, seen);
-        Assert.Contains(3u, seen);
-    }
+        events.EntitySpawned += handler;
+        events.EntitySpawned -= handler;
 
-    [Fact]
-    public void RehydratedEntity_ReplacesReplaySnapshotInsteadOfAppendingHistory()
-    {
-        var events = new WorldEvents();
-        events.FireEntitySpawned(S(1));
-        events.FireEntitySpawned(S(1) with { SourceId = 0x01000001u });
-
-        var seen = new List<WorldEntitySnapshot>();
-        events.EntitySpawned += seen.Add;
-
-        WorldEntitySnapshot replay = Assert.Single(seen);
-        Assert.Equal(0x01000001u, replay.SourceId);
-    }
-
-    [Fact]
-    public void ForgottenEntity_IsNotReplayedToLateSubscriber()
-    {
-        var events = new WorldEvents();
-        events.FireEntitySpawned(S(1));
-        events.FireEntitySpawned(S(2));
-
-        Assert.True(events.ForgetEntity(1));
-
-        var seen = new List<uint>();
-        events.EntitySpawned += e => seen.Add(e.Id);
-        Assert.Equal(new uint[] { 2 }, seen);
-    }
-
-    [Fact]
-    public void ClearCurrent_LeavesNoReplayHistory()
-    {
-        var events = new WorldEvents();
-        events.FireEntitySpawned(S(1));
-        events.FireEntitySpawned(S(2));
-        events.ClearCurrent();
-
-        var seen = new List<uint>();
-        events.EntitySpawned += e => seen.Add(e.Id);
         Assert.Empty(seen);
     }
 
     [Fact]
-    public async Task LiveEventDuringReplay_IsDeliveredAfterSnapshotWithoutStaleReordering()
+    public void ASecondProducerIsRefused()
     {
         var events = new WorldEvents();
-        events.FireEntitySpawned(S(1));
-        using var replayEntered = new ManualResetEventSlim();
-        using var releaseReplay = new ManualResetEventSlim();
-        var seen = new List<uint>();
-        Action<WorldEntitySnapshot> handler = snapshot =>
-        {
-            lock (seen)
-                seen.Add(snapshot.SourceId);
-            if (snapshot.SourceId == 0x01000000u)
-            {
-                replayEntered.Set();
-                releaseReplay.Wait();
-            }
-        };
+        events.BindWorldEntities(new RecordingWorldEntities());
 
-        Task subscribe = Task.Run(() => events.EntitySpawned += handler);
-        Assert.True(replayEntered.Wait(5_000));
-        events.FireEntitySpawned(S(1) with { SourceId = 0x01000001u });
-        releaseReplay.Set();
-        await subscribe;
-
-        lock (seen)
-            Assert.Equal(new uint[] { 0x01000000u, 0x01000001u }, seen);
+        Assert.Throws<InvalidOperationException>(() =>
+            events.BindWorldEntities(new RecordingWorldEntities()));
     }
 
     [Fact]
-    public async Task ClearCurrent_DropsLiveEventsQueuedBehindAnActiveReplay()
+    public void ANullHandlerIsRefusedRatherThanPassedOn()
     {
         var events = new WorldEvents();
-        events.FireEntitySpawned(S(1));
-        using var replayEntered = new ManualResetEventSlim();
-        using var releaseReplay = new ManualResetEventSlim();
-        var seen = new List<uint>();
-        Action<WorldEntitySnapshot> handler = snapshot =>
-        {
-            lock (seen)
-                seen.Add(snapshot.Id);
-            if (snapshot.Id == 1)
-            {
-                replayEntered.Set();
-                releaseReplay.Wait();
-            }
-        };
+        var producer = new RecordingWorldEntities();
+        events.BindWorldEntities(producer);
 
-        Task subscribe = Task.Run(() => events.EntitySpawned += handler);
-        Assert.True(replayEntered.Wait(5_000));
-        events.FireEntitySpawned(S(2));
-        events.ClearCurrent();
-        releaseReplay.Set();
-        await subscribe;
-
-        lock (seen)
-            Assert.Equal(new uint[] { 1 }, seen);
+        Assert.Throws<ArgumentNullException>(() => events.EntitySpawned += null!);
+        Assert.Empty(producer.Handlers);
     }
 
-    [Fact]
-    public void UpsertCurrent_RestoresLateReplayWithoutNotifyingExistingSubscriber()
+    private sealed class RecordingWorldEntities : IPluginWorldEntities
     {
-        var events = new WorldEvents();
-        var existing = new List<uint>();
-        events.EntitySpawned += snapshot => existing.Add(snapshot.Id);
-        events.FireEntitySpawned(S(1));
-        events.ForgetEntity(1);
+        private readonly List<Action<WorldEntitySnapshot>> _handlers = [];
 
-        events.UpsertCurrent(S(1) with { SourceId = 0x01000001u });
+        internal IReadOnlyList<Action<WorldEntitySnapshot>> Handlers => _handlers;
 
-        Assert.Equal(new uint[] { 1 }, existing);
-        var late = new List<WorldEntitySnapshot>();
-        events.EntitySpawned += late.Add;
-        Assert.Equal(0x01000001u, Assert.Single(late).SourceId);
+        public IReadOnlyList<WorldEntitySnapshot> Entities => [];
+
+        public void Subscribe(Action<WorldEntitySnapshot> handler) =>
+            _handlers.Add(handler);
+
+        public void Unsubscribe(Action<WorldEntitySnapshot> handler) =>
+            _handlers.Remove(handler);
+
+        internal void Raise(WorldEntitySnapshot snapshot)
+        {
+            foreach (Action<WorldEntitySnapshot> handler in _handlers.ToArray())
+                handler(snapshot);
+        }
     }
 }

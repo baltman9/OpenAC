@@ -48,6 +48,7 @@ internal sealed class WindowedArm : ParityArm
     private readonly LiveSessionAppSource _sessionSource;
     private readonly WorldGameState _state = new();
     private readonly WorldEvents _events = new();
+    private readonly RuntimeWorldEntityProjection _worldEntities;
     private readonly RuntimeAutomationSurface _automation;
     private readonly List<string> _warnings = [];
     private readonly List<IDisposable> _bindings = [];
@@ -70,6 +71,11 @@ internal sealed class WindowedArm : ParityArm
         var target = (RuntimeCombatTargetOperationsSlot)
             Dependencies.CombatTargetOperations;
 
+        // What a plugin sees in the world, exactly as the window binds it:
+        // the runtime's object directory, not what is drawn.
+        _worldEntities = new RuntimeWorldEntityProjection(Runtime);
+        _state.BindWorldEntities(_worldEntities);
+        _events.BindWorldEntities(_worldEntities);
         _sessionSource = new LiveSessionAppSource(Runtime.Session, _commands);
         _bindings.Add(_feedback.BindOwned(text =>
             Runtime.CommunicationOwner.AddText(
@@ -317,6 +323,7 @@ internal sealed class WindowedArm : ParityArm
     {
         for (int index = _bindings.Count - 1; index >= 0; index--)
             _bindings[index].Dispose();
+        _worldEntities.Dispose();
         _automation.Dispose();
         _sessionCommands.Dispose();
         _dispatcher?.Dispose();

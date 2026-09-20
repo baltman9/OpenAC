@@ -19,4 +19,24 @@ public interface IGameState
     /// not track them and before the server has sent any.
     /// </summary>
     IReadOnlyList<ContractSnapshot> Contracts => [];
+
+    /// <summary>
+    /// The fixed decoration of the landscape around the character -- trees,
+    /// rocks, buildings and the other pieces that come with the map rather
+    /// than from the world server -- with the position and facing the client
+    /// placed each one at.
+    /// <para>
+    /// These are not objects. Nothing here can be selected, used, attacked
+    /// or picked up, and none of it has a server identity, so an id in this
+    /// list never appears in <see cref="Entities"/> and never belongs in a
+    /// command. It is useful for reading the shape of the surroundings and
+    /// for nothing else.
+    /// </para>
+    /// <para>
+    /// Empty on a host that draws nothing, because what is placed, and how
+    /// far out, is a fact about a drawn world. A plugin that wants the
+    /// surroundings has to cope with an empty list.
+    /// </para>
+    /// </summary>
+    IReadOnlyList<WorldEntitySnapshot> SceneryObjects => [];
 }

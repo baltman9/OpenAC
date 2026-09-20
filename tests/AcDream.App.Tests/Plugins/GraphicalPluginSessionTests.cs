@@ -118,6 +118,8 @@ public sealed class GraphicalPluginSessionTests
             string.Empty);
         string statusPath = Path.Combine(temporary.Path, "status.jsonl");
         var events = new WorldEvents();
+        var worldEntities = new RaisableWorldEntities();
+        events.BindWorldEntities(worldEntities);
         var selection = new SelectionState();
         var ui = new BufferedUiRegistry();
         var host = new AppPluginHost(
@@ -139,7 +141,7 @@ public sealed class GraphicalPluginSessionTests
         Assert.Equal(0, plugins.LoadedCount);
         Assert.Empty(ui.Drain());
         Assert.Equal(0, ui.RegistrationCount);
-        events.FireEntitySpawned(new WorldEntitySnapshot(
+        worldEntities.Raise(new WorldEntitySnapshot(
             1u,
             2u,
             default,
@@ -172,6 +174,8 @@ public sealed class GraphicalPluginSessionTests
             string.Empty);
         string statusPath = Path.Combine(temporary.Path, "status.jsonl");
         var events = new WorldEvents();
+        var worldEntities = new RaisableWorldEntities();
+        events.BindWorldEntities(worldEntities);
         var selection = new SelectionState();
         var ui = new BufferedUiRegistry();
         var host = new AppPluginHost(
@@ -198,7 +202,7 @@ public sealed class GraphicalPluginSessionTests
             File.ReadAllText(Path.Combine(
                 pluginDirectory,
                 "unload-observation")));
-        events.FireEntitySpawned(new WorldEntitySnapshot(
+        worldEntities.Raise(new WorldEntitySnapshot(
             1u,
             2u,
             default,
@@ -312,6 +316,30 @@ public sealed class GraphicalPluginSessionTests
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
+        }
+    }
+
+    /// <summary>
+    /// A stand-in for the client's world-object producer, so a test can make
+    /// an object appear the way the running client does.
+    /// </summary>
+    private sealed class RaisableWorldEntities
+        : AcDream.Core.Plugins.IPluginWorldEntities
+    {
+        private readonly List<Action<WorldEntitySnapshot>> _handlers = [];
+
+        public IReadOnlyList<WorldEntitySnapshot> Entities => [];
+
+        public void Subscribe(Action<WorldEntitySnapshot> handler) =>
+            _handlers.Add(handler);
+
+        public void Unsubscribe(Action<WorldEntitySnapshot> handler) =>
+            _handlers.Remove(handler);
+
+        internal void Raise(WorldEntitySnapshot snapshot)
+        {
+            foreach (Action<WorldEntitySnapshot> handler in _handlers.ToArray())
+                handler(snapshot);
         }
     }
 

@@ -17,7 +17,7 @@ namespace AcDream.App.Tests.Rendering;
 public sealed class LiveEntityCreateSupersessionRecoveryTests
 {
     [Fact]
-    public void Recovery_RepublishesAppearanceThenCurrentSnapshotThenReplacesAnimation()
+    public void Recovery_RepublishesAppearanceThenReplacesAnimation()
     {
         var operations = new List<string>();
         var resources = new CountingResources();
@@ -40,7 +40,6 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
                 operations.Add("appearance");
                 return true;
             },
-            publishCurrentSnapshot: _ => operations.Add("current"),
             synchronizeAnimation: _ =>
             {
                 operations.Add("animation");
@@ -48,7 +47,7 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
             });
 
         Assert.True(recovered);
-        Assert.Equal(["capture", "appearance", "current", "animation"], operations);
+        Assert.Equal(["capture", "appearance", "animation"], operations);
         Assert.Equal(version, installedAnimationVersion);
         Assert.Equal(1, resources.RegisterCount);
         Assert.Equal(0, resources.UnregisterCount);
@@ -78,7 +77,6 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
                 record.Canonical.AdvanceCreateAuthority();
                 return true;
             },
-            publishCurrentSnapshot: _ => operations.Add("current"),
             synchronizeAnimation: _ => operations.Add("animation"));
 
         Assert.False(recovered);
@@ -92,7 +90,6 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
-    [InlineData(2)]
     public void Recovery_FailureAtEachPublicationStage_CanReplayOnRetainedOwner(
         int failingStage)
     {
@@ -101,7 +98,6 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
         LiveEntityRecord record = RegisterAndMaterialize(runtime);
         ulong version = record.CreateIntegrationVersion;
         ulong appearanceVersion = 1;
-        ulong currentVersion = 1;
         ulong animationVersion = 1;
         bool fail = true;
         void FailOnce(int stage)
@@ -125,22 +121,16 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
                 FailOnce(0);
                 return true;
             },
-            publishCurrentSnapshot: _ =>
-            {
-                currentVersion = version;
-                FailOnce(1);
-            },
             synchronizeAnimation: _ =>
             {
                 animationVersion = version;
-                FailOnce(2);
+                FailOnce(1);
             });
 
         Assert.Throws<InvalidOperationException>(() => Apply());
         Assert.True(Apply());
 
         Assert.Equal(version, appearanceVersion);
-        Assert.Equal(version, currentVersion);
         Assert.Equal(version, animationVersion);
         Assert.Same(record, AssertRecord(runtime));
         Assert.Equal(1, resources.RegisterCount);

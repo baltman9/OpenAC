@@ -33,8 +33,6 @@ internal sealed class DatLiveEntityProjectionMaterializer
     private readonly EntityClassificationCache _classification;
     private readonly EntityEffectPoseRegistry _effectPoses;
     private readonly EquippedChildRenderController _equippedChildren;
-    private readonly WorldGameState _worldState;
-    private readonly WorldEvents _worldEvents;
     private readonly ShadowObjectRegistry _shadows;
     private readonly LiveEntityCollisionBuilder _collisionBuilder;
     private readonly ProjectileController _projectiles;
@@ -56,8 +54,6 @@ internal sealed class DatLiveEntityProjectionMaterializer
         EntityClassificationCache classification,
         EntityEffectPoseRegistry effectPoses,
         EquippedChildRenderController equippedChildren,
-        WorldGameState worldState,
-        WorldEvents worldEvents,
         ShadowObjectRegistry shadows,
         LiveEntityCollisionBuilder collisionBuilder,
         ProjectileController projectiles,
@@ -78,8 +74,6 @@ internal sealed class DatLiveEntityProjectionMaterializer
         _classification = classification ?? throw new ArgumentNullException(nameof(classification));
         _effectPoses = effectPoses ?? throw new ArgumentNullException(nameof(effectPoses));
         _equippedChildren = equippedChildren ?? throw new ArgumentNullException(nameof(equippedChildren));
-        _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
-        _worldEvents = worldEvents ?? throw new ArgumentNullException(nameof(worldEvents));
         _shadows = shadows ?? throw new ArgumentNullException(nameof(shadows));
         _collisionBuilder = collisionBuilder ?? throw new ArgumentNullException(nameof(collisionBuilder));
         _projectiles = projectiles ?? throw new ArgumentNullException(nameof(projectiles));
@@ -306,16 +300,6 @@ internal sealed class DatLiveEntityProjectionMaterializer
                     animatedPartTemplate,
                     bounds,
                     expectedCreateIntegrationVersion),
-                publishCurrentSnapshot: visualUpdate =>
-                {
-                    var snapshot = new AcDream.Plugin.Abstractions.WorldEntitySnapshot(
-                        visualUpdate.Entity.Id,
-                        visualUpdate.Entity.SourceGfxObjOrSetupId,
-                        visualUpdate.Entity.Position,
-                        visualUpdate.Entity.Rotation);
-                    _worldState.Add(snapshot);
-                    _worldEvents.UpsertCurrent(snapshot);
-                },
                 synchronizeAnimation: visualUpdate => RegisterAnimation(
                     expectedRecord,
                     visualUpdate.Entity,
@@ -692,15 +676,6 @@ internal sealed class DatLiveEntityProjectionMaterializer
 
         bool retainedAnimation = !createdProjection
             && expectedRecord.AnimationRuntime is LiveEntityAnimationState;
-        var snapshot = new AcDream.Plugin.Abstractions.WorldEntitySnapshot(
-            entity.Id,
-            entity.SourceGfxObjOrSetupId,
-            entity.Position,
-            entity.Rotation);
-        _worldState.Add(snapshot);
-        _worldEvents.UpsertCurrent(snapshot);
-        if (_runtime.TryMarkWorldSpawnPublished(spawn.Guid))
-            _worldEvents.FireEntitySpawned(snapshot);
 
         if (!_runtime.IsCurrentCreateIntegration(
                 expectedRecord,

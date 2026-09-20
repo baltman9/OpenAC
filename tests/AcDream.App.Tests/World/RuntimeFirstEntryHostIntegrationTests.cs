@@ -48,9 +48,11 @@ public sealed class RuntimeFirstEntryHostIntegrationTests
         Assert.True(record.IsSpatiallyVisible);
         Assert.NotNull(record.PhysicsBody);
         Assert.Equal((record, true), Assert.Single(fixture.VisibilityEdges));
-        AcDream.Plugin.Abstractions.WorldEntitySnapshot snapshot =
-            Assert.Single(fixture.WorldState.Entities);
-        Assert.Equal(record.WorldEntity!.Position, snapshot.Position);
+        Assert.Equal(1, fixture.EffectPoses.Count);
+        Assert.True(fixture.EffectPoses.TryGetRootPose(
+            record.WorldEntity!.Id,
+            out System.Numerics.Matrix4x4 posed));
+        Assert.Equal(record.WorldEntity.Position, posed.Translation);
         Assert.Equal(0, fixture.EntityObjects.Placements.PendingCount);
         Assert.Equal(0, fixture.FirstEntry.PendingCount);
     }
@@ -73,7 +75,7 @@ public sealed class RuntimeFirstEntryHostIntegrationTests
         Assert.True(fixture.Runtime.ParentAttachments.ContainsDeferredCreate(
             childGuid,
             instanceSequence: 1));
-        Assert.Empty(fixture.WorldState.Entities);
+        Assert.Equal(0, fixture.EffectPoses.Count);
         Assert.Empty(fixture.VisibilityEdges);
 
         fixture.Controller.OnCreate(Spawn(parentGuid, Cell));
@@ -94,7 +96,7 @@ public sealed class RuntimeFirstEntryHostIntegrationTests
             parentGuid,
             out LiveEntityRecord parent));
         Assert.True(parent.IsSpatiallyVisible);
-        Assert.Single(fixture.WorldState.Entities);
+        Assert.Equal(1, fixture.EffectPoses.Count);
     }
 
     [Fact]
@@ -376,7 +378,7 @@ public sealed class RuntimeFirstEntryHostIntegrationTests
             .RuntimePlacementProjectionSubscription Subscription;
         internal readonly AcDream.Runtime.Gameplay.RuntimeLocalPlayerMovementState
             Movement;
-        internal readonly WorldGameState WorldState = new();
+        internal readonly EntityEffectPoseRegistry EffectPoses = new();
         internal readonly List<(LiveEntityRecord Record, bool Visible)>
             VisibilityEdges = [];
         internal int VisibilityFailuresRemaining;
@@ -458,9 +460,7 @@ public sealed class RuntimeFirstEntryHostIntegrationTests
             var sink = new RuntimePlacementPresentationSink(
                 Runtime,
                 new RuntimeWorldTransitState(),
-                WorldState,
-                new WorldEvents(),
-                new EntityEffectPoseRegistry(),
+                EffectPoses,
                 localShadowSynchronizer,
                 () => playerGuid,
                 [

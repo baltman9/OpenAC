@@ -509,8 +509,6 @@ internal sealed class LivePresentationCompositionPhase
             var placementProjection = new RuntimePlacementPresentationSink(
                 liveEntities,
                 worldTransit,
-                d.WorldGameState,
-                d.WorldEvents,
                 d.EffectPoses,
                 localPlayerShadowSynchronizer,
                 () => d.PlayerIdentity.ServerGuid,
@@ -530,8 +528,6 @@ internal sealed class LivePresentationCompositionPhase
                 new LiveEntityProjectionWithdrawalController(
                     liveEntities,
                     projectileController,
-                    d.WorldGameState,
-                    d.WorldEvents,
                     d.PhysicsEngine.ShadowObjects,
                     d.EffectPoses,
                     d.LocalPlayerShadow);
@@ -1176,8 +1172,7 @@ internal sealed class LivePresentationCompositionPhase
             new LandblockStaticPresentationPublisher(
                 content.LightingSink,
                 d.TranslucencyFades,
-                d.WorldGameState,
-                d.WorldEvents);
+                d.WorldGameState);
         var landblockRetirementOwner =
             new LandblockPresentationRetirementOwner(
                 landblockRenderPublisher,

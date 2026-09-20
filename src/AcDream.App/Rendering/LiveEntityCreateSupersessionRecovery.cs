@@ -14,14 +14,12 @@ internal static class LiveEntityCreateSupersessionRecovery
         ulong expectedCreateIntegrationVersion,
         Func<LiveEntityAppearanceUpdateState?> captureAppearance,
         Func<LiveEntityAppearanceUpdateState, bool> publishAppearance,
-        Action<LiveEntityAppearanceUpdateState> publishCurrentSnapshot,
         Action<LiveEntityAppearanceUpdateState> synchronizeAnimation)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(expectedRecord);
         ArgumentNullException.ThrowIfNull(captureAppearance);
         ArgumentNullException.ThrowIfNull(publishAppearance);
-        ArgumentNullException.ThrowIfNull(publishCurrentSnapshot);
         ArgumentNullException.ThrowIfNull(synchronizeAnimation);
 
         if (!runtime.IsCurrentCreateIntegration(
@@ -33,14 +31,6 @@ internal static class LiveEntityCreateSupersessionRecovery
                 expectedCreateIntegrationVersion)
             || !publishAppearance(visualUpdate)
             || !runtime.IsCurrentCreateIntegration(
-                expectedRecord,
-                expectedCreateIntegrationVersion))
-        {
-            return false;
-        }
-
-        publishCurrentSnapshot(visualUpdate);
-        if (!runtime.IsCurrentCreateIntegration(
                 expectedRecord,
                 expectedCreateIntegrationVersion))
         {

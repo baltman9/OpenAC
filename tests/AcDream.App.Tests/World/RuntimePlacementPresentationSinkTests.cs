@@ -64,9 +64,10 @@ public sealed class RuntimePlacementPresentationSinkTests
             fixture.Runtime,
             record));
         Assert.Equal(0, genericVisibilityCount);
-        Assert.Equal(
-            place.WorldPosition,
-            Assert.Single(fixture.WorldState.Entities).Position);
+        Assert.True(fixture.EffectPoses.TryGetRootPose(
+            entity.Id,
+            out Matrix4x4 placedPose));
+        Assert.Equal(place.WorldPosition, placedPose.Translation);
         Assert.Equal((record, true), Assert.Single(fixture.Visibility));
         Assert.Equal(
             new LocalPlayerShadowState.Snapshot(
@@ -113,7 +114,6 @@ public sealed class RuntimePlacementPresentationSinkTests
             fixture.Runtime,
             record));
         Assert.Equal(0, genericVisibilityCount);
-        Assert.Empty(fixture.WorldState.Entities);
         Assert.Equal(0, fixture.EffectPoses.Count);
         Assert.Null(fixture.LocalShadow.Current);
         Assert.Equal((record, false), Assert.Single(fixture.Visibility));
@@ -126,14 +126,9 @@ public sealed class RuntimePlacementPresentationSinkTests
         LiveEntityRecord record = fixture.Materialize(Spawn(Guid, 1, SourceCell));
         WorldEntity entity = Assert.IsType<WorldEntity>(record.WorldEntity);
 
-        AcDream.Plugin.Abstractions.WorldEntitySnapshot expectedSnapshot =
-            Assert.Single(fixture.WorldState.Entities);
         LocalPlayerShadowState.Snapshot? expectedShadow =
             fixture.LocalShadow.Current;
         Assert.NotNull(expectedShadow);
-        Assert.Equal(
-            expectedSnapshot,
-            Assert.Single(CurrentEventMembership(fixture.WorldEvents)));
         Assert.Equal(1, fixture.EffectPoses.Count);
         Vector3 posedPosition = entity.Position;
         Quaternion posedRotation = entity.Rotation;
@@ -145,8 +140,6 @@ public sealed class RuntimePlacementPresentationSinkTests
             posedPosition,
             posedRotation);
         Assert.True(fixture.Sink.TryApply(in withdraw));
-        Assert.Empty(fixture.WorldState.Entities);
-        Assert.Empty(CurrentEventMembership(fixture.WorldEvents));
         Assert.Equal(0, fixture.EffectPoses.Count);
 
         RuntimeOwnershipSnapshot beforeRestore =
@@ -178,12 +171,6 @@ public sealed class RuntimePlacementPresentationSinkTests
         Assert.Equal(SourceCell, entity.ParentCellId);
 
         // Sink-owned registrations - restored EXACTLY, not defaulted.
-        Assert.Equal(
-            expectedSnapshot,
-            Assert.Single(fixture.WorldState.Entities));
-        Assert.Equal(
-            expectedSnapshot,
-            Assert.Single(CurrentEventMembership(fixture.WorldEvents)));
         Assert.Equal(1, fixture.EffectPoses.Count);
         Assert.True(fixture.EffectPoses.TryGetRootPose(
             entity.Id,
@@ -206,10 +193,8 @@ public sealed class RuntimePlacementPresentationSinkTests
             RuntimeOwnershipSnapshot.Capture(fixture.Runtime, record));
 
         Assert.True(fixture.Sink.TryApply(in restored));
-        Assert.Equal(
-            expectedSnapshot,
-            Assert.Single(fixture.WorldState.Entities));
         Assert.Equal(1, fixture.EffectPoses.Count);
+        Assert.True(fixture.EffectPoses.TryGetRootPose(entity.Id, out _));
         Assert.True(record.IsSpatiallyVisible);
     }
 
@@ -239,17 +224,6 @@ public sealed class RuntimePlacementPresentationSinkTests
 
         Assert.True(fixture.Sink.TryApply(in restored));
         Assert.Empty(fixture.Visibility);
-    }
-
-    private static List<AcDream.Plugin.Abstractions.WorldEntitySnapshot>
-        CurrentEventMembership(WorldEvents events)
-    {
-        var replayed = new List<AcDream.Plugin.Abstractions.WorldEntitySnapshot>();
-        void Handler(AcDream.Plugin.Abstractions.WorldEntitySnapshot snapshot) =>
-            replayed.Add(snapshot);
-        events.EntitySpawned += Handler;
-        events.EntitySpawned -= Handler;
-        return replayed;
     }
 
     [Fact]
@@ -608,7 +582,6 @@ public sealed class RuntimePlacementPresentationSinkTests
 
         Assert.Equal(0, fixture.Lifetime.Placements.PendingCount);
         Assert.False(fixture.Record.IsSpatiallyProjected);
-        Assert.Empty(fixture.WorldState.Entities);
         Assert.Equal(0, fixture.EffectPoses.Count);
         Assert.Equal(2, fixture.Visibility.Count);
         Assert.False(subscription.HasAppliedReceiptAwaitingAcknowledgement);
@@ -852,8 +825,6 @@ public sealed class RuntimePlacementPresentationSinkTests
             GpuWorldState spatial,
             LiveEntityRuntime runtime,
             RuntimeWorldTransitState transit,
-            WorldGameState worldState,
-            WorldEvents worldEvents,
             EntityEffectPoseRegistry effectPoses,
             LocalPlayerShadowState localShadow,
             LocalPlayerShadowSynchronizer synchronizer)
@@ -861,16 +832,12 @@ public sealed class RuntimePlacementPresentationSinkTests
             Spatial = spatial;
             Runtime = runtime;
             Transit = transit;
-            WorldState = worldState;
-            WorldEvents = worldEvents;
             EffectPoses = effectPoses;
             LocalShadow = localShadow;
             Synchronizer = synchronizer;
             Sink = new RuntimePlacementPresentationSink(
                 runtime,
                 transit,
-                worldState,
-                worldEvents,
                 effectPoses,
                 synchronizer,
                 () => Guid,
@@ -891,8 +858,6 @@ public sealed class RuntimePlacementPresentationSinkTests
         internal GpuWorldState Spatial { get; }
         internal LiveEntityRuntime Runtime { get; }
         internal RuntimeWorldTransitState Transit { get; }
-        internal WorldGameState WorldState { get; }
-        internal WorldEvents WorldEvents { get; }
         internal EntityEffectPoseRegistry EffectPoses { get; }
         internal LocalPlayerShadowState LocalShadow { get; }
         internal LocalPlayerShadowSynchronizer Synchronizer { get; }
@@ -943,8 +908,6 @@ public sealed class RuntimePlacementPresentationSinkTests
                 spatial,
                 runtime,
                 new RuntimeWorldTransitState(),
-                new WorldGameState(),
-                new WorldEvents(),
                 new EntityEffectPoseRegistry(),
                 localShadow,
                 synchronizer);
@@ -957,13 +920,6 @@ public sealed class RuntimePlacementPresentationSinkTests
                 record.Canonical));
             Assert.True(record.ResourcesRegistered);
             WorldEntity entity = record.WorldEntity!;
-            var snapshot = new AcDream.Plugin.Abstractions.WorldEntitySnapshot(
-                entity.Id,
-                entity.SourceGfxObjOrSetupId,
-                entity.Position,
-                entity.Rotation);
-            WorldState.Add(snapshot);
-            WorldEvents.UpsertCurrent(snapshot);
             EffectPoses.PublishMeshRefs(entity);
             if (record.ServerGuid == Guid)
             {
@@ -1019,7 +975,6 @@ public sealed class RuntimePlacementPresentationSinkTests
             LiveEntityRuntime runtime,
             LiveEntityRecord record,
             RuntimePlacementPresentationSink sink,
-            WorldGameState worldState,
             EntityEffectPoseRegistry effectPoses,
             List<(LiveEntityRecord Record, bool Visible)> visibility)
         {
@@ -1027,7 +982,6 @@ public sealed class RuntimePlacementPresentationSinkTests
             Runtime = runtime;
             Record = record;
             Sink = sink;
-            WorldState = worldState;
             EffectPoses = effectPoses;
             Visibility = visibility;
         }
@@ -1037,7 +991,6 @@ public sealed class RuntimePlacementPresentationSinkTests
         internal LiveEntityRuntime Runtime { get; }
         internal LiveEntityRecord Record { get; }
         internal RuntimePlacementPresentationSink Sink { get; }
-        internal WorldGameState WorldState { get; }
         internal EntityEffectPoseRegistry EffectPoses { get; }
         internal List<(LiveEntityRecord Record, bool Visible)> Visibility { get; }
         internal int VisibilityFailuresRemaining { get; set; }
@@ -1074,8 +1027,6 @@ public sealed class RuntimePlacementPresentationSinkTests
                 body.Position,
                 body.Position);
 
-            var worldState = new WorldGameState();
-            var worldEvents = new WorldEvents();
             var effectPoses = new EntityEffectPoseRegistry();
             var localShadow = new LocalPlayerShadowState();
             var localShadowIdentity = new LocalPlayerIdentityState { ServerGuid = Guid };
@@ -1088,13 +1039,6 @@ public sealed class RuntimePlacementPresentationSinkTests
                 localShadowOrigin,
                 localShadow);
             WorldEntity entity = record.WorldEntity!;
-            var snapshot = new AcDream.Plugin.Abstractions.WorldEntitySnapshot(
-                entity.Id,
-                entity.SourceGfxObjOrSetupId,
-                entity.Position,
-                entity.Rotation);
-            worldState.Add(snapshot);
-            worldEvents.UpsertCurrent(snapshot);
             effectPoses.PublishMeshRefs(entity);
             localShadow.Set(entity.Position, entity.Rotation, record.FullCellId);
             var visibility = new List<(LiveEntityRecord Record, bool Visible)>();
@@ -1102,8 +1046,6 @@ public sealed class RuntimePlacementPresentationSinkTests
             var sink = new RuntimePlacementPresentationSink(
                 runtime,
                 new RuntimeWorldTransitState(),
-                worldState,
-                worldEvents,
                 effectPoses,
                 synchronizer,
                 () => Guid,
@@ -1124,7 +1066,6 @@ public sealed class RuntimePlacementPresentationSinkTests
                 runtime,
                 record,
                 sink,
-                worldState,
                 effectPoses,
                 visibility);
             return fixture;

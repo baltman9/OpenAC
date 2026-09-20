@@ -79,6 +79,8 @@ public sealed class GameWindow :
     private readonly string _datDir;
     private readonly WorldGameState _worldGameState;
     private readonly WorldEvents _worldEvents;
+    private readonly AcDream.Runtime.Plugins.RuntimeWorldEntityProjection
+        _pluginWorldEntities;
     private readonly HostQuiescenceGate _hostQuiescence = new();
     private IWindow? _window;
     private bool _renderLoopArmed;
@@ -561,6 +563,14 @@ public sealed class GameWindow :
         _datDir = options.DatDir;
         _worldGameState = worldGameState;
         _worldEvents = worldEvents;
+        // What a plugin sees in the world comes from the runtime's object
+        // directory, not from what happens to be drawn: the same producer the
+        // windowless client uses, so both answer the same population, ids
+        // and event order.
+        _pluginWorldEntities =
+            new AcDream.Runtime.Plugins.RuntimeWorldEntityProjection(_runtime);
+        _worldGameState.BindWorldEntities(_pluginWorldEntities);
+        _worldEvents.BindWorldEntities(_pluginWorldEntities);
         _displayFramePacing = new DisplayFramePacingController(
             options.UncappedRendering,
             _frameProfiler,
@@ -1736,6 +1746,7 @@ public sealed class GameWindow :
             _equippedChildRenderer,
             _liveEntities,
             _runtime,
+            _pluginWorldEntities,
             _runtimeHostLease,
             _renderSceneShadow,
             _livePresentationBindings,

@@ -21,9 +21,8 @@ internal sealed class HeadlessPluginHost
 
     private readonly GameRuntime _runtime;
     private readonly IDisposable _eventSubscription;
+    private readonly RuntimeWorldEntityProjection _worldEntities;
     private readonly object _eventGate = new();
-    private readonly List<Subscription> _subscriptions = [];
-    private Subscription[] _liveSnapshot = [];
     private readonly RuntimeAutomationSurface _automation;
     private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>
         _sessionSettingsByPlugin;
@@ -38,19 +37,6 @@ internal sealed class HeadlessPluginHost
     private Action<PluginConfirmation>? _confirmationRequested;
     private bool _wasInWorld;
     private bool _disposed;
-
-    private readonly record struct ReplayEntity(
-        RuntimeEntityIdentity Identity,
-        WorldEntitySnapshot Snapshot);
-
-    private sealed class Subscription(Action<WorldEntitySnapshot> handler)
-    {
-        internal Action<WorldEntitySnapshot> Handler { get; } = handler;
-        internal Queue<ReplayEntity> Pending { get; } = new();
-        internal HashSet<RuntimeEntityIdentity> Delivered { get; } = [];
-        internal bool Replaying { get; set; } = true;
-        internal bool Active { get; set; } = true;
-    }
 
     internal HeadlessPluginHost(
         GameRuntime runtime,
@@ -121,6 +107,9 @@ internal sealed class HeadlessPluginHost
         runtime.InventoryOwner.ExternalContainers.Changed += OnExternalContainerChanged;
         runtime.ActionOwner.Transactions.AppraisalReceived += OnAppraisalReceived;
         _eventSubscription = runtime.Subscribe(this);
+        // The one producer of what a plugin sees in the world, shared with
+        // the client that has a window.
+        _worldEntities = new RuntimeWorldEntityProjection(runtime);
     }
 
     private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>
@@ -237,16 +226,18 @@ internal sealed class HeadlessPluginHost
         }
     }
 
-    internal Action? ReplayCapturedForTest { get; set; }
+    internal Action? ReplayCapturedForTest
+    {
+        get => _worldEntities.ReplayCapturedForTest;
+        set => _worldEntities.ReplayCapturedForTest = value;
+    }
 
     public IReadOnlyList<WorldEntitySnapshot> Entities
     {
         get
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            var visitor = new SnapshotVisitor(_runtime);
-            _runtime.Entities.Visit(visitor);
-            return visitor.Items.Select(static item => item.Snapshot).ToArray();
+            return _worldEntities.Entities;
         }
     }
 
@@ -268,79 +259,13 @@ internal sealed class HeadlessPluginHost
         {
             ArgumentNullException.ThrowIfNull(value);
             ObjectDisposedException.ThrowIf(_disposed, this);
-            var subscription = new Subscription(value);
-            lock (_eventGate)
-            {
-                ObjectDisposedException.ThrowIf(_disposed, this);
-                _subscriptions.Add(subscription);
-            }
-
-            var visitor = new SnapshotVisitor(
-                _runtime,
-                ReplayCapturedForTest);
-            _runtime.Entities.Visit(visitor);
-            ReplayEntity[] replay = visitor.Items.ToArray();
-
-            foreach (ReplayEntity item in replay)
-            {
-                lock (_eventGate)
-                {
-                    if (!subscription.Active)
-                        return;
-                    if (!_runtime.Entities.TryGet(
-                            item.Identity.ServerGuid,
-                            out RuntimeEntitySnapshot current)
-                        || current.Identity != item.Identity
-                        || !subscription.Delivered.Add(item.Identity))
-                    {
-                        continue;
-                    }
-                }
-
-                Invoke(subscription.Handler, item.Snapshot);
-            }
-
-            while (true)
-            {
-                ReplayEntity pending;
-                lock (_eventGate)
-                {
-                    if (!subscription.Active)
-                        return;
-                    if (!subscription.Pending.TryDequeue(out pending))
-                    {
-                        subscription.Replaying = false;
-                        subscription.Delivered.Clear();
-                        RebuildLiveSnapshotLocked();
-                        return;
-                    }
-                    if (!subscription.Delivered.Add(pending.Identity))
-                        continue;
-                }
-
-                Invoke(subscription.Handler, pending.Snapshot);
-            }
+            _worldEntities.Subscribe(value);
         }
         remove
         {
             if (value is null)
                 return;
-            lock (_eventGate)
-            {
-                for (int index = _subscriptions.Count - 1; index >= 0; index--)
-                {
-                    Subscription subscription = _subscriptions[index];
-                    if (subscription.Handler != value)
-                        continue;
-                    subscription.Active = false;
-                    subscription.Pending.Clear();
-                    subscription.Delivered.Clear();
-                    _subscriptions.RemoveAt(index);
-                    if (!subscription.Replaying)
-                        RebuildLiveSnapshotLocked();
-                    break;
-                }
-            }
+            _worldEntities.Unsubscribe(value);
         }
     }
 
@@ -349,17 +274,8 @@ internal sealed class HeadlessPluginHost
         if (_disposed)
             return;
         lock (_eventGate)
-        {
             _disposed = true;
-            foreach (Subscription subscription in _subscriptions)
-            {
-                subscription.Active = false;
-                subscription.Pending.Clear();
-                subscription.Delivered.Clear();
-            }
-            _subscriptions.Clear();
-            _liveSnapshot = [];
-        }
+        _worldEntities.Dispose();
         lock (_tickGate)
         {
             _tick = null;
@@ -390,28 +306,6 @@ internal sealed class HeadlessPluginHost
                 RuntimeEntityChange.Deleted => PluginObjectChangeKind.Released,
                 _ => PluginObjectChangeKind.Updated,
             });
-        if (delta.Change != RuntimeEntityChange.Registered)
-            return;
-        Subscription[] toNotify;
-        var pending = new ReplayEntity(
-            delta.Entity.Identity,
-            Convert(_runtime, delta.Entity));
-        lock (_eventGate)
-        {
-            if (_disposed)
-                return;
-            foreach (Subscription subscription in _subscriptions)
-            {
-                if (subscription.Active && subscription.Replaying)
-                    subscription.Pending.Enqueue(pending);
-            }
-            toNotify = _liveSnapshot;
-        }
-        if (toNotify.Length == 0)
-            return;
-
-        foreach (Subscription subscription in toNotify)
-            Invoke(subscription.Handler, pending.Snapshot);
     }
 
     public void OnLifecycle(in RuntimeLifecycleDelta delta)
@@ -675,56 +569,4 @@ internal sealed class HeadlessPluginHost
     public void OnMovement(in RuntimeMovementDelta delta) { }
     public void OnPortal(in RuntimePortalDelta delta) { }
     public void OnCombat(in RuntimeCombatDelta delta) { }
-
-    private static WorldEntitySnapshot Convert(
-        GameRuntime runtime,
-        in RuntimeEntitySnapshot entity)
-    {
-        uint sourceId = runtime.EntityObjects.Entities.TryGetActive(
-            entity.Identity.ServerGuid,
-            out AcDream.Runtime.Entities.RuntimeEntityRecord record)
-            ? record.Snapshot.SetupTableId ?? 0u
-            : 0u;
-        return new WorldEntitySnapshot(
-            entity.Identity.LocalEntityId,
-            sourceId,
-            entity.Position?.Frame.Origin ?? default,
-            entity.Position?.Frame.Orientation
-                ?? System.Numerics.Quaternion.Identity);
-    }
-
-    private static void Invoke(
-        Action<WorldEntitySnapshot> handler,
-        WorldEntitySnapshot snapshot)
-    {
-        try { handler(snapshot); }
-        catch { }
-    }
-
-    private sealed class SnapshotVisitor(
-        GameRuntime runtime,
-        Action? captureBarrier = null)
-        : IRuntimeEntityVisitor
-    {
-        private Action? _captureBarrier = captureBarrier;
-
-        internal List<ReplayEntity> Items { get; } =
-            new(runtime.Entities.Count);
-
-        public void Visit(in RuntimeEntitySnapshot entity)
-        {
-            Items.Add(new ReplayEntity(
-                entity.Identity,
-                Convert(runtime, entity)));
-            Interlocked.Exchange(ref _captureBarrier, null)?.Invoke();
-        }
-    }
-
-    private void RebuildLiveSnapshotLocked()
-    {
-        _liveSnapshot = _subscriptions
-            .Where(static subscription =>
-                subscription.Active && !subscription.Replaying)
-            .ToArray();
-    }
 }
