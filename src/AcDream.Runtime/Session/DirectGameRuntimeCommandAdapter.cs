@@ -184,6 +184,9 @@ public sealed class DirectGameRuntimeCommandAdapter
             case RuntimePortalCommand.RecallMansion:
                 session!.SendTeleportToMansion();
                 break;
+            case RuntimePortalCommand.RecallAllegiance:
+                session!.SendRecallAllegianceHometown();
+                break;
             default:
                 return EmitUnsupported(
                     RuntimeCommandDomain.Portal,

@@ -11,6 +11,8 @@ public enum PluginRecallKind
     House,
     /// <summary>Recall to the mansion.</summary>
     Mansion,
+    /// <summary>Recall to the allegiance hometown.</summary>
+    Allegiance,
 }
 
 /// <summary>Why a recall request was accepted or refused.</summary>

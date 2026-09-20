@@ -1970,6 +1970,7 @@ internal sealed class RuntimeAutomationSurface
             PluginRecallKind.Marketplace => RuntimePortalCommand.RecallMarketplace,
             PluginRecallKind.House => RuntimePortalCommand.RecallHouse,
             PluginRecallKind.Mansion => RuntimePortalCommand.RecallMansion,
+            PluginRecallKind.Allegiance => RuntimePortalCommand.RecallAllegiance,
             _ => throw new ArgumentOutOfRangeException(nameof(kind)),
         };
         RuntimeCommandResult result = commands.Portal.Execute(runtime.Generation, command);

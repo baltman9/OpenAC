@@ -102,6 +102,7 @@ public enum RuntimePortalCommand
     RecallMarketplace,
     RecallHouse,
     RecallMansion,
+    RecallAllegiance,
 }
 
 public interface IRuntimeSessionCommands
