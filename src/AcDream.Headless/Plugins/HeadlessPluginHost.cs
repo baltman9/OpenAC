@@ -3,6 +3,7 @@ using AcDream.Core.Items;
 using AcDream.Headless.Hosting;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
+using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Navigation;
 using AcDream.Runtime.Plugins;
 
@@ -36,6 +37,7 @@ internal sealed class HeadlessPluginHost
     private long _objectChangeRevision;
     private Action<PluginPortalTransition>? _portalTransition;
     private long _portalTransitionRevision;
+    private Action<PluginItemUseCompletion>? _itemUseCompleted;
     private Action<PluginGoToReport>? _navigationChanged;
     private long _lastNavigationSequence;
     private PluginGoToState _lastNavigationState;
@@ -110,6 +112,7 @@ internal sealed class HeadlessPluginHost
         runtime.CommunicationOwner.LocalPlayerDied += OnLocalPlayerDied;
         runtime.InventoryOwner.ExternalContainers.Changed += OnExternalContainerChanged;
         runtime.ActionOwner.Transactions.AppraisalReceived += OnAppraisalReceived;
+        runtime.ActionOwner.Transactions.UseCompleted += OnUseCompleted;
         _eventSubscription = runtime.Subscribe(this);
     }
 
@@ -346,6 +349,7 @@ internal sealed class HeadlessPluginHost
         _runtime.CommunicationOwner.LocalPlayerDied -= OnLocalPlayerDied;
         _runtime.InventoryOwner.ExternalContainers.Changed -= OnExternalContainerChanged;
         _runtime.ActionOwner.Transactions.AppraisalReceived -= OnAppraisalReceived;
+        _runtime.ActionOwner.Transactions.UseCompleted -= OnUseCompleted;
         _eventSubscription.Dispose();
         _automation.Dispose();
     }
@@ -519,6 +523,23 @@ internal sealed class HeadlessPluginHost
         }
     }
 
+    public event Action<PluginItemUseCompletion> ItemUseCompleted
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_tickGate)
+                _itemUseCompleted += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_tickGate)
+                _itemUseCompleted -= value;
+        }
+    }
+
     public event Action<PluginGoToReport> NavigationChanged
     {
         add
@@ -668,6 +689,30 @@ internal sealed class HeadlessPluginHost
 
     private void OnAppraisalReceived(uint objectId) =>
         RaiseObjectChanged(objectId, PluginObjectChangeKind.IdentReceived);
+
+    private void OnUseCompleted(uint _)
+    {
+        RuntimeItemUseCompletion completion =
+            _runtime.ActionOwner.Transactions.LastItemUseCompletion;
+        Action<PluginItemUseCompletion>? handlers;
+        lock (_tickGate)
+            handlers = _itemUseCompleted;
+        if (handlers is null)
+            return;
+        var report = new PluginItemUseCompletion(
+            completion.Revision,
+            completion.SourceObjectId,
+            completion.TargetObjectId,
+            completion.WeenieError);
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginItemUseCompletion>)handler)(report); }
+            catch (Exception error)
+            {
+                Log.Warn($"Plugin item-use handler threw: {error}");
+            }
+        }
+    }
 
     private void RaiseUInt(ref Action<uint>? field, uint value)
     {
