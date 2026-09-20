@@ -77,6 +77,81 @@ public sealed class PluginEventParityTests
                     && change.Kind == PluginObjectChangeKind.Released);
         });
 
+    /// <summary>
+    /// The server re-describing something already in the world. It arrives as
+    /// a fresh incarnation under the same id: the previous one is retired
+    /// before the new one is registered, so a plugin hears the object
+    /// released and then created again under the one id, and the id is still
+    /// in the world when the batch is over. That is what the client with a
+    /// window has told plugins since before either client's producers were
+    /// shared, and it is what both tell them now; the guide says so, because
+    /// a plugin that reads a release as "gone for good" would drop a creature
+    /// still standing in front of it.
+    ///
+    /// The object here is one the server alone knows about, so the whole
+    /// sequence comes from the one source and can be asserted outright --
+    /// two clients that both reported nothing would write identical
+    /// transcripts.
+    ///
+    /// Mutation check (2026-09-20), run: mapping the retirement of a replaced
+    /// incarnation to <c>Updated</c> in the runtime's plugin event mapping
+    /// turned this red and left the rest of the file green; restoring it
+    /// turned it green.
+    /// </summary>
+    [Fact]
+    public void ReSendingAnObjectReleasesAndCreatesItOnBothClients() =>
+        ParityScenario.Run(static (arm, transcript) =>
+        {
+            transcript.Step("something arrives");
+            arm.Server.CreateObject(ParityWorld.Spawn(
+                Arrival,
+                ParityWorld.PlayerX + 4f,
+                ParityWorld.PlayerY,
+                ParityPlayerBody.Cell,
+                state: 0));
+            arm.Advance();
+
+            var changes = new List<PluginObjectChange>();
+            arm.Host.Events.ObjectChanged += changes.Add;
+
+            transcript.Step("the server sends it again");
+            arm.Server.CreateObject(ParityWorld.Spawn(
+                Arrival,
+                ParityWorld.PlayerX + 4f,
+                ParityWorld.PlayerY,
+                ParityPlayerBody.Cell,
+                state: 0,
+                instance: 2));
+            arm.Advance();
+            Record(transcript, "resent", changes);
+
+            // Released then created, twice over: the object side and the
+            // carried-items side each report the handover, as they do for
+            // any one underlying change to an object the client holds a row
+            // for. Pinned in full because the order and the count are what a
+            // plugin actually receives, and both clients owe the same one.
+            Assert.Equal(
+                [
+                    PluginObjectChangeKind.Released,
+                    PluginObjectChangeKind.Created,
+                    PluginObjectChangeKind.Released,
+                    PluginObjectChangeKind.Created,
+                ],
+                changes
+                    .Where(change => change.ObjectId == Arrival)
+                    .Select(change => change.Kind)
+                    .ToList());
+            // The release was a handover, not a departure: the id is still
+            // one the client answers for.
+            transcript.Record(
+                "known",
+                arm.Runtime.EntityObjects.Entities.TryGetActive(
+                    Arrival, out _));
+            Assert.True(arm.Runtime.EntityObjects.Entities.TryGetActive(
+                Arrival, out _));
+        });
+
+
     [Fact]
     public void SomethingEnteringThePacksTellsAPluginOnBothClients() =>
         ParityScenario.Run(static (arm, transcript) =>

@@ -170,6 +170,17 @@ tracking, on the same thread as `Tick`, in the host's own delivery order.
 
 A bulk container reset carries no single object id and is not reported.
 
+A `Released` does not always mean the object is gone. When the server
+re-describes something already in the world, the client retires the
+incarnation it was holding and registers the fresh one under the same id, so
+a plugin hears `Released` and then `Created` for that id in the same batch --
+and, for an object the client also holds a row for, twice over, once from
+each source (see the note on two calls per change below). The id is still
+live afterwards. Treat a `Released` as final only if no `Created` for the
+same id follows it before the next `Tick`; a plugin that drops its target on
+the first `Released` loses the creature standing in front of it every time
+the server repeats itself. Both clients report this identically.
+
 ### What is in the world: objects and scenery
 
 `host.State` carries two lists, and they are two different kinds of thing.
