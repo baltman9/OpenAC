@@ -90,6 +90,14 @@ internal sealed class RuntimeLocalPlayerMotionArming
     /// False when the character has no cycles to play yet, in which case it
     /// has nothing to move itself by and stands where the server put it.
     /// </summary>
+    /// <remarks>
+    /// The character's cycles being rebuilt sets it up again, and setting it
+    /// up again clears what the character was told to do beforehand. That is
+    /// the same thing taking hold of a body does, and for the same reason:
+    /// those instructions name cycles that have just been thrown away, and no
+    /// new cycle can ever finish them, so a character that kept them would
+    /// stand still for the rest of the session.
+    /// </remarks>
     internal bool EnsureArmed(PlayerMovementController? controller)
     {
         if (controller is null)
