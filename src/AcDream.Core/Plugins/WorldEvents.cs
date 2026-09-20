@@ -21,6 +21,7 @@ public sealed class WorldEvents : IEvents
     private Action<uint>? _containerOpened;
     private Action<uint>? _containerClosed;
     private Action<PluginConfirmation>? _confirmationRequested;
+    private Action<PluginActivationCompletion>? _activationCompleted;
 
     private sealed class Subscription(Action<WorldEntitySnapshot> handler)
     {
@@ -265,6 +266,23 @@ public sealed class WorldEvents : IEvents
         }
     }
 
+    public event Action<PluginActivationCompletion> ActivationCompleted
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_lock)
+                _activationCompleted += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_lock)
+                _activationCompleted -= value;
+        }
+    }
+
     public void FireLoginComplete()
     {
         Action? handlers;
@@ -388,6 +406,20 @@ public sealed class WorldEvents : IEvents
         foreach (Delegate handler in handlers.GetInvocationList())
         {
             try { ((Action<PluginConfirmation>)handler)(confirmation); }
+            catch { /* plugin errors do not propagate out of event dispatch */ }
+        }
+    }
+
+    public void FireActivationCompleted(PluginActivationCompletion completion)
+    {
+        Action<PluginActivationCompletion>? handlers;
+        lock (_lock)
+            handlers = _activationCompleted;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginActivationCompletion>)handler)(completion); }
             catch { /* plugin errors do not propagate out of event dispatch */ }
         }
     }

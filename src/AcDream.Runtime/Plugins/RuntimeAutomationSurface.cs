@@ -43,6 +43,8 @@ internal sealed class RuntimeAutomationSurface
     private long _recallRequestRevision;
     private long _pendingRecallRequestRevision;
     private PluginRecallRequest _lastRecallRequest;
+    private long _activationRevision;
+    private readonly Dictionary<uint, long> _pendingActivationObjectIds = new();
 
     private GameRuntime? _runtime;
     private AcDream.Runtime.Gameplay.RuntimeTradeAutomation? _tradeAutomation;
@@ -75,6 +77,7 @@ internal sealed class RuntimeAutomationSurface
     private Func<uint, uint, int, bool>? _sellItem;
     private Func<uint, bool>? _dismissGhost;
     private Func<PluginSelectionAction, bool>? _selectionAction;
+    private PluginActivationCompletion _lastActivationCompletion;
     private PhysicsEngine? _projectilePhysics;
     private IReadOnlyList<PluginProjectileDebugSample> _projectileDebugSamples =
         Array.Empty<PluginProjectileDebugSample>();
@@ -1233,6 +1236,19 @@ internal sealed class RuntimeAutomationSurface
             if (_disposed || _wasInWorld == isInWorld)
                 return;
             _wasInWorld = isInWorld;
+
+            // Clear pending activations on logoff.
+            if (!isInWorld && _pendingActivationObjectIds.Count > 0)
+            {
+                long revision = ++_activationRevision;
+                foreach (uint objId in _pendingActivationObjectIds.Keys)
+                {
+                    _lastActivationCompletion = new PluginActivationCompletion(
+                        revision, objId, PluginActivationOutcome.Interrupted, 0u);
+                    _pluginEvents?.FireActivationCompleted(_lastActivationCompletion);
+                }
+                _pendingActivationObjectIds.Clear();
+            }
         }
 
         if (isInWorld)
@@ -1328,6 +1344,34 @@ internal sealed class RuntimeAutomationSurface
                 _ => PluginPortalTransitionKind.Unknown,
             },
         });
+
+        // When a portal transition completes or cancels, resolve any
+        // pending activation that may be awaiting this transition.
+        if (delta.Portal.IsCompleted || delta.Portal.IsCancelled)
+        {
+            PluginActivationOutcome outcome = delta.Portal.IsCompleted
+                ? PluginActivationOutcome.Completed
+                : PluginActivationOutcome.Interrupted;
+            lock (_gate)
+            {
+                if (_pendingActivationObjectIds.Count > 0)
+                {
+                    // Clear all pending activations -- the transition
+                    // resolves any outstanding world interaction.
+                    long revision = ++_activationRevision;
+                    foreach (uint objId in _pendingActivationObjectIds.Keys)
+                    {
+                        _lastActivationCompletion = new PluginActivationCompletion(
+                            revision,
+                            objId,
+                            outcome,
+                            WeenieError: 0u);
+                        _pluginEvents?.FireActivationCompleted(_lastActivationCompletion);
+                    }
+                    _pendingActivationObjectIds.Clear();
+                }
+            }
+        }
     }
     void IRuntimeEventObserver.OnCombat(in RuntimeCombatDelta delta) { }
 
@@ -2000,6 +2044,10 @@ internal sealed class RuntimeAutomationSurface
 
     bool IRecallAutomation.IsAvailable => IsAvailable;
 
+    PluginActivationCompletion IWorldObjectAutomation.LastActivationCompletion
+    {
+        get { lock (_gate) return _lastActivationCompletion; }
+    }
     bool IAllegianceAutomation.IsAvailable => IsAvailable;
 
     PluginAllegianceSnapshot IAllegianceAutomation.Snapshot
@@ -2206,7 +2254,23 @@ internal sealed class RuntimeAutomationSurface
                 runtime.InventoryOwner.Objects))
             return new(PluginItemCommandStatus.InvalidTarget,
                 "Activate is for world objects; use Items.Use for owned items.");
-        return useWorldObject(objectId);
+        PluginItemCommandResult result = useWorldObject(objectId);
+        if (result.Accepted)
+        {
+            lock (_gate)
+            {
+                if (_pendingActivationObjectIds.TryGetValue(objectId, out long existing))
+                {
+                    // Already tracking this object; update revision.
+                    _pendingActivationObjectIds[objectId] = ++_activationRevision;
+                }
+                else
+                {
+                    _pendingActivationObjectIds.Add(objectId, ++_activationRevision);
+                }
+            }
+        }
+        return result;
     }
 
     PluginItemCommandResult IWorldObjectAutomation.Identify(uint objectId)

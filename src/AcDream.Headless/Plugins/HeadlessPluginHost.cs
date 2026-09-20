@@ -46,6 +46,7 @@ internal sealed class HeadlessPluginHost
     private Action<uint>? _containerOpened;
     private Action<uint>? _containerClosed;
     private Action<PluginConfirmation>? _confirmationRequested;
+    private Action<PluginActivationCompletion>? _activationCompleted;
     private bool _wasInWorld;
     private bool _disposed;
 
@@ -610,6 +611,23 @@ internal sealed class HeadlessPluginHost
         }
     }
 
+    public event Action<PluginActivationCompletion> ActivationCompleted
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_tickGate)
+                _activationCompleted += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_tickGate)
+                _activationCompleted -= value;
+        }
+    }
+
     public void OnCommand(in RuntimeCommandDelta delta) { }
 
     public void OnInventory(in RuntimeInventoryDelta delta)
@@ -752,6 +770,23 @@ internal sealed class HeadlessPluginHost
         }
     }
 
+    internal void RaiseActivationCompleted(PluginActivationCompletion completion)
+    {
+        Action<PluginActivationCompletion>? handlers;
+        lock (_tickGate)
+            handlers = _activationCompleted;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginActivationCompletion>)handler)(completion); }
+            catch (Exception error)
+            {
+                Log.Warn($"Plugin activation-completion handler threw: {error}");
+            }
+        }
+    }
+
     public void OnChat(in RuntimeChatDelta delta) { }
     public void OnMovement(in RuntimeMovementDelta delta) { }
     public void OnPortal(in RuntimePortalDelta delta)
@@ -800,6 +835,21 @@ internal sealed class HeadlessPluginHost
             {
                 Log.Warn($"Plugin portal-transition handler threw: {error}");
             }
+        }
+
+        // When a portal transition completes that was correlated to a recall
+        // request, fire an activation completion event.
+        if ((delta.Portal.IsCompleted || delta.Portal.IsCancelled)
+            && recallRequestRevision > 0)
+        {
+            PluginActivationOutcome outcome = delta.Portal.IsCompleted
+                ? PluginActivationOutcome.Completed
+                : PluginActivationOutcome.Interrupted;
+            RaiseActivationCompleted(new PluginActivationCompletion(
+                Interlocked.Increment(ref _portalTransitionRevision),
+                0u, // The object id is not directly tracked in the headless host.
+                outcome,
+                0u));
         }
     }
     public void OnCombat(in RuntimeCombatDelta delta) { }
