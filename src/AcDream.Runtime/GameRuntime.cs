@@ -455,6 +455,13 @@ public sealed class GameRuntime
                 WorldObjectUseOwner,
                 approachSource,
                 dependencies.Log);
+            // How fast the character runs and jumps follows what the server
+            // says about its skills, burden and stamina. One owner, so a
+            // client without a window does not read stale speeds.
+            MovementStats = new Gameplay.RuntimeMovementStatsApplier(
+                context.Movement,
+                context.Character.MovementSkills,
+                dependencies.Log ?? (static _ => { }));
             GhostDismissalOwner = new Entities.RuntimeGhostDismissal(
                 context.EntityObjects,
                 () => PlayerIdentity.ServerGuid);
@@ -579,6 +586,13 @@ public sealed class GameRuntime
     /// </summary>
     internal RuntimeInteractionApproachDriver ArmedApproachDrive { get; }
     public RuntimeLocalPlayerMovementState MovementOwner { get; }
+
+    /// <summary>
+    /// Re-derives the character's run and jump speed from the numbers the
+    /// server last sent. Both clients bind their character-session hooks to
+    /// this one instance.
+    /// </summary>
+    internal Gameplay.RuntimeMovementStatsApplier MovementStats { get; }
     internal RuntimeLocalPlayerPhysicsPublicationState
         LocalPlayerPhysicsPublication => MovementOwner.PhysicsPublication;
     public RuntimeWorldEnvironmentState EnvironmentOwner { get; }
@@ -765,8 +779,14 @@ public sealed class GameRuntime
 
     public void ResetGeneration(
         RuntimeGenerationToken retiringGeneration,
-        IRuntimeGenerationResetHost host) =>
+        IRuntimeGenerationResetHost host)
+    {
+        // A new generation starts without an opinion about whether the
+        // character was out of stamina, so the first update after it says so
+        // is a crossing and not a repeat.
+        MovementStats.Reset();
         GenerationReset.Reset(retiringGeneration, host);
+    }
 
     public IDisposable Subscribe(IRuntimeEventObserver observer)
     {

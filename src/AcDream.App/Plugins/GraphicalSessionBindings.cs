@@ -79,10 +79,10 @@ internal sealed record GraphicalCharacterSessionParts
     public required RuntimeSettingsController Settings { get; init; }
 
     /// <summary>
-    /// Re-derives how fast the character runs and jumps. Takes the reason, so
-    /// a reader of the log can tell a skill raise from a stat update.
+    /// The runtime's own owner of how fast the character runs and jumps.
     /// </summary>
-    public required Action<string> ApplyMovementStats { get; init; }
+    public required AcDream.Runtime.Gameplay.RuntimeMovementStatsApplier
+        MovementStats { get; init; }
 
     /// <summary>Turns a raw skill level into the level the server credits.</summary>
     public required Func<uint, uint, IReadOnlyDictionary<uint, uint>, uint>
@@ -181,20 +181,21 @@ internal static partial class GraphicalAutomationCapabilities
         RetailUiRuntime? retainedUi = parts.RetainedUi;
         RuntimeSettingsController settings = parts.Settings;
         RuntimeCharacterState character = parts.Character;
-        Action<string> applyMovementStats = parts.ApplyMovementStats;
+        AcDream.Runtime.Gameplay.RuntimeMovementStatsApplier movementStats =
+            parts.MovementStats;
         return new LiveCharacterSessionBindings(
             parts.Combat,
             character,
             ResolveSkillFormulaBonus: (skill, raw, credits) =>
                 parts.ResolveSkillFormulaBonus(skill, raw, credits),
             OnSkillsUpdated: (runSkill, jumpSkill) =>
-                applyMovementStats("skills"),
+                movementStats.Apply("skills"),
             OnConfirmationRequest: request =>
                 retainedUi?.HandleConfirmationRequest(request),
             OnConfirmationDone: done =>
                 retainedUi?.HandleConfirmationDone(done),
             ClientTime: () => parts.ClientTime(),
-            OnMovementStatsUpdated: () => applyMovementStats("stats"),
+            OnMovementStatsUpdated: () => movementStats.Apply("stats"),
             OnCharacterOptionsChanged: (_, options2) =>
             {
                 settings.SyncChatFromServerOptions(options2);

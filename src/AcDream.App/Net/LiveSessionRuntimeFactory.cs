@@ -103,7 +103,6 @@ internal sealed class LiveSessionRuntimeFactory
     private readonly LiveSessionWorldRuntime _world;
     private readonly LiveSessionCommandSurface _commands;
     private readonly Action<string> _log;
-    private readonly LiveMovementStatsApplier _movementStats;
     private readonly SessionStatusWriter _statusWriter;
     private readonly string _sessionId;
     private readonly IReadOnlyList<string> _loginCommands;
@@ -151,10 +150,6 @@ internal sealed class LiveSessionRuntimeFactory
         _loginCommands = loginCommands is null ? [] : [.. loginCommands];
         _loginCommandDelay = TimeSpan.FromMilliseconds(loginCommandDelayMs);
         _timeProvider = timeProvider ?? TimeProvider.System;
-        _movementStats = new LiveMovementStatsApplier(
-            _player.Controller,
-            _domain.Character.MovementSkills,
-            _log);
     }
 
     public LiveSessionHost Create(
@@ -258,7 +253,6 @@ internal sealed class LiveSessionRuntimeFactory
 
     private void ResetPlayerPresentation()
     {
-        _movementStats.Reset();
         _interaction.PlayerMode.ResetSession();
         _world.SpawnClaims.Reset();
     }
@@ -372,7 +366,7 @@ internal sealed class LiveSessionRuntimeFactory
                     Character = _domain.Character,
                     Combat = _domain.Actions.Combat,
                     Settings = _interaction.Settings,
-                    ApplyMovementStats = reason => _movementStats.Apply(reason),
+                    MovementStats = _domain.Runtime.MovementStats,
                     ResolveSkillFormulaBonus = skillCreditResolver.Resolve,
                     ClientTime = ClientTimerNow,
                     RetainedUi = _ui.RetailUi,

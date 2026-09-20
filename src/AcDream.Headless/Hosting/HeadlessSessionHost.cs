@@ -928,6 +928,7 @@ internal sealed class HeadlessSessionHost : IDisposable
                                 request.Message));
                     },
                     OnConfirmationDone = HandleConfirmationDone,
+                    MovementStats = Runtime.MovementStats,
                     NoteOptionsSeeded = () =>
                         _optionsSeeder?.NoteOptionsSeeded(),
                 });

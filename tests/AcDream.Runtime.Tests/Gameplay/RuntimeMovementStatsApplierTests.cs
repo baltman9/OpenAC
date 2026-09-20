@@ -1,5 +1,5 @@
 using System.Net;
-using AcDream.App.Net;
+using System.Reflection;
 using AcDream.Core.Chat;
 using AcDream.Core.Combat;
 using AcDream.Core.Items;
@@ -9,10 +9,11 @@ using AcDream.Core.Social;
 using AcDream.Runtime;
 using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Session;
+using AcDream.Runtime.Tests.Plugins;
 
-namespace AcDream.App.Tests.Net;
+namespace AcDream.Runtime.Tests.Gameplay;
 
-public sealed class LiveMovementStatsApplierTests
+public sealed class RuntimeMovementStatsApplierTests
 {
     private const uint PlayerGuid = 0x5000000Au;
 
@@ -23,17 +24,16 @@ public sealed class LiveMovementStatsApplierTests
         public ClientObjectTable Objects { get; } = new();
         public RuntimeCharacterState Character { get; } = new();
         public RuntimeLocalPlayerMovementState Movement { get; } = new();
-        public LiveMovementStatsApplier Applier { get; }
+        public RuntimeMovementStatsApplier Applier { get; }
         public List<string> Log { get; } = [];
 
-        // The router requires an action state; a runtime supplies the one
-        // the graphical host would hand it.
+        // The router requires an action state; a runtime supplies it.
         public GameRuntime Runtime { get; } = GameRuntimeTestFactory.Create();
 
         public Harness()
         {
             Session = new WorldSession(new IPEndPoint(IPAddress.Loopback, 9));
-            Applier = new LiveMovementStatsApplier(
+            Applier = new RuntimeMovementStatsApplier(
                 Movement,
                 Character.MovementSkills,
                 Log.Add);
@@ -157,6 +157,61 @@ public sealed class LiveMovementStatsApplierTests
         Assert.Equal(
             ObjectInfoState.IsPK,
             controller.OwnPvpFlags & ObjectInfoState.IsPK);
+    }
+
+    /// <summary>
+    /// One tracker of whether the character was out of stamina, and a new
+    /// generation starts without an opinion, so the first update after a
+    /// reconnect that says "out of stamina" is a crossing and not a repeat.
+    /// </summary>
+    [Fact]
+    public void OneExhaustionTrackerIsResetWithTheGeneration()
+    {
+        _ = Assert.Single(
+            typeof(RuntimeMovementStatsApplier).GetFields(
+                BindingFlags.Instance | BindingFlags.NonPublic),
+            field => field.FieldType == typeof(StaminaExhaustionEdgeTracker));
+
+        var tracker = new StaminaExhaustionEdgeTracker();
+        Assert.Null(tracker.Opinion);
+        Assert.False(tracker.Observe(37));
+        Assert.True(tracker.Observe(0));
+        Assert.False(tracker.Observe(0));
+        tracker.Reset();
+        Assert.Null(tracker.Opinion);
+
+        // The runtime's own owner is the one both clients bind, and it
+        // forgets with the generation, so a reconnect starts with no opinion.
+        using GameRuntime runtime = GameRuntimeTestFactory.Create();
+        using IDisposable lease = runtime.AcquireHostLease("movement stats");
+        runtime.MovementOwner.Controller = NewDormantRuntimeController();
+        runtime.CharacterOwner.MovementSkills.Update(
+            runSkill: 240,
+            jumpSkill: 180);
+        runtime.CharacterOwner.MovementSkills.UpdateStamina(37);
+        Assert.Null(runtime.MovementStats.StaminaOpinion);
+        _ = runtime.MovementStats.Apply("stats");
+        Assert.False(runtime.MovementStats.StaminaOpinion);
+        runtime.ResetGeneration(runtime.Generation, InertResetHost.Instance);
+        Assert.Null(runtime.MovementStats.StaminaOpinion);
+    }
+
+    private sealed class InertResetHost : IRuntimeGenerationResetHost
+    {
+        internal static readonly InertResetHost Instance = new();
+
+        public void RetireEntityProjection(
+            AcDream.Runtime.Entities.RuntimeEntityRecord entity)
+        {
+        }
+
+        public void DrainEntityProjectionBoundary()
+        {
+        }
+
+        public void CompleteEntityProjectionRetirement()
+        {
+        }
     }
 
     [Fact]

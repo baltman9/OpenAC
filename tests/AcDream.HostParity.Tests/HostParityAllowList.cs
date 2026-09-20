@@ -145,14 +145,5 @@ internal static class HostParityAllowList
     /// <summary>Character-session bindings one host fills in and the other does not.</summary>
     internal static IReadOnlyList<ParityAllowance> CharacterSessionBindings { get; } =
     [
-        new("OnSkillsUpdated", ParityHost.Windowless,
-            "New skill levels re-derive run and jump speed on the windowed "
-            + "host only, so the two hosts can disagree about how fast the "
-            + "character moves after a raise.",
-            ParityStage.AnswerItFromOneSource),
-        new("OnMovementStatsUpdated", ParityHost.Windowless,
-            "The same re-derivation from a movement-stat update; it belongs to "
-            + "whoever owns movement, not to whoever has a window.",
-            ParityStage.AnswerItFromOneSource),
     ];
 }

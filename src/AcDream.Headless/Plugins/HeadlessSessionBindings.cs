@@ -82,6 +82,12 @@ internal sealed record HeadlessCharacterSessionParts
     public required Action<GameEvents.CharacterConfirmationDone>
         OnConfirmationDone { get; init; }
 
+    /// <summary>
+    /// The runtime's own owner of how fast the character runs and jumps.
+    /// </summary>
+    public required AcDream.Runtime.Gameplay.RuntimeMovementStatsApplier
+        MovementStats { get; init; }
+
     /// <summary>Takes note that the server has seeded the character options.</summary>
     public required Action NoteOptionsSeeded { get; init; }
 }
@@ -163,12 +169,14 @@ internal static partial class HeadlessAutomationCapabilities
                 ? (skill, raw, credits) =>
                     resolveSkillFormulaBonus(skill, raw, credits)
                 : null,
-            OnSkillsUpdated: null,
+            OnSkillsUpdated: (runSkill, jumpSkill) =>
+                parts.MovementStats.Apply("skills"),
             OnConfirmationRequest: request =>
                 parts.OnConfirmationRequest(request),
             OnConfirmationDone: done => parts.OnConfirmationDone(done),
             ClientTime: () => parts.ClientTime(),
-            OnMovementStatsUpdated: null,
+            OnMovementStatsUpdated: () =>
+                parts.MovementStats.Apply("stats"),
             OnCharacterOptionsChanged: (_, _) => parts.NoteOptionsSeeded());
     }
 }

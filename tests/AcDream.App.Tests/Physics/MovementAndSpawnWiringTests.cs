@@ -9,48 +9,16 @@ namespace AcDream.App.Tests.Physics;
 
 public sealed class MovementAndSpawnWiringTests
 {
+    /// <summary>
+    /// The two occasions to re-derive how fast the character moves -- a skill
+    /// raise and a movement-stat update -- are named where the character
+    /// bindings are built, and both hosts build them from the runtime's own
+    /// owner. The owner itself, and resetting it with the session, is pinned
+    /// beside that owner.
+    /// </summary>
     [Fact]
-    public void MovementStats_UseOneEdgeTrackerAndResetItWithTheSession()
+    public void MovementStats_AreReDerivedOnBothOccasionsFromTheRuntimeOwner()
     {
-        _ = Assert.Single(
-            typeof(LiveMovementStatsApplier).GetFields(
-                BindingFlags.Instance | BindingFlags.NonPublic),
-            field => field.FieldType == typeof(StaminaExhaustionEdgeTracker));
-
-        IReadOnlyList<CompiledCall> applierCalls =
-            CompiledCallGraph.ReadDeclared(typeof(LiveMovementStatsApplier));
-        Assert.Single(
-            applierCalls,
-            call =>
-                call.Target.DeclaringType == typeof(StaminaExhaustionEdgeTracker)
-                && call.Target.Name == nameof(StaminaExhaustionEdgeTracker.Observe));
-        Assert.Single(
-            applierCalls,
-            call =>
-                call.Target.DeclaringType
-                    == typeof(RuntimeLocalPlayerMovementState)
-                && call.Target.Name == nameof(
-                    RuntimeLocalPlayerMovementState.ReportExhaustion));
-        Assert.Single(
-            applierCalls,
-            call =>
-                call.Target.DeclaringType == typeof(StaminaExhaustionEdgeTracker)
-                && call.Target.Name == nameof(StaminaExhaustionEdgeTracker.Reset));
-
-        IReadOnlyList<CompiledCall> factoryCalls =
-            CompiledCallGraph.ReadDeclared(typeof(LiveSessionRuntimeFactory));
-        Assert.Single(
-            factoryCalls,
-            call =>
-                call.Target.DeclaringType == typeof(LiveMovementStatsApplier)
-                && call.Target.Name == nameof(LiveMovementStatsApplier.Reset));
-        Assert.Single(
-            factoryCalls,
-            call =>
-                call.Target.DeclaringType == typeof(LiveMovementStatsApplier)
-                && call.Target.Name == nameof(LiveMovementStatsApplier.Apply));
-        // The two occasions to re-derive it -- a skill raise and a movement
-        // stat update -- are named where the character bindings are built.
         MethodInfo buildCharacterBindings = typeof(AcDream.App.Plugins
             .GraphicalAutomationCapabilities).GetMethod(
                 "BuildCharacterSessionBindings",
@@ -71,7 +39,7 @@ public sealed class MovementAndSpawnWiringTests
             reason => CompiledCallGraph.ReadStringLiterals(reason)
                 .Contains("stats"));
         Assert.DoesNotContain(
-            factoryCalls,
+            CompiledCallGraph.ReadDeclared(typeof(LiveSessionRuntimeFactory)),
             call => call.Target.DeclaringType == typeof(MotionInterpreter)
                 && call.Target.Name == nameof(MotionInterpreter.ReportExhaustion));
     }

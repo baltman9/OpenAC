@@ -186,6 +186,8 @@ internal static partial class HeadlessAutomationCapabilities
             nameof(LiveCharacterSessionBindings.Combat),
             nameof(LiveCharacterSessionBindings.Character),
             nameof(LiveCharacterSessionBindings.ResolveSkillFormulaBonus),
+            nameof(LiveCharacterSessionBindings.OnSkillsUpdated),
+            nameof(LiveCharacterSessionBindings.OnMovementStatsUpdated),
             nameof(LiveCharacterSessionBindings.OnConfirmationRequest),
             nameof(LiveCharacterSessionBindings.OnConfirmationDone),
             nameof(LiveCharacterSessionBindings.ClientTime),

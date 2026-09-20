@@ -231,7 +231,8 @@ internal static class ObservedHostRecords
                     .RuntimeCharacterState>(),
                 Combat = Part<AcDream.Core.Combat.CombatState>(),
                 Settings = Part<AcDream.App.Settings.RuntimeSettingsController>(),
-                ApplyMovementStats = Note,
+                MovementStats = Part<AcDream.Runtime.Gameplay
+                    .RuntimeMovementStatsApplier>(),
                 ResolveSkillFormulaBonus = NoteAndAnswerSkill,
                 ClientTime = NoteAndAnswerTime,
                 RetainedUi = Part<AcDream.App.UI.RetailUiRuntime>(),
@@ -251,6 +252,8 @@ internal static class ObservedHostRecords
                 OnConfirmationRequest = NoteConfirmationRequest,
                 OnConfirmationDone = NoteConfirmationDone,
                 NoteOptionsSeeded = NoteNothingHappened,
+                MovementStats = Part<AcDream.Runtime.Gameplay
+                    .RuntimeMovementStatsApplier>(),
             });
 
     internal static LiveCharacterSessionBindings
