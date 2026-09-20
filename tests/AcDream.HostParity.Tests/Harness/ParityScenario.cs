@@ -32,7 +32,7 @@ internal static class ParityScenario
         ParityTranscript windowed = Play(new WindowedArm(), script);
         ParityTranscript windowless = Play(new WindowlessArm(), script);
 
-        Compare(windowed, windowless, expectedDifferences);
+        CompareTranscripts(windowed, windowless, expectedDifferences);
     }
 
     private static ParityTranscript Play(
@@ -48,7 +48,12 @@ internal static class ParityScenario
         }
     }
 
-    private static void Compare(
+    /// <summary>
+    /// Compares what the two clients wrote down. Public to the harness so a
+    /// scenario about something other than the plugin surface -- a creature's
+    /// body, say -- compares its transcripts by the same rule.
+    /// </summary>
+    internal static void CompareTranscripts(
         ParityTranscript windowed,
         ParityTranscript windowless,
         IReadOnlyList<ParityExpectedDifference> expected)

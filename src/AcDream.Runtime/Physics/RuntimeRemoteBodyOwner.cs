@@ -287,13 +287,7 @@ internal sealed class RuntimeRemoteBodyOwner
             facts.LiveCenterX,
             facts.LiveCenterY,
             presentation.CaptureAnimationHooks,
-            animation is null
-                ? null
-                : velocity => RemoteServerControlledVelocityCycle.Apply(
-                    serverGuid,
-                    sequencer,
-                    remote,
-                    velocity),
+            animation is not null,
             presentation.AcceptPose,
             presentation.StillOwned,
             sphereList: shape.Spheres,

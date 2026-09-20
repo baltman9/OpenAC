@@ -3163,7 +3163,6 @@ public sealed class RuntimePhysicsStateTests
         lifetime.Physics.SetRemoteMotion(record, remote);
         lifetime.Physics.AcknowledgeSpatialProjection(record, spatial: true);
         var updater = new RuntimeRemotePhysicsUpdater(lifetime.Physics);
-        Vector3? cycle = null;
 
         Assert.True(updater.Tick(
             record,
@@ -3180,11 +3179,10 @@ public sealed class RuntimePhysicsStateTests
             height: 1.835f,
             liveCenterX: 1,
             liveCenterY: 1,
-            applyStaleVelocityCycle: value => cycle = value));
+            applyStaleVelocityCycle: true));
 
         Assert.False(remote.HasServerVelocity);
         Assert.Equal(Vector3.Zero, remote.ServerVelocity);
-        Assert.Equal(Vector3.Zero, cycle);
     }
 
     [Fact]
