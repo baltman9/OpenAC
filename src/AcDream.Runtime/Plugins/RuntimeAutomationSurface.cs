@@ -23,8 +23,8 @@ internal sealed class RuntimeAutomationSurface
       ICombatAutomation, IEquipmentAutomation, IItemAutomation,
       ILootAutomation, IFellowshipAutomation, IEnchantmentAutomation,
       IRuntimeCommunicationObserver, IRuntimeEventObserver,
-      IWorldObjectAutomation, IRecallAutomation, IWorldTimeAutomation,
-      ILoginAutomation, INetworkAutomation, IRecoveryAutomation,
+      IWorldObjectAutomation, IRecallAutomation, IAllegianceAutomation,
+      IWorldTimeAutomation, ILoginAutomation, INetworkAutomation, IRecoveryAutomation,
       IProjectileAutomation, ISelectionAutomation, IDialogAutomation, IDisposable
 {
     private readonly PluginCommandRegistry _pluginCommands;
@@ -182,6 +182,7 @@ internal sealed class RuntimeAutomationSurface
     public INavigationAutomation Navigation => _navigation;
     public IWorldObjectAutomation Objects => this;
     public IRecallAutomation Recalls => this;
+    public IAllegianceAutomation Allegiance => this;
     public IWorldTimeAutomation WorldTime => this;
     public ILoginAutomation Login => this;
     public INetworkAutomation Network => this;
@@ -1992,6 +1993,29 @@ internal sealed class RuntimeAutomationSurface
     bool IWorldObjectAutomation.IsAvailable => IsAvailable;
 
     bool IRecallAutomation.IsAvailable => IsAvailable;
+
+    bool IAllegianceAutomation.IsAvailable => IsAvailable;
+
+    PluginAllegianceSnapshot IAllegianceAutomation.Snapshot
+    {
+        get
+        {
+            GameRuntime? runtime;
+            lock (_gate)
+                runtime = _runtime;
+            if (runtime is null || !IsAvailable)
+                return default;
+            RuntimeAllegianceSnapshot snapshot = runtime.Allegiance.Snapshot;
+            return new PluginAllegianceSnapshot(
+                snapshot.Revision,
+                snapshot.HasProfile,
+                snapshot.AllegianceName,
+                snapshot.Rank,
+                snapshot.TotalMembers,
+                snapshot.TotalVassals,
+                snapshot.MonarchGuid);
+        }
+    }
 
     PluginRecallRequest IRecallAutomation.LastRequest
     {

@@ -731,6 +731,9 @@ public interface IAutomationSurface
     /// <summary>Authoritative fellowship vitals for helper spell policy.</summary>
     IFellowshipAutomation Fellowship => NoOpAutomationSurface.Instance;
 
+    /// <summary>Authoritative allegiance identity and membership state.</summary>
+    IAllegianceAutomation Allegiance => NoOpAutomationSurface.Instance;
+
     /// <summary>Enchantments in force on other objects, as the client tracks them.</summary>
     IEnchantmentAutomation Enchantments => NoOpAutomationSurface.Instance;
 
@@ -778,7 +781,7 @@ public sealed class NoOpAutomationSurface
     : IAutomationSurface, ICharacterInfo, ISpellCatalog, IMagicCommands,
       IPluginChat, ICombatAutomation
       , IEquipmentAutomation, IItemAutomation, ILootAutomation,
-      IFellowshipAutomation, IEnchantmentAutomation, INavigationAutomation
+      IFellowshipAutomation, IAllegianceAutomation, IEnchantmentAutomation, INavigationAutomation
       , IWorldObjectAutomation, IRecallAutomation, IWorldTimeAutomation, ILoginAutomation,
       INetworkAutomation, IRecoveryAutomation, IProjectileAutomation
       , ISelectionAutomation, IDialogAutomation, ITradeAutomation,
@@ -823,6 +826,9 @@ public sealed class NoOpAutomationSurface
 
     /// <inheritdoc/>
     public IFellowshipAutomation Fellowship => this;
+
+    /// <inheritdoc/>
+    public IAllegianceAutomation Allegiance => this;
 
     /// <inheritdoc/>
     public IEnchantmentAutomation Enchantments => this;
