@@ -68,10 +68,10 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
     /// The chat entry itself: the draft, where a line goes when it is sent,
     /// and what was sent before. Shared with every other front end that can be
     /// typed into, so this window is one view of it rather than its owner.
-    /// A window built without one gets its own, which keeps the panel usable
-    /// in isolation.
+    /// Every caller supplies it: a window that made its own would look like a
+    /// chat box that forgets what was typed into the client elsewhere.
     /// </summary>
-    private RuntimeChatEntryOwner _entry = new();
+    private RuntimeChatEntryOwner _entry = null!;
 
     /// <summary>The chat entry this window is a view of.</summary>
     internal RuntimeChatEntryOwner Entry => _entry;
@@ -174,14 +174,15 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
         UiDatFont? datFont,
         BitmapFont? debugFont,
         Func<uint, (uint tex, int w, int h)> resolve,
+        RuntimeChatEntryOwner entry,
         Func<string?>? selectedTargetName = null,
         Func<uint>? selectedTargetGuid = null,
         Func<string, string?>? chatStrings = null,
         Func<uint, UiDatFont?>? resolveFont = null,
-        Func<bool>? stayInChatMode = null,
-        RuntimeChatEntryOwner? entry = null)
+        Func<bool>? stayInChatMode = null)
     {
         ArgumentNullException.ThrowIfNull(windowFilters);
+        ArgumentNullException.ThrowIfNull(entry);
 
         // Their parent panels must exist as real widgets in the layout tree.
         var transcriptPanel = layout.FindElement(TranscriptPanelId);
@@ -205,9 +206,8 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
             DatWindowInfo = FindInfo(rootInfo, RootId) ?? rootInfo,
             _windowFilters = windowFilters,
             _chatStrings = chatStrings,
+            _entry = entry,
         };
-        if (entry is not null)
-            c._entry = entry;
 
         foreach (uint id in LockedTwinIds)
             if (layout.FindElement(id) is { } twin)
