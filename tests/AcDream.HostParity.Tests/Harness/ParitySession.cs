@@ -9,6 +9,28 @@ namespace AcDream.HostParity.Tests;
 /// <summary>One message a host asked the world session to send.</summary>
 internal readonly record struct ParityOutbound(uint Opcode, string Body)
 {
+    /// <summary>The message that carries one of the client's own actions.</summary>
+    private const uint GameActionOpcode = 0xF7B1u;
+
+    /// <summary>
+    /// Which action this is, when it is one of the client's actions rather
+    /// than something else the client sends. A scenario says "the use has
+    /// not gone out yet" with this, which it cannot say by counting
+    /// messages: a walking character is telling the server where it is the
+    /// whole time.
+    /// </summary>
+    internal uint? GameAction
+    {
+        get
+        {
+            if (Opcode != GameActionOpcode || Body.Length < 24)
+                return null;
+            byte[] body = Convert.FromHexString(Body);
+            return System.Buffers.Binary.BinaryPrimitives
+                .ReadUInt32LittleEndian(body.AsSpan(8));
+        }
+    }
+
     public override string ToString() =>
         $"0x{Opcode:X4} {Body}";
 }

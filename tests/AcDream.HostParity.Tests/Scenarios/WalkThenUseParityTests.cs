@@ -28,10 +28,9 @@ namespace AcDream.HostParity.Tests;
 /// pinned so that the fix has something to turn green.
 ///
 /// Mutation check (2026-09-20), run: making the shared route send the use
-/// immediately instead of arming it for arrival turned the first scenario
-/// red twice over -- a use in the first step's outbound record, where the
-/// scenario insists nothing has been sent, and no walk installed. Restoring
-/// it turned it green.
+/// immediately instead of arming it for arrival turned two of the three red
+/// -- no walk installed, and a use among what was sent before the character
+/// had got anywhere. Restoring it turned them green.
 /// </summary>
 public sealed class WalkThenUseParityTests
 {
@@ -62,14 +61,15 @@ public sealed class WalkThenUseParityTests
             Record(transcript, "use", items.Use(ParityWorld.Corpse));
             RecordWalk(transcript, arm);
             RecordLoot(transcript, loot);
-            transcript.RecordOutbound(arm);
-            // Said outright: a walk was begun, aimed at the corpse, and the
-            // use was NOT sent. A client that sent it from out of reach gets
-            // a walk order back and then, much later, a bare "done" with
-            // nothing done.
+            // Said outright, and said BEFORE the outbound record is taken,
+            // because taking it empties it: a walk was begun, aimed at the
+            // corpse, and the use was NOT sent. A client that sent it from
+            // out of reach gets a walk order back and then, much later, a
+            // bare "done" with nothing done.
             Assert.Equal(MovementType.MoveToObject, Walk(arm).MovementTypeState);
             Assert.Equal(ParityWorld.Corpse, Walk(arm).SoughtObjectId);
-            Assert.Empty(arm.Operations.Outbound);
+            AssertNoUseWasSent(arm);
+            transcript.RecordOutbound(arm);
 
             transcript.Step("half way");
             Advance(arm, TicksForTwoHundredMilliseconds);
@@ -106,10 +106,11 @@ public sealed class WalkThenUseParityTests
             Record(transcript, "use", items.Use(ParityWorld.Corpse));
             Advance(arm, TicksForTwoHundredMilliseconds);
             RecordWalk(transcript, arm);
-            transcript.RecordOutbound(arm);
             // Half way there: the walk is running and nothing has been sent.
+            // Asked before the outbound record is taken, which empties it.
             Assert.True(Walk(arm).IsMovingTo());
-            Assert.Empty(arm.Operations.Outbound);
+            AssertNoUseWasSent(arm);
+            transcript.RecordOutbound(arm);
 
             transcript.Step("the plugin takes the character back");
             transcript.Record(
@@ -181,6 +182,20 @@ public sealed class WalkThenUseParityTests
         ParityWorld.StageCorpseContents(arm.Runtime);
         _ = arm.Operations.TakeOutbound();
         return arm.Host.Automation.Loot;
+    }
+
+    /// <summary>
+    /// That no use has gone out. Counting messages will not do it: a walking
+    /// character is telling the server where it is the whole time, so this
+    /// looks for the client action itself.
+    /// </summary>
+    private static void AssertNoUseWasSent(ParityArm arm)
+    {
+        const uint UseAction = 0x0036u;
+        IReadOnlyList<ParityOutbound> sent = arm.Operations.Outbound;
+        Assert.DoesNotContain(
+            UseAction,
+            sent.Select(static message => message.GameAction ?? 0u));
     }
 
     private static void Advance(ParityArm arm, int ticks)
