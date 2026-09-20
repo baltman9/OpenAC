@@ -1281,7 +1281,17 @@ internal sealed class RuntimeAutomationSurface
 
     void IRuntimeEventObserver.OnChat(in RuntimeChatDelta delta) { }
     void IRuntimeEventObserver.OnMovement(in RuntimeMovementDelta delta) { }
-    void IRuntimeEventObserver.OnPortal(in RuntimePortalDelta delta) { }
+    void IRuntimeEventObserver.OnPortal(in RuntimePortalDelta delta)
+    {
+        _pluginEvents?.FirePortalTransition(new PluginPortalTransition(
+            Revision: 0,
+            Generation: delta.Portal.Generation,
+            DestinationCell: delta.Portal.DestinationCell,
+            IsReady: delta.Portal.IsReady,
+            IsMaterialized: delta.Portal.IsMaterialized,
+            IsCompleted: delta.Portal.IsCompleted,
+            IsCancelled: delta.Portal.IsCancelled));
+    }
     void IRuntimeEventObserver.OnCombat(in RuntimeCombatDelta delta) { }
 
     private void OnLocalPlayerDied(string deathMessage) =>

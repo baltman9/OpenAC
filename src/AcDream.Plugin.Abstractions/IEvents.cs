@@ -65,6 +65,17 @@ public interface IEvents
     }
 
     /// <summary>
+    /// Raised when the host observes a portal, recall, or other world
+    /// transition. Notifications carry a generation and revision so a
+    /// plugin can reject stale transition state.
+    /// </summary>
+    event Action<PluginPortalTransition> PortalTransition
+    {
+        add { }
+        remove { }
+    }
+
+    /// <summary>
     /// Raised when the host's current navigation walk report changes. Reports
     /// are delivered on the same thread as <see cref="Tick"/> and are emitted
     /// only when the report's sequence or state changes. A host that does not

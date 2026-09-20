@@ -9,6 +9,20 @@ public class WorldEventsTests
     private static WorldEntitySnapshot S(uint id) => new(id, SourceId: 0x01000000u, Position: Vector3.Zero, Rotation: Quaternion.Identity);
 
     [Fact]
+    public void PortalTransition_AssignsMonotonicRevisions()
+    {
+        var events = new WorldEvents();
+        var seen = new List<PluginPortalTransition>();
+        events.PortalTransition += seen.Add;
+
+        events.FirePortalTransition(new PluginPortalTransition(0, 7, 0x1234u, true, false, false, false));
+        events.FirePortalTransition(new PluginPortalTransition(0, 7, 0x1234u, true, true, false, false));
+
+        Assert.Equal([1L, 2L], seen.Select(static transition => transition.Revision));
+        Assert.All(seen, static transition => Assert.Equal(7L, transition.Generation));
+    }
+
+    [Fact]
     public void ObjectChanged_AssignsMonotonicSessionRevisions()
     {
         var events = new WorldEvents();

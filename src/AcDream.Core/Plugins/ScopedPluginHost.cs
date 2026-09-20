@@ -723,6 +723,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         private readonly List<Action> _logoffRegistrations = [];
         private readonly List<Action<string>> _localPlayerDiedRegistrations = [];
         private readonly List<Action<PluginObjectChange>> _objectChangedRegistrations = [];
+        private readonly List<Action<PluginPortalTransition>> _portalTransitionRegistrations = [];
         private readonly List<Action<PluginGoToReport>> _navigationChangedRegistrations = [];
         private readonly List<Action<uint>> _containerOpenedRegistrations = [];
         private readonly List<Action<uint>> _containerClosedRegistrations = [];
@@ -965,6 +966,33 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             }
         }
 
+        public event Action<PluginPortalTransition> PortalTransition
+        {
+            add
+            {
+                ArgumentNullException.ThrowIfNull(value);
+                inner.PortalTransition += value;
+                lock (_gate)
+                {
+                    if (!_disposed)
+                    {
+                        _portalTransitionRegistrations.Add(value);
+                        return;
+                    }
+                }
+                inner.PortalTransition -= value;
+                throw new ObjectDisposedException(nameof(ScopedEvents));
+            }
+            remove
+            {
+                if (value is null)
+                    return;
+                inner.PortalTransition -= value;
+                lock (_gate)
+                    _portalTransitionRegistrations.Remove(value);
+            }
+        }
+
         public event Action<PluginGoToReport> NavigationChanged
         {
             add
@@ -1125,6 +1153,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             Action[] logoffRegistrations;
             Action<string>[] localPlayerDiedRegistrations;
             Action<PluginObjectChange>[] objectChangedRegistrations;
+            Action<PluginPortalTransition>[] portalTransitionRegistrations;
             Action<PluginGoToReport>[] navigationChangedRegistrations;
             Action<uint>[] containerOpenedRegistrations;
             Action<uint>[] containerClosedRegistrations;
@@ -1146,6 +1175,8 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
                 _localPlayerDiedRegistrations.Clear();
                 objectChangedRegistrations = _objectChangedRegistrations.ToArray();
                 _objectChangedRegistrations.Clear();
+                portalTransitionRegistrations = _portalTransitionRegistrations.ToArray();
+                _portalTransitionRegistrations.Clear();
                 navigationChangedRegistrations = _navigationChangedRegistrations.ToArray();
                 _navigationChangedRegistrations.Clear();
                 containerOpenedRegistrations = _containerOpenedRegistrations.ToArray();
@@ -1190,6 +1221,12 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             for (int index = objectChangedRegistrations.Length - 1; index >= 0; index--)
             {
                 try { inner.ObjectChanged -= objectChangedRegistrations[index]; }
+                catch { }
+            }
+
+            for (int index = portalTransitionRegistrations.Length - 1; index >= 0; index--)
+            {
+                try { inner.PortalTransition -= portalTransitionRegistrations[index]; }
                 catch { }
             }
 
