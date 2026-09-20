@@ -1,3 +1,4 @@
+using AcDream.App.Rendering;
 using AcDream.App.Streaming;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
@@ -1657,8 +1658,24 @@ public sealed class LiveEntityRuntime : ILiveEntityRadarSource
 
         _ = RequireProjectionKey(record);
         record.AnimationRuntime = runtime;
+        PublishSimulationState(record);
         RefreshSpatialRuntimeIndexes(record);
     }
+
+    /// <summary>
+    /// Tells the shared owner which motion simulation state the thing behind
+    /// this projection is now advancing with, so that the body and everything
+    /// drawing it read the one state.
+    /// </summary>
+    /// <remarks>
+    /// A projection built afresh brings a state built afresh, and installing
+    /// it discards the previous one: that is the same lifetime the drawn owner
+    /// has always had, said once where both hosts can see it.
+    /// </remarks>
+    private void PublishSimulationState(LiveEntityRecord record) =>
+        _physics.SetRemoteAnimation(
+            record.Canonical,
+            (record.AnimationRuntime as LiveEntityAnimationState)?.Simulation);
 
     public bool TryGetAnimationRuntime(
         uint localEntityId,
@@ -1700,6 +1717,7 @@ public sealed class LiveEntityRuntime : ILiveEntityRadarSource
             || record.AnimationRuntime is null)
             return false;
         record.AnimationRuntime = null;
+        PublishSimulationState(record);
         RefreshSpatialRuntimeIndexes(record);
         return true;
     }
@@ -1716,6 +1734,7 @@ public sealed class LiveEntityRuntime : ILiveEntityRadarSource
         }
 
         record.AnimationRuntime = null;
+        PublishSimulationState(record);
         RefreshSpatialRuntimeIndexes(record);
         return true;
     }
@@ -3089,6 +3108,7 @@ public sealed class LiveEntityRuntime : ILiveEntityRadarSource
             }
 
             record.AnimationRuntime = null;
+            PublishSimulationState(record);
             record.EffectProfile = null;
             record.IsSpatiallyProjected = false;
             record.IsSpatiallyVisible = false;

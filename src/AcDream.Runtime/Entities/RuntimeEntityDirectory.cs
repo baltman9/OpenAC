@@ -477,6 +477,14 @@ public sealed class RuntimeEntityDirectory
         record.RemoteMotion = remote;
     }
 
+    internal void SetRemoteAnimation(
+        RuntimeEntityRecord record,
+        RuntimeRemoteAnimationState? state)
+    {
+        EnsureKnown(record);
+        record.SetRemoteAnimation(state);
+    }
+
     public void SetRemoteMotionBindingInProgress(
         RuntimeEntityRecord record,
         bool value)

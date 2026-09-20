@@ -6,6 +6,7 @@ using AcDream.Headless.Policies;
 using AcDream.Plugin.Abstractions;
 using AcDream.Content.CharGen;
 using AcDream.Content.Skills;
+using AcDream.Content.Vfx;
 using AcDream.Core.Chat;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
@@ -978,6 +979,15 @@ internal sealed class HeadlessSessionHost : IDisposable
             // it measures to the line through its middle and can never finish.
             Runtime.EntityObjects.Physics.BindSetupCollisionSource(
                 content.PreparedCollision);
+            // Animation content comes off the same lease, for the same reason:
+            // a body that is to move itself between the server's updates needs
+            // the table that names its cycles and the frames those cycles
+            // play. A session with no lease has no content and no bodies, and
+            // binds nothing.
+            Runtime.EntityObjects.Physics.BindMotionContentSource(
+                new RuntimeDatMotionContentSource(
+                    content.Dats,
+                    new RetailAnimationLoader(content.Dats)));
             _firstEntryDrive ??= new RuntimeFirstEntryDriveController(
                 Runtime.EntityObjects,
                 Runtime.Clock,

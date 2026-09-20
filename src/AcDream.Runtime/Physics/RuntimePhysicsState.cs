@@ -1219,6 +1219,67 @@ public sealed class RuntimePhysicsState : IDisposable
         _setupCollisionSource = source;
     }
 
+    private RuntimeMotionStateBuilder? _motionStates;
+
+    /// <summary>
+    /// Where this host's animation content comes from. Bound once per host;
+    /// a host that binds nothing gets bodies that play nothing, which is what
+    /// a host with no content files has always had.
+    /// </summary>
+    internal void BindMotionContentSource(IRuntimeMotionContentSource? source)
+    {
+        EnsureNotDisposed();
+        _motionStates = source is null
+            ? null
+            : new RuntimeMotionStateBuilder(source);
+    }
+
+    /// <summary>
+    /// Builds a body's motion simulation state from the bound content, or null
+    /// when this host has bound none.
+    /// </summary>
+    internal RuntimeMotionStateBuilder? MotionStates
+    {
+        get
+        {
+            EnsureNotDisposed();
+            return _motionStates;
+        }
+    }
+
+    /// <summary>
+    /// Records that this is the motion simulation state the thing with this
+    /// record is now advancing with. Replacing it discards the previous one,
+    /// because a body that is built afresh starts its cycles afresh.
+    /// </summary>
+    /// <remarks>
+    /// A record that is no longer the current one is left alone: its body has
+    /// already been let go, and a late report about it must not reach whatever
+    /// took its place.
+    /// </remarks>
+    internal void SetRemoteAnimation(
+        RuntimeEntityRecord record,
+        RuntimeRemoteAnimationState? state)
+    {
+        EnsureNotDisposed();
+        ArgumentNullException.ThrowIfNull(record);
+        if (!Entities.IsCurrent(record))
+            return;
+        Entities.SetRemoteAnimation(record, state);
+    }
+
+    /// <summary>
+    /// The motion simulation state the thing with this id is advancing with,
+    /// or null when it has none.
+    /// </summary>
+    internal RuntimeRemoteAnimationState? EntityRemoteAnimation(uint serverGuid)
+    {
+        EnsureNotDisposed();
+        return Entities.TryGetActive(serverGuid, out RuntimeEntityRecord record)
+            ? record.RemoteAnimation
+            : null;
+    }
+
     /// <summary>
     /// How wide an entity is, in metres, measured the way everything that
     /// compares two bodies measures it: the girth its authored shape declares,

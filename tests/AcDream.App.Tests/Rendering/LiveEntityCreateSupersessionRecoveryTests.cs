@@ -7,6 +7,7 @@ using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 using AcDream.Core.Physics.Motion;
 using AcDream.Core.World;
+using AcDream.Runtime.Physics;
 using DatReaderWriter.DBObjs;
 using DatReaderWriter.Types;
 using DRWMotionCommand = DatReaderWriter.Enums.MotionCommand;
@@ -175,7 +176,8 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
                 canonicalLowFrame: 0,
                 canonicalHighFrame: 0,
                 canonicalFramerate: 0f,
-                motionTable: table,
+                motionStates: MotionStates(table, loader),
+                motionTableId: FixtureMotionTableId,
                 wireState: Wire(Ready));
 
         Assert.False(reinitialized);
@@ -203,7 +205,7 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
             LowFrame = 2,
             HighFrame = 11,
             Framerate = 12f,
-            Scale = 1f,
+            Simulation = new RuntimeRemoteAnimationState { Scale = 1f },
             PartTemplate = [],
             PartAvailability = [],
             CurrFrame = 7.25f,
@@ -218,7 +220,8 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
                 canonicalLowFrame: 0,
                 canonicalHighFrame: 4,
                 canonicalFramerate: 30f,
-                motionTable: null,
+                motionStates: MotionStates(new MotionTable(), new Loader()),
+                motionTableId: 0u,
                 wireState: null);
 
         Assert.False(synchronized);
@@ -259,7 +262,8 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
                 canonicalLowFrame: 0,
                 canonicalHighFrame: 0,
                 canonicalFramerate: 0f,
-                motionTable: table,
+                motionStates: MotionStates(table, loader),
+                motionTableId: FixtureMotionTableId,
                 wireState: Wire(Ready));
 
         Assert.True(reinitialized);
@@ -349,7 +353,7 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
             LowFrame = 0,
             HighFrame = 0,
             Framerate = 0f,
-            Scale = 1f,
+            Simulation = new RuntimeRemoteAnimationState { Scale = 1f },
             PartTemplate = [],
             PartAvailability = [],
             Sequencer = sequencer,
@@ -417,6 +421,27 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
             Framerate = 30f,
         });
         return data;
+    }
+
+    private const uint FixtureMotionTableId = 0x09000001u;
+
+    /// <summary>
+    /// The shared builder, over a content source that knows one table under
+    /// one id: exactly the content the windowed host would have had to hand.
+    /// </summary>
+    private static RuntimeMotionStateBuilder MotionStates(
+        MotionTable table,
+        IAnimationLoader loader) =>
+        new(new FixtureMotionContent(table, loader));
+
+    private sealed class FixtureMotionContent(
+        MotionTable table,
+        IAnimationLoader loader) : IRuntimeMotionContentSource
+    {
+        public IAnimationLoader AnimationLoader => loader;
+
+        public MotionTable? TryGetMotionTable(uint motionTableId) =>
+            motionTableId == FixtureMotionTableId ? table : null;
     }
 
     private sealed class Loader : IAnimationLoader

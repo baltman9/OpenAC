@@ -9,6 +9,7 @@ using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 using AcDream.Core.World;
+using AcDream.Runtime.Physics;
 using AcDream.Core.Vfx;
 using AcDream.Runtime.Entities;
 using DatReaderWriter.DBObjs;
@@ -712,7 +713,7 @@ public sealed class LiveEntityAnimationSchedulerTests
             LowFrame = 0,
             HighFrame = 0,
             Framerate = 0f,
-            Scale = 1f,
+            Simulation = new RuntimeRemoteAnimationState { Scale = 1f },
             PartTemplate = Array.Empty<LiveAnimationPartTemplate>(),
             PartAvailability = Array.Empty<bool>(),
             Sequencer = new AnimationSequencer(
@@ -766,7 +767,7 @@ public sealed class LiveEntityAnimationSchedulerTests
             LowFrame = 0,
             HighFrame = 3,
             Framerate = 30f,
-            Scale = 1f,
+            Simulation = new RuntimeRemoteAnimationState { Scale = 1f },
             PartTemplate = new[]
             {
                 new LiveAnimationPartTemplate(

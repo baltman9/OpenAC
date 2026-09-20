@@ -1038,7 +1038,7 @@ public sealed class LiveEntityNetworkOnPositionCollapseMatrixTests
                     LowFrame = 0,
                     HighFrame = 0,
                     Framerate = 0f,
-                    Scale = 1f,
+                    Simulation = new RuntimeRemoteAnimationState { Scale = 1f },
                     PartTemplate = Array.Empty<LiveAnimationPartTemplate>(),
                     PartAvailability = Array.Empty<bool>(),
                     Sequencer = sequencer,

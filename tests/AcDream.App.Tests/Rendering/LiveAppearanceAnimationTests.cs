@@ -46,7 +46,7 @@ public sealed class LiveAppearanceAnimationTests
             LowFrame = 0,
             HighFrame = 0,
             Framerate = 0f,
-            Scale = 1f,
+            Simulation = new RuntimeRemoteAnimationState { Scale = 1f },
             PartTemplate = Array.Empty<LiveAnimationPartTemplate>(),
             PartAvailability = Array.Empty<bool>(),
         };
@@ -74,7 +74,7 @@ public sealed class LiveAppearanceAnimationTests
             LowFrame = 2,
             HighFrame = 9,
             Framerate = 30f,
-            Scale = 1f,
+            Simulation = new RuntimeRemoteAnimationState { Scale = 1f },
             PartTemplate = [new LiveAnimationPartTemplate(0x01000001u, null, true)],
             PartAvailability = [true],
             CurrFrame = 6.5f,

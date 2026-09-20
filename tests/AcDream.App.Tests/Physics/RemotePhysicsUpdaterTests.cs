@@ -9,6 +9,7 @@ using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 using AcDream.Core.Physics.Motion;
 using AcDream.Core.World;
+using AcDream.Runtime.Physics;
 using DatReaderWriter.DBObjs;
 
 namespace AcDream.App.Tests.Physics;
@@ -144,7 +145,7 @@ public sealed class RemotePhysicsUpdaterTests
             LowFrame = 0,
             HighFrame = 0,
             Framerate = 0f,
-            Scale = 1f,
+            Simulation = new RuntimeRemoteAnimationState { Scale = 1f },
             PartTemplate = Array.Empty<LiveAnimationPartTemplate>(),
             PartAvailability = Array.Empty<bool>(),
         };
@@ -206,7 +207,7 @@ public sealed class RemotePhysicsUpdaterTests
             LowFrame = 0,
             HighFrame = 0,
             Framerate = 0f,
-            Scale = 1f,
+            Simulation = new RuntimeRemoteAnimationState { Scale = 1f },
             PartTemplate = Array.Empty<LiveAnimationPartTemplate>(),
             PartAvailability = Array.Empty<bool>(),
         };
@@ -266,7 +267,7 @@ public sealed class RemotePhysicsUpdaterTests
             LowFrame = 0,
             HighFrame = 0,
             Framerate = 0f,
-            Scale = 1f,
+            Simulation = new RuntimeRemoteAnimationState { Scale = 1f },
             PartTemplate = Array.Empty<LiveAnimationPartTemplate>(),
             PartAvailability = Array.Empty<bool>(),
         };

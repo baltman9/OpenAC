@@ -1,6 +1,7 @@
 using AcDream.App.World;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
+using AcDream.Runtime.Physics;
 using DatReaderWriter.DBObjs;
 
 namespace AcDream.App.Rendering;
@@ -62,11 +63,13 @@ internal static class LiveEntityCreateAnimationSynchronization
         int canonicalLowFrame,
         int canonicalHighFrame,
         float canonicalFramerate,
-        MotionTable? motionTable,
+        RuntimeMotionStateBuilder motionStates,
+        uint motionTableId,
         CreateObject.ServerMotionState? wireState)
     {
         ArgumentNullException.ThrowIfNull(record);
         ArgumentNullException.ThrowIfNull(animation);
+        ArgumentNullException.ThrowIfNull(motionStates);
         if (record.InitialHydrationCompleted)
             return false;
 
@@ -79,11 +82,11 @@ internal static class LiveEntityCreateAnimationSynchronization
             animation.CurrFrame = canonicalLowFrame;
         }
 
-        if (animation.Sequencer is { } sequencer && motionTable is not null)
+        if (animation.Sequencer is { } sequencer)
         {
-            SpawnMotionInitializer.Reinitialize(
+            motionStates.TryReinitialize(
                 sequencer,
-                motionTable,
+                motionTableId,
                 wireState);
         }
         return true;
