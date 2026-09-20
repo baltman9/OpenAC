@@ -1821,6 +1821,9 @@ public sealed class GameWindow :
     public void Dispose()
     {
         CompleteShutdown(releaseNativeWindow: true);
+        // After the terminal status line, release the status file so it can
+        // be read, moved or deleted freely.
+        _statusWriter.Dispose();
         _window = null;
         _pluginWindowHandle = null;
     }

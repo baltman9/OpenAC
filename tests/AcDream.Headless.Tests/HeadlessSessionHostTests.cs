@@ -162,7 +162,7 @@ public sealed class HeadlessSessionHostTests
             Assert.False(host.IsFaulted);
 
             host.Dispose();
-            JsonElement[] events = File.ReadAllLines(statusPath)
+            JsonElement[] events = LiveStatusFile.ReadAllLines(statusPath)
                 .Select(static line =>
                     JsonDocument.Parse(line).RootElement.Clone())
                 .ToArray();
@@ -458,7 +458,7 @@ public sealed class HeadlessSessionHostTests
                 Assert.Single(
                     host.Runtime.CommunicationOwner.SpewBox.Snapshot()).Text);
 
-            JsonElement[] events = File.ReadAllLines(statusPath)
+            JsonElement[] events = LiveStatusFile.ReadAllLines(statusPath)
                 .Select(static line =>
                     JsonDocument.Parse(line).RootElement.Clone())
                 .ToArray();
@@ -508,7 +508,7 @@ public sealed class HeadlessSessionHostTests
             Assert.Single(captured);
             Assert.Equal(ChatRequests.TalkOpcode, ActionOpcode(captured[0]));
 
-            JsonElement[] events = File.ReadAllLines(statusPath)
+            JsonElement[] events = LiveStatusFile.ReadAllLines(statusPath)
                 .Select(static line =>
                     JsonDocument.Parse(line).RootElement.Clone())
                 .ToArray();
@@ -766,7 +766,7 @@ public sealed class HeadlessSessionHostTests
             Assert.True(host.IsPolicyComplete);
 
             host.Dispose();
-            string exitedLine = File.ReadAllLines(statusPath)
+            string exitedLine = LiveStatusFile.ReadAllLines(statusPath)
                 .Single(static line =>
                     JsonDocument.Parse(line).RootElement.GetProperty("e").GetString()
                         == "exited");
@@ -818,7 +818,7 @@ public sealed class HeadlessSessionHostTests
             Assert.Equal(0, operations.ReturnToCharacterSelectCount);
 
             host.Dispose();
-            string exitedLine = File.ReadAllLines(statusPath)
+            string exitedLine = LiveStatusFile.ReadAllLines(statusPath)
                 .Single(static line =>
                     JsonDocument.Parse(line).RootElement.GetProperty("e").GetString()
                         == "exited");
@@ -897,7 +897,7 @@ public sealed class HeadlessSessionHostTests
                 host.Reconnect().Status);
             host.Dispose();
 
-            JsonElement[] events = File.ReadAllLines(statusPath)
+            JsonElement[] events = LiveStatusFile.ReadAllLines(statusPath)
                 .Select(static line => JsonDocument.Parse(line).RootElement.Clone())
                 .ToArray();
             Assert.Equal(
@@ -979,7 +979,7 @@ public sealed class HeadlessSessionHostTests
                 host.Plugins.Host.Window.RequestClose();
             Assert.Equal(HostWindowStatus.Done, secondResult.Status);
 
-            JsonElement[] events = File.ReadAllLines(statusPath)
+            JsonElement[] events = LiveStatusFile.ReadAllLines(statusPath)
                 .Select(static line => JsonDocument.Parse(line).RootElement.Clone())
                 .ToArray();
             JsonElement exited = Assert.Single(
@@ -1043,7 +1043,7 @@ public sealed class HeadlessSessionHostTests
 
             if (File.Exists(statusPath))
             {
-                JsonElement[] events = File.ReadAllLines(statusPath)
+                JsonElement[] events = LiveStatusFile.ReadAllLines(statusPath)
                     .Select(static line =>
                         JsonDocument.Parse(line).RootElement.Clone())
                     .ToArray();
@@ -1091,7 +1091,7 @@ public sealed class HeadlessSessionHostTests
             Assert.Equal(RuntimeSessionStartStatus.Connected, started.Status);
             host.Dispose();
 
-            string[] lines = File.ReadAllLines(statusPath);
+            string[] lines = LiveStatusFile.ReadAllLines(statusPath);
             string[] eventNames = lines
                 .Select(line => JsonDocument.Parse(line)
                     .RootElement.GetProperty("e").GetString()!)
@@ -1119,7 +1119,7 @@ public sealed class HeadlessSessionHostTests
                 lines[Array.IndexOf(eventNames, "exited")]);
             Assert.Equal(0, exitedDoc.RootElement.GetProperty("code").GetInt32());
 
-            string contents = File.ReadAllText(statusPath);
+            string contents = LiveStatusFile.ReadAllText(statusPath);
             Assert.DoesNotContain("password", contents, StringComparison.Ordinal);
         }
         finally
@@ -1175,7 +1175,7 @@ public sealed class HeadlessSessionHostTests
             Assert.Equal(0, operations.EnterWorldCallCount);
             Assert.True(host.Runtime.CaptureOwnership().IsConverged);
 
-            string[] lines = File.ReadAllLines(statusPath);
+            string[] lines = LiveStatusFile.ReadAllLines(statusPath);
             string[] eventNames = lines
                 .Select(line => JsonDocument.Parse(line)
                     .RootElement.GetProperty("e").GetString()!)
@@ -1195,7 +1195,7 @@ public sealed class HeadlessSessionHostTests
                 "probe",
                 exitedDoc.RootElement.GetProperty("reason").GetString());
 
-            string contents = File.ReadAllText(statusPath);
+            string contents = LiveStatusFile.ReadAllText(statusPath);
             Assert.DoesNotContain("password", contents, StringComparison.Ordinal);
         }
         finally
@@ -1280,7 +1280,7 @@ public sealed class HeadlessSessionHostTests
             host.Dispose();
             host.Dispose();
 
-            string[] lines = File.ReadAllLines(statusPath);
+            string[] lines = LiveStatusFile.ReadAllLines(statusPath);
             JsonElement[] events = lines
                 .Select(static line =>
                     JsonDocument.Parse(line).RootElement.Clone())
@@ -1425,7 +1425,7 @@ public sealed class HeadlessSessionHostTests
 
             Assert.True(host.Session.Runtime.CaptureOwnership().IsConverged);
             Assert.Equal(1, operations.DisposedSessionCount);
-            string[] lines = File.ReadAllLines(statusPath);
+            string[] lines = LiveStatusFile.ReadAllLines(statusPath);
             string[] eventNames = ReadStatusEventNames(statusPath);
             Assert.Equal(
                 [
@@ -1450,7 +1450,7 @@ public sealed class HeadlessSessionHostTests
             Assert.NotEqual("probe", exitReason);
             Assert.DoesNotContain(
                 "process-password",
-                File.ReadAllText(statusPath),
+                LiveStatusFile.ReadAllText(statusPath),
                 StringComparison.Ordinal);
             Assert.DoesNotContain(
                 "process-password",
@@ -3560,7 +3560,7 @@ public sealed class HeadlessSessionHostTests
     };
 
     private static string[] ReadStatusEventNames(string path) =>
-        File.ReadAllLines(path)
+        LiveStatusFile.ReadAllLines(path)
             .Select(static line =>
             {
                 using JsonDocument document = JsonDocument.Parse(line);

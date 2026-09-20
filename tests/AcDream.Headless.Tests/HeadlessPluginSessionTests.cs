@@ -1024,7 +1024,7 @@ public sealed class HeadlessPluginSessionTests
         null);
 
     private static JsonElement[] ReadStatuses(string path) =>
-        File.ReadAllLines(path)
+        LiveStatusFile.ReadAllLines(path)
             .Select(static line => JsonDocument.Parse(line).RootElement.Clone())
             .ToArray();
 

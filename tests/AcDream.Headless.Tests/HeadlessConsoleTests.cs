@@ -868,7 +868,7 @@ public sealed class HeadlessConsoleTests
 
             DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
             while (!File.Exists(statusPathAlpha)
-                || !ReadWhileTheHostWrites(statusPathAlpha).Contains("\"exited\""))
+                || !LiveStatusFile.ReadAllText(statusPathAlpha).Contains("\"exited\""))
             {
                 if (DateTime.UtcNow > deadline)
                 {
@@ -886,7 +886,7 @@ public sealed class HeadlessConsoleTests
             // write rather than racing it.
             DateTime betaDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
             while (!File.Exists(statusPathBeta)
-                || !ReadWhileTheHostWrites(statusPathBeta)
+                || !LiveStatusFile.ReadAllText(statusPathBeta)
                     .Contains("\"enteredWorld\""))
             {
                 if (DateTime.UtcNow > betaDeadline)
@@ -897,14 +897,14 @@ public sealed class HeadlessConsoleTests
             Assert.False(beta.IsPolicyComplete);
             Assert.DoesNotContain(
                 "\"exited\"",
-                ReadWhileTheHostWrites(statusPathBeta));
+                LiveStatusFile.ReadAllText(statusPathBeta));
 
             cts.Cancel();
             HeadlessExitCode exitCode = await run.WaitAsync(TimeSpan.FromSeconds(10));
             Assert.Equal(HeadlessExitCode.Success, exitCode);
 
             JsonElement alphaExited = JsonDocument.Parse(
-                ReadWhileTheHostWrites(statusPathAlpha)
+                LiveStatusFile.ReadAllText(statusPathAlpha)
                     .Split(
                         Environment.NewLine,
                         StringSplitOptions.RemoveEmptyEntries)
@@ -1038,28 +1038,6 @@ public sealed class HeadlessConsoleTests
             Reference = "CONSOLE_BOT_PASSWORD",
         },
     };
-
-    /// <summary>
-    /// Reads a status file while the host is still appending to it.
-    /// <see cref="File.ReadAllText(string)"/> cannot be used for that: it
-    /// opens the file in a mode that locks a writer out, so a status line
-    /// written while the read is in flight fails, and the writer answers a
-    /// failed write by turning that session's whole status stream off for
-    /// good. Watching a live session then silences the very thing being
-    /// watched, and the watcher waits forever for a line that will never
-    /// come. Sharing the file for writing as well leaves the host free to
-    /// keep writing while this reads.
-    /// </summary>
-    private static string ReadWhileTheHostWrites(string path)
-    {
-        using var stream = new FileStream(
-            path,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.ReadWrite | FileShare.Delete);
-        using var reader = new StreamReader(stream);
-        return reader.ReadToEnd();
-    }
 
     private sealed class FixtureSessionOperations : ILiveSessionOperations
     {

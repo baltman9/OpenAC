@@ -170,6 +170,13 @@ group carries the group's word:
 "pluginTags": ["tank", "group-a"]
 ```
 
+`statusFile` is one JSON line per session event, appended as it happens. A
+running session keeps that file open for its whole lifetime, so anything
+that watches it -- the launcher, a script, a person -- must open it with
+writing shared (`FileShare.ReadWrite`, or a tool that tails rather than
+locks). An ordinary exclusive read is refused while the session runs, so a
+watcher can never take the session's own writing away from it.
+
 `pluginSettings` is the startup settings each plugin is given, one object of
 settings per plugin id. A plugin reads only its own, through
 `IPluginHost.SessionSettings`:

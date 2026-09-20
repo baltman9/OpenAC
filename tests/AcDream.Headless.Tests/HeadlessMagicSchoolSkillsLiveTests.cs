@@ -173,7 +173,7 @@ public sealed class HeadlessMagicSchoolSkillsLiveTests(ITestOutputHelper output)
         if (!File.Exists(statusPath))
             return [];
         var names = new List<string>();
-        foreach (string line in File.ReadAllLines(statusPath))
+        foreach (string line in LiveStatusFile.ReadAllLines(statusPath))
         {
             if (string.IsNullOrWhiteSpace(line))
                 continue;
