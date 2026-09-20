@@ -1312,7 +1312,15 @@ internal sealed class RuntimeAutomationSurface
             IsReady: delta.Portal.IsReady,
             IsMaterialized: delta.Portal.IsMaterialized,
             IsCompleted: delta.Portal.IsCompleted,
-            IsCancelled: delta.Portal.IsCancelled));
+            IsCancelled: delta.Portal.IsCancelled)
+        {
+            Kind = delta.Portal.Kind switch
+            {
+                RuntimePortalKind.Login => PluginPortalTransitionKind.Login,
+                RuntimePortalKind.Portal => PluginPortalTransitionKind.Portal,
+                _ => PluginPortalTransitionKind.Unknown,
+            },
+        });
     }
     void IRuntimeEventObserver.OnCombat(in RuntimeCombatDelta delta) { }
 

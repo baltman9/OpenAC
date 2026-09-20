@@ -369,6 +369,7 @@ public sealed class HeadlessPluginApiSurfaceTests
         RuntimePortalSnapshot snapshot = RuntimePortalSnapshot.Idle with
         {
             Generation = 4,
+            Kind = RuntimePortalKind.Portal,
             Materialized = false,
         };
 
@@ -380,6 +381,9 @@ public sealed class HeadlessPluginApiSurfaceTests
 
         Assert.Equal(2, seen.Count);
         Assert.Equal([1L, 2L], seen.Select(static item => item.Revision));
+        Assert.All(seen, static item => Assert.Equal(
+            PluginPortalTransitionKind.Portal,
+            item.Kind));
     }
 
     [Fact]

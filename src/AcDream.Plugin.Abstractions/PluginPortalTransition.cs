@@ -1,5 +1,16 @@
 namespace AcDream.Plugin.Abstractions;
 
+/// <summary>Broad source of a world transition.</summary>
+public enum PluginPortalTransitionKind
+{
+    /// <summary>The host could not identify the transition source.</summary>
+    Unknown,
+    /// <summary>A login or reconnect transition.</summary>
+    Login,
+    /// <summary>A portal or recall transition while already in-world.</summary>
+    Portal,
+}
+
 /// <summary>
 /// A semantic portal or recall transition observed by the host. This is a
 /// state notification, not a raw protocol event; repeated notifications for
@@ -14,6 +25,9 @@ public readonly record struct PluginPortalTransition(
     bool IsCompleted,
     bool IsCancelled)
 {
+    /// <summary>The semantic source of this transition.</summary>
+    public PluginPortalTransitionKind Kind { get; init; }
+
     /// <summary>True while this generation has not completed or cancelled.</summary>
     public bool IsActive => Generation != 0 && !IsCompleted && !IsCancelled;
 

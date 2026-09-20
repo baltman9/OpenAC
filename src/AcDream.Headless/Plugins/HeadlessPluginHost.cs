@@ -769,7 +769,15 @@ internal sealed class HeadlessPluginHost
             IsReady: delta.Portal.IsReady,
             IsMaterialized: delta.Portal.IsMaterialized,
             IsCompleted: delta.Portal.IsCompleted,
-            IsCancelled: delta.Portal.IsCancelled);
+            IsCancelled: delta.Portal.IsCancelled)
+        {
+            Kind = delta.Portal.Kind switch
+            {
+                RuntimePortalKind.Login => PluginPortalTransitionKind.Login,
+                RuntimePortalKind.Portal => PluginPortalTransitionKind.Portal,
+                _ => PluginPortalTransitionKind.Unknown,
+            },
+        };
         Action<PluginPortalTransition>? handlers;
         lock (_tickGate)
             handlers = _portalTransition;

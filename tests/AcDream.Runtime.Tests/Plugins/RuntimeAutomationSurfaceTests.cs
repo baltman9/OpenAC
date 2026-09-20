@@ -175,7 +175,11 @@ public sealed class RuntimeAutomationSurfaceTests
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         var seen = new List<PluginPortalTransition>();
         events.PortalTransition += seen.Add;
-        var snapshot = RuntimePortalSnapshot.Idle with { Generation = 3 };
+        var snapshot = RuntimePortalSnapshot.Idle with
+        {
+            Generation = 3,
+            Kind = RuntimePortalKind.Portal,
+        };
         var observer = (IRuntimeEventObserver)surface;
 
         observer.OnPortal(new RuntimePortalDelta(default, snapshot));
@@ -186,6 +190,9 @@ public sealed class RuntimeAutomationSurfaceTests
 
         Assert.Equal(2, seen.Count);
         Assert.Equal([1L, 2L], seen.Select(static item => item.Revision));
+        Assert.All(seen, static item => Assert.Equal(
+            PluginPortalTransitionKind.Portal,
+            item.Kind));
     }
 
     [Fact]
