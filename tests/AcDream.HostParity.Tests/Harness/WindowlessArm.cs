@@ -64,6 +64,12 @@ internal sealed class WindowlessArm : ParityArm
         _host = new HeadlessPluginHost(
             Runtime,
             _log,
+            // Real storage on disk, as a bot session is given, under this
+            // arm's own scratch folder.
+            storage: new AcDream.Core.Plugins.FilePluginStorage(
+                Path.Combine(DataDirectory, "plugin-storage")),
+            vtankProfiles: new AcDream.Core.Plugins.FilePluginStorage(
+                Path.Combine(DataDirectory, "plugin-profiles")),
             sessionCommands: _commands,
             dataDirectory: DataDirectory,
             pluginTags: ConfiguredPluginTags);

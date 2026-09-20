@@ -146,6 +146,12 @@ internal sealed class WindowedArm : ParityArm
                 Warn = _warnings.Add,
                 SessionCommands = _sessionCommands,
             }));
+        // Everything a plugin reaches for that does not need a graphics card
+        // is the real thing here: this client's own hotkey registry over a
+        // file in this arm's scratch folder, its own world-line store, and
+        // real storage on disk. Only the two that cannot exist without a
+        // window are stood in for -- the panel tree and the clipboard -- and
+        // those answer as this client answers when there is no window.
         Host = new AppPluginHost(
             new RecordingPluginLogger(),
             _state,
@@ -153,7 +159,27 @@ internal sealed class WindowedArm : ParityArm
             Runtime.ActionOwner.Selection,
             NoOpUiRegistry.Instance,
             _automation,
-            commands: _automation.PluginCommands);
+            storage: new AcDream.Core.Plugins.FilePluginStorage(
+                Path.Combine(DataDirectory, "plugin-storage")),
+            commands: _automation.PluginCommands,
+            lootClassifiers:
+                new AcDream.Core.Plugins.PluginLootClassifierRegistry(),
+            vtankProfiles: new AcDream.Core.Plugins.FilePluginStorage(
+                Path.Combine(DataDirectory, "plugin-profiles")),
+            clipboard: new NoWindowClipboard(),
+            hotkeys: new AcDream.App.Input.AppHotkeyRegistry(
+                Path.Combine(DataDirectory, "plugin-hotkeys.json")),
+            worldLines: new AcDream.App.Plugins.PluginWorldLineStore());
+    }
+
+    /// <summary>
+    /// The clipboard belongs to the window: this client reads and writes it
+    /// through the one it opened, so a run without one has none and says so,
+    /// which is the same answer the client with no window gives.
+    /// </summary>
+    private sealed class NoWindowClipboard : IPluginClipboard
+    {
+        public bool TrySetText(string text) => false;
     }
 
     internal override IPluginHost Host { get; }
