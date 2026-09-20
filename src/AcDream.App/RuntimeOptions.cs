@@ -64,6 +64,19 @@ public sealed record RuntimeOptions(
 
     public IReadOnlyList<string> PluginTags { get; init; } = [];
 
+    /// <summary>
+    /// The character options this session was told to arrive with, read from
+    /// the session document. They belong to the character on the server, so
+    /// the client seeds them once, on login, and only where they differ from
+    /// what the server says the character already has. Empty when the client
+    /// was started without a session document, which is every ordinary launch:
+    /// a player who sets an option in the panels is never overruled by this.
+    /// </summary>
+    public IReadOnlyDictionary<
+        AcDream.Core.Net.Messages.CharacterOptionId,
+        bool> DeclaredCharacterOptions { get; init; } =
+        new Dictionary<AcDream.Core.Net.Messages.CharacterOptionId, bool>();
+
     public string? VtankProfileDirectoryOverride { get; init; }
 
     /// <summary>
@@ -219,6 +232,10 @@ public sealed record RuntimeOptions(
                 ? AcDream.Runtime.Plugins.PluginSessionSettings.FromDeclared(
                     declared)
                 : null,
+            DeclaredCharacterOptions =
+                AcDream.Runtime.Gameplay.RuntimeDeclaredCharacterOptions.Parse(
+                    session.Id,
+                    session.CharacterOptions),
         };
     }
 

@@ -1,11 +1,10 @@
 using AcDream.Core.Net.Messages;
-using AcDream.Headless.Hosting;
 using AcDream.Runtime;
 using AcDream.Runtime.Gameplay;
 
-namespace AcDream.Headless.Tests;
+namespace AcDream.Runtime.Tests.Gameplay;
 
-public sealed class HeadlessCharacterOptionsSeederTests
+public sealed class RuntimeCharacterOptionsSeederTests
 {
     private const uint AutoSaveMask = 0x00000002u;
 
@@ -15,7 +14,7 @@ public sealed class HeadlessCharacterOptionsSeederTests
         using GameRuntime runtime = NewRuntime();
         runtime.CharacterOwner.Options.Replace(0u, 0u);
         var commands = new FakeCharacterCommands(runtime.CharacterOwner.Options);
-        var seeder = new HeadlessCharacterOptionsSeeder(
+        var seeder = new RuntimeCharacterOptionsSeeder(
             new Dictionary<CharacterOptionId, bool>
             {
                 [CharacterOptionId.AutoRepeatAttack] = false,
@@ -35,7 +34,7 @@ public sealed class HeadlessCharacterOptionsSeederTests
         using GameRuntime runtime = NewRuntime();
         runtime.CharacterOwner.Options.Replace(0u, 0u);
         var commands = new FakeCharacterCommands(runtime.CharacterOwner.Options);
-        var seeder = new HeadlessCharacterOptionsSeeder(
+        var seeder = new RuntimeCharacterOptionsSeeder(
             new Dictionary<CharacterOptionId, bool>
             {
                 [CharacterOptionId.AutoRepeatAttack] = true,
@@ -59,7 +58,7 @@ public sealed class HeadlessCharacterOptionsSeederTests
         using GameRuntime runtime = NewRuntime();
         runtime.CharacterOwner.Options.Replace(0u, 0u);
         var commands = new FakeCharacterCommands(runtime.CharacterOwner.Options);
-        var seeder = new HeadlessCharacterOptionsSeeder(
+        var seeder = new RuntimeCharacterOptionsSeeder(
             new Dictionary<CharacterOptionId, bool>
             {
                 [CharacterOptionId.IgnoreTradeRequests] = true,
@@ -83,7 +82,7 @@ public sealed class HeadlessCharacterOptionsSeederTests
         using GameRuntime runtime = NewRuntime();
         runtime.CharacterOwner.Options.Replace(0u, 0u);
         var commands = new FakeCharacterCommands(runtime.CharacterOwner.Options);
-        var seeder = new HeadlessCharacterOptionsSeeder(
+        var seeder = new RuntimeCharacterOptionsSeeder(
             new Dictionary<CharacterOptionId, bool>
             {
                 // Declared out of id order on purpose — the seeder sorts
@@ -109,7 +108,7 @@ public sealed class HeadlessCharacterOptionsSeederTests
     {
         using GameRuntime runtime = NewRuntime();
         var commands = new FakeCharacterCommands(runtime.CharacterOwner.Options);
-        var seeder = new HeadlessCharacterOptionsSeeder(
+        var seeder = new RuntimeCharacterOptionsSeeder(
             new Dictionary<CharacterOptionId, bool>
             {
                 [CharacterOptionId.AutoRepeatAttack] = true,
@@ -132,7 +131,7 @@ public sealed class HeadlessCharacterOptionsSeederTests
         using GameRuntime runtime = NewRuntime();
         runtime.CharacterOwner.Options.Replace(0u, 0u);
         var commands = new FakeCharacterCommands(runtime.CharacterOwner.Options);
-        var seeder = new HeadlessCharacterOptionsSeeder(
+        var seeder = new RuntimeCharacterOptionsSeeder(
             new Dictionary<CharacterOptionId, bool>
             {
                 [CharacterOptionId.AutoRepeatAttack] = true,
@@ -153,7 +152,7 @@ public sealed class HeadlessCharacterOptionsSeederTests
         using GameRuntime runtime = NewRuntime();
         runtime.CharacterOwner.Options.Replace(0xFFFFFFFFu, 0xFFFFFFFFu);
         var commands = new FakeCharacterCommands(runtime.CharacterOwner.Options);
-        var seeder = new HeadlessCharacterOptionsSeeder(
+        var seeder = new RuntimeCharacterOptionsSeeder(
             new Dictionary<CharacterOptionId, bool>(),
             runtime,
             commands);
@@ -176,7 +175,7 @@ public sealed class HeadlessCharacterOptionsSeederTests
 
         runtime.CharacterOwner.Options.Replace(0u, 0u);
         var firstCommands = new FakeCharacterCommands(runtime.CharacterOwner.Options);
-        var firstSeeder = new HeadlessCharacterOptionsSeeder(
+        var firstSeeder = new RuntimeCharacterOptionsSeeder(
             declared, runtime, firstCommands);
         firstSeeder.NoteLoginCompleteSent();
         firstSeeder.NoteOptionsSeeded();
@@ -185,7 +184,7 @@ public sealed class HeadlessCharacterOptionsSeederTests
         runtime.CharacterOwner.Options.ResetSession();
         runtime.CharacterOwner.Options.Replace(AutoSaveMask, 0u);
         var secondCommands = new FakeCharacterCommands(runtime.CharacterOwner.Options);
-        var secondSeeder = new HeadlessCharacterOptionsSeeder(
+        var secondSeeder = new RuntimeCharacterOptionsSeeder(
             declared, runtime, secondCommands);
         secondSeeder.NoteLoginCompleteSent();
         secondSeeder.NoteOptionsSeeded();
@@ -195,14 +194,12 @@ public sealed class HeadlessCharacterOptionsSeederTests
 
     private static GameRuntime NewRuntime()
     {
-        var gameplay = new HeadlessGameplayOperations();
-        var runtime = new GameRuntime(new GameRuntimeDependencies(
+        var gameplay = new RuntimeCreatureDeathStateTests.NoOpOperations();
+        return new GameRuntime(new GameRuntimeDependencies(
             gameplay,
             gameplay,
             gameplay,
             gameplay));
-        gameplay.Bind(runtime, catalog: null, () => "account");
-        return runtime;
     }
 
     private sealed class FakeCharacterCommands(
@@ -216,7 +213,7 @@ public sealed class HeadlessCharacterOptionsSeederTests
             RuntimeGenerationToken expectedGeneration,
             in RuntimeAdvancementCommand command) =>
             throw new NotSupportedException(
-                "HeadlessCharacterOptionsSeeder never calls Advance.");
+                "The character options seeder never calls Advance.");
 
         public RuntimeCommandResult SetSingleOption(
             RuntimeGenerationToken expectedGeneration,
@@ -245,6 +242,6 @@ public sealed class HeadlessCharacterOptionsSeederTests
             RuntimeGenerationToken expectedGeneration,
             uint titleId) =>
             throw new NotSupportedException(
-                "HeadlessCharacterOptionsSeeder never calls SetTitle.");
+                "The character options seeder never calls SetTitle.");
     }
 }

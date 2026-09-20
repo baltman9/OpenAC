@@ -208,15 +208,17 @@ dotnet run --project src/AcDream.App/AcDream.App.csproj -c Release -- --session-
 
 It requires exactly one session in the document, and it honours every
 per-session field that decides what a plugin sees: `character`, `plugins`,
-`pluginTags`, `pluginSettings`, `loginCommands`, `loginCommandDelayMs` and
-`statusFile`. Two fields only the windowless client acts on are accepted and
-ignored here rather than refused, so one document still starts either client:
-`characterOptions` (the windowless client applies the declared options on
-login; the graphical client leaves the character's own saved options alone)
-and `policy` (which bot policy drives a windowless session; a graphical
-session is driven by the player). The one field the graphical client refuses
-is `"mode": "probe"`, because a probe never selects a character and there is
-no windowed session to show.
+`pluginTags`, `pluginSettings`, `loginCommands`, `loginCommandDelayMs`,
+`characterOptions` and `statusFile`. Both clients check `characterOptions`
+against the same declarable list and seed it the same way on login, so a
+document means the same thing whichever client reads it; a client started
+without a document declares none, so a player who sets an option in the
+panels is never overruled. One field only the windowless client acts on is
+accepted and ignored here rather than refused, so one document still starts
+either client: `policy` (which bot policy drives a windowless session; a
+graphical session is driven by the player). The one field the graphical
+client refuses is `"mode": "probe"`, because a probe never selects a
+character and there is no windowed session to show.
 
 Where a document and a startup option say the same thing, the document wins:
 its `pluginTags` outranks `ACDREAM_PLUGIN_TAGS`, and its `pluginSettings`

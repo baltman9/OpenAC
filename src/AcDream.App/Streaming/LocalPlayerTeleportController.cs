@@ -351,13 +351,24 @@ internal interface ILocalPlayerTeleportSession
 internal sealed class LocalPlayerTeleportSession : ILocalPlayerTeleportSession
 {
     private readonly ILiveWorldSessionSource _session;
+    private readonly Action? _onLoginCompleteSent;
 
-    public LocalPlayerTeleportSession(ILiveWorldSessionSource session) =>
+    public LocalPlayerTeleportSession(
+        ILiveWorldSessionSource session,
+        Action? onLoginCompleteSent = null)
+    {
         _session = session ?? throw new ArgumentNullException(nameof(session));
+        _onLoginCompleteSent = onLoginCompleteSent;
+    }
 
-    public void SendLoginComplete() =>
+    public void SendLoginComplete()
+    {
         _session.CurrentSession?.SendGameAction(
             GameActionLoginComplete.Build());
+        // Anything that has been waiting for the login to be complete before
+        // it asks the server for something runs here.
+        _onLoginCompleteSent?.Invoke();
+    }
 }
 
 internal interface ILocalPlayerTeleportPresentation : IDisposable

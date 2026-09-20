@@ -111,6 +111,9 @@ internal sealed class LiveSessionRuntimeFactory
 
     private readonly string _chatLogDirectory;
 
+    /// <summary>Told when the server has seeded the character options.</summary>
+    private readonly Action _noteOptionsSeeded;
+
     private ChatSessionLog? _chatSessionLog;
 
     private ChatTranscriptLogWriter? _chatLogWriter;
@@ -128,8 +131,10 @@ internal sealed class LiveSessionRuntimeFactory
         IReadOnlyList<string>? loginCommands = null,
         int loginCommandDelayMs = 500,
         TimeProvider? timeProvider = null,
-        string? chatLogDirectory = null)
+        string? chatLogDirectory = null,
+        Action? noteOptionsSeeded = null)
     {
+        _noteOptionsSeeded = noteOptionsSeeded ?? (() => { });
         _player = player ?? throw new ArgumentNullException(nameof(player));
         _domain = domain ?? throw new ArgumentNullException(nameof(domain));
         _ui = ui ?? throw new ArgumentNullException(nameof(ui));
@@ -371,6 +376,7 @@ internal sealed class LiveSessionRuntimeFactory
                     ResolveSkillFormulaBonus = skillCreditResolver.Resolve,
                     ClientTime = ClientTimerNow,
                     RetainedUi = _ui.RetailUi,
+                    NoteOptionsSeeded = _noteOptionsSeeded,
                     Warn = _log,
                 });
     }

@@ -146,7 +146,9 @@ internal sealed class WindowlessArm : ParityArm
                             request.Message)),
                 OnConfirmationDone = _ => { },
                 MovementStats = Runtime.MovementStats,
-                NoteOptionsSeeded = () => _log.Info("options seeded"),
+                // Neither arm starts from a session document, so nothing is
+                // declared for the seeder to compare against.
+                NoteOptionsSeeded = () => { },
                 Warn = _log.Warn,
             });
 

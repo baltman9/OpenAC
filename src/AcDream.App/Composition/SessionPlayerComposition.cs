@@ -930,6 +930,13 @@ internal sealed class SessionPlayerCompositionPhase
         playerMode.BindAutoEntry(playerModeAutoEntry);
         Fault(SessionPlayerCompositionPoint.PlayerModeBound);
 
+        // The character options a session document declared are seeded by the
+        // runtime, the same way on both clients. The seeder needs the
+        // character command adapter, which is built further down, so it is
+        // filled in there and reached through this slot until it is.
+        AcDream.Runtime.Gameplay.RuntimeCharacterOptionsSeeder? optionsSeeder =
+            null;
+
         LocalPlayerTeleportController localTeleport =
             d.PortalTunnelFallback.Transfer(CreateLocalTeleportWithTunnel);
 
@@ -955,7 +962,9 @@ internal sealed class SessionPlayerCompositionPhase
                     d.PlayerHost,
                     d.ChaseCameraInput,
                     liveSpatialReconciler),
-                new LocalPlayerTeleportSession(liveSessionSource),
+                new LocalPlayerTeleportSession(
+                    liveSessionSource,
+                    () => optionsSeeder?.NoteLoginCompleteSent()),
                 presentation,
                 acceptedPositionDrive,
                 new RuntimeLoginLifecycleSource(d.Runtime),
@@ -1078,7 +1087,8 @@ internal sealed class SessionPlayerCompositionPhase
             d.StatusWriter,
             d.Options.SessionId ?? "app",
             d.Options.LoginCommands,
-            d.Options.LoginCommandDelayMs);
+            d.Options.LoginCommandDelayMs,
+            noteOptionsSeeded: () => optionsSeeder?.NoteOptionsSeeded());
         LiveSessionHost sessionHost = sessionRuntimeFactory.Create(
             liveSession,
             new LiveSessionConnectOptions(
@@ -1117,6 +1127,10 @@ internal sealed class SessionPlayerCompositionPhase
             liveSessionCommands,
             live.SelectionInteractions);
         bindings.Adopt("current game runtime adapter", gameRuntime);
+        optionsSeeder = new AcDream.Runtime.Gameplay.RuntimeCharacterOptionsSeeder(
+            d.Options.DeclaredCharacterOptions,
+            d.Runtime,
+            gameRuntime.CharacterCommands);
         bindings.Adopt(
             "retained-UI game runtime commands",
             interaction.LateBindings.GameRuntime.Bind(gameRuntime, gameRuntime));

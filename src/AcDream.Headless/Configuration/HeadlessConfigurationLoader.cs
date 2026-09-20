@@ -8,43 +8,6 @@ internal static class HeadlessConfigurationLoader
 {
     private const int CurrentVersion = 1;
 
-    private static readonly HashSet<CharacterOptionId> AllowedCharacterOptions =
-    [
-        // Tier 1 (22).
-        CharacterOptionId.IgnoreAllegianceRequests,
-        CharacterOptionId.IgnoreFellowshipRequests,
-        CharacterOptionId.IgnoreTradeRequests,
-        CharacterOptionId.AllowGive,
-        CharacterOptionId.FellowshipShareXP,
-        CharacterOptionId.AcceptLootPermits,
-        CharacterOptionId.FellowshipShareLoot,
-        CharacterOptionId.FellowshipAutoAcceptRequests,
-        CharacterOptionId.DisplayAllegianceLogonNotifications,
-        CharacterOptionId.UseChargeAttack,
-        CharacterOptionId.UseCraftSuccessDialog,
-        CharacterOptionId.AutoRepeatAttack,
-        CharacterOptionId.LeadMissileTargets,
-        CharacterOptionId.UseFastMissiles,
-        CharacterOptionId.ConfirmVolatileRareUse,
-        CharacterOptionId.AppearOffline,
-        CharacterOptionId.ListenToAllegianceChat,
-        CharacterOptionId.ListenToGeneralChat,
-        CharacterOptionId.ListenToTradeChat,
-        CharacterOptionId.ListenToLFGChat,
-        CharacterOptionId.ListenToRoleplayChat,
-        CharacterOptionId.ListenToSocietyChat,
-        // Tier 2 (4).
-        CharacterOptionId.MainPackPreferred,
-        CharacterOptionId.ToggleRun,
-        CharacterOptionId.AutoTarget,
-        CharacterOptionId.SalvageMultiple,
-    ];
-
-    private static readonly HashSet<string> AllowedCharacterOptionNames =
-        new(
-            AllowedCharacterOptions.Select(static id => id.ToString()),
-            StringComparer.Ordinal);
-
     private static readonly JsonSerializerOptions Options = new()
     {
         AllowTrailingCommas = false,
@@ -328,34 +291,13 @@ internal static class HeadlessConfigurationLoader
 
     private static void ValidateCharacterOptions(HeadlessSessionDescriptor session)
     {
-        if (session.CharacterOptions is not { } declared)
-            return;
-
-        foreach (string name in declared.Keys)
+        // The declarable set and the rules about it are the runtime's, so
+        // both clients refuse the same document for the same reason.
+        if (AcDream.Runtime.Gameplay.RuntimeDeclaredCharacterOptions.Describe(
+                session.Id,
+                session.CharacterOptions) is { } complaint)
         {
-            if (!AllowedCharacterOptionNames.Contains(name))
-            {
-                throw new HeadlessConfigurationException(
-                    $"Session '{session.Id}' characterOptions declares "
-                    + $"'{name}', which is not a bot-declarable character "
-                    + "option name.");
-            }
-        }
-
-        if (declared.TryGetValue(
-                nameof(CharacterOptionId.IgnoreFellowshipRequests), out bool ignoreFellowship)
-            && ignoreFellowship
-            && declared.TryGetValue(
-                nameof(CharacterOptionId.FellowshipAutoAcceptRequests), out bool autoAcceptFellowship)
-            && autoAcceptFellowship)
-        {
-            throw new HeadlessConfigurationException(
-                $"Session '{session.Id}' characterOptions declares both "
-                + $"'{nameof(CharacterOptionId.IgnoreFellowshipRequests)}' and "
-                + $"'{nameof(CharacterOptionId.FellowshipAutoAcceptRequests)}' "
-                + "as true; retail's own mutual exclusion makes that "
-                + "combination unsatisfiable — turning one on always clears "
-                + "the other.");
+            throw new HeadlessConfigurationException(complaint);
         }
     }
 }

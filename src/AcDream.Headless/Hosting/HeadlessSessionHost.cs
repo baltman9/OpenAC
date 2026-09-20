@@ -146,7 +146,7 @@ internal sealed class HeadlessSessionHost : IDisposable
     private RuntimeSessionStartStatus? _startOutcome;
     private bool _hasConnected;
     private readonly Dictionary<CharacterOptionId, bool> _declaredCharacterOptions;
-    private HeadlessCharacterOptionsSeeder? _optionsSeeder;
+    private RuntimeCharacterOptionsSeeder? _optionsSeeder;
     private readonly TimeSpan _reconnectQuiescence;
     private readonly TimeProvider _timeProvider;
     private readonly HeadlessGenerationResetHost _resetHost = new();
@@ -461,7 +461,7 @@ internal sealed class HeadlessSessionHost : IDisposable
 
     internal GameRuntime Runtime { get; }
     internal DirectGameRuntimeCommandAdapter Commands { get; }
-    internal HeadlessCharacterOptionsSeeder? OptionsSeeder => _optionsSeeder;
+    internal RuntimeCharacterOptionsSeeder? OptionsSeeder => _optionsSeeder;
     internal HeadlessPluginSession Plugins => _pluginSession;
     internal AcDream.Plugin.Abstractions.IPluginCommandRegistry PluginCommands =>
         _pluginSession.PluginCommands;
@@ -975,7 +975,7 @@ internal sealed class HeadlessSessionHost : IDisposable
     {
         _currentSession = session;
         _pendingConfirmation = null;
-        _optionsSeeder = new HeadlessCharacterOptionsSeeder(
+        _optionsSeeder = new RuntimeCharacterOptionsSeeder(
             _declaredCharacterOptions,
             Runtime,
             Commands.Character);
@@ -1131,18 +1131,10 @@ internal sealed class HeadlessSessionHost : IDisposable
     }
 
     private static Dictionary<CharacterOptionId, bool> ParseDeclaredCharacterOptions(
-        HeadlessSessionDescriptor descriptor)
-    {
-        var declared = new Dictionary<CharacterOptionId, bool>();
-        if (descriptor.CharacterOptions is not { } options)
-            return declared;
-        foreach (KeyValuePair<string, bool> pair in options)
-        {
-            declared[Enum.Parse<CharacterOptionId>(pair.Key, ignoreCase: false)] =
-                pair.Value;
-        }
-        return declared;
-    }
+        HeadlessSessionDescriptor descriptor) =>
+        RuntimeDeclaredCharacterOptions.Parse(
+            descriptor.Id,
+            descriptor.CharacterOptions);
 
     private static LiveSessionCharacterSelector? MapCharacterSelector(
         HeadlessCharacterSelector? selector) =>
