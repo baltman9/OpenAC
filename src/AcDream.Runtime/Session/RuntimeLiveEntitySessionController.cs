@@ -1,6 +1,7 @@
 using System.Numerics;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
+using AcDream.Core.Physics.Motion;
 using AcDream.Core.Physics;
 using AcDream.Runtime.Entities;
 using AcDream.Runtime.Gameplay;
@@ -42,6 +43,7 @@ public sealed class RuntimeLiveEntitySessionController
     private readonly Func<uint, bool> _isChildGuidKnown;
     private readonly Func<uint, ushort?> _resolveParentInstance;
     private readonly Func<ParentEvent.Parsed, bool> _acceptParentEvent;
+    private RuntimeRemoteArming? _remoteArming;
 
     public RuntimeLiveEntitySessionController(
         GameRuntime runtime,
@@ -66,6 +68,23 @@ public sealed class RuntimeLiveEntitySessionController
             candidate,
             acknowledgeProjection: null,
             out _);
+    }
+
+    /// <summary>
+    /// Hands this session the one owner that arms another creature's body
+    /// from the server's word about it. Without one, an accepted movement or
+    /// position for another creature still updates what this client knows and
+    /// still moves the body between cells; it just arms nothing.
+    /// </summary>
+    internal void BindRemoteArming(RuntimeRemoteArming arming)
+    {
+        ArgumentNullException.ThrowIfNull(arming);
+        if (_remoteArming is not null)
+        {
+            throw new InvalidOperationException(
+                "This session already has a remote arming bound.");
+        }
+        _remoteArming = arming;
     }
 
     public LiveEntitySessionSink CreateSink() => new(
@@ -177,6 +196,8 @@ public sealed class RuntimeLiveEntitySessionController
         // gets. A host with a window has always obeyed it.
         if (known && isLocal)
             _ = RuntimeServerControlledLocalMovement.TryApply(_runtime, update);
+        else if (known)
+            ArmRemoteInboundMotion(update);
     }
 
     private void OnPositionUpdated(
@@ -213,6 +234,7 @@ public sealed class RuntimeLiveEntitySessionController
 
         if (!isLocal)
         {
+            ArmRemoteAcceptedPosition(update, disposition, timestamps);
             TryCommitAcceptedWireCell(update);
             return;
         }
@@ -543,4 +565,172 @@ public sealed class RuntimeLiveEntitySessionController
                 $"Runtime rejected headless host acknowledgement {stage}.");
         }
     }
+
+    /// <summary>
+    /// Arms another creature's body from an accepted movement: gives the body
+    /// what it needs to move itself, then hands the movement to its
+    /// interpreter. This is the same arming a client with a window does, from
+    /// the same owner; what differs is only that nothing here is drawing the
+    /// body.
+    /// </summary>
+    private void ArmRemoteInboundMotion(
+        WorldSession.EntityMotionUpdate update)
+    {
+        if (_remoteArming is not { } arming
+            || !Entities.Entities.TryGetActive(
+                update.Guid,
+                out RuntimeEntityRecord record)
+            || (record.FinalPhysicsState & PhysicsStateFlags.Static) != 0
+            || record.PhysicsBody is null)
+        {
+            return;
+        }
+
+        ulong movementAuthority = record.MovementAuthorityVersion;
+        ulong velocityAuthority = record.VelocityAuthorityVersion;
+        bool IsCurrent() =>
+            Entities.Entities.IsCurrent(record)
+            && record.MovementAuthorityVersion == movementAuthority
+            && record.VelocityAuthorityVersion == velocityAuthority;
+        if (!IsCurrent())
+            return;
+
+        RemoteMotion remote = Entities.Physics.GetOrCreateRemoteMotion(record);
+        if (!IsCurrent())
+            return;
+
+        AnimationSequencer? sequencer =
+            Entities.Physics.EntityRemoteAnimation(update.Guid)?.Sequencer;
+        IInterpretedMotionSink? sink = arming.EnsureRemoteMotionBindings(
+            remote,
+            sequencer,
+            update.Guid);
+        if (!IsCurrent())
+            return;
+
+        uint commandClass = sequencer?.CurrentMotion & 0xFF000000u
+            ?? remote.Motion.InterpretedState.ForwardCommand & 0xFF000000u;
+        if (commandClass == 0u)
+            commandClass = 0x41000000u;
+
+        _ = arming.InboundMotion.Apply(
+            update,
+            remote.Movement,
+            sink,
+            remote.Host,
+            remote.CellId,
+            commandClass,
+            IsCurrent);
+    }
+
+    /// <summary>
+    /// Does to another creature's body what an accepted position says to do:
+    /// the same one of four things the client with a window does, decided by
+    /// the same owner. A body with nothing armed under it yet is left to the
+    /// cell bookkeeping alone.
+    /// </summary>
+    private void ArmRemoteAcceptedPosition(
+        WorldSession.EntityPositionUpdate update,
+        PositionTimestampDisposition disposition,
+        in AcceptedPhysicsTimestamps timestamps)
+    {
+        if (_remoteArming is not { } arming
+            || !Entities.Entities.TryGetActive(
+                update.Guid,
+                out RuntimeEntityRecord record)
+            || record.RemoteMotion is not RemoteMotion remote
+            || IsMissilePacket(record, update.Guid))
+        {
+            return;
+        }
+
+        ulong positionAuthority = record.PositionAuthorityVersion;
+        bool IsCurrent() =>
+            Entities.Entities.IsCurrent(record)
+            && record.PositionAuthorityVersion == positionAuthority
+            && ReferenceEquals(record.RemoteMotion, remote);
+        if (!IsCurrent())
+            return;
+
+        RuntimeAuthoritativePositionRoute? route =
+            Entities.ClassifyRemoteAcceptedPosition(
+                record,
+                update,
+                disposition,
+                timestamps,
+                PlayerDistanceTo(update.Position));
+        if (!IsCurrent()
+            || RuntimeRemoteSteadyStatePosition.IsAirborneNoOperation(route))
+        {
+            return;
+        }
+
+        bool isTeleport =
+            RuntimeRemoteTeleportPosition.OwnsTeleportPlacement(route);
+        if (!update.IsGrounded && !isTeleport)
+            return;
+
+        RuntimeRemoteContactRouting routing =
+            arming.ApplyRemoteContactRouting(
+                record,
+                remote,
+                route,
+                Entities.Physics.WireOriginToWorldFrame(
+                    update.Position.LandblockId,
+                    update.Position.PositionX,
+                    update.Position.PositionY,
+                    update.Position.PositionZ),
+                new Quaternion(
+                    update.Position.RotationX,
+                    update.Position.RotationY,
+                    update.Position.RotationZ,
+                    update.Position.RotationW),
+                willBeAdvanced: false,
+                runTeleportHook: IsCurrent);
+        if (!IsCurrent())
+            return;
+
+        RuntimeRemoteSteadyStatePosition.TryArmConstraintAfterOperation(
+            ToConstraintArm(routing.Arm),
+            remote);
+        RuntimeRemoteArming.TryAdoptWireCellAfterRouting(
+            remote,
+            routing,
+            update.Position.LandblockId);
+    }
+
+    /// <summary>
+    /// How far the accepted position is from this character, which is one of
+    /// the things that decides whether a body is re-placed or asked to catch
+    /// up. Null when this character has no body of its own yet.
+    /// </summary>
+    private float? PlayerDistanceTo(CreateObject.ServerPosition position)
+    {
+        if (_runtime.MovementOwner.Controller is not { } controller)
+            return null;
+        return Vector3.Distance(
+            Entities.Physics.WireOriginToWorldFrame(
+                position.LandblockId,
+                position.PositionX,
+                position.PositionY,
+                position.PositionZ),
+            controller.Position);
+    }
+
+    private static RuntimeRemoteAcceptedPositionArm ToConstraintArm(
+        RuntimeRemoteContactArm arm) => arm switch
+    {
+        RuntimeRemoteContactArm.TeleportPlacement =>
+            RuntimeRemoteAcceptedPositionArm.TeleportPlacement,
+        RuntimeRemoteContactArm.FarSnapPlacement =>
+            RuntimeRemoteAcceptedPositionArm.FarSnapPlacement,
+        RuntimeRemoteContactArm.SteadyStateInterpolate =>
+            RuntimeRemoteAcceptedPositionArm.NearInterpolate,
+        RuntimeRemoteContactArm.AirborneSnap =>
+            RuntimeRemoteAcceptedPositionArm.NearInterpolate,
+        RuntimeRemoteContactArm.UnroutedCatchUp =>
+            RuntimeRemoteAcceptedPositionArm.UnroutedCatchUp,
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(arm), arm, "Unhandled remote contact arm."),
+    };
 }

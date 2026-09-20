@@ -167,6 +167,7 @@ internal sealed class HeadlessSessionHost : IDisposable
     private readonly IRuntimePlacementProjectionSink? _placementSinkOverride;
     private RuntimeFirstEntryDriveController? _firstEntryDrive;
     private RuntimeAcceptedPositionDriveController? _acceptedPositionDrive;
+    private AcDream.Runtime.Physics.RuntimeRemoteArming? _remoteArming;
     private AcDream.Core.Net.WorldSession? _currentSession;
     private HeadlessSessionWorldProjection? _worldProjection;
     private RuntimeLiveEntitySessionController? _entities;
@@ -1001,6 +1002,14 @@ internal sealed class HeadlessSessionHost : IDisposable
                     Runtime.Generation.Value));
             _worldProjection = projection;
             worldProjection = projection;
+            // Arming another creature's body is the runtime's, and this client
+            // arms the same bodies the same way; it simply draws none of
+            // them, so the arming answers its own questions off the record.
+            _remoteArming ??= AcDream.Runtime.Physics.RuntimeRemoteArming.Create(
+                Runtime.EntityObjects,
+                Runtime.Clock,
+                content.PreparedCollision,
+                projection.RemotePlacementServiceWindow);
         }
         var entities = new RuntimeLiveEntitySessionController(
             Runtime,
@@ -1014,6 +1023,8 @@ internal sealed class HeadlessSessionHost : IDisposable
             // OP7: the first two of three production LoginComplete send
             // sites — see RuntimeLiveEntitySessionController's own doc.
             onLoginCompleteSent: () => _optionsSeeder?.NoteLoginCompleteSent());
+        if (_remoteArming is { } remoteArming)
+            entities.BindRemoteArming(remoteArming);
         _entities = entities;
         var route = new LiveSessionEventRouter(
             session,

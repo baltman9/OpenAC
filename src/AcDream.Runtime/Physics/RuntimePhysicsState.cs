@@ -607,6 +607,43 @@ public sealed class RuntimePhysicsState : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// A place named as an offset inside a landblock, carried into the frame
+    /// the local character's own body is measured in. With no frame published
+    /// yet the offset is zero, which measures from the corner of the world.
+    /// </summary>
+    internal System.Numerics.Vector3 WireOriginToWorldFrame(
+        uint originCellId,
+        float originX,
+        float originY,
+        float originZ)
+    {
+        EnsureNotDisposed();
+        _ = TryGetWorldFrameOffset(
+            originCellId,
+            out float offsetX,
+            out float offsetY);
+        return new System.Numerics.Vector3(
+            originX + offsetX,
+            originY + offsetY,
+            originZ);
+    }
+
+    /// <summary>
+    /// Where a thing this client could be ordered to walk at or stick to is,
+    /// or null when there is nothing to follow: no live record, nothing to
+    /// see, or no position to aim at. Null is the refusal such an order needs.
+    /// </summary>
+    internal System.Numerics.Vector3? InteractionTargetPosition(uint serverGuid)
+    {
+        EnsureNotDisposed();
+        return Entities.TryGetActive(serverGuid, out RuntimeEntityRecord record)
+            && (record.FinalPhysicsState & PhysicsStateFlags.Hidden) == 0
+            && TryGetObjectTablePosition(record, out Position position)
+                ? position.Frame.Origin
+                : null;
+    }
+
     public RuntimePhysicsOwnershipSnapshot CaptureOwnership()
     {
         RuntimeSetPositionOwnershipSnapshot setPosition =

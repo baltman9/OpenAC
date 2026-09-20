@@ -622,13 +622,22 @@ internal sealed class SessionPlayerCompositionPhase
                     portal.RevealGeneration,
                     portal.TeleportSequence,
                     portal.Projection.DestinationCell));
-        var remotePlacementDrive = new RuntimeRemotePlacementDriveController(
+        // Arming another creature's body from the server's word about it is one
+        // implementation for every client, and it owns the drive that carries
+        // out an accepted re-placement, so a body the server moved lands in
+        // the same place here as it does without a window. This client hands
+        // it the short list of things only a drawn world can answer.
+        var remoteArming = RuntimeRemoteArming.Create(
             d.EntityObjects,
             d.Runtime.Clock,
             firstEntryCollision,
             new GraphicalRemotePlacementServiceWindow(
                 live.WorldState,
-                streaming.IsLandblockPresentationReady));
+                streaming.IsLandblockPresentationReady),
+            d.MotionBindings.HostFacts);
+        d.MotionBindings.BindArming(remoteArming);
+        RuntimeRemotePlacementDriveController remotePlacementDrive =
+            remoteArming.PlacementDrive;
         var hydration = new LiveEntityHydrationController(
             live.LiveEntities,
             d.EntityObjects,

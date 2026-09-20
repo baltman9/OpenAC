@@ -1,13 +1,28 @@
 using System.Collections.Immutable;
+using System.Numerics;
 using AcDream.App.Interaction;
 using AcDream.App.Rendering;
 using AcDream.App.World;
 using AcDream.Core.Physics;
 using AcDream.Core.Selection;
 using AcDream.Core.World;
+using AcDream.Runtime.Entities;
+using AcDream.Runtime.Physics;
 
 namespace AcDream.App.Physics;
 
+/// <summary>
+/// What this client — the one with a window — knows about another creature's
+/// body when the server's word about it arrives, and how it hands that to the
+/// shared arming.
+/// </summary>
+/// <remarks>
+/// The arming itself is not here any more: a body is armed the same way on
+/// every client, so one owner does it. What IS here is the short list of
+/// things only a client with a drawn world can answer — which bodies it is
+/// drawing, where it has them, and the centre it measures a landblock-local
+/// place from — handed over as the facts the shared arming asks for.
+/// </remarks>
 internal sealed class LiveEntityMotionRuntimeController
     : ILiveEntityMotionRuntimeBindings
 {
@@ -15,6 +30,8 @@ internal sealed class LiveEntityMotionRuntimeController
     private readonly Func<SelectionInteractionController?> _selectionInteractions;
     private readonly SelectionState _selection;
     private readonly LiveWorldOriginState _origin;
+
+    private RuntimeRemoteArming? _arming;
 
     public LiveEntityMotionRuntimeController(
         LiveEntityRuntime liveEntities,
@@ -27,97 +44,64 @@ internal sealed class LiveEntityMotionRuntimeController
         _selection = selection ?? throw new ArgumentNullException(nameof(selection));
         _origin = origin ?? throw new ArgumentNullException(nameof(origin));
     }
-    internal AcDream.Core.Physics.Motion.MotionTableDispatchSink? EnsureRemoteMotionBindings(
-        RemoteMotion rm, LiveEntityAnimationState? ae, uint serverGuid)
+
+    /// <summary>
+    /// What this client can tell the shared arming that the arming cannot work
+    /// out for itself.
+    /// </summary>
+    /// <remarks>
+    /// Each answer is the drawn world's, and each is the one the window has
+    /// always used. "A body I am drawing" is a stronger test than "a live
+    /// record": the projection that draws a body can be replaced while the
+    /// record lives on, and a body whose drawn form has gone is not one to
+    /// hang a physics host off.
+    /// </remarks>
+    public RuntimeRemoteArmingHostFacts HostFacts => new(
+        DrawnBody: serverGuid =>
+            _liveEntities.TryGetRecord(serverGuid, out LiveEntityRecord record)
+                && record.WorldEntity is not null
+                ? new RuntimeRemoteArmingDrawnBody(
+                    record.Canonical,
+                    () => record.WorldEntity?.Position,
+                    () => _liveEntities.TryGetRecord(
+                            serverGuid, out LiveEntityRecord current)
+                        && ReferenceEquals(current, record))
+                : null,
+        WireOriginToWorld: (originCellId, x, y, z) =>
+            AcDream.Core.Physics.Motion.MoveToMath.OriginToWorld(
+                originCellId, x, y, z, _origin.CenterX, _origin.CenterY),
+        InteractionTargetPosition: serverGuid =>
+            _liveEntities.TryGetInteractionEligibleEntity(
+                serverGuid, out WorldEntity target)
+                ? target.Position
+                : null);
+
+    /// <summary>
+    /// Hands this client's facts to the one arming, once per session. The
+    /// arming is built where the collision catalogue and the service window
+    /// are, which is later than this controller.
+    /// </summary>
+    public void BindArming(RuntimeRemoteArming arming)
     {
-        AcDream.Core.Physics.AnimationSequencer? sequencer = ae?.Sequencer;
-        if (sequencer is not null && rm.Sink is null)
+        ArgumentNullException.ThrowIfNull(arming);
+        if (_arming is not null)
         {
-            rm.Sink = new AcDream.Core.Physics.Motion.MotionTableDispatchSink(sequencer);
-            rm.Motion.DefaultSink = rm.Sink;
+            throw new InvalidOperationException(
+                "The live-entity motion controller is already bound to a "
+                + "remote arming.");
         }
-        if (sequencer is not null)
-        {
-            rm.Motion.RemoveLinkAnimations = () => sequencer.Manager.HandleEnterWorld();
-            rm.Motion.InitializeMotionTables = () => sequencer.Manager.InitializeState();
-            rm.Motion.CheckForCompletedMotions = sequencer.Manager.CheckForCompletedMotions;
-        }
-
-        if (rm.Host is not null)
-            return rm.Sink;
-        if (_liveEntities is not { } liveEntities
-            || !liveEntities.TryGetRecord(serverGuid, out LiveEntityRecord hostRecord)
-            || !ReferenceEquals(hostRecord.RemoteMotionRuntime, rm))
-        {
-            return rm.Sink;
-        }
-        var rmT = rm;
-        var mtBody = rm.Body;
-        if (!_liveEntities.TryGetWorldEntity(serverGuid, out var selfEntity))
-            return rm.Sink;
-        EntityPhysicsHost host = null!;
-        double NowSeconds() => (System.DateTime.UtcNow - System.DateTime.UnixEpoch).TotalSeconds;
-        rm.Movement.MoveToFactory = () =>
-        {
-            var mtm = new AcDream.Core.Physics.Motion.MoveToManager(
-                rm.Motion,
-                stopCompletely: () => rmT.Movement.PerformMovement(
-                    new AcDream.Core.Physics.MovementStruct
-                    {
-                        Type = AcDream.Core.Physics.MovementType.StopCompletely,
-                    }),
-                getPosition: () => new AcDream.Core.Physics.Position(
-                    rmT.CellId, mtBody.Position, mtBody.Orientation),
-                getHeading: () => AcDream.Core.Physics.Motion.MoveToMath.GetHeading(
-                    mtBody.Orientation),
-                setHeading: (h, _) => mtBody.Orientation =
-                    AcDream.Core.Physics.Motion.MoveToMath.SetHeading(mtBody.Orientation, h),
-                getOwnRadius: () => GetSetupCylinder(serverGuid, selfEntity).Radius,
-                getOwnHeight: () => GetSetupCylinder(serverGuid, selfEntity).Height,
-                contact: () => mtBody.OnWalkable,
-                isInterpolating: () => rmT.Interp.IsActive,
-                getVelocity: () => mtBody.Velocity,
-                getSelfId: () => serverGuid,
-                setTarget: (ctx, tlid, radius, q) => host.SetTarget(ctx, tlid, radius, q),
-                clearTarget: () => host.ClearTarget(),
-                getTargetQuantum: () => host.TargetManager.GetTargetQuantum(),
-                setTargetQuantum: q => host.TargetManager.SetTargetQuantum(q),
-                curTime: NowSeconds);
-            mtm.StickTo = (tlid, radius, height) =>
-                host.PositionManager.StickTo(tlid, radius, height);
-            mtm.Unstick = host.PositionManager.UnStick;
-            return mtm;
-        };
-        rm.Motion.InterruptCurrentMovement =
-            () => rmT.Movement.CancelMoveTo(
-                AcDream.Core.Physics.WeenieError.ActionCancelled);
-
-        var configuredHost = new EntityPhysicsHost(
-            serverGuid,
-            getPosition: () => new AcDream.Core.Physics.Position(
-                hostRecord.FullCellId,
-                hostRecord.WorldEntity?.Position ?? mtBody.Position,
-                mtBody.Orientation),
-            getVelocity: () => mtBody.Velocity,
-            getRadius: () => GetSetupCylinder(serverGuid, selfEntity).Radius,
-            inContact: () => mtBody.OnWalkable,
-            minterpMaxSpeed: () => rmT.Motion.GetAdjustedMaxSpeed(),
-            curTime: NowSeconds,
-            physicsTimerTime: NowSeconds,
-            getObjectA: ResolvePhysicsHost,
-            handleUpdateTarget: info => rmT.Movement.HandleUpdateTarget(info),
-            interruptCurrentMovement: () => rmT.Movement.CancelMoveTo(
-                AcDream.Core.Physics.WeenieError.ActionCancelled));
-        host = EntityPhysicsHostComposition.InstallOrRebind(
-            liveEntities,
-            hostRecord,
-            configuredHost);
-        rm.MarkFullPhysicsHostBound();
-
-        rm.Movement.MakeMoveToManager();
-        rm.Motion.UnstickFromObject = host.PositionManager.UnStick;
-        return rm.Sink;
+        _arming = arming;
     }
+
+    private RuntimeRemoteArming Arming =>
+        _arming ?? throw new InvalidOperationException(
+            "The live-entity motion controller has no remote arming bound; "
+            + "the session composition must bind one before the first "
+            + "inbound movement.");
+
+    internal AcDream.Core.Physics.Motion.MotionTableDispatchSink? EnsureRemoteMotionBindings(
+        RemoteMotion rm, LiveEntityAnimationState? ae, uint serverGuid) =>
+        Arming.EnsureRemoteMotionBindings(rm, ae?.Sequencer, serverGuid);
 
     public AcDream.Core.Physics.Motion.IPhysicsObjHost? ResolvePhysicsHost(uint id)
     {
@@ -170,16 +154,8 @@ internal sealed class LiveEntityMotionRuntimeController
 
     public void StickToObjectFromWire(
         AcDream.Core.Physics.Motion.IPhysicsObjHost? host,
-        uint targetGuid)
-    {
-        if (host is not EntityPhysicsHost entityHost)
-            return;
-        if (_liveEntities is not { } liveEntities
-            || !liveEntities.TryGetInteractionEligibleEntity(targetGuid, out var tgtEnt))
-            return;
-        var (radius, height) = GetSetupCylinder(targetGuid, tgtEnt);
-        entityHost.PositionManager.StickTo(targetGuid, radius, height);
-    }
+        uint targetGuid) =>
+        Arming.StickToObjectFromWire(host, targetGuid);
 
     public void ClearTargetForHiddenEntity(uint serverGuid)
     {
@@ -195,102 +171,6 @@ internal sealed class LiveEntityMotionRuntimeController
     public bool RouteServerMoveTo(
         AcDream.Core.Physics.Motion.MovementManager movement,
         uint cellId,
-        AcDream.Core.Net.WorldSession.EntityMotionUpdate update)
-    {
-        if (update.MotionState.IsServerControlledMoveTo
-            && update.MotionState.MoveToPath is { } path)
-        {
-            // my_run_rate write (unpack_movement @300603).
-            if (update.MotionState.MoveToRunRate is { } mtRunRate)
-                movement.Minterp.MyRunRate = mtRunRate;
-
-            var destWorld = AcDream.Core.Physics.Motion.MoveToMath
-                .OriginToWorld(
-                    path.OriginCellId, path.OriginX, path.OriginY, path.OriginZ,
-                    _origin.CenterX, _origin.CenterY);
-            var mp = AcDream.Core.Physics.Motion.MovementParameters.FromWire(
-                path.Bitfield,
-                path.DistanceToObject,
-                path.MinDistance,
-                path.FailDistance,
-                update.MotionState.MoveToSpeed ?? 1f,
-                path.WalkRunThreshold,
-                path.DesiredHeading);
-
-            var ms = new AcDream.Core.Physics.MovementStruct
-            {
-                Params = mp,
-            };
-            // mt 6 with a resolvable target → MoveToObject (the P4 tracker
-            // feeds position updates per tick); else degrade to
-            // MoveToPosition at the wire origin (§2f).
-            if (update.MotionState.MovementType == 6
-                && path.TargetGuid is { } tgtGuid
-                && _liveEntities is { } liveMoveEntities
-                && liveMoveEntities.TryGetInteractionEligibleEntity(tgtGuid, out var tgtEnt)
-                && ResolvePhysicsHost(tgtGuid) is not null)
-            {
-                ms.Type = AcDream.Core.Physics.MovementType.MoveToObject;
-                ms.ObjectId = tgtGuid;
-                ms.TopLevelId = tgtGuid;
-                (ms.Radius, ms.Height) = GetSetupCylinder(tgtGuid, tgtEnt);
-                ms.Pos = new AcDream.Core.Physics.Position(
-                    cellId, tgtEnt.Position,
-                    System.Numerics.Quaternion.Identity);
-            }
-            else
-            {
-                ms.Type = AcDream.Core.Physics.MovementType.MoveToPosition;
-                ms.Pos = new AcDream.Core.Physics.Position(
-                    cellId, destWorld,
-                    System.Numerics.Quaternion.Identity);
-            }
-            movement.PerformMovement(ms);
-            return true;
-        }
-
-        if (update.MotionState.IsServerControlledTurnTo
-            && update.MotionState.TurnToPath is { } turnPath)
-        {
-            var mp = AcDream.Core.Physics.Motion.MovementParameters.FromWireTurnTo(
-                turnPath.Bitfield,
-                turnPath.Speed,
-                turnPath.DesiredHeading);
-
-            var ms = new AcDream.Core.Physics.MovementStruct { Params = mp };
-            // The same test the walk branch above makes, and for the same
-            // reason: an order that names something with no body to follow
-            // degrades to the heading it named. Facing had been letting a
-            // bodiless id through, which is the one place these two routes
-            // disagreed.
-            if (update.MotionState.MovementType == 8
-                && turnPath.TargetGuid is { } turnTgt
-                && _liveEntities is { } liveTurnEntities
-                && liveTurnEntities.TryGetInteractionEligibleEntity(turnTgt, out var turnEnt)
-                && ResolvePhysicsHost(turnTgt) is not null)
-            {
-                ms.Type = AcDream.Core.Physics.MovementType.TurnToObject;
-                ms.ObjectId = turnTgt;
-                ms.TopLevelId = turnTgt;
-                ms.Pos = new AcDream.Core.Physics.Position(
-                    cellId, turnEnt.Position,
-                    System.Numerics.Quaternion.Identity);
-            }
-            else
-            {
-                ms.Type = AcDream.Core.Physics.MovementType.TurnToHeading;
-                if (update.MotionState.MovementType == 8
-                    && turnPath.WireHeading is { } wireHeading)
-                {
-                    mp.DesiredHeading = wireHeading;
-                }
-            }
-            movement.PerformMovement(ms);
-            return true;
-        }
-
-        return false;
-    }
-
-
+        AcDream.Core.Net.WorldSession.EntityMotionUpdate update) =>
+        Arming.RouteServerMoveTo(movement, cellId, update);
 }

@@ -79,6 +79,17 @@ public sealed class DeferredLiveEntityMotionRuntimeBindingsTests
         public void StickToObjectFromWire(IPhysicsObjHost? host, uint targetGuid) =>
             Calls.Add($"stick:{targetGuid}");
         public void ClearTargetForHiddenEntity(uint guid) => Calls.Add($"hidden:{guid}");
+        public AcDream.Runtime.Physics.RuntimeRemoteArmingHostFacts HostFacts
+        {
+            get
+            {
+                Calls.Add("facts");
+                return default;
+            }
+        }
+        public void BindArming(
+            AcDream.Runtime.Physics.RuntimeRemoteArming arming) =>
+            Calls.Add("arming");
         public IPhysicsObjHost? ResolvePhysicsHost(uint guid)
         {
             Calls.Add($"host:{guid}");

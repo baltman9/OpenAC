@@ -3252,6 +3252,8 @@ public sealed class HeadlessSessionHostTests
 
         public bool IsWithinServiceWindow(uint fullCellId) => true;
 
+        public bool IsCollisionPublished(uint fullCellId) => true;
+
         public bool IsQuiescent => true;
     }
 
@@ -3354,6 +3356,8 @@ public sealed class HeadlessSessionHostTests
         public bool IsReady(uint fullCellId) => true;
 
         public bool IsWithinServiceWindow(uint fullCellId) => true;
+
+        public bool IsCollisionPublished(uint fullCellId) => true;
 
         public bool IsQuiescent => true;
     }
@@ -4554,6 +4558,9 @@ public sealed class HeadlessSessionHostTests
 
         public bool IsQuiescent => true;
 
+        public bool IsCollisionPublished(uint fullCellId) =>
+            IsWithinServiceWindow(fullCellId);
+
         public bool IsWithinServiceWindow(uint fullCellId)
         {
             if (LastCell == 0u)
@@ -4604,6 +4611,8 @@ public sealed class HeadlessSessionHostTests
         public bool IsReady(uint fullCellId) => true;
 
         public bool IsWithinServiceWindow(uint fullCellId) => true;
+
+        public bool IsCollisionPublished(uint fullCellId) => true;
     }
 
     private sealed class GateControllableCollisionNeighborhood
@@ -4618,6 +4627,8 @@ public sealed class HeadlessSessionHostTests
         public bool IsReady(uint fullCellId) => fullCellId == _lastCell;
 
         public bool IsWithinServiceWindow(uint fullCellId) => true;
+
+        public bool IsCollisionPublished(uint fullCellId) => true;
 
         public bool IsQuiescent => QuiescentOverride;
     }

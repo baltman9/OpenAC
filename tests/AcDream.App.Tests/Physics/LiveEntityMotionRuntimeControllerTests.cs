@@ -24,9 +24,10 @@ public sealed class LiveEntityMotionRuntimeControllerTests
             0x0101FFFFu,
             new LandBlock(),
             Array.Empty<WorldEntity>()));
-        var runtime = LiveEntityRuntimeFixture.Create(
-            spatial,
-            new DelegateLiveEntityResourceLifecycle(_ => { }, _ => { }));
+        (LiveEntityRuntime runtime, AcDream.Runtime.Entities.RuntimeEntityObjectLifetime lifetime) =
+            LiveEntityRuntimeFixture.CreateWithLifetime(
+                spatial,
+                new DelegateLiveEntityResourceLifecycle(_ => { }, _ => { }));
         runtime.RegisterAndMaterializeProjection(Spawn(targetGuid, cellId));
         Assert.False(runtime.TryGetPhysicsHost(targetGuid, out _));
 
@@ -37,6 +38,11 @@ public sealed class LiveEntityMotionRuntimeControllerTests
             static () => null,
             new SelectionState(),
             origin);
+        lifetime.Physics.BindObjectTableHostResolver(
+            controller.ResolvePhysicsHost);
+        controller.BindArming(
+            LiveEntityRuntimeFixture.CreateArming(
+                lifetime, controller.HostFacts));
         var movement = new MovementManager(new MotionInterpreter());
         var update = new WorldSession.EntityMotionUpdate(
             Guid: 0x50000001u,

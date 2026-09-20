@@ -15,6 +15,7 @@ using AcDream.Core.Items;
 using AcDream.Core.Physics;
 using AcDream.Runtime.Entities;
 using AcDream.Runtime.Gameplay;
+using AcDream.Runtime.Physics;
 using AcDream.Runtime.Session;
 using AcDream.Core.Selection;
 using AcDream.Core.World;
@@ -633,115 +634,6 @@ internal sealed class LiveEntityNetworkUpdateController
         return true;
     }
 
-    internal enum RemoteContactArm : byte
-    {
-        AirborneSnap,
-
-        /// <summary>Route 4a's near InterpolateTo branch.</summary>
-        SteadyStateInterpolate,
-
-        FarSnapPlacement,
-
-        TeleportPlacement,
-
-        UnroutedCatchUp,
-    }
-
-    internal readonly record struct RemoteContactRouting(
-        RemoteContactArm Arm,
-        RuntimeRemotePlacementExecutionStatus? Placement,
-        RuntimeRemoteSteadyStatePosition.Action? Interpolation = null);
-
-    internal static RemoteContactRouting ApplyRemoteContactRouting(
-        RuntimeRemotePlacementDriveController placementDrive,
-        RuntimeEntityRecord canonical,
-        RemoteMotion remote,
-        RuntimeAuthoritativePositionRoute? route,
-        System.Numerics.Vector3 worldPos,
-        System.Numerics.Quaternion rotation,
-        bool willBeDrTicked,
-        Func<bool> runTeleportHook)
-    {
-        ArgumentNullException.ThrowIfNull(placementDrive);
-        ArgumentNullException.ThrowIfNull(canonical);
-        ArgumentNullException.ThrowIfNull(remote);
-        ArgumentNullException.ThrowIfNull(runTeleportHook);
-
-        if (RuntimeRemoteTeleportPosition.OwnsTeleportPlacement(route))
-        {
-            bool hookRan = runTeleportHook();
-            RuntimeRemotePlacementExecutionStatus teleportStatus =
-                placementDrive.ApplyAcceptedRemoteTeleport(
-                    canonical,
-                    remote,
-                    route!.Value);
-            if (AcDream.Core.Physics.PhysicsDiagnostics.ProbeRemoteTeleportEnabled)
-            {
-                AcDream.Core.Physics.PhysicsDiagnostics.LogRemoteTeleport(
-                    canonical.ServerGuid,
-                    cause: route.Value.Authority.TeleportAdvanced
-                        ? "teleport-ts"
-                        : "cellless",
-                    hookRan,
-                    teleportStatus.ToString());
-            }
-            return new RemoteContactRouting(
-                RemoteContactArm.TeleportPlacement,
-                teleportStatus);
-        }
-
-        AcDream.Core.Physics.PhysicsDiagnostics.BeginRemoteSlideAttribution(
-            canonical.ServerGuid);
-        if (!remote.Body.InContact)
-        {
-            remote.Body.Position = worldPos;
-            remote.Body.Orientation = rotation;
-            return new RemoteContactRouting(
-                RemoteContactArm.AirborneSnap, Placement: null);
-        }
-
-        switch (RuntimeRemoteFarSnapPosition.ResolveArm(route))
-        {
-            case RuntimeRemoteAcceptedPositionArm.FarSnapPlacement:
-                return new RemoteContactRouting(
-                    RemoteContactArm.FarSnapPlacement,
-                    placementDrive.ApplyAcceptedRemoteFarSnap(
-                        canonical,
-                        remote,
-                        route!.Value));
-
-            case RuntimeRemoteAcceptedPositionArm.NearInterpolate:
-                return new RemoteContactRouting(
-                    RemoteContactArm.SteadyStateInterpolate,
-                    Placement: null,
-                    Interpolation: RuntimeRemoteSteadyStatePosition.ApplyInterpolate(
-                        remote,
-                        worldPos,
-                        rotation,
-                        isMovingTo: remote.Movement.IsMovingTo(),
-                        willBeDrTicked,
-                        (canonical.Snapshot.Physics?.Position ?? canonical.Snapshot.Position)?.LandblockId ?? 0u));
-
-            case RuntimeRemoteAcceptedPositionArm.AirborneNoOperation:
-                throw new InvalidOperationException(
-                    "A NoPositionOperation (airborne no-op) classification "
-                    + "must be handled by the caller's own early return "
-                    + "before routing; MoveOrTeleport writes nothing "
-                    + "at all on that branch.");
-
-            default:
-                return new RemoteContactRouting(
-                    RemoteContactArm.UnroutedCatchUp,
-                    Placement: null,
-                    Interpolation: RuntimeRemoteSteadyStatePosition.ApplyInterpolate(
-                        remote,
-                        worldPos,
-                        rotation,
-                        isMovingTo: remote.Movement.IsMovingTo(),
-                        willBeDrTicked,
-                        (canonical.Snapshot.Physics?.Position ?? canonical.Snapshot.Position)?.LandblockId ?? 0u));
-        }
-    }
 
     private static void ApplyWireAirborneLeftoverBookkeeping(
         RemoteMotion remote,
@@ -755,7 +647,7 @@ internal sealed class LiveEntityNetworkUpdateController
         remote.LastServerPosTime = nowSec;
     }
 
-    private RemoteContactRouting? RunRemoteArmTail(
+    private RuntimeRemoteContactRouting? RunRemoteArmTail(
         RuntimeEntityRecord canonical,
         LiveEntityRecord positionRecord,
         RemoteMotion remote,
@@ -772,18 +664,18 @@ internal sealed class LiveEntityNetworkUpdateController
         _remoteArmPositionAuthorityVersion = positionAuthorityVersion;
         _remoteArmExpectedEntity = expectedEntity;
 
-        RemoteContactRouting routing = ApplyRemoteContactRouting(
+        RuntimeRemoteContactRouting routing = RuntimeRemoteArming.ApplyRemoteContactRouting(
             _remotePlacementDrive,
             canonical,
             remote,
             route,
             worldPos,
             rotation,
-            willBeDrTicked: WillAdvanceRemoteMotion(guid, remote),
+            willBeAdvanced: WillAdvanceRemoteMotion(guid, remote),
             runTeleportHook: _remoteArmCallbacks.RunTeleportHook);
 
-        if ((routing.Arm is RemoteContactArm.FarSnapPlacement
-                or RemoteContactArm.TeleportPlacement)
+        if ((routing.Arm is RuntimeRemoteContactArm.FarSnapPlacement
+                or RuntimeRemoteContactArm.TeleportPlacement)
             && (!_remoteArmCallbacks.IsCurrentPositionOwner()
                 || !ReferenceEquals(positionRecord.RemoteMotionRuntime, remote)))
         {
@@ -811,35 +703,6 @@ internal sealed class LiveEntityNetworkUpdateController
         && RunRemoteTeleportHook(
             canonical, motion, _remoteArmCallbacks.IsCurrentPositionOwner);
 
-    internal static bool TryAdoptWireCellAfterRouting(
-        RemoteMotion remote,
-        RemoteContactArm arm,
-        uint wireCellId)
-        => TryAdoptWireCellAfterRouting(
-            remote,
-            new RemoteContactRouting(arm, Placement: null),
-            wireCellId);
-
-    /// <summary>
-    /// Adopts the wire cell as the body's cell only when the routing moved
-    /// the body to the wire pose. Placements own their own cell commit, and
-    /// a queued interpolation changes nothing physical yet: the body keeps
-    /// its committed cell until its own sweeps carry it across.
-    /// </summary>
-    internal static bool TryAdoptWireCellAfterRouting(
-        RemoteMotion remote,
-        RemoteContactRouting routing,
-        uint wireCellId)
-    {
-        ArgumentNullException.ThrowIfNull(remote);
-        if (routing.Arm is RemoteContactArm.FarSnapPlacement
-            or RemoteContactArm.TeleportPlacement)
-            return false;
-        if (routing.Interpolation is RuntimeRemoteSteadyStatePosition.Action.Enqueued)
-            return false;
-        remote.CellId = wireCellId;
-        return true;
-    }
 
     /// <summary>
     /// True when the accepted position will only be queued for interpolation
@@ -868,20 +731,20 @@ internal sealed class LiveEntityNetworkUpdateController
     }
 
     private static RuntimeRemoteAcceptedPositionArm ToConstraintArm(
-        RemoteContactArm arm) => arm switch
+        RuntimeRemoteContactArm arm) => arm switch
     {
-        RemoteContactArm.TeleportPlacement =>
+        RuntimeRemoteContactArm.TeleportPlacement =>
             RuntimeRemoteAcceptedPositionArm.TeleportPlacement,
-        RemoteContactArm.FarSnapPlacement =>
+        RuntimeRemoteContactArm.FarSnapPlacement =>
             RuntimeRemoteAcceptedPositionArm.FarSnapPlacement,
-        RemoteContactArm.SteadyStateInterpolate =>
+        RuntimeRemoteContactArm.SteadyStateInterpolate =>
             RuntimeRemoteAcceptedPositionArm.NearInterpolate,
-        RemoteContactArm.AirborneSnap =>
+        RuntimeRemoteContactArm.AirborneSnap =>
             RuntimeRemoteAcceptedPositionArm.NearInterpolate,
-        RemoteContactArm.UnroutedCatchUp =>
+        RuntimeRemoteContactArm.UnroutedCatchUp =>
             RuntimeRemoteAcceptedPositionArm.UnroutedCatchUp,
         _ => throw new ArgumentOutOfRangeException(
-            nameof(arm), arm, "Unhandled RemoteContactArm in ToConstraintArm."),
+            nameof(arm), arm, "Unhandled RuntimeRemoteContactArm in ToConstraintArm."),
     };
 
     public void OnVector(AcDream.Core.Net.Messages.VectorUpdate.Parsed update)
@@ -1451,8 +1314,8 @@ internal sealed class LiveEntityNetworkUpdateController
             // A sticky lease (a creature closing on its melee target) does not
             // gate the position arm: the server correction routes like any
             // other, and the per-tick stick adjustment then overwrites the frame.
-            RemoteContactArm arm = RemoteContactArm.UnroutedCatchUp;
-            RemoteContactRouting? routing = RunRemoteArmTail(
+            RuntimeRemoteContactArm arm = RuntimeRemoteContactArm.UnroutedCatchUp;
+            RuntimeRemoteContactRouting? routing = RunRemoteArmTail(
                 acceptedPositionCanonical,
                 positionRecord,
                 rmState,
@@ -1466,7 +1329,7 @@ internal sealed class LiveEntityNetworkUpdateController
                 return;
             arm = routing.Value.Arm;
 
-            if (arm is RemoteContactArm.AirborneSnap)
+            if (arm is RuntimeRemoteContactArm.AirborneSnap)
             {
                 if (IsPlayerGuid(update.Guid))
                 {
@@ -1484,7 +1347,8 @@ internal sealed class LiveEntityNetworkUpdateController
             RuntimeRemoteSteadyStatePosition.TryArmConstraintAfterOperation(
                 ToConstraintArm(arm), rmState);
 
-            TryAdoptWireCellAfterRouting(rmState, routing.Value, p.LandblockId);
+            RuntimeRemoteArming.TryAdoptWireCellAfterRouting(
+                rmState, routing.Value, p.LandblockId);
 
             rmState.LastServerPos = worldPos;
             rmState.LastServerPosTime = nowSec;

@@ -20,6 +20,14 @@ internal interface IHeadlessCollisionNeighborhood
 
     bool IsWithinServiceWindow(uint fullCellId);
 
+    /// <summary>
+    /// Whether the collision for this cell is published right now. That is a
+    /// narrower question than being near the centre, and it is the one an
+    /// accepted re-placement of another creature's body has to ask: a body
+    /// cannot be put down where there is nothing yet to put it down on.
+    /// </summary>
+    bool IsCollisionPublished(uint fullCellId);
+
     bool IsQuiescent { get; }
 }
 
@@ -287,6 +295,9 @@ internal sealed class HeadlessCollisionNeighborhood
                 .GetCellStruct(fullCellId) is not null;
     }
 
+    public bool IsCollisionPublished(uint fullCellId) =>
+        IsCollisionCurrentlyPublished(fullCellId);
+
     bool AcDream.Runtime.Session.IRuntimeRemotePlacementServiceWindow
         .IsWithinServiceWindow(uint fullCellId) =>
         IsCollisionCurrentlyPublished(fullCellId);
@@ -522,6 +533,23 @@ internal sealed class HeadlessSessionWorldProjection
         _firstEntry = firstEntry;
         _acceptedPositionDrive = acceptedPositionDrive;
         _onNonQuiescentStall = onNonQuiescentStall;
+    }
+
+    /// <summary>
+    /// The test an accepted re-placement of another creature's body must pass
+    /// before it is carried out here: the collision it would land on is
+    /// published. Without a window that is the whole of the question; a client
+    /// with one also asks whether the landblock is drawn.
+    /// </summary>
+    internal IRuntimeRemotePlacementServiceWindow RemotePlacementServiceWindow =>
+        new PublishedCollisionServiceWindow(_collision);
+
+    private sealed class PublishedCollisionServiceWindow(
+        IHeadlessCollisionNeighborhood collision)
+        : IRuntimeRemotePlacementServiceWindow
+    {
+        public bool IsWithinServiceWindow(uint landblockId) =>
+            collision.IsCollisionPublished(landblockId);
     }
 
     public void ProjectSpawn(
