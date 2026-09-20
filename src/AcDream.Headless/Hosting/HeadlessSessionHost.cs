@@ -237,8 +237,7 @@ internal sealed class HeadlessSessionHost : IDisposable
                         gameplay,
                         _timeProvider,
                         message => diagnostics.Message(descriptor.Id, message),
-                        sessionOperations,
-                        () => runtimeRef?.Clock.SimulationTimeSeconds ?? 0d));
+                        sessionOperations));
             runtimeRef = runtime;
             if (contentLease is { } content)
             {

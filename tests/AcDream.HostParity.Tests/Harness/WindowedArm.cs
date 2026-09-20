@@ -1,4 +1,6 @@
 using AcDream.App.Combat;
+using AcDream.App.Input;
+using AcDream.App.Rendering;
 using AcDream.App.Net;
 using AcDream.App.Plugins;
 using AcDream.Core.Net;
@@ -8,6 +10,8 @@ using AcDream.Runtime;
 using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Plugins;
 using AcDream.Runtime.Session;
+using AcDream.UI.Abstractions.Input;
+using Silk.NET.Input;
 
 namespace AcDream.HostParity.Tests;
 
@@ -43,6 +47,7 @@ internal sealed class WindowedArm : ParityArm
     private readonly RuntimeAutomationSurface _automation;
     private readonly List<string> _warnings = [];
     private readonly List<IDisposable> _bindings = [];
+    private InputDispatcher? _dispatcher;
 
     internal WindowedArm()
         : base(
@@ -138,6 +143,146 @@ internal sealed class WindowedArm : ParityArm
     protected override ILiveSessionCommandRouting CreateCommandRoute(
         WorldSession session) => new InertCommandRoute();
 
+    /// <summary>
+    /// The windowed client's own frame host, built from the real classes:
+    /// its camera, its player-mode state, its chase-camera slot, its input
+    /// source over a real detached dispatcher, the runtime's movement owner
+    /// and the shared outbound owner. Two things it asks for are the drawn
+    /// world's and are stood in for here -- what the world says about the
+    /// player's body (which drawable, out of sight, clock running) and the
+    /// projection of the result onto that drawable -- because nothing is
+    /// drawn. Both are reported, and the first is the difference the entity
+    /// projection work has to close.
+    /// </summary>
+    protected override RuntimeLocalPlayerFrameController
+        CreateFrameController()
+    {
+        var camera = new CameraController(new OrbitCamera(), new FlyCamera());
+        var mode = new AcDream.App.Input.LocalPlayerModeState
+        {
+            IsPlayerMode = true,
+        };
+        var chase = new AcDream.App.Input.ChaseCameraInputState
+        {
+            Legacy = new ChaseCamera(),
+        };
+        var input = new DispatcherMovementInputSource(Runtime.MovementOwner);
+        _dispatcher = InputDispatcher.CreateDetached(
+            new SilentKeyboard(),
+            new SilentMouse(),
+            new KeyBindings());
+        input.Bind(_dispatcher);
+        var frameRuntime = new AcDream.App.Input.LiveLocalPlayerFrameRuntime(
+            camera,
+            mode,
+            Runtime.MovementOwner,
+            chase,
+            input,
+            new RuntimeDirectoryWorldFacts(Runtime),
+            new AcDream.App.Input.LocalPlayerIdentityState(
+                Runtime.PlayerIdentity),
+            new AcDream.App.Input.LocalPlayerPhysicsHostSlot(),
+            new AcDream.App.Input.LocalPlayerProjectionController(
+                new UndrawnProjectionRuntime()),
+            new LocalPlayerOutboundController(
+                static (_, _, _, _, _, _) => { }),
+            _sessionSource);
+        return Runtime.CreateLocalPlayerFrameController(frameRuntime, input);
+    }
+
+    /// <summary>
+    /// What the world says about the player's body when nothing is drawing
+    /// it. The windowed client asks its drawn-entity owner these three
+    /// questions and the windowless one asks the entity directory; until that
+    /// is one owner, an arm with no window has to read the directory.
+    /// </summary>
+    private sealed class RuntimeDirectoryWorldFacts(GameRuntime runtime)
+        : AcDream.App.Input.ILocalPlayerWorldFacts
+    {
+        public uint ResolveLocalEntityId(uint serverGuid) =>
+            serverGuid != 0u
+            && runtime.EntityObjects.Entities.TryGetActive(
+                serverGuid,
+                out var record)
+                ? record.LocalEntityId ?? 0u
+                : 0u;
+
+        public bool IsHidden(uint serverGuid) =>
+            serverGuid != 0u
+            && runtime.EntityObjects.Entities.TryGetActive(
+                serverGuid,
+                out var record)
+            && (record.FinalPhysicsState
+                & AcDream.Core.Physics.PhysicsStateFlags.Hidden) != 0;
+
+        public AcDream.Core.Physics.RetailObjectClockDisposition
+            GetRootObjectClockDisposition(uint serverGuid)
+        {
+            if (serverGuid == 0u
+                || !runtime.EntityObjects.Entities.TryGetActive(
+                    serverGuid,
+                    out var record)
+                || record.FullCellId == 0u
+                || (record.FinalPhysicsState
+                    & (AcDream.Core.Physics.PhysicsStateFlags.Frozen
+                        | AcDream.Core.Physics.PhysicsStateFlags.Static)) != 0)
+            {
+                return AcDream.Core.Physics.RetailObjectClockDisposition
+                    .Suspend;
+            }
+            return AcDream.Core.Physics.RetailObjectClockDisposition.Advance;
+        }
+    }
+
+    /// <summary>There is no drawable to move, so the projection has nothing to do.</summary>
+    private sealed class UndrawnProjectionRuntime
+        : AcDream.App.Input.ILocalPlayerProjectionRuntime
+    {
+        public AcDream.Core.World.WorldEntity? ResolveEntity() => null;
+        public int LiveCenterX => 0;
+        public int LiveCenterY => 0;
+        public void SyncShadow(
+            AcDream.Core.World.WorldEntity entity, uint cellId)
+        {
+        }
+
+        public void Rebucket(uint serverGuid, uint landblockId)
+        {
+        }
+
+        public bool IsCurrentVisibleProjection(
+            AcDream.Core.World.WorldEntity entity) => false;
+
+        public void SuspendShadow(AcDream.Core.World.WorldEntity entity)
+        {
+        }
+    }
+
+    /// <summary>A keyboard nobody is typing on.</summary>
+    private sealed class SilentKeyboard : IKeyboardSource
+    {
+#pragma warning disable CS0067
+        public event Action<Key, ModifierMask>? KeyDown;
+        public event Action<Key, ModifierMask>? KeyUp;
+#pragma warning restore CS0067
+        public bool IsHeld(Key key) => false;
+        public ModifierMask CurrentModifiers => ModifierMask.None;
+    }
+
+    /// <summary>A mouse nobody is holding.</summary>
+    private sealed class SilentMouse : IMouseSource
+    {
+#pragma warning disable CS0067
+        public event Action<MouseButton, ModifierMask>? MouseDown;
+        public event Action<MouseButton, ModifierMask>? MouseUp;
+        public event Action<float, float>? MouseMove;
+        public event Action<float>? Scroll;
+#pragma warning restore CS0067
+        public bool WantCaptureKeyboard { get; set; }
+        public bool WantCaptureMouse { get; set; }
+        public bool IsHeld(MouseButton button) => false;
+    }
+
     private sealed class InertCommandRoute : ILiveSessionCommandRouting
     {
         public void Activate()
@@ -154,6 +299,7 @@ internal sealed class WindowedArm : ParityArm
         for (int index = _bindings.Count - 1; index >= 0; index--)
             _bindings[index].Dispose();
         _automation.Dispose();
+        _dispatcher?.Dispose();
     }
 
     /// <summary>

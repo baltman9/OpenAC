@@ -855,7 +855,7 @@ internal sealed class SessionPlayerCompositionPhase
             d.PlayerController,
             d.ChaseCameraInput,
             d.MovementInput,
-            live.LiveEntities,
+            new LiveEntityWorldFacts(live.LiveEntities),
             d.PlayerIdentity,
             d.PlayerHost,
             localPlayerProjection,

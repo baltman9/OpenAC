@@ -17,6 +17,10 @@ public sealed record GameRuntimeDependencies(
     Action<string>? Log = null,
     Action<string>? TimeSyncDiagnostic = null,
     ILiveSessionOperations? SessionOperations = null,
+    /// <summary>
+    /// Where the attack power-up reads the time from. Left out, it is the
+    /// runtime's own simulation clock, which is what both hosts want.
+    /// </summary>
     Func<double>? CombatTime = null,
     uint FirstLocalEntityId = RuntimeEntityDirectory.FirstLocalEntityId,
     int MaximumChatEntries = 500,
@@ -307,7 +311,11 @@ public sealed class GameRuntime
                 dependencies.CombatTargetOperations,
                 dependencies.CombatModeOperations,
                 dependencies.SpellCastOperations,
-                dependencies.CombatTime);
+                // The power-up is timed off the simulation clock unless a
+                // host insists otherwise, so both clients build a swing at
+                // the same rate whether or not there is a window to draw it.
+                dependencies.CombatTime
+                    ?? (() => clock.SimulationTimeSeconds));
             construction.Own(context.Actions);
             Fault(
                 GameRuntimeConstructionPoint.ActionsCreated,

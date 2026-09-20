@@ -3,6 +3,7 @@ using AcDream.Headless.Hosting;
 using AcDream.Headless.Plugins;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
+using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Session;
 
 namespace AcDream.HostParity.Tests;
@@ -28,11 +29,11 @@ internal sealed class WindowlessArm : ParityArm
     private readonly RecordingPluginLogger _log = new();
 
     internal WindowlessArm()
-        : this(new HeadlessGameplayOperations(), new ClockHolder())
+        : this(new HeadlessGameplayOperations())
     {
     }
 
-    private WindowlessArm(HeadlessGameplayOperations gameplay, ClockHolder clock)
+    private WindowlessArm(HeadlessGameplayOperations gameplay)
         : base(
             ParityHost.Windowless,
             operations =>
@@ -40,11 +41,8 @@ internal sealed class WindowlessArm : ParityArm
                 gameplay,
                 TimeProvider.System,
                 static _ => { },
-                sessionOperations: operations,
-                combatTime: () =>
-                    clock.Runtime?.Clock.SimulationTimeSeconds ?? 0d))
+                sessionOperations: operations))
     {
-        clock.Runtime = Runtime;
         _gameplay = gameplay;
         _gameplay.Bind(Runtime, catalog: null, accountName: () => "parity");
         _host = new HeadlessPluginHost(Runtime, _log);
@@ -69,14 +67,17 @@ internal sealed class WindowlessArm : ParityArm
     protected override ILiveSessionCommandRouting CreateCommandRoute(
         WorldSession session) => _gameplay.CreateRoute(session);
 
+    /// <summary>
+    /// The windowless client's own frame host, unchanged: it reads the
+    /// character's body and the world's facts about it off the runtime, and
+    /// sends position through the shared outbound owner.
+    /// </summary>
+    protected override RuntimeLocalPlayerFrameController
+        CreateFrameController() =>
+        Runtime.CreateLocalPlayerFrameController(
+            new HeadlessLocalPlayerFrameHost(Runtime, Session),
+            new HeadlessMovementInputSource(Runtime.MovementOwner));
+
     protected override void DisposeHost() => _host.Dispose();
 
-    /// <summary>
-    /// The combat clock reads the runtime that is about to be built, the same
-    /// way the real session host does.
-    /// </summary>
-    private sealed class ClockHolder
-    {
-        internal GameRuntime? Runtime { get; set; }
-    }
 }

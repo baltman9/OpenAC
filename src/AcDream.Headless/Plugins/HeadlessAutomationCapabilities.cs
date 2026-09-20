@@ -133,7 +133,6 @@ internal static class HeadlessAutomationCapabilities
             nameof(GameRuntimeDependencies.Log),
             nameof(GameRuntimeDependencies.TimeProvider),
             nameof(GameRuntimeDependencies.SessionOperations),
-            nameof(GameRuntimeDependencies.CombatTime),
         };
 
     /// <summary>
@@ -158,8 +157,7 @@ internal static class HeadlessAutomationCapabilities
         HeadlessGameplayOperations gameplay,
         TimeProvider timeProvider,
         Action<string> log,
-        ILiveSessionOperations? sessionOperations,
-        Func<double> combatTime)
+        ILiveSessionOperations? sessionOperations)
     {
         ArgumentNullException.ThrowIfNull(gameplay);
         return new GameRuntimeDependencies(
@@ -169,8 +167,7 @@ internal static class HeadlessAutomationCapabilities
             gameplay,
             TimeProvider: timeProvider,
             Log: log,
-            SessionOperations: sessionOperations,
-            CombatTime: combatTime);
+            SessionOperations: sessionOperations);
     }
 
     /// <summary>Which live-session host bindings this host fills in.</summary>

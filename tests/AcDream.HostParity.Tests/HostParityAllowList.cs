@@ -125,11 +125,7 @@ internal static class HostParityAllowList
             "The windowed host drives the runtime from its frame clock rather "
             + "than an injected time provider.",
             ParityStage.AnswerItFromOneSource),
-        new("CombatTime", ParityHost.Windowed,
-            "The attack power-up is timed off a wall clock with a window and "
-            + "off the simulation clock without one; the same clock has to "
-            + "time both.",
-            ParityStage.AnswerItFromOneSource),
+
         new("TimeSyncDiagnostic", ParityHost.Windowless,
             "A launch-option diagnostic the windowed host fills in only when "
             + "the sky dump is on, so in a plain run neither host has one. It "

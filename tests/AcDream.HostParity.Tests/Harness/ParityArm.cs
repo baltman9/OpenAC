@@ -1,6 +1,7 @@
 using AcDream.Core.Net;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
+using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Session;
 
 namespace AcDream.HostParity.Tests;
@@ -18,6 +19,8 @@ internal abstract class ParityArm : IDisposable
     internal const double TickSeconds = 0.015d;
 
     private readonly IDisposable _hostLease;
+    private ParityPlayerBody? _body;
+    private RuntimeLocalPlayerFrameController? _frame;
     private bool _disposed;
 
     protected ParityArm(
@@ -82,13 +85,50 @@ internal abstract class ParityArm : IDisposable
         Runtime.SyncLifecycleEmission();
     }
 
-    /// <summary>One step of the shared clock, the same length on both arms.</summary>
+    /// <summary>
+    /// Takes ownership of the character's body, and stands up this host's own
+    /// per-frame movement driver over it, so from here on the arm advances a
+    /// character the way its client does.
+    /// </summary>
+    internal ParityPlayerBody AdoptPlayerBody(ParityPlayerBody body)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        if (_body is not null)
+            throw new InvalidOperationException(
+                "This arm already has a character.");
+        _body = body;
+        _frame = CreateFrameController();
+        return body;
+    }
+
+    /// <summary>
+    /// Whether the character has a body that can be moved. A scenario about
+    /// moving or swinging asserts this first: without it both arms answer
+    /// "no body" and agreeing proves nothing.
+    /// </summary>
+    internal bool HasLiveBody => _body?.HasLiveBody == true;
+
+    /// <summary>
+    /// One step of the shared clock, the same length on both arms, in the
+    /// order a client takes it: the body advances and says what it did on the
+    /// object side of the inbound-network barrier, the session runs, then the
+    /// post-network command phase closes the frame.
+    /// </summary>
     internal virtual void Advance()
     {
         _ = Runtime.Clock.Advance(TickSeconds);
+        _body?.Drive();
+        _frame?.AdvanceBeforeNetwork((float)TickSeconds);
         Runtime.Session.Tick();
+        _frame?.RunPostNetworkCommandPhase();
         OnAdvanced();
     }
+
+    /// <summary>
+    /// This host's own local-player frame driver, over this host's own frame
+    /// host. Both are the classes the real client builds.
+    /// </summary>
+    protected abstract RuntimeLocalPlayerFrameController CreateFrameController();
 
     /// <summary>Whatever this host does once per step beyond ticking.</summary>
     protected virtual void OnAdvanced()
@@ -113,6 +153,7 @@ internal abstract class ParityArm : IDisposable
         _disposed = true;
         if (Runtime.Session.CurrentSession is not null)
             _ = Session.Stop(Runtime.Generation);
+        _body?.Dispose();
         DisposeHost();
         _hostLease.Dispose();
         Runtime.Dispose();

@@ -17,7 +17,7 @@ public sealed class ReadParityTests
     public void TheCharacterReadsTheSameOnBothClients() =>
         ParityScenario.Run(static (arm, transcript) =>
         {
-            ParityWorld.Stage(arm.Runtime);
+            ParityWorld.Stage(arm);
             arm.Advance();
             ICharacterInfo character = arm.Host.Automation.Character;
 
@@ -48,7 +48,7 @@ public sealed class ReadParityTests
     public void SkillsAndAttributesReadTheSameOnBothClients() =>
         ParityScenario.Run(static (arm, transcript) =>
         {
-            ParityWorld.Stage(arm.Runtime);
+            ParityWorld.Stage(arm);
             arm.Advance();
             ICharacterInfo character = arm.Host.Automation.Character;
 
@@ -89,7 +89,7 @@ public sealed class ReadParityTests
     public void AWorldObjectReadsTheSameOnBothClients() =>
         ParityScenario.Run(static (arm, transcript) =>
         {
-            ParityWorld.Stage(arm.Runtime);
+            ParityWorld.Stage(arm);
             arm.Advance();
             IWorldObjectAutomation objects = arm.Host.Automation.Objects;
 
@@ -127,7 +127,7 @@ public sealed class ReadParityTests
     public void TheNavigationSnapshotReadsTheSameOnBothClients() =>
         ParityScenario.Run(static (arm, transcript) =>
         {
-            ParityWorld.Stage(arm.Runtime);
+            ParityWorld.Stage(arm);
             arm.Advance();
             PluginNavigationSnapshot navigation =
                 arm.Host.Automation.Navigation.Snapshot;

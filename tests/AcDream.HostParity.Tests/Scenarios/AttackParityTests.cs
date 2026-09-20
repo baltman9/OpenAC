@@ -22,7 +22,7 @@ public sealed class AttackParityTests
     public void NamingATargetWithNothingSelectedSwingsAtIt() =>
         ParityScenario.Run(static (arm, transcript) =>
         {
-            ParityWorld.Stage(arm.Runtime);
+            ParityWorld.Stage(arm);
             ICombatAutomation combat = arm.Host.Automation.Combat;
 
             transcript.Step("enter melee");
@@ -53,7 +53,7 @@ public sealed class AttackParityTests
     public void NamingATargetWhileAnotherIsSelectedSwingsAtTheNamedOne() =>
         ParityScenario.Run(static (arm, transcript) =>
         {
-            ParityWorld.Stage(arm.Runtime);
+            ParityWorld.Stage(arm);
             ICombatAutomation combat = arm.Host.Automation.Combat;
             _ = combat.EnterMode(PluginCombatMode.Melee);
             arm.Host.Selection.Select(ParityWorld.SecondMonster);
@@ -96,7 +96,7 @@ public sealed class AttackParityTests
     public void OutOfCombatModeTheStanceIsWhatRefuses() =>
         ParityScenario.Run(static (arm, transcript) =>
         {
-            ParityWorld.Stage(arm.Runtime);
+            ParityWorld.Stage(arm);
             ICombatAutomation combat = arm.Host.Automation.Combat;
 
             transcript.Step("begin without a stance");
@@ -110,7 +110,7 @@ public sealed class AttackParityTests
     private static void RefusalScenario(uint target) =>
         ParityScenario.Run((arm, transcript) =>
         {
-            ParityWorld.Stage(arm.Runtime);
+            ParityWorld.Stage(arm);
             ICombatAutomation combat = arm.Host.Automation.Combat;
             _ = combat.EnterMode(PluginCombatMode.Melee);
             arm.Advance();

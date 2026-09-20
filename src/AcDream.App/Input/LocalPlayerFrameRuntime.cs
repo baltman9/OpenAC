@@ -20,6 +20,38 @@ internal interface ILocalPlayerFrameRuntime :
         CanPresentPlayer;
 }
 
+/// <summary>
+/// What a frame needs to know about the local player's body as the world
+/// holds it: which drawable it is, whether it is out of sight, and whether
+/// its clock should run. Named on its own so the frame can be built over a
+/// world that is not being drawn.
+/// </summary>
+internal interface ILocalPlayerWorldFacts
+{
+    uint ResolveLocalEntityId(uint serverGuid);
+    bool IsHidden(uint serverGuid);
+    RetailObjectClockDisposition GetRootObjectClockDisposition(uint serverGuid);
+}
+
+/// <summary>The drawn world's answers, which is where they come from in a real run.</summary>
+internal sealed class LiveEntityWorldFacts(LiveEntityRuntime liveEntities)
+    : ILocalPlayerWorldFacts
+{
+    private readonly LiveEntityRuntime _liveEntities =
+        liveEntities ?? throw new ArgumentNullException(nameof(liveEntities));
+
+    public uint ResolveLocalEntityId(uint serverGuid) =>
+        _liveEntities.TryGetWorldEntity(serverGuid, out var entity)
+            ? entity.Id
+            : 0u;
+
+    public bool IsHidden(uint serverGuid) => _liveEntities.IsHidden(serverGuid);
+
+    public RetailObjectClockDisposition GetRootObjectClockDisposition(
+        uint serverGuid) =>
+        _liveEntities.GetRootObjectClockDisposition(serverGuid);
+}
+
 internal sealed class LiveLocalPlayerFrameRuntime : ILocalPlayerFrameRuntime
 {
     private readonly CameraController _camera;
@@ -27,7 +59,7 @@ internal sealed class LiveLocalPlayerFrameRuntime : ILocalPlayerFrameRuntime
     private readonly IRuntimeLocalPlayerControllerSource _controller;
     private readonly IChaseCameraSource _chase;
     private readonly DispatcherMovementInputSource _input;
-    private readonly LiveEntityRuntime _liveEntities;
+    private readonly ILocalPlayerWorldFacts _worldFacts;
     private readonly ILocalPlayerIdentitySource _identity;
     private readonly ILocalPlayerPhysicsHostSource _physicsHost;
     private readonly LocalPlayerProjectionController _projection;
@@ -40,7 +72,7 @@ internal sealed class LiveLocalPlayerFrameRuntime : ILocalPlayerFrameRuntime
         IRuntimeLocalPlayerControllerSource controller,
         IChaseCameraSource chase,
         DispatcherMovementInputSource input,
-        LiveEntityRuntime liveEntities,
+        ILocalPlayerWorldFacts worldFacts,
         ILocalPlayerIdentitySource identity,
         ILocalPlayerPhysicsHostSource physicsHost,
         LocalPlayerProjectionController projection,
@@ -52,7 +84,7 @@ internal sealed class LiveLocalPlayerFrameRuntime : ILocalPlayerFrameRuntime
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _chase = chase ?? throw new ArgumentNullException(nameof(chase));
         _input = input ?? throw new ArgumentNullException(nameof(input));
-        _liveEntities = liveEntities ?? throw new ArgumentNullException(nameof(liveEntities));
+        _worldFacts = worldFacts ?? throw new ArgumentNullException(nameof(worldFacts));
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
         _physicsHost = physicsHost ?? throw new ArgumentNullException(nameof(physicsHost));
         _projection = projection ?? throw new ArgumentNullException(nameof(projection));
@@ -74,16 +106,14 @@ internal sealed class LiveLocalPlayerFrameRuntime : ILocalPlayerFrameRuntime
     public PlayerMovementController? Controller => _controller.Controller;
 
     public uint ResolveLocalEntityId() =>
-        _liveEntities.TryGetWorldEntity(_identity.ServerGuid, out var entity)
-            ? entity.Id
-            : 0u;
+        _worldFacts.ResolveLocalEntityId(_identity.ServerGuid);
 
     public void HandleTargeting() => _physicsHost.Host?.HandleTargetting();
 
-    public bool IsHidden => _liveEntities.IsHidden(_identity.ServerGuid);
+    public bool IsHidden => _worldFacts.IsHidden(_identity.ServerGuid);
 
     public RetailObjectClockDisposition ObjectClockDisposition =>
-        _liveEntities.GetRootObjectClockDisposition(_identity.ServerGuid);
+        _worldFacts.GetRootObjectClockDisposition(_identity.ServerGuid);
 
     public void Project(
         PlayerMovementController controller,

@@ -12,6 +12,10 @@ namespace AcDream.HostParity.Tests;
 /// The little world a scenario stages, written once and handed to both arms
 /// so the two clients are looking at exactly the same thing when they are
 /// asked to do something.
+///
+/// Everything stands on the one flat square of ground <see cref="ParityPlayerBody"/>
+/// lays down, a metre apart along the x axis, so "the nearest creature" and
+/// "how far away is it" are questions with real answers.
 /// </summary>
 internal static class ParityWorld
 {
@@ -22,22 +26,33 @@ internal static class ParityWorld
     internal const uint HiddenMonster = 0x50000010u;
     internal const uint Bystander = 0x50000020u;
 
+    /// <summary>Where the character stands, in metres inside its cell.</summary>
+    internal const float PlayerX = 96f;
+    internal const float PlayerY = 97f;
+
     /// <summary>
     /// The player, a monster two metres further out, a second monster beyond
-    /// it, a dead one, a hidden one and a harmless bystander.
+    /// it, a dead one, a hidden one and a harmless bystander -- and, with a
+    /// body, a character that can turn towards any of them and swing.
     /// </summary>
-    internal static void Stage(GameRuntime runtime)
+    internal static ParityPlayerBody Stage(ParityArm arm)
     {
-        ArgumentNullException.ThrowIfNull(runtime);
-        runtime.PlayerIdentity.ServerGuid = Player;
-        Add(runtime, Player, 10f, PlayerObject(Player));
-        Add(runtime, HiddenMonster, 11f, MonsterObject(HiddenMonster),
+        ArgumentNullException.ThrowIfNull(arm);
+        GameRuntime runtime = arm.Runtime;
+        ParityPlayerBody body = arm.AdoptPlayerBody(
+            ParityPlayerBody.Prepare(runtime));
+        _ = body.SpawnLocalPlayer(Player, PlayerX, PlayerY);
+        runtime.InventoryOwner.Objects.AddOrUpdate(PlayerObject(Player));
+
+        Add(runtime, HiddenMonster, PlayerX + 1f, MonsterObject(HiddenMonster),
             PhysicsStateFlags.Hidden);
-        Add(runtime, DeadMonster, 12f, MonsterObject(DeadMonster));
+        Add(runtime, DeadMonster, PlayerX + 2f, MonsterObject(DeadMonster));
         runtime.ActionOwner.Combat.OnUpdateHealth(DeadMonster, 0f);
-        Add(runtime, Monster, 13f, MonsterObject(Monster));
-        Add(runtime, SecondMonster, 17f, MonsterObject(SecondMonster));
-        Add(runtime, Bystander, 14f, BystanderObject(Bystander));
+        Add(runtime, Monster, PlayerX + 3f, MonsterObject(Monster));
+        Add(runtime, SecondMonster, PlayerX + 7f, MonsterObject(SecondMonster));
+        Add(runtime, Bystander, PlayerX + 4f, BystanderObject(Bystander));
+        body.Drive();
+        return body;
     }
 
     internal static ClientObject PlayerObject(uint objectId) => new()
@@ -73,7 +88,7 @@ internal static class ParityWorld
         PhysicsStateFlags state = 0)
     {
         RuntimeEntityRecord record = runtime.EntityObjects
-            .RegisterEntity(Spawn(guid, x, state))
+            .RegisterEntity(Spawn(guid, x, PlayerY, ParityPlayerBody.Cell, state))
             .Canonical!;
         runtime.EntityObjects.ApplyAcceptedSpawn(
             record,
@@ -83,13 +98,16 @@ internal static class ParityWorld
         runtime.InventoryOwner.Objects.AddOrUpdate(item);
     }
 
-    private static WorldSession.EntitySpawn Spawn(
+
+    internal static WorldSession.EntitySpawn Spawn(
         uint guid,
         float x,
+        float y,
+        uint cell,
         PhysicsStateFlags state)
     {
         var position = new CreateObject.ServerPosition(
-            0x01010001u, x, 10f, 5f, 1f, 0f, 0f, 0f);
+            cell, x, y, ParityPlayerBody.GroundHeight, 1f, 0f, 0f, 0f);
         var timestamps = new PhysicsTimestamps(
             Position: 1,
             Movement: 1,

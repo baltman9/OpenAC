@@ -93,8 +93,7 @@ internal static class ObservedHostRecords
             Part<AcDream.Headless.Hosting.HeadlessGameplayOperations>(),
             TimeProvider.System,
             static _ => { },
-            Part<AcDream.Runtime.Session.ProductionLiveSessionOperations>(),
-            static () => 0d);
+            Part<AcDream.Runtime.Session.ProductionLiveSessionOperations>());
 
     internal static GameRuntimeDependencies RuntimeDependenciesFor(string host) =>
         host == ParityHost.Windowed

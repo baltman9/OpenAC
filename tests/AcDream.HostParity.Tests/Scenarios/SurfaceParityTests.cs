@@ -19,7 +19,7 @@ public sealed class SurfaceParityTests
     public void SelectingAndClearingBehavesTheSameOnBothClients() =>
         ParityScenario.Run(static (arm, transcript) =>
         {
-            ParityWorld.Stage(arm.Runtime);
+            ParityWorld.Stage(arm);
             ISelectionService selection = arm.Host.Selection;
             var seen = new List<SelectionChangedEvent>();
             selection.Changed += change => seen.Add(change);
@@ -72,7 +72,7 @@ public sealed class SurfaceParityTests
     public void CyclingTheSelectionIsRefusedTheSameWayToday() =>
         ParityScenario.Run(static (arm, transcript) =>
         {
-            ParityWorld.Stage(arm.Runtime);
+            ParityWorld.Stage(arm);
             ISelectionService selection = arm.Host.Selection;
             _ = selection.Select(ParityWorld.Monster);
             arm.Advance();
