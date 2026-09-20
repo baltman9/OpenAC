@@ -306,6 +306,10 @@ public readonly record struct PluginWorldObject(
     /// </summary>
     public PluginObjectCapabilities Capabilities { get; init; }
 
+    /// <summary>True when the host recognizes an activation interaction.</summary>
+    public bool CanActivate =>
+        (Capabilities & PluginObjectCapabilities.Interactable) != 0;
+
     /// <summary>
     /// True when the local player owns the object, counting anything nested
     /// inside a pack they carry.
