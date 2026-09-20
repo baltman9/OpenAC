@@ -15,8 +15,22 @@ using AcDream.Runtime.Gameplay;
 
 namespace AcDream.Runtime.Tests.Session;
 
-public sealed class LiveSessionEventRouterTests
+public sealed class LiveSessionEventRouterTests : IDisposable
 {
+    /// <summary>
+    /// The action states these tests hand the router. They own owners of
+    /// their own, so the class lets go of every one it made rather than
+    /// leaving them to a finalizer that will not come.
+    /// </summary>
+    private readonly List<RuntimeActionState> _actionStates = [];
+
+    public void Dispose()
+    {
+        foreach (RuntimeActionState actions in _actionStates)
+            actions.Dispose();
+        _actionStates.Clear();
+    }
+
     [Fact]
     public void CreatedRouterPublishesNoHandlersUntilExplicitAttach()
     {
@@ -941,15 +955,20 @@ public sealed class LiveSessionEventRouterTests
     /// The action state the router now requires. Both hosts hand it their
     /// own; a test only needs one that exists.
     /// </summary>
-    private static RuntimeActionState NewActions() =>
-        AcDream.Runtime.Tests.Gameplay.RuntimeActionTestFactory.Create(
-            new InventoryTransactionState(new ClientObjectTable()));
+    private RuntimeActionState NewActions()
+    {
+        RuntimeActionState actions =
+            AcDream.Runtime.Tests.Gameplay.RuntimeActionTestFactory.Create(
+                new InventoryTransactionState(new ClientObjectTable()));
+        _actionStates.Add(actions);
+        return actions;
+    }
 
     private static LiveEnvironmentSessionSink NoOpEnvironmentSink() => new(
         EnvironChanged: _ => { },
         ServerTimeUpdated: _ => { });
 
-    private static LiveSessionEventRouter NewRouter(
+    private LiveSessionEventRouter NewRouter(
         WorldSession session,
         Counters counters,
         Action<int>? constructionCheckpoint = null,
