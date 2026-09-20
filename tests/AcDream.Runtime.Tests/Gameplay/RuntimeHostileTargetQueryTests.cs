@@ -432,6 +432,45 @@ public sealed class RuntimeHostileTargetQueryTests
     }
 
     /// <summary>
+    /// The same two readers, on a slope. Every distance a plugin is handed
+    /// between two objects is the straight line between them, height
+    /// included: three metres along the ground and four metres up is five
+    /// metres away, not three. Measuring one of them flat makes a corpse on
+    /// the storey below read as lying at the character's feet, and a client
+    /// that walks to it never arrives.
+    /// Mutation: drop the height term from either reader and the flat three
+    /// metres comes back instead of five.
+    /// </summary>
+    [Fact]
+    public void DistancesAreTheStraightLineHeightIncluded()
+    {
+        using GameRuntime runtime = Create();
+        runtime.PlayerIdentity.ServerGuid = Player;
+        Add(runtime, Player, 0x01010001u, 10f, 10f, PlayerObject(Player));
+        Add(runtime, 0x50000010u, 0x01010001u, 10f, 30f, Hostile(0x50000010u));
+        Assert.True(runtime.EntityObjects.Entities.TryGetActive(
+            0x50000010u, out RuntimeEntityRecord record));
+        var body = new PhysicsBody();
+        body.SnapToCell(
+            0x01010001u,
+            new Vector3(10f, 30f, 5f),
+            new Vector3(10f, 30f, 5f));
+        record.SetPhysicsBody(body);
+        // Three metres north of the character and four metres above it.
+        body.Position = new Vector3(10f, 13f, 9f);
+
+        RuntimeHostileTargetSnapshot target = Assert.Single(
+            RuntimeHostileTargetQuery.Capture(
+                runtime, 50f, HostileTargetScope.Classified));
+        Assert.True(RuntimeFriendlyTargetQuery.TryGetDistance(
+            runtime, 0x50000010u, out float objectDistance));
+
+        Assert.Equal(5f, target.Distance, 3);
+        Assert.Equal(5f, objectDistance, 3);
+        Assert.Equal(4f, target.HeightDifference, 3);
+    }
+
+    /// <summary>
     /// The local character is measured from its own simulated body too, so a
     /// character that has run away from where the server last placed it does
     /// not drag every distance in the client along with it.

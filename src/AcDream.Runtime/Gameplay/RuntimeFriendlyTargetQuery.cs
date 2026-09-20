@@ -109,7 +109,12 @@ public static class RuntimeFriendlyTargetQuery
             : null;
     }
 
-    /// <summary>Horizontal live-world distance from the local player.</summary>
+    /// <summary>
+    /// Straight-line live-world distance from the local player, centre to
+    /// centre, height included. Every plugin-facing distance measured between
+    /// two objects reads the same way, so a corpse or a fellow on the floor
+    /// above is not two metres off because it happens to be overhead.
+    /// </summary>
     public static bool TryGetDistance(
         GameRuntime runtime,
         uint guid,
@@ -137,9 +142,7 @@ public static class RuntimeFriendlyTargetQuery
             return false;
         }
 
-        distance = Vector2.Distance(
-            new Vector2(from.X, from.Y),
-            new Vector2(to.X, to.Y));
+        distance = Vector3.Distance(from, to);
         return true;
     }
 

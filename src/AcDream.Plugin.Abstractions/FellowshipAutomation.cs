@@ -13,7 +13,9 @@ namespace AcDream.Plugin.Abstractions;
 /// <param name="CurrentMana">The member's current mana.</param>
 /// <param name="MaxMana">The member's maximum mana.</param>
 /// <param name="Distance">
-/// Distance from the local player in metres; zero for the local player's own
+/// Straight-line distance from the local player in metres, centre to centre
+/// and height included -- the same measure
+/// <see cref="PluginCombatTarget.Distance"/> uses; zero for the local player's own
 /// entry.
 /// </param>
 public readonly record struct PluginFellowMember(

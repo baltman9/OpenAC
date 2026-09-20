@@ -348,9 +348,10 @@ item's own automation) is held to, rather than bypassing them:
 - `Refused` means the object isn't useable at all (for example, a target
   that requires being appraised first), or is another player — a
   player-to-player exchange goes through the Trade surface, not Use.
-- `Busy` means the use-throttle refused it, an inventory request was
-  already in flight, or an approach/use was already pending — the pending
-  one is left alone rather than cancelled.
+- `Busy` means the pacing between two uses had not lapsed, an inventory
+  request was already in flight, or an approach/use was already pending —
+  the pending one is left alone rather than cancelled. The first two are
+  what `Items.IsBusy` reports; see "Busy means 'not yet'" below.
 - `Unavailable` means the send itself was rejected by the transport,
   distinct from `Busy`'s "try again shortly".
 
@@ -755,6 +756,57 @@ window too. `Loot.Open` on a corpse or a chest out in the world takes that
 same route, so opening a corpse and using it are the same walk and the same
 send on the same object. An openable container the plugin owns is still
 opened where it is, since there is nowhere to walk to.
+
+### Busy means "not yet", and `IsBusy` tells you when
+
+`Items.IsBusy` and `Loot.IsBusy` answer one question: would a command
+offered right now come back `Busy`? Two things put them there.
+
+- **A request of your own is still in flight.** The client sends one item
+  request at a time and waits for the server's answer. Clears when that
+  answer arrives.
+- **The pacing between two uses.** The client keeps a fifth of a second
+  between one use and the next, the same on both clients and off the same
+  clock. Closing one corpse and opening the next are two uses, so the
+  second one runs into this even though nothing is in flight.
+
+Both mean "not yet", never "no". A command refused this way has not
+failed: it should not count against an attempt limit, and it should not
+arm a back-off. Wait for `IsBusy` to read false and ask again -- a looter
+that treated the pacing as a failure spent whole seconds standing between
+one corpse and the next.
+
+There is no busy-changed event. `IsBusy` is polled, like the rest of the
+surface: read it on the `Tick` you were going to act on anyway. If your
+own heartbeat is slower than the pacing, you will never see the pacing at
+all.
+
+`IsBusy` never reads false while a command would be refused as busy. It
+can read true slightly longer than a move or a merge strictly needs,
+because those do not take the use pacing -- asking a moment later costs a
+fifth of a second at worst, and never a wrong answer.
+
+`Equipment.IsBusy` and `Vendor.IsBusy` are separate channels with their
+own meaning; see their own members.
+
+### How distances are measured
+
+Every distance a plugin is handed between two objects is the straight
+line between them, centre to centre, in metres, with height included:
+`Combat`'s `PluginCombatTarget.Distance`, `Loot`'s
+`PluginLootContainer.Distance` and `Fellowship`'s
+`PluginFellowMember.Distance` all read the same way. So something three
+metres away along the ground and four metres above reads as five metres,
+not three, and a corpse on the storey below does not read as lying at
+your feet. `PluginCombatTarget.HeightDifference` is the height term on
+its own, for a plugin that wants to leave other floors alone.
+
+The one deliberate exception says so in its name.
+`PluginNavigationPosition.HorizontalDistanceMeters` measures along the
+ground and ignores height, because it answers a walking question: how far
+the character has to travel, not how far away the thing is.
+`Navigation.TryFindObject`'s radius is measured the same way, and is
+documented as such.
 
 ### Available, but only with the installed data files
 
