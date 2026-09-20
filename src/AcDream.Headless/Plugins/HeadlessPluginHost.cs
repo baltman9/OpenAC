@@ -33,6 +33,7 @@ internal sealed class HeadlessPluginHost
     private Action? _logoff;
     private Action<string>? _localPlayerDied;
     private Action<PluginObjectChange>? _objectChanged;
+    private long _objectChangeRevision;
     private Action<PluginGoToReport>? _navigationChanged;
     private long _lastNavigationSequence;
     private PluginGoToState _lastNavigationState;
@@ -608,7 +609,10 @@ internal sealed class HeadlessPluginHost
             handlers = _objectChanged;
         if (handlers is null)
             return;
-        var change = new PluginObjectChange(objectId, kind);
+        var change = new PluginObjectChange(objectId, kind)
+        {
+            Revision = Interlocked.Increment(ref _objectChangeRevision),
+        };
         foreach (Delegate handler in handlers.GetInvocationList())
         {
             try { ((Action<PluginObjectChange>)handler)(change); }

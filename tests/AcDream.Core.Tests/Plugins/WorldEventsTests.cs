@@ -9,6 +9,21 @@ public class WorldEventsTests
     private static WorldEntitySnapshot S(uint id) => new(id, SourceId: 0x01000000u, Position: Vector3.Zero, Rotation: Quaternion.Identity);
 
     [Fact]
+    public void ObjectChanged_AssignsMonotonicSessionRevisions()
+    {
+        var events = new WorldEvents();
+        var seen = new List<PluginObjectChange>();
+        events.ObjectChanged += seen.Add;
+
+        events.FireObjectChanged(new PluginObjectChange(1, PluginObjectChangeKind.Created));
+        events.FireObjectChanged(new PluginObjectChange(1, PluginObjectChangeKind.Updated));
+        events.FireObjectChanged(new PluginObjectChange(1, PluginObjectChangeKind.Released));
+
+        Assert.Equal([1L, 2L, 3L], seen.Select(static change => change.Revision));
+        Assert.All(seen, static change => Assert.Equal(1u, change.ObjectId));
+    }
+
+    [Fact]
     public void NavigationChanged_DeliversAndUnsubscribes()
     {
         var events = new WorldEvents();

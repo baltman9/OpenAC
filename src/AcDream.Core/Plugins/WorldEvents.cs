@@ -13,6 +13,7 @@ public sealed class WorldEvents : IEvents
     private Action? _logoff;
     private Action<string>? _localPlayerDied;
     private Action<PluginObjectChange>? _objectChanged;
+    private long _objectChangeRevision;
     private Action<PluginGoToReport>? _navigationChanged;
     private Action<uint>? _containerOpened;
     private Action<uint>? _containerClosed;
@@ -262,7 +263,10 @@ public sealed class WorldEvents : IEvents
     {
         Action<PluginObjectChange>? handlers;
         lock (_lock)
+        {
+            change = change with { Revision = ++_objectChangeRevision };
             handlers = _objectChanged;
+        }
         if (handlers is null)
             return;
         foreach (Delegate handler in handlers.GetInvocationList())

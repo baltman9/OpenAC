@@ -22,4 +22,13 @@ public enum PluginObjectChangeKind
 /// <summary>One change to a world object, as reported by <see cref="IEvents.ObjectChanged"/>.</summary>
 public readonly record struct PluginObjectChange(
     uint ObjectId,
-    PluginObjectChangeKind Kind);
+    PluginObjectChangeKind Kind)
+{
+    /// <summary>
+    /// Monotonically increasing host revision for this session's object
+    /// changes. Plugins can retain the greatest revision they have handled
+    /// and ignore stale queued notifications. Zero is reserved for an
+    /// unsequenced value supplied by a fixture or inert host.
+    /// </summary>
+    public long Revision { get; init; }
+}
