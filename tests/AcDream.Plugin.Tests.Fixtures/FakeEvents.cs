@@ -18,6 +18,7 @@ public sealed class FakeEvents : IEvents
     private Action<double>? _tick;
     private Action<PluginGoToReport>? _navigationChanged;
     private Action<PluginObjectChange>? _objectChanged;
+    private Action<PluginPortalTransition>? _portalTransition;
     private Action<uint>? _containerOpened;
     private Action<uint>? _containerClosed;
     private Action<PluginConfirmation>? _confirmationRequested;
@@ -87,6 +88,22 @@ public sealed class FakeEvents : IEvents
         {
             if (value is null) return;
             lock (_gate) _objectChanged -= value;
+        }
+    }
+
+    /// <inheritdoc/>
+    /// <inheritdoc/>
+    public event Action<PluginPortalTransition> PortalTransition
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_gate) _portalTransition += value;
+        }
+        remove
+        {
+            if (value is null) return;
+            lock (_gate) _portalTransition -= value;
         }
     }
 
@@ -194,6 +211,25 @@ public sealed class FakeEvents : IEvents
                 foreach (Delegate handler in handlers.GetInvocationList())
                 {
                     try { ((Action<PluginObjectChange>)handler)(change); }
+                    catch { }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Fires <see cref="PortalTransition"/> for every listener.
+    /// </summary>
+    public void RaisePortalTransition(PluginPortalTransition transition)
+    {
+        lock (_gate)
+        {
+            Action<PluginPortalTransition>? handlers = _portalTransition;
+            if (handlers is not null)
+            {
+                foreach (Delegate handler in handlers.GetInvocationList())
+                {
+                    try { ((Action<PluginPortalTransition>)handler)(transition); }
                     catch { }
                 }
             }

@@ -148,6 +148,19 @@ public sealed class FakePluginHostContractTests
     }
 
     [Fact]
+    public void PortalTransitionFiresRegisteredHandlers()
+    {
+        var host = new FakePluginHost();
+        PluginPortalTransition? received = null;
+        host.Events.PortalTransition += transition => received = transition;
+        host.PluginEvents.RaisePortalTransition(
+            new PluginPortalTransition(4, 9, 0x1234u, true, true, false, false));
+        Assert.NotNull(received);
+        Assert.Equal(9, received.Value.Generation);
+        Assert.Equal(0x1234u, received.Value.DestinationCell);
+    }
+
+    [Fact]
     public void ExceptionInOneTickHandlerDoesNotStopOthers()
     {
         var host = new FakePluginHost();
