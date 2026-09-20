@@ -263,6 +263,14 @@ public sealed class RuntimeItemInteraction : IDisposable
     public bool IsDisposed => _disposed;
 
     public int BusyCount => _transactions.BusyCount;
+
+    /// <summary>
+    /// Outstanding appraisal requests, counted apart from
+    /// <see cref="BusyCount"/>. A description in flight holds nothing an
+    /// item action needs, so it never gates one; the cursor still shows the
+    /// wait, because the character is waiting on the server either way.
+    /// </summary>
+    public int AppraisalCount => _transactions.AppraisalCount;
     public uint CurrentAppraisalId =>
         _runtimeTransactions.CurrentAppraisalId;
 
@@ -723,7 +731,7 @@ public sealed class RuntimeItemInteraction : IDisposable
 
     public AppraisalResponseAcceptance AcceptAppraisalResponse(uint objectId)
     {
-        bool ownedBusyReference = _transactions.BusyCount > 0;
+        bool ownedBusyReference = _transactions.AppraisalCount > 0;
         RuntimeAppraisalResponseAcceptance acceptance =
             _runtimeTransactions.AcceptAppraisalResponse(objectId);
         if (acceptance.FirstResponse && !ownedBusyReference)
@@ -746,7 +754,7 @@ public sealed class RuntimeItemInteraction : IDisposable
     {
         if (_sendExamine is null)
             return;
-        bool ownedBusyReference = _transactions.BusyCount > 0;
+        bool ownedBusyReference = _transactions.AppraisalCount > 0;
         if (_runtimeTransactions.CancelObjectAppraisalForSpell(_sendExamine)
             && !ownedBusyReference)
         {

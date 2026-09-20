@@ -358,11 +358,10 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
 
         // A background plugin Identify must never bump a deliberate user
         // assess out of the single awaiting slot -- that would make the
-        // user's own assess action produce nothing. The caller's ordinary
-        // CanBeginRequest/busy gate already prevents this in practice (the
-        // user's request holds the one busy reference), so this only ever
-        // bites a narrow same-tick race; it reports the same false a
-        // transport failure would, which callers already treat as refused/
+        // user's own assess action produce nothing. The awaiting slot below
+        // is what admits one request at a time, so this only ever bites a
+        // narrow same-tick race; it reports the same false a transport
+        // failure would, which callers already treat as refused/
         // retry-next-scan rather than a hard error.
         if (origin == AppraisalRequestOrigin.Automation
             && _awaitingAppraisalId != 0u
@@ -383,11 +382,16 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         if (objectId == _lastCompletedAppraisalId)
             _lastCompletedAppraisalId = 0u;
 
+        // An appraisal takes a reference of its own rather than the shared
+        // item-action one. It sends no item action, and counting it as one
+        // made every pick-up and container open refuse while a description
+        // was in flight -- which is most of the time for anything that
+        // describes what it is about to touch.
         uint epoch = _clearEpoch;
         bool acquiredBusy = _awaitingAppraisalId == 0u;
         if (acquiredBusy)
         {
-            _inventory.IncrementBusyCount();
+            _inventory.IncrementAppraisalCount();
             if (_disposed || epoch != _clearEpoch)
                 return false;
         }
@@ -410,7 +414,7 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
                 _awaitingAppraisalId = previousAwaiting;
                 _awaitingAppraisalOrigin = previousOrigin;
                 if (acquiredBusy)
-                    _inventory.CompleteUse(0u);
+                    _inventory.CompleteAppraisal();
                 IncrementRevision();
             }
             throw;
@@ -469,7 +473,7 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
             _lastCompletedAppraisalId = objectId;
             if (retargetsCurrent)
                 _currentAppraisalId = objectId;
-            _inventory.CompleteUse(0u);
+            _inventory.CompleteAppraisal();
             IncrementRevision();
         }
 
@@ -494,6 +498,24 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
             PresentInUi: presentInUi);
     }
 
+    /// <summary>
+    /// Gives up on a description the server never answered, freeing the one
+    /// awaiting slot and the reference it holds. This is the recovery path
+    /// for a lost answer; nothing is sent.
+    /// </summary>
+    /// <returns>True when a request was abandoned.</returns>
+    public bool AbandonAwaitingAppraisal()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_awaitingAppraisalId == 0u)
+            return false;
+        _awaitingAppraisalId = 0u;
+        _awaitingAppraisalOrigin = default;
+        _inventory.CompleteAppraisal();
+        IncrementRevision();
+        return true;
+    }
+
     public bool RefreshCurrentAppraisal(Action<uint> sendAppraisal)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -512,7 +534,7 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
             return false;
 
         if (_awaitingAppraisalId != 0u)
-            _inventory.CompleteUse(0u);
+            _inventory.CompleteAppraisal();
         _awaitingAppraisalId = 0u;
         _awaitingAppraisalOrigin = default;
         _currentAppraisalId = 0u;

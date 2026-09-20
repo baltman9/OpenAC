@@ -366,7 +366,9 @@ public sealed class ItemInteractionControllerTests
 
         Assert.Equal(new[] { item }, h.Examines);
         Assert.False(h.Controller.IsAnyTargetModeActive);
-        Assert.Equal(1, h.Controller.BusyCount);
+        Assert.Equal(1, h.Controller.AppraisalCount);
+        // The description holds no item action: a pick-up may still begin.
+        Assert.Equal(0, h.Controller.BusyCount);
     }
 
     [Fact]
@@ -563,14 +565,14 @@ public sealed class ItemInteractionControllerTests
 
         Assert.True(h.Controller.ExamineSelectedOrEnterMode(Player));
         Assert.Equal(new[] { Player }, h.Examines);
-        Assert.Equal(1, h.Controller.BusyCount);
+        Assert.Equal(1, h.Controller.AppraisalCount);
 
         Assert.True(h.Controller.ExamineSelectedOrEnterMode(0u));
         Assert.Equal(InteractionModeKind.Examine, h.Controller.InteractionState.Current.Kind);
         Assert.Equal(ItemPrimaryClickResult.ConsumedSuccess,
             h.Controller.OfferPrimaryClick(Pack));
         Assert.Equal(new[] { Player, Pack }, h.Examines);
-        Assert.Equal(1, h.Controller.BusyCount);
+        Assert.Equal(1, h.Controller.AppraisalCount);
         Assert.False(h.Controller.IsAnyTargetModeActive);
     }
 
@@ -611,31 +613,31 @@ public sealed class ItemInteractionControllerTests
     }
 
     [Fact]
-    public void AppraisalResponse_releasesOneBusyReferenceAndAcceptsCurrentRefresh()
+    public void AppraisalResponse_releasesOneAppraisalReferenceAndAcceptsCurrentRefresh()
     {
         var h = new Harness();
 
         Assert.True(h.Controller.ExamineSelectedOrEnterMode(Player));
         Assert.True(h.Controller.ExamineSelectedOrEnterMode(Pack));
-        Assert.Equal(1, h.Controller.BusyCount);
+        Assert.Equal(1, h.Controller.AppraisalCount);
 
         Assert.False(h.Controller.AcceptAppraisalResponse(Player).Accepted);
-        Assert.Equal(1, h.Controller.BusyCount);
+        Assert.Equal(1, h.Controller.AppraisalCount);
 
         var first = h.Controller.AcceptAppraisalResponse(Pack);
         Assert.True(first.Accepted);
         Assert.True(first.FirstResponse);
-        Assert.Equal(0, h.Controller.BusyCount);
+        Assert.Equal(0, h.Controller.AppraisalCount);
         Assert.Equal(Pack, h.Controller.CurrentAppraisalId);
 
         var refresh = h.Controller.AcceptAppraisalResponse(Pack);
         Assert.True(refresh.Accepted);
         Assert.False(refresh.FirstResponse);
-        Assert.Equal(0, h.Controller.BusyCount);
+        Assert.Equal(0, h.Controller.AppraisalCount);
     }
 
     [Fact]
-    public void RefreshCurrentAppraisal_sendsWithoutAcquiringBusyReference()
+    public void RefreshCurrentAppraisal_sendsWithoutAcquiringAReference()
     {
         var h = new Harness();
         Assert.True(h.Controller.ExamineSelectedOrEnterMode(Pack));
@@ -644,7 +646,7 @@ public sealed class ItemInteractionControllerTests
         Assert.True(h.Controller.RefreshCurrentAppraisal());
 
         Assert.Equal(new[] { Pack, Pack }, h.Examines);
-        Assert.Equal(0, h.Controller.BusyCount);
+        Assert.Equal(0, h.Controller.AppraisalCount);
     }
 
     [Fact]

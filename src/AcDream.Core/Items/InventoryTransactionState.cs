@@ -50,6 +50,7 @@ public sealed class InventoryTransactionState : IDisposable
     private ulong _useReservationGeneration;
     private PendingInventoryRequest? _pendingRequest;
     private int _busyCount;
+    private int _appraisalCount;
     private long _dispatchFailureCount;
     private bool _disposed;
 
@@ -77,8 +78,24 @@ public sealed class InventoryTransactionState : IDisposable
 
     public ClientObjectTable Objects => _objects;
     public int BusyCount => _busyCount;
+
+    /// <summary>
+    /// How many appraisal requests are outstanding. Asking an object to
+    /// describe itself is counted on its own, apart from
+    /// <see cref="BusyCount"/>: it sends no item action and the server
+    /// answers it on a channel of its own, so a description in flight must
+    /// not make the next pick-up or container open report itself busy.
+    /// </summary>
+    public int AppraisalCount => _appraisalCount;
     public bool HasPendingRequest => _pendingRequest is not null;
     public bool CanBeginRequest => _busyCount == 0 && _pendingRequest is null;
+
+    /// <summary>
+    /// Whether another appraisal may be asked for. One at a time, and only
+    /// that: an item action in flight is no reason to refuse a description,
+    /// and a description in flight is no reason to refuse an item action.
+    /// </summary>
+    public bool CanBeginAppraisal => _appraisalCount == 0;
     public bool IsDisposed => _disposed;
     public long DispatchFailureCount =>
         Interlocked.Read(ref _dispatchFailureCount);
@@ -237,21 +254,42 @@ public sealed class InventoryTransactionState : IDisposable
         DispatchStateChanged();
     }
 
+    /// <summary>Takes a reference for one outstanding appraisal request.</summary>
+    public void IncrementAppraisalCount()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _appraisalCount++;
+        DispatchStateChanged();
+    }
+
+    /// <summary>Gives back the reference one appraisal request took.</summary>
+    public void CompleteAppraisal()
+    {
+        if (_appraisalCount == 0)
+            return;
+        _appraisalCount--;
+        DispatchStateChanged();
+    }
+
     public void ClearBusy()
     {
-        if (_busyCount == 0)
+        if (_busyCount == 0 && _appraisalCount == 0)
             return;
         _useReservationGeneration++;
         _busyCount = 0;
+        _appraisalCount = 0;
         DispatchStateChanged();
     }
 
     public void ResetSession()
     {
-        bool changed = _pendingRequest is not null || _busyCount != 0;
+        bool changed = _pendingRequest is not null
+            || _busyCount != 0
+            || _appraisalCount != 0;
         _pendingRequest = null;
         _useReservationGeneration++;
         _busyCount = 0;
+        _appraisalCount = 0;
         if (changed)
             DispatchStateChanged();
     }
@@ -271,6 +309,7 @@ public sealed class InventoryTransactionState : IDisposable
         _pendingRequest = null;
         _useReservationGeneration++;
         _busyCount = 0;
+        _appraisalCount = 0;
         StateChanged = null;
         RequestCompleted = null;
         RequestFailed = null;

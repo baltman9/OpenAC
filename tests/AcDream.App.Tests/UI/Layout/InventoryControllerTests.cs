@@ -693,7 +693,7 @@ public class InventoryControllerTests
         Assert.Equal(0xAu, selection.SelectedObjectId);
         Assert.True(grid.GetItem(0)!.Selected);
         Assert.Equal(new uint[] { 0xAu }, appraisals);
-        Assert.Equal(1, interaction.BusyCount);
+        Assert.Equal(1, interaction.AppraisalCount);
     }
 
     [Fact]
@@ -767,7 +767,7 @@ public class InventoryControllerTests
 
         Assert.Equal(0xAu, selection.SelectedObjectId);
         Assert.Equal(new uint[] { 0xAu }, appraisals);
-        Assert.Equal(1, interaction.BusyCount);
+        Assert.Equal(1, interaction.AppraisalCount);
 
         Assert.Same(cell, grid.GetItem(0));
         Assert.Same(cell, root.Captured);
@@ -2153,7 +2153,7 @@ public class InventoryControllerTests
         // the exact chain the reporter had running.
         Assert.Equal(0xAu, f.Selection.SelectedObjectId);
         Assert.Equal(new uint[] { 0xAu }, f.Appraisals);
-        Assert.Equal(1, f.Interaction.BusyCount);
+        Assert.Equal(1, f.Interaction.AppraisalCount);
         Assert.Same(cell, f.Grid.GetItem(0));
         Assert.Same(cell, f.Root.Captured);
 

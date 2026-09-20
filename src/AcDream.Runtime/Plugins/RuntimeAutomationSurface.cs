@@ -229,14 +229,35 @@ internal sealed class RuntimeAutomationSurface
         InventoryTransactionState transactions =
             runtime.InventoryOwner.Transactions;
         int before = transactions.BusyCount;
-        transactions.CompleteUse(0u);
+        if (before != 0)
+        {
+            transactions.CompleteUse(0u);
+            return new(
+                Accepted: true,
+                PreviousCount: before,
+                CurrentCount: transactions.BusyCount,
+                Message: "Cleared one action busy reference.");
+        }
+
+        // Nothing is holding an item action, so the thing worth freeing is a
+        // description the server never answered: it holds its own reference
+        // and the one awaiting slot, and until it is let go every later
+        // description is refused.
+        if (runtime.ItemInteractionOwner.RuntimeTransactions
+            .AbandonAwaitingAppraisal())
+        {
+            return new(
+                Accepted: true,
+                PreviousCount: 0,
+                CurrentCount: 0,
+                Message: "Gave up an unanswered appraisal request.");
+        }
+
         return new(
             Accepted: true,
-            PreviousCount: before,
-            CurrentCount: transactions.BusyCount,
-            Message: before == 0
-                ? "The action busy count was already zero."
-                : "Cleared one action busy reference.");
+            PreviousCount: 0,
+            CurrentCount: 0,
+            Message: "The action busy count was already zero.");
     }
 
     bool INetworkAutomation.IsAvailable
@@ -2137,7 +2158,9 @@ internal sealed class RuntimeAutomationSurface
             return new(PluginItemCommandStatus.Unavailable);
         if (objectId == 0u || runtime.InventoryOwner.Objects.Get(objectId) is null)
             return new(PluginItemCommandStatus.InvalidItem);
-        if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
+        // Only another description in flight holds this up. An item action
+        // of the caller's own is not one: the two do not share a channel.
+        if (!runtime.InventoryOwner.Transactions.CanBeginAppraisal)
             return new(PluginItemCommandStatus.Busy);
         return identify(objectId)
             ? new(PluginItemCommandStatus.Started)
@@ -3213,7 +3236,9 @@ internal sealed class RuntimeAutomationSurface
         {
             return new(PluginItemCommandStatus.InvalidItem);
         }
-        if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
+        // One description at a time; a pick-up or an open of the caller's
+        // own is on another channel and does not hold this up.
+        if (!runtime.InventoryOwner.Transactions.CanBeginAppraisal)
             return new(PluginItemCommandStatus.Busy);
         return identify(objectId)
             ? new(PluginItemCommandStatus.Started)

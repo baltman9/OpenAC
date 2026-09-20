@@ -1934,7 +1934,7 @@ public sealed class AppraisalUiControllerTests
             spellComponentTemplates: componentTemplate)!;
 
         Assert.True(interaction.ExamineSelectedOrEnterMode(ObjectId));
-        Assert.Equal(1, interaction.BusyCount);
+        Assert.Equal(1, interaction.AppraisalCount);
 
         Assert.True(controller.ExamineSpell(metadata.SpellId));
 

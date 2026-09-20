@@ -121,7 +121,11 @@ public sealed class CursorFeedbackController
             HoverTextEdit: hover?.IsEditControl == true,
             HoverTargetGuid: hoverTarget,
             HoverTargetCompatible: hoverTargetCompatible,
-            BusyCount: _itemInteraction?.BusyCount ?? 0,
+            // An outstanding description counts towards the busy cursor even
+            // though it gates no item action: the character is waiting on the
+            // server either way, and that is what the cursor reports.
+            BusyCount: (_itemInteraction?.BusyCount ?? 0)
+                + (_itemInteraction?.AppraisalCount ?? 0),
             TargetMode: targetMode,
             CombatMode: _combatModeProvider());
 
