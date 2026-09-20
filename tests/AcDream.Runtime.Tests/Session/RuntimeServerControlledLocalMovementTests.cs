@@ -68,10 +68,13 @@ public sealed class RuntimeServerControlledLocalMovementTests
         out MovementStruct request,
         out float? runRate,
         float? targetRadius = 0.4f,
+        float targetHeight = 1.3f,
         (float X, float Y)? frameOffset = null) =>
         RuntimeServerControlledLocalMovement.TryResolve(
             update,
-            targetBodyRadius: _ => targetRadius,
+            targetBody: _ => targetRadius is { } radius
+                ? (radius, targetHeight)
+                : null,
             worldFrameOffset: _ => frameOffset ?? (0f, 0f),
             localCellId: LocalCell,
             out request,
@@ -89,6 +92,10 @@ public sealed class RuntimeServerControlledLocalMovementTests
         Assert.Equal(TargetGuid, request.ObjectId);
         Assert.Equal(TargetGuid, request.TopLevelId);
         Assert.Equal(0.4f, request.Radius);
+        // How tall it is travels with how wide it is: the gap that ends the
+        // walk is measured between two cylinders, and a thing with no height
+        // is a flat disc on the floor.
+        Assert.Equal(1.3f, request.Height);
         Assert.Equal(1.8f, request.Params!.DistanceToObject);
         Assert.Equal(1.75f, runRate);
     }
@@ -155,7 +162,7 @@ public sealed class RuntimeServerControlledLocalMovementTests
     {
         Assert.False(RuntimeServerControlledLocalMovement.TryResolve(
             MoveToObjectOrder(),
-            targetBodyRadius: _ => null,
+            targetBody: _ => null,
             worldFrameOffset: _ => null,
             localCellId: LocalCell,
             out _,

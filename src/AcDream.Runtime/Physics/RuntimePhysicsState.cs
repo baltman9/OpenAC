@@ -1175,15 +1175,50 @@ public sealed class RuntimePhysicsState : IDisposable
     /// grown or shrunk by the scale the server gave this particular one.
     /// Zero when the shape is not to hand.
     /// </summary>
-    internal float EntityRadius(RuntimeEntityRecord record)
+    internal float EntityRadius(RuntimeEntityRecord record) =>
+        TryGetEntityShape(record, out FlatSetupCollision? setup, out float scale)
+            ? setup!.Radius * scale
+            : 0f;
+
+    /// <summary>
+    /// How tall an entity is, in metres, by the same measure as its girth: the
+    /// height its authored shape declares, grown or shrunk by the scale the
+    /// server gave this particular one. Zero when the shape is not to hand.
+    /// A walk ordered at a thing measures the gap between the two bodies as
+    /// cylinders, so the height counts as much as the girth does: with none,
+    /// a tall thing is measured as a flat disc on the floor.
+    /// </summary>
+    internal float EntityHeight(RuntimeEntityRecord record) =>
+        TryGetEntityShape(record, out FlatSetupCollision? setup, out float scale)
+            ? setup!.Height * scale
+            : 0f;
+
+    /// <summary>
+    /// The girth and height of the thing with this id, as one answer, or null
+    /// when nothing live is carrying that id.
+    /// </summary>
+    public (float Radius, float Height)? EntityBodyShape(uint serverGuid)
+    {
+        EnsureNotDisposed();
+        return Entities.TryGetActive(serverGuid, out RuntimeEntityRecord record)
+            ? (EntityRadius(record), EntityHeight(record))
+            : null;
+    }
+
+    private bool TryGetEntityShape(
+        RuntimeEntityRecord record,
+        out FlatSetupCollision? setup,
+        out float scale)
     {
         ArgumentNullException.ThrowIfNull(record);
+        setup = null;
+        scale = 1f;
         uint setupId = record.Snapshot.Physics?.SetupTableId
             ?? record.Snapshot.SetupTableId
             ?? 0u;
         if (setupId == 0u)
-            return 0f;
-        FlatSetupCollision? setup = DataCache.GetFlatSetup(setupId);
+            return false;
+        setup = DataCache.GetFlatSetup(setupId);
         if (setup is null && _setupCollisionSource is { } source)
         {
             AcDream.Content.PreparedCollisionReadResult<FlatSetupCollision>
@@ -1193,11 +1228,12 @@ public sealed class RuntimePhysicsState : IDisposable
                 setup = read.Data;
         }
         if (setup is null)
-            return 0f;
-        float scale = record.Snapshot.Physics?.Scale
+            return false;
+        float authored = record.Snapshot.Physics?.Scale
             ?? record.Snapshot.ObjScale
             ?? 1f;
-        return setup.Radius * (scale > 0f ? scale : 1f);
+        scale = authored > 0f ? authored : 1f;
+        return true;
     }
 
     /// <summary>

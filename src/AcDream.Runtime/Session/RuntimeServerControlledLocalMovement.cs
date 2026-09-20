@@ -62,8 +62,11 @@ internal static class RuntimeServerControlledLocalMovement
         RuntimePhysicsState physics = runtime.EntityObjects.Physics;
         if (!TryResolve(
                 update,
-                targetBodyRadius: guid =>
-                    physics.ResolveObjectTableHost(guid)?.Radius,
+                targetBody: guid =>
+                    physics.ResolveObjectTableHost(guid) is { } host
+                        ? (host.Radius,
+                            physics.EntityBodyShape(guid)?.Height ?? 0f)
+                        : null,
                 worldFrameOffset: cellId =>
                     physics.TryGetWorldFrameOffset(
                         cellId,
@@ -114,9 +117,11 @@ internal static class RuntimeServerControlledLocalMovement
     /// What one inbound movement asks the local character to do, or nothing
     /// when it asks for nothing this host owes an answer to.
     /// </summary>
-    /// <param name="targetBodyRadius">
-    /// The radius of the named thing's body, or null when it has none to
-    /// follow.
+    /// <param name="targetBody">
+    /// How wide and how tall the named thing's body is, or null when it has
+    /// none to follow. Both are needed: the gap a walk has to close is
+    /// measured between two cylinders, so a thing with no height is measured
+    /// as a flat disc on the floor and the walk stops in the wrong place.
     /// </param>
     /// <param name="worldFrameOffset">
     /// How far the named cell's landblock sits from the frame the character's
@@ -124,13 +129,13 @@ internal static class RuntimeServerControlledLocalMovement
     /// </param>
     internal static bool TryResolve(
         in WorldSession.EntityMotionUpdate update,
-        Func<uint, float?> targetBodyRadius,
+        Func<uint, (float Radius, float Height)?> targetBody,
         Func<uint, (float X, float Y)?> worldFrameOffset,
         uint localCellId,
         out MovementStruct request,
         out float? runRate)
     {
-        ArgumentNullException.ThrowIfNull(targetBodyRadius);
+        ArgumentNullException.ThrowIfNull(targetBody);
         ArgumentNullException.ThrowIfNull(worldFrameOffset);
         request = default;
         runRate = null;
@@ -145,19 +150,19 @@ internal static class RuntimeServerControlledLocalMovement
         {
             return TryResolveMoveTo(
                 state,
-                targetBodyRadius,
+                targetBody,
                 worldFrameOffset,
                 localCellId,
                 ref request,
                 ref runRate);
         }
         return state.IsServerControlledTurnTo
-            && TryResolveTurnTo(state, targetBodyRadius, ref request);
+            && TryResolveTurnTo(state, targetBody, ref request);
     }
 
     private static bool TryResolveMoveTo(
         in CreateObject.ServerMotionState state,
-        Func<uint, float?> targetBodyRadius,
+        Func<uint, (float Radius, float Height)?> targetBody,
         Func<uint, (float X, float Y)?> worldFrameOffset,
         uint localCellId,
         ref MovementStruct request,
@@ -178,14 +183,17 @@ internal static class RuntimeServerControlledLocalMovement
 
         if (state.MovementType == MoveToObjectMovementType
             && path.TargetGuid is { } targetGuid
-            && targetBodyRadius(targetGuid) is { } radius)
+            && targetBody(targetGuid) is { } body)
         {
             // Following the thing itself: the walk tracks where it is, not
-            // where it was when the order was written.
+            // where it was when the order was written. Both measurements of
+            // its body go with it, because the distance that ends the walk is
+            // the gap between two cylinders.
             request.Type = MovementType.MoveToObject;
             request.ObjectId = targetGuid;
             request.TopLevelId = targetGuid;
-            request.Radius = radius;
+            request.Radius = body.Radius;
+            request.Height = body.Height;
             return true;
         }
 
@@ -205,7 +213,7 @@ internal static class RuntimeServerControlledLocalMovement
 
     private static bool TryResolveTurnTo(
         in CreateObject.ServerMotionState state,
-        Func<uint, float?> targetBodyRadius,
+        Func<uint, (float Radius, float Height)?> targetBody,
         ref MovementStruct request)
     {
         if (state.TurnToPath is not { } path)
@@ -218,7 +226,7 @@ internal static class RuntimeServerControlledLocalMovement
 
         if (state.MovementType == TurnToObjectMovementType
             && path.TargetGuid is { } targetGuid
-            && targetBodyRadius(targetGuid) is not null)
+            && targetBody(targetGuid) is not null)
         {
             request.Params = parameters;
             request.Type = MovementType.TurnToObject;

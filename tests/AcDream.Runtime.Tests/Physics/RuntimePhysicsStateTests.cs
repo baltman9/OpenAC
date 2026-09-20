@@ -204,6 +204,40 @@ public sealed class RuntimePhysicsStateTests
     }
 
     /// <summary>
+    /// How tall it is comes from the same authored shape and the same scale.
+    /// A walk ordered at a thing measures the gap between the two bodies as
+    /// cylinders, so a height of nothing makes a standing creature a flat
+    /// disc on the floor and the walk stops short of, or inside, it.
+    ///
+    /// Mutation: report the authored height unscaled, or read the girth for
+    /// it, and this fails.
+    /// </summary>
+    [Fact]
+    public void AnEntityBodyMadeOnDemandAlsoReportsItsScaledHeight()
+    {
+        using var lifetime = new RuntimeEntityObjectLifetime();
+        RuntimeEntityRecord record =
+            lifetime.Entities.AddActive(Spawn(0x70000115u, 1));
+        lifetime.Entities.SetFullCell(record, 0x01010001u, 0x0101FFFFu);
+        lifetime.Entities.SetPhysicsBody(
+            record,
+            FollowableBody(record, new Vector3(11f, 22f, 5f)));
+        record.Snapshot = record.Snapshot with { ObjScale = 1.5f };
+        using var shapes = new OneAuthoredShape(
+            0x02000001u,
+            radius: 0.8f,
+            height: 2.4f);
+        lifetime.Physics.BindSetupCollisionSource(shapes);
+
+        (float Radius, float Height)? shape =
+            lifetime.Physics.EntityBodyShape(record.ServerGuid);
+
+        Assert.NotNull(shape);
+        Assert.Equal(1.2f, shape.Value.Radius, 4);
+        Assert.Equal(3.6f, shape.Value.Height, 4);
+    }
+
+    /// <summary>
     /// With no shape to hand the body says so rather than inventing a girth:
     /// a made-up one would move every arrival test by a made-up amount.
     /// </summary>
