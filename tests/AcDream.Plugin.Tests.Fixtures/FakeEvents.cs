@@ -220,6 +220,10 @@ public sealed class FakeEvents : IEvents
     /// </summary>
     public void RaiseObjectChanged(PluginObjectChange change)
     {
+        change = change with
+        {
+            ChangedFields = PluginObjectChange.FieldsFor(change.Kind),
+        };
         lock (_gate)
         {
             Action<PluginObjectChange>? handlers = _objectChanged;

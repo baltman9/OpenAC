@@ -156,6 +156,8 @@ public sealed class FakePluginHostContractTests
             new PluginObjectChange(0x50000001u, PluginObjectChangeKind.Created));
         Assert.NotNull(received);
         Assert.Equal(0x50000001u, received.Value.ObjectId);
+        Assert.True(received.Value.ChangedFields.HasFlag(
+            PluginObjectChangeFields.Lifecycle));
     }
 
     [Fact]
