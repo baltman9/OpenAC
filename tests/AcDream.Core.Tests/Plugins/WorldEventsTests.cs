@@ -16,6 +16,9 @@ public class WorldEventsTests
         Assert.False(transition.IsStaleComparedTo(5));
         Assert.True(transition.IsStaleComparedTo(6));
         Assert.True(transition.IsStaleComparedTo(7));
+        Assert.False(transition.IsTerminal);
+        Assert.True((transition with { IsCompleted = true }).IsTerminal);
+        Assert.True((transition with { IsCancelled = true }).IsTerminal);
     }
 
     [Fact]

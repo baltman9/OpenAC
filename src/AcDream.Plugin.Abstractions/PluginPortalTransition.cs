@@ -31,6 +31,9 @@ public readonly record struct PluginPortalTransition(
     /// <summary>True while this generation has not completed or cancelled.</summary>
     public bool IsActive => Generation != 0 && !IsCompleted && !IsCancelled;
 
+    /// <summary>True when the transition reached completion or cancellation.</summary>
+    public bool IsTerminal => Generation != 0 && (IsCompleted || IsCancelled);
+
     /// <summary>
     /// Returns true when this notification is older than a transition
     /// revision the plugin has already processed.
