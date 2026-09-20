@@ -92,6 +92,7 @@ public sealed class RuntimeAutomationSurfaceTests
     [InlineData(PluginObjectClass.Npc, PluginObjectCapabilities.Interactable | PluginObjectCapabilities.Npc)]
     [InlineData(PluginObjectClass.Lifestone, PluginObjectCapabilities.Interactable)]
     [InlineData(PluginObjectClass.Services, PluginObjectCapabilities.Interactable)]
+    [InlineData(PluginObjectClass.Corpse, PluginObjectCapabilities.Interactable)]
     [InlineData(PluginObjectClass.MeleeWeapon, PluginObjectCapabilities.None)]
     public void ObjectCapabilitiesAreStableSemanticFlags(
         PluginObjectClass objectClass,
