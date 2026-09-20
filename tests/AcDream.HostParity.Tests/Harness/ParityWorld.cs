@@ -1,4 +1,4 @@
-using AcDream.Core.Combat;
+﻿using AcDream.Core.Combat;
 using AcDream.Core.Items;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
@@ -97,6 +97,15 @@ internal static class ParityWorld
     /// <summary>An item that cannot be used without naming a target.</summary>
     internal const uint TargetedItem = 0x50000044u;
 
+    /// <summary>
+    /// A part-filled stack the character already carries, of the same kind as
+    /// the coins lying in the corpse.
+    /// </summary>
+    internal const uint CarriedCoin = 0x50000045u;
+
+    /// <summary>What takes the last free slot in the side pack.</summary>
+    internal const uint SidePackFiller = 0x50000046u;
+
     /// <summary>A corpse lying on the ground, openable.</summary>
     internal const uint Corpse = 0x50000050u;
 
@@ -157,6 +166,88 @@ internal static class ParityWorld
             TargetedItem,
             "Mana Stone",
             ItemUseability.Contained | (ItemUseability.Contained << 16)));
+    }
+
+    /// <summary>
+    /// Leaves the character with nowhere to put anything new -- every item
+    /// slot taken and no room for another pack -- while it still carries a
+    /// part-filled stack of the coins lying in the corpse. Adding to that
+    /// stack costs no slot, so this is the shape that tells a placement which
+    /// joins a stack apart from one that only looks for room.
+    ///
+    /// The capacities are counted off what was actually staged rather than
+    /// written down, so the inventory stays full if the staging above it
+    /// grows.
+    /// </summary>
+    internal static void StageAFullInventoryOverAStack(GameRuntime runtime)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        StageCarriedItems(runtime);
+        ClientObjectTable objects = runtime.InventoryOwner.Objects;
+
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = CarriedCoin,
+            Type = ItemType.Money,
+            Name = "Pyreal",
+            ContainerId = Player,
+            WeenieClassId = 0x0000_0111u,
+            StackSize = 250,
+            StackSizeMax = 25000,
+            Useability = ItemUseability.Contained,
+        });
+
+        ClientObject filler = Carried(
+            SidePackFiller, "Trinket", ItemUseability.Contained);
+        filler.ContainerId = SidePack;
+        objects.AddOrUpdate(filler);
+
+        // The listing the server sends for each pack. Slots are counted
+        // against the listing, not against what each thing says it is in, so
+        // a staging that skips this leaves both packs looking bottomless.
+        objects.ReplaceContents(SidePack, [new ContainerContentEntry(SidePackFiller, 0u)]);
+        objects.ReplaceContents(
+            Player,
+            [
+                new ContainerContentEntry(Kit, 0u),
+                new ContainerContentEntry(SalvageTool, 0u),
+                new ContainerContentEntry(ScrapItem, 0u),
+                new ContainerContentEntry(TargetedItem, 0u),
+                new ContainerContentEntry(CarriedCoin, 0u),
+                new ContainerContentEntry(SidePack, 1u),
+            ]);
+
+        if (objects.Get(SidePack) is { } sidePack)
+        {
+            sidePack.ItemsCapacity = CountHeld(objects, SidePack, packs: false);
+            objects.AddOrUpdate(sidePack);
+        }
+
+        if (objects.Get(Player) is { } player)
+        {
+            player.ItemsCapacity = CountHeld(objects, Player, packs: false);
+            player.ContainersCapacity = CountHeld(objects, Player, packs: true);
+            objects.AddOrUpdate(player);
+        }
+    }
+
+    /// <summary>
+    /// How many of one container's contents are packs, or how many are not.
+    /// </summary>
+    private static int CountHeld(
+        ClientObjectTable objects,
+        uint containerId,
+        bool packs)
+    {
+        int held = 0;
+        foreach (uint id in objects.GetContents(containerId))
+        {
+            if (objects.Get(id) is not { } item)
+                continue;
+            if (InventoryContainerPlacementPolicy.IsContainer(item) == packs)
+                held++;
+        }
+        return held;
     }
 
     /// <summary>

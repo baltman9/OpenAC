@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using AcDream.Core.Chat;
 using AcDream.Core.Combat;
 using AcDream.Core.Items;
@@ -974,12 +974,14 @@ public sealed class RuntimeItemInteraction : IDisposable
     }
 
     /// <summary>
-    /// Picks up a world item into the inventory. The pack the request names
-    /// is the one the player has open (or the main pack when asked); when it
-    /// has no room the item goes to the main pack, then to the first side
-    /// pack with room, and when nothing has room the "completely full"
-    /// notice is shown and nothing is sent. The server fills exactly the
-    /// pack it is asked for, so the choice must be made here.
+    /// Picks up a world item into the inventory. A quantity that joins a
+    /// stack the character already holds is sent as that join and needs no
+    /// free slot. Otherwise the pack the request names is the one the player
+    /// has open (or the main pack when asked); when it has no room the item
+    /// goes to the main pack, then to the first side pack with room, and when
+    /// nothing has room the "completely full" notice is shown and nothing is
+    /// sent. The server fills exactly the pack it is asked for, so the choice
+    /// must be made here.
     ///
     /// Answers true when the request was the client's to handle, which is not
     /// the same as it having been sent: the three ways it can come to nothing
@@ -1011,21 +1013,18 @@ public sealed class RuntimeItemInteraction : IDisposable
         uint containerId = InventoryPlacementSearch.ChooseContainer(
             _objects, itemGuid, root, target, root,
             out InventoryContainerPlacementRejection noRoom);
-        if (containerId == 0u)
-        {
-            if (InventoryContainerPlacementPolicy.ComposeClientLocal(
-                    noRoom, _objects.Get(itemGuid), _objects.Get(root), root) is { } fullNotice)
-            {
-                ReportClientLocal(fullNotice);
-            }
-            return RuntimeBackpackPlacementOutcome.NoRoom;
-        }
 
+        // Adding to a stack the character already holds costs no slot, so
+        // whether one is free is not what decides it: the join is settled
+        // before the room refusal, and a completely full inventory still
+        // takes what only joins a stack inside it.
         if (TryPlanAutoMerge(itemGuid) is { } merge)
         {
             return TryDispatchPendingBackpackPlacement(
                     itemGuid,
-                    containerId,
+                    containerId != 0u
+                        ? containerId
+                        : ContainerHolding(merge.TargetObjectId, root),
                     placement,
                     InventoryRequestKind.Merge,
                     () =>
@@ -1043,6 +1042,16 @@ public sealed class RuntimeItemInteraction : IDisposable
                 : RuntimeBackpackPlacementOutcome.NotDispatched;
         }
 
+        if (containerId == 0u)
+        {
+            if (InventoryContainerPlacementPolicy.ComposeClientLocal(
+                    noRoom, _objects.Get(itemGuid), _objects.Get(root), root) is { } fullNotice)
+            {
+                ReportClientLocal(fullNotice);
+            }
+            return RuntimeBackpackPlacementOutcome.NoRoom;
+        }
+
         if (!TryBeginPendingBackpackPlacement(
                 itemGuid,
                 containerId,
@@ -1053,6 +1062,17 @@ public sealed class RuntimeItemInteraction : IDisposable
         }
         _placeInBackpack(itemGuid, containerId, placement);
         return RuntimeBackpackPlacementOutcome.Sent;
+    }
+
+    /// <summary>
+    /// The pack a merged quantity ends up in: the one holding the stack it
+    /// joins. Falls back to the root when that stack's pack is not known,
+    /// because the placement has to name a pack to wait on.
+    /// </summary>
+    private uint ContainerHolding(uint targetId, uint root)
+    {
+        uint container = _objects.Get(targetId)?.ContainerId ?? 0u;
+        return container != 0u ? container : root;
     }
 
     private StackMergePlan? TryPlanAutoMerge(uint sourceId)
