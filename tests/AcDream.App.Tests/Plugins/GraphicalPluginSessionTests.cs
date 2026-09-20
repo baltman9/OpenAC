@@ -199,7 +199,7 @@ public sealed class GraphicalPluginSessionTests
         Assert.Equal(0, ui.RegistrationCount);
         Assert.Equal(
             "ui=True;events=True;selection=True",
-            File.ReadAllText(Path.Combine(
+            ReadSharedText(Path.Combine(
                 pluginDirectory,
                 "unload-observation")));
         worldEntities.Raise(new WorldEntitySnapshot(
@@ -246,7 +246,7 @@ public sealed class GraphicalPluginSessionTests
     }
 
     private static JsonElement[] ReadStatuses(string path) =>
-        File.ReadAllLines(path)
+        ReadSharedLines(path)
             .Select(static line => JsonDocument.Parse(line).RootElement.Clone())
             .ToArray();
 
@@ -385,4 +385,18 @@ public sealed class GraphicalPluginSessionTests
             }
         }
     }
-}
+
+    // A status file belongs to a session that may still be writing it, and a
+    // reader that does not share the file for writing is refused while it is.
+    private static string ReadSharedText(string path)
+    {
+        using var stream = new FileStream(
+            path, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    private static string[] ReadSharedLines(string path) =>
+        ReadSharedText(path).Split(
+            ["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries);}
