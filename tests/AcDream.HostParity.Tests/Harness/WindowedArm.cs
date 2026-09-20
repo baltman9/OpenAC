@@ -174,7 +174,10 @@ internal sealed class WindowedArm : ParityArm
             clipboard: new NoWindowClipboard(),
             hotkeys: new AcDream.App.Input.AppHotkeyRegistry(
                 Path.Combine(DataDirectory, "plugin-hotkeys.json")),
-            worldLines: new AcDream.App.Plugins.PluginWorldLineStore());
+            worldLines: new AcDream.App.Plugins.PluginWorldLineStore(),
+            // What this client was started with for each plugin, out of the
+            // same map the other arm is given.
+            sessionSettings: ConfiguredPluginSettings);
     }
 
     /// <summary>

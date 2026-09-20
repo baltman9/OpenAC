@@ -27,6 +27,34 @@ internal abstract class ParityArm : IDisposable
     internal static readonly string[] ConfiguredPluginTags =
         ["parity-tag", "parity-second"];
 
+    /// <summary>The plugin ids both arms are given startup settings for.</summary>
+    internal const string SettingsPluginId = "acdream.parity.settings";
+
+    /// <summary>A second one, so a plugin cannot read another plugin's settings.</summary>
+    internal const string OtherSettingsPluginId = "acdream.parity.other";
+
+    /// <summary>
+    /// The startup settings both arms are configured with. Real clients read
+    /// these from their own configuration -- a launch option naming a file on
+    /// one, the session file on the other -- and both end at this one shape,
+    /// so the arms stand in for that with one map.
+    /// </summary>
+    internal static readonly AcDream.Runtime.Plugins.PluginSessionSettings
+        ConfiguredPluginSettings =
+        AcDream.Runtime.Plugins.PluginSessionSettings.FromDeclared(
+            new Dictionary<string, Dictionary<string, string>>
+            {
+                [SettingsPluginId] = new()
+                {
+                    ["startMacro"] = "true",
+                    ["profile"] = "parity",
+                },
+                [OtherSettingsPluginId] = new()
+                {
+                    ["startMacro"] = "false",
+                },
+            });
+
     private readonly IDisposable _hostLease;
     private ParityPlayerBody? _body;
     private RuntimeLocalPlayerFrameController? _frame;

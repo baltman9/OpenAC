@@ -72,7 +72,8 @@ internal sealed class WindowlessArm : ParityArm
                 Path.Combine(DataDirectory, "plugin-profiles")),
             sessionCommands: _commands,
             dataDirectory: DataDirectory,
-            pluginTags: ConfiguredPluginTags);
+            pluginTags: ConfiguredPluginTags,
+            sessionSettings: ConfiguredPluginSettings);
     }
 
     internal override IPluginHost Host => _host;
