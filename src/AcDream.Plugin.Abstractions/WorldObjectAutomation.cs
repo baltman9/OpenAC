@@ -422,4 +422,15 @@ public interface IWorldObjectAutomation
     /// </summary>
     PluginItemCommandResult Identify(uint objectId) =>
         new(PluginItemCommandStatus.Unavailable);
+
+    /// <summary>
+    /// Activates a known world object such as a portal, door, vendor, NPC, or
+    /// external container. The host may approach an out-of-range object first;
+    /// <see cref="PluginItemCommandStatus.Started"/> means the interaction
+    /// was accepted, not that the world transition has completed. Use
+    /// <see cref="IEvents.PortalTransition"/> and object changes for follow-up
+    /// state.
+    /// </summary>
+    PluginItemCommandResult Activate(uint objectId) =>
+        new(PluginItemCommandStatus.Unavailable);
 }

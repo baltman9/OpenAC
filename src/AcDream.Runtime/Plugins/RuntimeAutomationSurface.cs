@@ -2012,6 +2012,29 @@ internal sealed class RuntimeAutomationSurface
     // owned inventory, equipped, landscape, a vendor listing, or an open
     // container's content -- unlike ILootAutomation.Identify, which is
     // deliberately scoped to the currently open corpse/container.
+    PluginItemCommandResult IWorldObjectAutomation.Activate(uint objectId)
+    {
+        GameRuntime? runtime;
+        Func<uint, PluginItemCommandResult>? useWorldObject;
+        lock (_gate)
+        {
+            runtime = _runtime;
+            useWorldObject = _useWorldObject;
+        }
+        if (runtime is null || useWorldObject is null || !IsAvailable)
+            return new(PluginItemCommandStatus.Unavailable);
+        if (objectId == 0u || runtime.InventoryOwner.Objects.Get(objectId) is not { } item)
+            return new(PluginItemCommandStatus.InvalidTarget);
+        uint playerId = runtime.PlayerIdentity.ServerGuid;
+        if (RuntimeWorldObjectProjection.IsPlayerOwned(
+                item,
+                playerId,
+                runtime.InventoryOwner.Objects))
+            return new(PluginItemCommandStatus.InvalidTarget,
+                "Activate is for world objects; use Items.Use for owned items.");
+        return useWorldObject(objectId);
+    }
+
     PluginItemCommandResult IWorldObjectAutomation.Identify(uint objectId)
     {
         GameRuntime? runtime;
