@@ -25,6 +25,12 @@ public readonly record struct PluginPortalTransition(
     bool IsCompleted,
     bool IsCancelled)
 {
+    /// <summary>
+    /// The recall request revision that initiated this transition, or zero
+    /// when the transition was not correlated to a plugin recall request.
+    /// </summary>
+    public long RecallRequestRevision { get; init; }
+
     /// <summary>The semantic source of this transition.</summary>
     public PluginPortalTransitionKind Kind { get; init; }
 

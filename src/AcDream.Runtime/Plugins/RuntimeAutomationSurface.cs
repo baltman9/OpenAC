@@ -41,6 +41,7 @@ internal sealed class RuntimeAutomationSurface
     private PluginGoToState _lastNavigationState;
     private RuntimePortalSnapshot? _lastPublishedPortalSnapshot;
     private long _recallRequestRevision;
+    private long _pendingRecallRequestRevision;
     private PluginRecallRequest _lastRecallRequest;
 
     private GameRuntime? _runtime;
@@ -641,6 +642,7 @@ internal sealed class RuntimeAutomationSurface
         _lastPublishedPortalSnapshot = null;
         _lastRecallRequest = default;
         _recallRequestRevision = 0;
+        _pendingRecallRequestRevision = 0;
         _chatMessages.Clear();
         if (_spellbook is not null)
         {
@@ -1299,12 +1301,15 @@ internal sealed class RuntimeAutomationSurface
     void IRuntimeEventObserver.OnMovement(in RuntimeMovementDelta delta) { }
     void IRuntimeEventObserver.OnPortal(in RuntimePortalDelta delta)
     {
+        long recallRequestRevision;
         lock (_gate)
         {
             if (_lastPublishedPortalSnapshot is { } previous
                 && previous.Equals(delta.Portal))
                 return;
             _lastPublishedPortalSnapshot = delta.Portal;
+            recallRequestRevision = _pendingRecallRequestRevision;
+            _pendingRecallRequestRevision = 0;
         }
         _pluginEvents?.FirePortalTransition(new PluginPortalTransition(
             Revision: 0,
@@ -1315,6 +1320,7 @@ internal sealed class RuntimeAutomationSurface
             IsCompleted: delta.Portal.IsCompleted,
             IsCancelled: delta.Portal.IsCancelled)
         {
+            RecallRequestRevision = recallRequestRevision,
             Kind = delta.Portal.Kind switch
             {
                 RuntimePortalKind.Login => PluginPortalTransitionKind.Login,
@@ -2081,6 +2087,9 @@ internal sealed class RuntimeAutomationSurface
                 ++_recallRequestRevision,
                 kind,
                 status);
+            _pendingRecallRequestRevision = status == PluginRecallStatus.Started
+                ? _lastRecallRequest.Revision
+                : 0;
         }
         return new(status, status == PluginRecallStatus.Refused
             ? result.Status.ToString()

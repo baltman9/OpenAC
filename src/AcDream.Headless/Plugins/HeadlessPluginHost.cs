@@ -38,6 +38,7 @@ internal sealed class HeadlessPluginHost
     private Action<PluginPortalTransition>? _portalTransition;
     private long _portalTransitionRevision;
     private RuntimePortalSnapshot? _lastPublishedPortalSnapshot;
+    private long _lastPublishedRecallRequestRevision;
     private Action<PluginItemUseCompletion>? _itemUseCompleted;
     private Action<PluginGoToReport>? _navigationChanged;
     private long _lastNavigationSequence;
@@ -762,6 +763,14 @@ internal sealed class HeadlessPluginHost
                 return;
             _lastPublishedPortalSnapshot = delta.Portal;
         }
+        long recallRequestRevision =
+            ((IRecallAutomation)_automation).LastRequest.Status == PluginRecallStatus.Started
+                ? ((IRecallAutomation)_automation).LastRequest.Revision
+                : 0;
+        if (recallRequestRevision == _lastPublishedRecallRequestRevision)
+            recallRequestRevision = 0;
+        else
+            _lastPublishedRecallRequestRevision = recallRequestRevision;
         PluginPortalTransition transition = new(
             Revision: Interlocked.Increment(ref _portalTransitionRevision),
             Generation: delta.Portal.Generation,
@@ -771,6 +780,7 @@ internal sealed class HeadlessPluginHost
             IsCompleted: delta.Portal.IsCompleted,
             IsCancelled: delta.Portal.IsCancelled)
         {
+            RecallRequestRevision = recallRequestRevision,
             Kind = delta.Portal.Kind switch
             {
                 RuntimePortalKind.Login => PluginPortalTransitionKind.Login,
