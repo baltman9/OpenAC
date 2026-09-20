@@ -60,10 +60,10 @@ public sealed class ScopedAutomationSurfaceTests
             checkedMembers.Add(property.Name);
         }
 
-        // Every property this loop actually walked should be one of the 18
-        // known forwarders, guarding against the loop silently checking
-        // zero properties if reflection ever returned nothing.
-        Assert.Equal(20, checkedMembers.Count);
+        // Every property this loop actually walked should be one of the
+        // known forwarders, guarding against the loop silently checking zero
+        // properties if reflection ever returned nothing.
+        Assert.Equal(21, checkedMembers.Count);
 
         scoped.Dispose();
     }
