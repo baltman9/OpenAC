@@ -126,6 +126,23 @@ else
     runtimeOptions = RuntimeOptions.FromEnvironment(datDir);
 }
 
+// The startup settings each plugin was given. A named file that cannot be
+// read is a startup fault and says so: a plugin whose settings silently came
+// out empty would behave differently here than it does on the client with no
+// window, which is the one thing this option exists to prevent.
+AcDream.Runtime.Plugins.PluginSessionSettings pluginSessionSettings;
+try
+{
+    pluginSessionSettings = runtimeOptions.PluginSettingsFile is { } settingsPath
+        ? AcDream.Runtime.Plugins.PluginSessionSettings.ReadFile(settingsPath)
+        : AcDream.Runtime.Plugins.PluginSessionSettings.Empty;
+}
+catch (AcDream.Runtime.Plugins.PluginSessionSettingsException error)
+{
+    Log.Error("ACDREAM_PLUGIN_SETTINGS_FILE invalid: {Error}", error.Message);
+    return 2;
+}
+
 if (runtimeOptions.DevTools)
 {
     Log.Information(
@@ -195,7 +212,8 @@ var host = new AppPluginHost(
         () => window.PluginWindowHandle,
         () => window.PluginWindowIsMinimized,
         () => window.ClipboardDispatch),
-    window.WorldLines);
+    window.WorldLines,
+    pluginSessionSettings);
 GraphicalPluginSession pluginSession = GraphicalPluginSession.Create(
     applicationPaths,
     runtimeOptions.Plugins,

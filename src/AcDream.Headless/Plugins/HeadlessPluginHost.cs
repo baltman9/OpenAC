@@ -22,8 +22,9 @@ internal sealed class HeadlessPluginHost
     private readonly RuntimeWorldEntityProjection _worldEntities;
     private readonly object _eventGate = new();
     private readonly RuntimeAutomationSurface _automation;
-    private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>
-        _sessionSettingsByPlugin;
+    // The one snapshot both clients answer a plugin from, so the settings a
+    // session was started with read the same whichever client is running.
+    private readonly PluginSessionSettings _sessionSettings;
     private readonly object _tickGate = new();
     private Action<double>? _tick;
     private Action? _loginComplete;
@@ -40,7 +41,7 @@ internal sealed class HeadlessPluginHost
         IPluginLogger logger,
         IPluginStorage? storage = null,
         IPluginStorage? vtankProfiles = null,
-        IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
+        PluginSessionSettings? sessionSettings = null,
         Func<string, bool>? submitChatText = null,
         MagicCatalog? magicCatalog = null,
         HeadlessLogoutAutomation? logout = null,
@@ -57,7 +58,7 @@ internal sealed class HeadlessPluginHost
         Log = logger ?? throw new ArgumentNullException(nameof(logger));
         Storage = storage ?? NoOpPluginStorage.Instance;
         VtankProfiles = vtankProfiles ?? NoOpPluginStorage.Instance;
-        _sessionSettingsByPlugin = CopySessionSettings(sessionSettings);
+        _sessionSettings = sessionSettings ?? PluginSessionSettings.Empty;
         Window = new HeadlessHostWindow(requestGracefulStop);
         // One factory, shared with the windowed host. The surface announces
         // this client to the other clients on this machine off the tick it is
@@ -108,24 +109,6 @@ internal sealed class HeadlessPluginHost
         _worldEntities = new RuntimeWorldEntityProjection(runtime, Log.Warn);
     }
 
-    private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>
-        CopySessionSettings(
-            IReadOnlyDictionary<string, Dictionary<string, string>>? source)
-    {
-        if (source is null || source.Count == 0)
-            return new Dictionary<string, IReadOnlyDictionary<string, string>>();
-        var copy = new Dictionary<string, IReadOnlyDictionary<string, string>>(
-            source.Count,
-            StringComparer.Ordinal);
-        foreach ((string pluginId, Dictionary<string, string>? perPlugin) in source)
-        {
-            copy[pluginId] = perPlugin is { Count: > 0 }
-                ? new Dictionary<string, string>(perPlugin, StringComparer.Ordinal)
-                : EmptySettings;
-        }
-        return copy;
-    }
-
     public bool HasUi => false;
 
     public IPluginLogger Log { get; }
@@ -169,15 +152,8 @@ internal sealed class HeadlessPluginHost
 
     public IReadOnlyDictionary<string, string> SessionSettings => EmptySettings;
 
-    public IReadOnlyDictionary<string, string> SessionSettingsFor(string pluginId)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
-        return _sessionSettingsByPlugin.TryGetValue(
-            pluginId,
-            out IReadOnlyDictionary<string, string>? settings)
-            ? settings
-            : EmptySettings;
-    }
+    public IReadOnlyDictionary<string, string> SessionSettingsFor(string pluginId) =>
+        _sessionSettings.SessionSettingsFor(pluginId);
 
     public event Action<double> Tick
     {

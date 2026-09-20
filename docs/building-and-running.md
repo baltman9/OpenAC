@@ -113,6 +113,7 @@ libraries directly. It does not require those environment variables.
 | `ACDREAM_HEADLESS_CONSOLE=0\|1` | Headless interactive console; defaults to on when stdin is a terminal |
 | `ACDREAM_HEADLESS_CONSOLE_STREAM=stderr\|stdout` | Which stream that console prints to; `stderr` by default |
 | `ACDREAM_PLUGIN_TAGS=a,b` | Words this client wants to be found by; plugins on the clients running on this machine can see one another's tags and filter on them. The headless config's `pluginTags` is the same option |
+| `ACDREAM_PLUGIN_SETTINGS_FILE=<path>` | Path to a JSON file holding the startup settings each plugin is given. The file is the same map the headless config names under `pluginSettings`, so a plugin reads the same settings whichever client is running. A named file that is missing, unreadable or the wrong shape stops startup with the reason; unset means no settings |
 
 A few other `ACDREAM_*` variables switch original-client behaviors that are
 on by default (`ACDREAM_RETAIL_CHASE`, `ACDREAM_CAMERA_COLLIDE`,
@@ -168,6 +169,33 @@ group carries the group's word:
 ```json
 "pluginTags": ["tank", "group-a"]
 ```
+
+`pluginSettings` is the startup settings each plugin is given, one object of
+settings per plugin id. A plugin reads only its own, through
+`IPluginHost.SessionSettings`:
+
+```json
+"pluginSettings": {
+  "acdream.example": { "startMacro": "true", "profile": "tank" }
+}
+```
+
+The graphical client takes the same map from a file of its own:
+`ACDREAM_PLUGIN_SETTINGS_FILE=<path>`, where the whole file is that map and
+nothing else:
+
+```json
+{
+  "acdream.example": { "startMacro": "true", "profile": "tank" }
+}
+```
+
+Both clients read it the same way and refuse the same mistakes: a plugin id
+with nothing behind it, or a setting with no value, stops startup and says
+which one. A file the graphical client was told to read and could not is a
+startup error too, never a quiet run with no settings — a plugin that decides
+what to do on login from a setting would otherwise behave differently under a
+window than it does without one.
 
 For a single local session, `run` also accepts `--user` and `--password`. Add
 more session entries for a multi-session process. Built-in policies:

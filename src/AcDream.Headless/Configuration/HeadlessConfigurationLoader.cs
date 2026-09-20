@@ -313,27 +313,16 @@ internal static class HeadlessConfigurationLoader
         }
     }
 
+    // The same check both clients make of the same map, in the same words:
+    // a session file naming a plugin with nothing behind it and a launch
+    // option naming one are the same mistake, so they read the same.
     private static void ValidatePluginSettings(HeadlessSessionDescriptor session)
     {
-        if (session.PluginSettings is not { } declared)
-            return;
-
-        foreach ((string pluginId, Dictionary<string, string>? perPlugin) in declared)
+        if (AcDream.Runtime.Plugins.PluginSessionSettings.DescribeFault(
+                session.PluginSettings) is { } fault)
         {
-            if (perPlugin is null)
-            {
-                throw new HeadlessConfigurationException(
-                    $"Session '{session.Id}' pluginSettings['{pluginId}'] cannot be null.");
-            }
-
-            foreach ((string key, string? value) in perPlugin)
-            {
-                if (value is null)
-                {
-                    throw new HeadlessConfigurationException(
-                        $"Session '{session.Id}' pluginSettings['{pluginId}']['{key}'] cannot be null.");
-                }
-            }
+            throw new HeadlessConfigurationException(
+                $"Session '{session.Id}' {fault}");
         }
     }
 

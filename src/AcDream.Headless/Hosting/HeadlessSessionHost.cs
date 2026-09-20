@@ -339,7 +339,8 @@ internal sealed class HeadlessSessionHost : IDisposable
                 descriptor.Plugins,
                 storage,
                 vtankProfiles,
-                descriptor.PluginSettings,
+                AcDream.Runtime.Plugins.PluginSessionSettings.FromDeclared(
+                    descriptor.PluginSettings),
                 SubmitChatText,
                 contentLease?.MagicCatalog,
                 logout,

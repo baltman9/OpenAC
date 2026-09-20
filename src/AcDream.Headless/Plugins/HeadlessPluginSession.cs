@@ -5,6 +5,7 @@ using AcDream.Headless.Hosting;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
 using AcDream.Runtime.Navigation;
+using AcDream.Runtime.Plugins;
 using AcDream.Runtime.Session;
 
 namespace AcDream.Headless.Plugins;
@@ -49,7 +50,7 @@ internal sealed class HeadlessPluginSession : IDisposable
         IReadOnlyList<string>? allowList,
         IPluginStorage? storage = null,
         IPluginStorage? vtankProfiles = null,
-        IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
+        PluginSessionSettings? sessionSettings = null,
         Func<string, bool>? submitChatText = null,
         MagicCatalog? magicCatalog = null,
         HeadlessLogoutAutomation? logout = null,

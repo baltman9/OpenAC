@@ -67,6 +67,15 @@ public sealed record RuntimeOptions(
     public string? VtankProfileDirectoryOverride { get; init; }
 
     /// <summary>
+    /// Path to a JSON file holding the startup settings this client was
+    /// started with for each plugin: one object of settings per plugin id.
+    /// Unset means none. The file is the same map a session configuration
+    /// names under <c>pluginSettings</c>, so a plugin reads the same settings
+    /// whichever client is running.
+    /// </summary>
+    public string? PluginSettingsFile { get; init; }
+
+    /// <summary>
     /// Build options from the process environment. Used by
     /// <c>Program.cs</c> at startup.
     /// </summary>
@@ -147,6 +156,8 @@ public sealed record RuntimeOptions(
         {
             PluginTags = ParsePluginTags(env("ACDREAM_PLUGIN_TAGS")),
             VtankProfileDirectoryOverride = NullIfEmpty(env("ACDREAM_VTANK_PROFILE_DIR")),
+            PluginSettingsFile =
+                NullIfEmpty(env("ACDREAM_PLUGIN_SETTINGS_FILE")),
         };
     }
 
