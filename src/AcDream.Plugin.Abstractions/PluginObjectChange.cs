@@ -31,4 +31,11 @@ public readonly record struct PluginObjectChange(
     /// unsequenced value supplied by a fixture or inert host.
     /// </summary>
     public long Revision { get; init; }
+
+    /// <summary>
+    /// The normalized object snapshot at the time of the change, when the
+    /// object is still known. This is absent for a release after the host has
+    /// discarded the object.
+    /// </summary>
+    public PluginWorldObject? Current { get; init; }
 }

@@ -1250,9 +1250,11 @@ internal sealed class RuntimeAutomationSurface
             RuntimeEntityChange.Deleted => PluginObjectChangeKind.Released,
             _ => PluginObjectChangeKind.Updated,
         };
-        events.FireObjectChanged(new PluginObjectChange(
-            delta.Entity.Identity.ServerGuid,
-            kind));
+        uint objectId = delta.Entity.Identity.ServerGuid;
+        events.FireObjectChanged(new PluginObjectChange(objectId, kind)
+        {
+            Current = CaptureCurrentObject(objectId),
+        });
     }
 
     /// <summary>
@@ -1274,9 +1276,11 @@ internal sealed class RuntimeAutomationSurface
             RuntimeInventoryChange.Removed => PluginObjectChangeKind.Released,
             _ => PluginObjectChangeKind.Updated,
         };
-        events.FireObjectChanged(new PluginObjectChange(
-            delta.Item.ObjectId,
-            kind));
+        uint objectId = delta.Item.ObjectId;
+        events.FireObjectChanged(new PluginObjectChange(objectId, kind)
+        {
+            Current = CaptureCurrentObject(objectId),
+        });
     }
 
     void IRuntimeEventObserver.OnChat(in RuntimeChatDelta delta) { }
@@ -1319,7 +1323,30 @@ internal sealed class RuntimeAutomationSurface
     private void OnAppraisalReceived(uint objectId) =>
         _pluginEvents?.FireObjectChanged(new PluginObjectChange(
             objectId,
-            PluginObjectChangeKind.IdentReceived));
+            PluginObjectChangeKind.IdentReceived)
+        {
+            Current = CaptureCurrentObject(objectId),
+        });
+
+    private PluginWorldObject? CaptureCurrentObject(uint objectId)
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        if (runtime is null || objectId == 0u)
+            return null;
+        runtime.EntityObjects.Entities.TryGetActive(
+            objectId,
+            out RuntimeEntityRecord? record);
+        ClientObject? item = runtime.InventoryOwner.Objects.Get(objectId);
+        if (record is null && item is null)
+            return null;
+        return ProjectWorldObject(
+            runtime,
+            record,
+            item,
+            runtime.PlayerIdentity.ServerGuid);
+    }
 
     // ── IDialogAutomation ────────────────────────────────────────────────
     IDialogAutomation IAutomationSurface.Dialogs => this;
