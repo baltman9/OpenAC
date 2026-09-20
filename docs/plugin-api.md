@@ -661,7 +661,6 @@ code rather than in the runtime:
 
 | Seam | What a plugin loses |
 |---|---|
-| `BindWorldObjectUse` | Using an object the character does not own -- a vendor, a corpse, a chest, an NPC -- walks to it first, and that walk-then-use route is still windowed code. `Items.Use` on something you own works on both. |
 | `BindGhostDeletion` | Letting go of a target the client still believes in. |
 | `BindSelectionActions` | Cycling the selection (previous selection, previous player, next player). `Selection` itself -- what is selected, and selecting by id -- is real on both. |
 | `BindSpeciesNameResolver` | Creature display names by species; the table is still loaded by windowed layout code. |
