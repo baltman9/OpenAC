@@ -283,6 +283,37 @@ public sealed class RuntimeChatFeedTests
             state.ChatFeed.SnapshotForWindow(0).Select(line => line.Text).ToArray());
     }
 
+    // -- The short tag a colourless front end puts in front of a line ------
+
+    [Fact]
+    public void ALineThatAlreadyNamesItsChannelIsNotTaggedWithTheChannelAgain()
+    {
+        // Before this the console printed the label twice:
+        // "[fellowship] [Fellowship] Bob says, ...".
+        var log = new ChatLog();
+        using var feed = new RuntimeChatFeed(log);
+        log.OnChannelBroadcast(
+            7u, "Bob", "group up",
+            (uint)RetailLogTextType.Fellowship, "Fellowship");
+
+        RuntimeChatLine line = feed.Snapshot()[0];
+
+        Assert.Equal(string.Empty, RuntimeChatLineTags.For(line));
+        Assert.Equal("[Fellowship] Bob says, \"group up\"", line.Text);
+    }
+
+    [Fact]
+    public void EveryOtherLineStillCarriesTheTagForItsTextClass()
+    {
+        var log = new ChatLog();
+        using var feed = new RuntimeChatFeed(log);
+        log.OnLocalSpeech(
+            "Bob", "hi there", OtherPlayerGuid, false,
+            (uint)RetailLogTextType.Speech);
+
+        Assert.Equal("[say] ", RuntimeChatLineTags.For(feed.Snapshot()[0]));
+    }
+
     [Fact]
     public void DisposingTheCommunicationOwnerStopsItsFeed()
     {

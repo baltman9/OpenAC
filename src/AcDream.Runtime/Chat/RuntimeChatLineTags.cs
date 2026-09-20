@@ -19,6 +19,14 @@ public static class RuntimeChatLineTags
 
     private const string Fallback = "[msg] ";
 
+    /// <summary>
+    /// The tag to put in front of this finished line. Empty when the line's own
+    /// words already open with a bracketed channel label, so a front end that
+    /// tags its lines does not print the same label twice.
+    /// </summary>
+    public static string For(in RuntimeChatLine line)
+        => line.Kind == ChatKind.Channel ? string.Empty : For(line.LogTextType);
+
     /// <summary>The tag to put in front of a line of this text class,
     /// brackets and trailing space included.</summary>
     public static string For(uint logTextType) => logTextType switch

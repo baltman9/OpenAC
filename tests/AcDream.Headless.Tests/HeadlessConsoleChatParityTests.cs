@@ -76,7 +76,7 @@ public sealed class HeadlessConsoleChatParityTests
         IReadOnlyList<RuntimeChatLine> shown = feed.SnapshotForWindow(0, limit: 100);
         Assert.Equal(
             shown
-                .Select(line => RuntimeChatLineTags.For(line.LogTextType) + line.Text)
+                .Select(line => RuntimeChatLineTags.For(line) + line.Text)
                 .ToArray(),
             Lines(output));
 
@@ -85,7 +85,8 @@ public sealed class HeadlessConsoleChatParityTests
         Assert.Equal(
             shown.Select(line => line.Text).ToArray(),
             Lines(output)
-                .Select(line => line[(line.IndexOf("] ", StringComparison.Ordinal) + 2)..])
+                .Zip(shown, (printed, line) =>
+                    printed[RuntimeChatLineTags.For(line).Length..])
                 .ToArray());
     }
 
@@ -107,7 +108,9 @@ public sealed class HeadlessConsoleChatParityTests
                 "[say] Bob shouts, \"over here\"",
                 "[tell] Bob tells you, \"meet me\"",
                 "[tell] You tell Bob, \"on my way\"",
-                "[fellowship] [Fellowship] Bob says, \"group up\"",
+                // No "[fellowship] " in front: the line already names its
+                // channel, and printing the label twice reads badly.
+                "[Fellowship] Bob says, \"group up\"",
                 "[emote] * Bob waves.",
                 "[emote] * Bob bows deeply.",
                 "[advance] Your Cooking skill is now trained!",

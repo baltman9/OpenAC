@@ -67,7 +67,7 @@ internal sealed class HeadlessConsoleRenderer : IRuntimeEventObserver, IDisposab
         if (_chat is not null && !_chat.BelongsTo(_windowId, line.LogTextType))
             return;
         WriteLine(
-            RuntimeChatLineTags.For(line.LogTextType) + line.Text, dim: false);
+            RuntimeChatLineTags.For(line) + line.Text, dim: false);
     }
 
     /// <summary>
