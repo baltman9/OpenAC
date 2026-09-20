@@ -566,8 +566,8 @@ internal sealed class SessionPlayerCompositionPhase
                 d.Runtime.CharacterOwner.MovementSkills.Snapshot),
             record =>
             {
-                float radius = 0.48f;
-                float height = 1.835f;
+                float radius = DefaultPlayerBody.Radius;
+                float height = DefaultPlayerBody.Height;
                 uint localId = record.Key?.LocalEntityId ?? 0u;
                 if (localId != 0u && localId == firstEntryCylinderLocalId)
                 {

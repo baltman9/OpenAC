@@ -1,23 +1,28 @@
 using System.Collections.Immutable;
 using System.Numerics;
-using AcDream.App.Physics;
 using AcDream.App.Streaming;
 using AcDream.App.World;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
-using AcDream.Core.Selection;
 using AcDream.Core.World;
 using DatReaderWriter.DBObjs;
 
 namespace AcDream.App.Tests.Physics;
 
 /// <summary>
-/// How wide and how tall a thing is has to have ONE answer. The windowed host
-/// used to work it out itself while the shared physics owner worked out the
-/// same thing from the same authored shape and the same scale; nothing
-/// compared the two. These tests pin that the two agree on every shape the
-/// wire can describe, so the windowed helpers can simply ask.
+/// How wide and how tall a thing is has ONE answer, and this is what that one
+/// answer says about every shape the wire can describe: a plain creature, a
+/// scaled one, one whose authored shape carries no cylinder and no balls, one
+/// built from several balls, one that declares no step allowance, one sent a
+/// nonsense scale, one whose shape is not loaded, and an id nothing live is
+/// carrying.
+///
+/// These used to also assert that the windowed helpers agreed with the shared
+/// owner. Those helpers are now one-line forwards to it, so the assertion
+/// compared a call with itself and would have passed however wrong either
+/// side was; it is gone. What pins that the window still has no second answer
+/// of its own is that it has no code to compute one.
 /// </summary>
 public sealed class EntityBodyShapeOneSourceTests
 {
@@ -28,16 +33,6 @@ public sealed class EntityBodyShapeOneSourceTests
     private sealed class Harness
     {
         public required LiveEntityRuntime Runtime { get; init; }
-        public required LiveEntityMotionRuntimeController Controller { get; init; }
-        public required WorldEntity Entity { get; init; }
-
-        public (float Radius, float Height) WindowedCylinder() =>
-            Controller.GetSetupCylinder(Guid, Entity);
-
-        public (ImmutableArray<FlatCollisionSphere> Spheres, float Scale,
-                float StepUpHeight, float StepDownHeight)
-            WindowedMoverShape() =>
-            Controller.GetSetupMoverShape(Guid, Entity);
 
         public (float Radius, float Height) SharedCylinder() =>
             Runtime.Physics.EntityBodyShape(Guid) ?? (0f, 0f);
@@ -59,40 +54,18 @@ public sealed class EntityBodyShapeOneSourceTests
             spatial,
             new DelegateLiveEntityResourceLifecycle(_ => { }, _ => { }));
 
-        // Both answers read the SAME prepared-shape store: the windowed host's
-        // cache IS the shared owner's cache in production.
+        // The prepared-shape store the owner answers from is the one the
+        // window fills in production.
         if (setup is not null)
             runtime.Physics.DataCache.CacheSetup(SetupId, setup);
 
         runtime.RegisterAndMaterializeProjection(Spawn(scale));
-        Assert.True(runtime.TryGetWorldEntity(Guid, out WorldEntity entity));
-
-        var origin = new LiveWorldOriginState();
-        origin.Recenter(1, 1);
-        var controller = new LiveEntityMotionRuntimeController(
-            runtime,
-            static () => null,
-            new SelectionState(),
-            origin);
+        Assert.True(runtime.TryGetWorldEntity(Guid, out WorldEntity _));
 
         return new Harness
         {
             Runtime = runtime,
-            Controller = controller,
-            Entity = entity,
         };
-    }
-
-    private static void AssertOneAnswer(Harness harness)
-    {
-        Assert.Equal(harness.SharedCylinder(), harness.WindowedCylinder());
-
-        var shared = harness.SharedMoverShape();
-        var windowed = harness.WindowedMoverShape();
-        Assert.Equal(shared.Scale, windowed.Scale);
-        Assert.Equal(shared.StepUpHeight, windowed.StepUpHeight);
-        Assert.Equal(shared.StepDownHeight, windowed.StepDownHeight);
-        Assert.Equal(shared.Spheres, windowed.Spheres);
     }
 
     private static FlatSetupCollision MakeSetup(
@@ -121,7 +94,6 @@ public sealed class EntityBodyShapeOneSourceTests
                 spheres: [new FlatCollisionSphere(Vector3.Zero, 0.5f)]),
             scale: null);
 
-        AssertOneAnswer(harness);
         Assert.Equal((0.5f, 1.8f), harness.SharedCylinder());
         Assert.Equal(1f, harness.SharedMoverShape().Scale);
     }
@@ -137,7 +109,6 @@ public sealed class EntityBodyShapeOneSourceTests
                 spheres: [new FlatCollisionSphere(Vector3.Zero, 0.5f)]),
             scale: scale);
 
-        AssertOneAnswer(harness);
         (float radius, float height) = harness.SharedCylinder();
         Assert.Equal(expectedRadius, radius, precision: 5);
         Assert.Equal(expectedHeight, height, precision: 5);
@@ -149,7 +120,6 @@ public sealed class EntityBodyShapeOneSourceTests
     {
         Harness harness = Build(MakeSetup(radius: 0f, height: 0f), scale: 3f);
 
-        AssertOneAnswer(harness);
         Assert.Equal((0f, 0f), harness.SharedCylinder());
         Assert.Empty(harness.SharedMoverShape().Spheres);
     }
@@ -168,7 +138,6 @@ public sealed class EntityBodyShapeOneSourceTests
                 stepUp: 0.55f, stepDown: 0.65f),
             scale: 2f);
 
-        AssertOneAnswer(harness);
         var shape = harness.SharedMoverShape();
         Assert.Equal(balls, shape.Spheres);
         Assert.Equal(2f, shape.Scale);
@@ -184,7 +153,6 @@ public sealed class EntityBodyShapeOneSourceTests
             MakeSetup(radius: 0.5f, height: 1.8f, stepUp: 0f, stepDown: 0f),
             scale: 2f);
 
-        AssertOneAnswer(harness);
         var shape = harness.SharedMoverShape();
         Assert.Equal(0.4f, shape.StepUpHeight);
         Assert.Equal(0.4f, shape.StepDownHeight);
@@ -198,7 +166,6 @@ public sealed class EntityBodyShapeOneSourceTests
         Harness harness = Build(
             MakeSetup(radius: 0.5f, height: 1.8f), scale: nonsenseScale);
 
-        AssertOneAnswer(harness);
         Assert.Equal((0.5f, 1.8f), harness.SharedCylinder());
         Assert.Equal(1f, harness.SharedMoverShape().Scale);
     }
@@ -208,7 +175,6 @@ public sealed class EntityBodyShapeOneSourceTests
     {
         Harness harness = Build(setup: null, scale: 2f);
 
-        AssertOneAnswer(harness);
         Assert.Equal((0f, 0f), harness.SharedCylinder());
         var shape = harness.SharedMoverShape();
         Assert.Empty(shape.Spheres);

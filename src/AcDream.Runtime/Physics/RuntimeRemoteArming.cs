@@ -365,9 +365,9 @@ internal sealed class RuntimeRemoteArming
     private const float MinimumSettleRadius = 0.05f;
 
     /// <summary>The girth and height of an ordinary person on two legs.</summary>
-    private const float FallbackSettleRadius = 0.48f;
+    private const float FallbackSettleRadius = DefaultPlayerBody.Radius;
 
-    private const float FallbackSettleHeight = 1.835f;
+    private const float FallbackSettleHeight = DefaultPlayerBody.Height;
 
     private static bool IsPlayerGuid(uint guid) =>
         (guid & 0xFF000000u) == 0x50000000u;

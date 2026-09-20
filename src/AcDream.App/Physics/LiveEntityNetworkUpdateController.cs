@@ -186,8 +186,8 @@ internal sealed class LiveEntityNetworkUpdateController
         var (radius, height) = _motionRuntime.GetSetupCylinder(serverGuid, entity);
         if (radius < 0.05f)
         {
-            radius = 0.48f;
-            height = 1.835f;
+            radius = DefaultPlayerBody.Radius;
+            height = DefaultPlayerBody.Height;
         }
 
         var moverFlags = IsPlayerGuid(serverGuid)

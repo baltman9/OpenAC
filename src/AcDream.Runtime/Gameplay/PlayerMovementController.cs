@@ -1525,8 +1525,8 @@ public sealed class PlayerMovementController
                     previousPosition,
                     _body.Position,
                     CellId,
-                    sphereRadius: 0.48f,
-                    sphereHeight: 1.835f,
+                    sphereRadius: DefaultPlayerBody.Radius,
+                    sphereHeight: DefaultPlayerBody.Height,
                     stepUpHeight: StepUpHeight,
                     stepDownHeight: StepDownHeight,
                     isOnGround: previousOnWalkable,
@@ -1923,8 +1923,8 @@ public sealed class PlayerMovementController
 
             var resolveResult = _physics.ResolveWithTransition(
                 preIntegratePos, postIntegratePos, CellId,
-                sphereRadius: 0.48f,
-                sphereHeight: 1.835f,
+                sphereRadius: DefaultPlayerBody.Radius,
+                sphereHeight: DefaultPlayerBody.Height,
                 stepUpHeight: StepUpHeight,
                 stepDownHeight: StepDownHeight,  // L.2.3a: from Setup.StepDownHeight
                 isOnGround: _body.OnWalkable,

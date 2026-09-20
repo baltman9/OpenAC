@@ -992,8 +992,8 @@ internal sealed class HeadlessSessionHost : IDisposable
                 () => PlayerMovementConstructionOptions.From(
                     Runtime.CharacterOwner.MovementSkills.Snapshot),
                 static _ => new RuntimeLocalPlayerPhysicsActivationPreparation(
-                    Radius: 0.48f,
-                    Height: 1.835f,
+                    Radius: DefaultPlayerBody.Radius,
+                    Height: DefaultPlayerBody.Height,
                     RuntimeLocalPlayerShadowDisposition.ProvenShapeless));
             PhysicsDiagnostics.LocalTeleportHostKind = "headless";
             _acceptedPositionDrive ??= new RuntimeAcceptedPositionDriveController(
