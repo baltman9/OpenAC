@@ -19,6 +19,7 @@ public sealed class FakeEvents : IEvents
     private Action<PluginGoToReport>? _navigationChanged;
     private Action<PluginObjectChange>? _objectChanged;
     private Action<PluginPortalTransition>? _portalTransition;
+    private Action<PluginItemUseCompletion>? _itemUseCompleted;
     private Action<uint>? _containerOpened;
     private Action<uint>? _containerClosed;
     private Action<PluginConfirmation>? _confirmationRequested;
@@ -104,6 +105,22 @@ public sealed class FakeEvents : IEvents
         {
             if (value is null) return;
             lock (_gate) _portalTransition -= value;
+        }
+    }
+
+    /// <inheritdoc/>
+    /// <inheritdoc/>
+    public event Action<PluginItemUseCompletion> ItemUseCompleted
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_gate) _itemUseCompleted += value;
+        }
+        remove
+        {
+            if (value is null) return;
+            lock (_gate) _itemUseCompleted -= value;
         }
     }
 
@@ -230,6 +247,25 @@ public sealed class FakeEvents : IEvents
                 foreach (Delegate handler in handlers.GetInvocationList())
                 {
                     try { ((Action<PluginPortalTransition>)handler)(transition); }
+                    catch { }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Fires <see cref="ItemUseCompleted"/> for every listener.
+    /// </summary>
+    public void RaiseItemUseCompleted(PluginItemUseCompletion completion)
+    {
+        lock (_gate)
+        {
+            Action<PluginItemUseCompletion>? handlers = _itemUseCompleted;
+            if (handlers is not null)
+            {
+                foreach (Delegate handler in handlers.GetInvocationList())
+                {
+                    try { ((Action<PluginItemUseCompletion>)handler)(completion); }
                     catch { }
                 }
             }

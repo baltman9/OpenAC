@@ -172,6 +172,19 @@ public sealed class FakePluginHostContractTests
     }
 
     [Fact]
+    public void ItemUseCompletedFiresRegisteredHandlers()
+    {
+        var host = new FakePluginHost();
+        PluginItemUseCompletion? received = null;
+        host.Events.ItemUseCompleted += completion => received = completion;
+        host.PluginEvents.RaiseItemUseCompleted(
+            new PluginItemUseCompletion(3, 10u, 11u, 0u));
+        Assert.NotNull(received);
+        Assert.Equal(10u, received.Value.SourceObjectId);
+        Assert.True(received.Value.IsSuccess);
+    }
+
+    [Fact]
     public void ExceptionInOneTickHandlerDoesNotStopOthers()
     {
         var host = new FakePluginHost();
