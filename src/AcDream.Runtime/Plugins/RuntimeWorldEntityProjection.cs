@@ -236,16 +236,24 @@ public sealed class RuntimeWorldEntityProjection
         GameRuntime runtime,
         in RuntimeEntitySnapshot entity)
     {
-        uint sourceId = runtime.EntityObjects.Entities.TryGetActive(
+        bool known = runtime.EntityObjects.Entities.TryGetActive(
             entity.Identity.ServerGuid,
-            out RuntimeEntityRecord record)
-            ? record.Snapshot.SetupTableId ?? 0u
-            : 0u;
+            out RuntimeEntityRecord record);
+        uint sourceId = known ? record.Snapshot.SetupTableId ?? 0u : 0u;
+        // Where the object is, from the body that moves if it has one, and
+        // from the last thing the server said otherwise. The body is the
+        // answer the rest of the client works from between server updates,
+        // so reading the wire snapshot here would have one plugin surface
+        // giving two answers about the same object: a walk aimed at where
+        // the creature was a moment ago rather than where it is.
+        AcDream.Core.Physics.Position? position =
+            (known ? record.PhysicsBody?.CellPosition : null)
+            ?? entity.Position;
         return new WorldEntitySnapshot(
             entity.Identity.LocalEntityId,
             sourceId,
-            entity.Position?.Frame.Origin ?? default,
-            entity.Position?.Frame.Orientation
+            position?.Frame.Origin ?? default,
+            position?.Frame.Orientation
                 ?? System.Numerics.Quaternion.Identity);
     }
 
