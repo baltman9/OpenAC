@@ -239,15 +239,10 @@ public sealed class ItemParityTests
     /// Both clients have to hold and release the one slot at the same steps,
     /// or a bot polling for an answer stalls forever on one of them.
     ///
-    /// Found while writing this: the bound on that wait is measured against
-    /// the wall clock, while the pacing between two uses right beside it is
-    /// measured against the session's own simulation clock. Six seconds of
-    /// simulated waiting here therefore does not reach it, which is why this
-    /// scenario asserts what the one slot does rather than when it lapses.
-    /// Both clients read the same wall clock, so this is not a difference
-    /// between them; it is a second clock under one throttle, and closing it
-    /// changes how long a live session waits, so it is reported rather than
-    /// quietly changed here.
+    /// The bound on that wait and the pacing between two uses beside it are
+    /// now measured against one clock, the session's own simulation clock,
+    /// so simulated waiting really does reach it: six simulated seconds of
+    /// silence here end the wait, and the next question takes the slot.
     /// </summary>
     [Fact]
     public void AnUnansweredDescriptionExpiresTheSameOnBothClients() =>
@@ -273,17 +268,17 @@ public sealed class ItemParityTests
             RecordAppraisal(transcript, loot);
             transcript.Record("busy", items.IsBusy);
 
-            // The wait is let go of when the next one asks, not by a timer,
-            // so this is the step that clears it -- and the one that has to
-            // clear it on both clients.
+            // The wait has run out by now, so this is the step that takes the
+            // slot over -- and the one that has to take it on both clients.
             transcript.Step("ask about something else after giving up");
             Record(transcript, "identify", objects.Identify(ParityWorld.ScrapItem));
             RecordAppraisal(transcript, loot);
             transcript.RecordOutbound(arm);
             // Both arms agreeing that nothing happened would pass the
             // comparison and prove nothing, so the one slot really has to
-            // have been taken and held by the first question.
-            Assert.Equal(ParityWorld.Kit, loot.Appraisal.AwaitingObjectId);
+            // have moved off the question nobody answered.
+            Assert.Equal(
+                ParityWorld.ScrapItem, loot.Appraisal.AwaitingObjectId);
         });
 
     /// <summary>

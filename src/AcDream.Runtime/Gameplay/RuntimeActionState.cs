@@ -108,8 +108,14 @@ public sealed class RuntimeActionState : IDisposable
         Selection = new SelectionState();
         Combat = new CombatState();
         Interaction = new InteractionState();
+        // The description channel and the item-use pacing share one
+        // throttle, so they share one clock: the pacing is stamped from the
+        // simulation clock at the call site, and the give-up bound is
+        // measured against the same clock here rather than against the
+        // machine's uptime.
         Transactions = new RuntimeInteractionTransactionState(
-            inventoryTransactions);
+            inventoryTransactions,
+            () => checked((long)Math.Floor(_now() * 1000d)));
         CombatAttack = new RuntimeCombatAttackState(
             Combat,
             combatAttackOperations,
