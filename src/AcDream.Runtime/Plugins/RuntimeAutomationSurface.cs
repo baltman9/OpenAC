@@ -2018,7 +2018,7 @@ internal sealed class RuntimeAutomationSurface
                 PluginRecallKind.House,
                 RuntimeWorldObjectProjection.ProjectNavigationPosition(position.Value),
                 "House",
-                1,
+                runtime.HouseOwner.Revision,
                 true),
         ];
     }
