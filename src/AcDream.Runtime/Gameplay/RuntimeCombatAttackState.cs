@@ -227,12 +227,17 @@ public sealed class RuntimeCombatAttackState : IDisposable
         StateChanged?.Invoke();
     }
 
-    public void ReleaseAttack() => EndAttackRequest(committedPower: null);
+    /// <summary>
+    /// Ends the request. The answer says whether the swing is on its way, so an
+    /// owner that names its own targets can tell a swing from a request that
+    /// never left the client instead of waiting on a result that is not coming.
+    /// </summary>
+    public bool ReleaseAttack() => EndAttackRequest(committedPower: null);
 
-    private void EndAttackRequest(float? committedPower)
+    private bool EndAttackRequest(float? committedPower)
     {
         if (!_attackRequestInProgress)
-            return;
+            return false;
 
         _attackRequestInProgress = false;
         float currentPower = GetPowerBarLevel();
@@ -240,44 +245,82 @@ public sealed class RuntimeCombatAttackState : IDisposable
         // far: an early release keeps loading to the setting, a late release
         // fires at the held level. A commit deferred over a busy server keeps
         // the level it was queued with.
+        //
+        // An owner that names its own power is the exception: it gets exactly
+        // the level it named. The bar runs on past the setting between one look
+        // at it and the next, so committing the level reached would send that
+        // overshoot, and then a second swing to bring the setting back.
         _requestedAttackPower = committedPower
-            ?? Math.Max(DesiredPower, currentPower);
+            ?? (AutomationControlled
+                ? DesiredPower
+                : Math.Max(DesiredPower, currentPower));
 
         if (_attackServerResponsePending)
         {
+            if (AutomationControlled)
+            {
+                // Such an owner paces its own swings and asks again within a
+                // fraction of a second. Parking this one would fire it
+                // whenever the server finally answered, by then at whatever
+                // the owner had moved on to.
+                ResetPowerBar();
+                StateChanged?.Invoke();
+                return false;
+            }
             _attackWhenResponseReceived = true;
             _attackWhenResponseReceivedPower = _requestedAttackPower;
+            StateChanged?.Invoke();
+            return true;
         }
-        else if (DesiredPower <= currentPower || _repeatAttacking)
+
+        bool sent;
+        if (DesiredPower <= currentPower || _repeatAttacking)
         {
-            ExecuteAttack(RequestedHeight, setServerPending: true);
+            sent = ExecuteAttack(RequestedHeight, setServerPending: true);
 
             // A charged swing is immediately followed by a second request at
             // the bar setting. The server consumes one requested level per
             // swing, so without this the swing after the charged one repeats
             // the charged level instead of returning to the setting.
-            if (_requestedAttackPower > DesiredPower)
+            if (sent && _requestedAttackPower > DesiredPower)
             {
                 _requestedAttackPower = DesiredPower;
                 ExecuteAttack(RequestedHeight, setServerPending: true);
             }
         }
+        else
+        {
+            // Released early: the bar goes on loading to the setting and the
+            // swing commits when it gets there.
+            sent = true;
+        }
 
         StateChanged?.Invoke();
+        return sent;
     }
 
     public void AbortAutomaticAttack()
     {
         if (!_attackServerResponsePending
             && !_attackRequestInProgress
-            && !_repeatAttacking)
+            && !_repeatAttacking
+            && !_attackWhenResponseReceived)
             return;
 
         _operations.SendCancelAttack();
         _repeatAttacking = false;
 
-        if (_buildInProgress)
-            ResetPowerBar();
+        // The cancel ends the whole attack, not only the part the server still
+        // holds. A request left in progress goes on loading the bar by itself
+        // and fires a swing nobody asked for, at whatever is selected by then,
+        // and until it does every fresh request is refused behind it. The
+        // answer the server still owes ends with it too: the cancel is what
+        // closes that swing, and a late answer must not reopen the wait.
+        _attackRequestInProgress = false;
+        _attackServerResponsePending = false;
+        _attackWhenResponseReceived = false;
+        _attackWhenResponseReceivedPower = 0f;
+        ResetPowerBar();
 
         StateChanged?.Invoke();
     }
@@ -367,7 +410,7 @@ public sealed class RuntimeCombatAttackState : IDisposable
         return (float)Math.Clamp((_now() - _buildStartTime) / duration, 0d, 1d);
     }
 
-    private void ExecuteAttack(AttackHeight height, bool setServerPending)
+    private bool ExecuteAttack(AttackHeight height, bool setServerPending)
     {
         StopBuild();
         if (!_operations.SendAttack(
@@ -376,12 +419,13 @@ public sealed class RuntimeCombatAttackState : IDisposable
                 allowAutoTarget: !AutomationControlled))
         {
             ResetPowerBar();
-            return;
+            return false;
         }
 
         if (AutoRepeatAllowed)
             _repeatAttacking = true;
         _attackServerResponsePending = setServerPending;
+        return true;
     }
 
     private void OnAttackCommenced()
@@ -419,7 +463,13 @@ public sealed class RuntimeCombatAttackState : IDisposable
         if (!AutoRepeatAllowed || !_repeatAttacking)
         {
             _repeatAttacking = false;
-            ResetPowerBar();
+            // A request still being charged owns the bar. The answer to a
+            // swing that is already over must not send it back to zero, or
+            // every swing pays for the one before it a second time.
+            if (_attackRequestInProgress)
+                AttemptStartBuildingAttack();
+            else
+                ResetPowerBar();
         }
         else if (_attackRequestInProgress)
         {
