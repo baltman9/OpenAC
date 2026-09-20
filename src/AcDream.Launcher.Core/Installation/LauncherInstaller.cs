@@ -1163,11 +1163,14 @@ public sealed class LauncherInstaller : ILauncherInstaller
     private static long GetAvailableFreeSpace(string path)
     {
         string fullPath = Path.GetFullPath(path);
-        string root = Path.GetPathRoot(fullPath)
+        string directory = Path.GetDirectoryName(fullPath)
             ?? throw new ArgumentException(
-                $"Path '{fullPath}' has no filesystem root.",
+                $"Path '{fullPath}' has no parent directory.",
                 nameof(path));
-        return new DriveInfo(root).AvailableFreeSpace;
+        // Query the actual package directory. On Linux, reducing this to
+        // Path.GetPathRoot(fullPath) incorrectly checks / when the data
+        // directory is on a separate mount (or / is a read-only overlay).
+        return new DriveInfo(directory).AvailableFreeSpace;
     }
 
     private static string BuildChildFailure(
