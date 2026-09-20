@@ -777,7 +777,7 @@ public sealed class EquippedChildProjectionWithdrawalTests
     [Theory]
     [InlineData(0x50000811u, (ushort)4)]
     [InlineData(0x70000291u, (ushort)0)]
-    public void OnCreateParentAccepted_ParentNotYetKnown_RefusesWithoutStateOrCrash(
+    public void OnCreateParentAccepted_ParentNotYetKnown_AttachesOnceTheParentArrives(
         uint parentGuid,
         ushort parentIncarnation)
     {
@@ -799,6 +799,9 @@ public sealed class EquippedChildProjectionWithdrawalTests
 
         Assert.True(fixture.Live.TryApplyCreateParent(update, out _));
         fixture.Controller.OnCreateParentAccepted(update);
+
+        // Neither side can be joined yet, so nothing is staged or committed,
+        // but the relation is held rather than thrown away.
         Assert.False(fixture.Live.ParentAttachments.TryGetStagedProjection(
             childGuid,
             out _));
@@ -806,14 +809,196 @@ public sealed class EquippedChildProjectionWithdrawalTests
             childGuid,
             out _,
             out _));
-        Assert.Equal(0, fixture.Live.ParentAttachments.UnresolvedRelationCount);
 
         LiveEntityRecord parent = fixture.Spawn(parentGuid, generation: parentIncarnation);
+        fixture.Poses.Publish(parent.WorldEntity!, Array.Empty<Matrix4x4>());
         fixture.Controller.OnWorldEntityRegistered(parent.ServerGuid);
+
+        Assert.True(fixture.Live.ParentAttachments.TryGetCommittedParent(
+            childGuid,
+            out uint committedParentGuid,
+            out ushort committedParentIncarnation));
+        Assert.Equal(parentGuid, committedParentGuid);
+        Assert.Equal(parentIncarnation, committedParentIncarnation);
+        Assert.True(fixture.Live.TryGetRecord(
+            childGuid,
+            out LiveEntityRecord childProjection));
+        Assert.Equal(
+            LiveEntityProjectionKind.Attached,
+            childProjection.ProjectionKind);
+        Assert.Contains(
+            childProjection.WorldEntity!.Id,
+            fixture.Controller.AttachedEntityIds);
+    }
+
+    [Fact]
+    public void OnCreateParentAccepted_ParentAlreadyKnown_AttachesWithoutWaiting()
+    {
+        using var fixture = new ControllerFixture((_, _, _) =>
+            new ExactProjectionWithdrawalOutcome(
+                ExactProjectionWithdrawalDisposition.Completed,
+                Failure: null));
+        const uint parentGuid = 0x50000812u;
+        const uint childGuid = 0x700002A0u;
+        LiveEntityRecord parent = fixture.Spawn(parentGuid, generation: 3);
+        fixture.Poses.Publish(parent.WorldEntity!, Array.Empty<Matrix4x4>());
+        fixture.RegisterOnly(childGuid, generation: 1, hasPosition: false);
+        fixture.CompleteFirstEntry();
+
+        var update = new CreateParentUpdate(
+            childGuid,
+            parentGuid,
+            ParentLocation: 0,
+            PlacementId: 0,
+            ChildInstanceSequence: 1,
+            ChildPositionSequence: 1);
+        Assert.True(fixture.Live.TryApplyCreateParent(update, out _));
+        fixture.Controller.OnCreateParentAccepted(update);
+
+        Assert.True(fixture.Live.ParentAttachments.TryGetCommittedParent(
+            childGuid,
+            out uint committedParentGuid,
+            out _));
+        Assert.Equal(parentGuid, committedParentGuid);
+        Assert.True(fixture.Live.TryGetRecord(
+            childGuid,
+            out LiveEntityRecord childProjection));
+        Assert.Contains(
+            childProjection.WorldEntity!.Id,
+            fixture.Controller.AttachedEntityIds);
+    }
+
+    [Fact]
+    public void ResendBurst_MixedArrivalOrders_AttachesEveryHeldItem()
+    {
+        using var fixture = new ControllerFixture((_, _, _) =>
+            new ExactProjectionWithdrawalOutcome(
+                ExactProjectionWithdrawalDisposition.Completed,
+                Failure: null));
+        const uint earlyParentGuid = 0x50000813u;
+        const uint lateParentGuid = 0x50000815u;
+        const uint earlyChildGuid = 0x700002A1u;
+        const uint lateChildGuid = 0x700002A2u;
+
+        // One wielder is already ingested when its relation lands; the other is
+        // still unknown. Both must end up holding their item.
+        LiveEntityRecord earlyParent = fixture.Spawn(earlyParentGuid, generation: 7);
+        fixture.Poses.Publish(earlyParent.WorldEntity!, Array.Empty<Matrix4x4>());
+        fixture.RegisterOnly(earlyChildGuid, generation: 1, hasPosition: false);
+        fixture.RegisterOnly(lateChildGuid, generation: 1, hasPosition: false);
+        fixture.CompleteFirstEntry();
+
+        var early = new CreateParentUpdate(
+            earlyChildGuid,
+            earlyParentGuid,
+            ParentLocation: 0,
+            PlacementId: 0,
+            ChildInstanceSequence: 1,
+            ChildPositionSequence: 1);
+        var late = new CreateParentUpdate(
+            lateChildGuid,
+            lateParentGuid,
+            ParentLocation: 0,
+            PlacementId: 0,
+            ChildInstanceSequence: 1,
+            ChildPositionSequence: 1);
+        Assert.True(fixture.Live.TryApplyCreateParent(early, out _));
+        fixture.Controller.OnCreateParentAccepted(early);
+        Assert.True(fixture.Live.TryApplyCreateParent(late, out _));
+        fixture.Controller.OnCreateParentAccepted(late);
+
+        Assert.Equal(
+            1,
+            fixture.Live.ParentAttachments.RelationsAwaitingParentCount);
+
+        LiveEntityRecord lateParent = fixture.Spawn(lateParentGuid, generation: 9);
+        fixture.Poses.Publish(lateParent.WorldEntity!, Array.Empty<Matrix4x4>());
+        fixture.Controller.OnWorldEntityRegistered(lateParentGuid);
+
+        Assert.Equal(
+            0,
+            fixture.Live.ParentAttachments.RelationsAwaitingParentCount);
+        Assert.True(fixture.Live.ParentAttachments.TryGetCommittedParent(
+            earlyChildGuid,
+            out uint earlyCommitted,
+            out ushort earlyIncarnation));
+        Assert.Equal(earlyParentGuid, earlyCommitted);
+        Assert.Equal(7, earlyIncarnation);
+        Assert.True(fixture.Live.ParentAttachments.TryGetCommittedParent(
+            lateChildGuid,
+            out uint lateCommitted,
+            out ushort lateIncarnation));
+        Assert.Equal(lateParentGuid, lateCommitted);
+        // The waiting relation binds to the parent generation that actually
+        // arrived, not to one guessed when the relation was received.
+        Assert.Equal(9, lateIncarnation);
+        Assert.True(fixture.Live.TryGetRecord(
+            lateChildGuid,
+            out LiveEntityRecord lateChild));
+        Assert.Contains(
+            lateChild.WorldEntity!.Id,
+            fixture.Controller.AttachedEntityIds);
+        Assert.True(fixture.Live.TryGetRecord(
+            earlyChildGuid,
+            out LiveEntityRecord earlyChild));
+        Assert.Contains(
+            earlyChild.WorldEntity!.Id,
+            fixture.Controller.AttachedEntityIds);
+    }
+
+    [Fact]
+    public void ServerDeletesAnotherPlayersHeldItem_DetachesAndFreesTheDrawnChild()
+    {
+        using var fixture = new ControllerFixture((record, positionVersion, projectionVersion) =>
+            new ExactProjectionWithdrawalOutcome(
+                ExactProjectionWithdrawalDisposition.Completed,
+                Failure: null));
+        const uint parentGuid = 0x50000814u;
+        const uint childGuid = 0x700002A3u;
+        LiveEntityRecord parent = fixture.Spawn(parentGuid, generation: 1);
+        fixture.Poses.Publish(parent.WorldEntity!, Array.Empty<Matrix4x4>());
+        fixture.RegisterOnly(childGuid, generation: 1, hasPosition: false);
+        fixture.CompleteFirstEntry();
+
+        var update = new CreateParentUpdate(
+            childGuid,
+            parentGuid,
+            ParentLocation: 0,
+            PlacementId: 0,
+            ChildInstanceSequence: 1,
+            ChildPositionSequence: 1);
+        Assert.True(fixture.Live.TryApplyCreateParent(update, out _));
+        fixture.Controller.OnCreateParentAccepted(update);
+        Assert.True(fixture.Live.TryGetRecord(
+            childGuid,
+            out LiveEntityRecord childProjection));
+        uint childEntityId = childProjection.WorldEntity!.Id;
+        Assert.Contains(childEntityId, fixture.Controller.AttachedEntityIds);
+
+        // The wielder swaps weapons: the observer is told the old item is gone.
+        Assert.True(fixture.Live.UnregisterLiveEntity(
+            new DeleteObject.Parsed(childGuid, 1),
+            isLocalPlayer: false,
+            removeRetainedObject: true));
+
+        Assert.DoesNotContain(childEntityId, fixture.Controller.AttachedEntityIds);
         Assert.False(fixture.Live.ParentAttachments.TryGetCommittedParent(
             childGuid,
             out _,
             out _));
+        Assert.Empty(fixture.Live.ParentAttachments.ChildrenAttachedToParent(
+            parentGuid,
+            1));
+
+        // The wielder keeps moving and redrawing; the removed item must not
+        // come back into the hand.
+        fixture.Poses.Publish(parent.WorldEntity!, Array.Empty<Matrix4x4>());
+        fixture.Controller.OnPosePublished(parentGuid);
+        fixture.Controller.Tick();
+        Assert.DoesNotContain(childEntityId, fixture.Controller.AttachedEntityIds);
+        Assert.Equal(
+            0,
+            fixture.Live.ParentAttachments.RelationsAwaitingParentCount);
     }
 
     [Fact]

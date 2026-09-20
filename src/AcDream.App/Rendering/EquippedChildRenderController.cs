@@ -67,7 +67,6 @@ public sealed class EquippedChildRenderController : IDisposable
     private readonly Func<RuntimeEntityKey, bool> _tickAttached;
     private readonly Func<RuntimeEntityKey, bool> _reconcileAttached;
     private int _activePoseCompositionVisits;
-    private readonly HashSet<uint> _loggedUnaddressableParentRefusals = [];
 
     internal int LastFullPoseCompositionVisits { get; private set; }
     internal int LastReconcilePoseCompositionVisits { get; private set; }
@@ -713,16 +712,50 @@ public sealed class EquippedChildRenderController : IDisposable
                 placementId,
                 parentSpawn.InstanceSequence,
                 childPositionSequence));
+            return;
         }
-        else if (_loggedUnaddressableParentRefusals.Add(childGuid))
+
+        // Both sides must exist before a parent relation can be applied, and
+        // the two can arrive in either order. When the named parent is not
+        // addressable yet the relation waits on the parent instead of being
+        // thrown away, and is applied as soon as that parent appears.
+        Relations.DeferCreateObjectRelationUntilParentKnown(
+            parentGuid,
+            childGuid,
+            parentLocation,
+            placementId,
+            childPositionSequence);
+    }
+
+    /// <summary>
+    /// Applies every CreateObject-carried relation that was waiting for
+    /// <paramref name="parentGuid"/>, now that the parent is addressable.
+    /// </summary>
+    private void AdmitRelationsAwaitingParent(uint parentGuid)
+    {
+        if (Relations.ChildrenAwaitingParent(parentGuid) is not { Count: > 0 } children
+            || !_liveEntities.TryGetSnapshot(
+                parentGuid,
+                out WorldSession.EntitySpawn parentSpawn))
         {
-            Console.Error.WriteLine(
-                $"equipment: parent 0x{parentGuid:X8} unaddressable for child " +
-                $"0x{childGuid:X8} at CreateObject-carried relation accept - " +
-                "refusing (should be structurally unreachable - see " +
-                "RuntimeEntityObjectLifetime.RegisterEntityCore's " +
-                "EnqueueDeferredCreate gate). Logged once for this child; " +
-                "further refusals for the same child are suppressed.");
+            return;
+        }
+
+        for (int i = 0; i < children.Count; i++)
+        {
+            if (!Relations.TryTakeRelationAwaitingParent(
+                    children[i],
+                    out CreateObjectParentRelationRequest request))
+            {
+                continue;
+            }
+            Relations.AcceptCreateObjectRelation(new ParentAttachmentRelation(
+                request.ParentGuid,
+                request.ChildGuid,
+                request.ParentLocation,
+                request.PlacementId,
+                parentSpawn.InstanceSequence,
+                request.ChildPositionSequence));
         }
     }
 
@@ -889,6 +922,7 @@ public sealed class EquippedChildRenderController : IDisposable
 
     private void RetryWaitingDescendants(uint parentGuid)
     {
+        AdmitRelationsAwaitingParent(parentGuid);
         _relationRecoveryOrder.RealizeDescendants(
             parentGuid,
             Relations.ChildrenWaitingForParent,
@@ -1605,7 +1639,6 @@ public sealed class EquippedChildRenderController : IDisposable
         _pendingReparentRemovalByChild.Clear();
         _pendingPoseLossRemovalByChild.Clear();
         _pendingOrphanRemovalByChild.Clear();
-        _loggedUnaddressableParentRefusals.Clear();
         Relations.Clear();
     }
 
