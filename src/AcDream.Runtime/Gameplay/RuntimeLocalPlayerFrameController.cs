@@ -39,6 +39,7 @@ public sealed class RuntimeLocalPlayerFrameController
     private readonly IRuntimeMovementInputSource _input;
     private readonly Action? _publishMovement;
     private readonly IRuntimeArmedApproachDrive? _armedApproaches;
+    private RuntimeLocalPlayerMotionArming? _motionArming;
     private AdvancedFrame? _advancedFrame;
 
     private readonly record struct AdvancedFrame(
@@ -67,6 +68,16 @@ public sealed class RuntimeLocalPlayerFrameController
         _publishMovement = publishMovement;
         _armedApproaches = armedApproaches;
     }
+
+    /// <summary>
+    /// Gives the character's own locomotion somewhere to be set up from. It
+    /// is done from here because it must be retried: the cycles the character
+    /// moves itself by are built from content that need not be to hand the
+    /// moment the body is.
+    /// </summary>
+    internal void BindMotionArming(RuntimeLocalPlayerMotionArming arming) =>
+        _motionArming = arming
+            ?? throw new ArgumentNullException(nameof(arming));
 
     public bool HiddenPartPoseDirty => _advancedFrame is
     {
@@ -113,6 +124,9 @@ public sealed class RuntimeLocalPlayerFrameController
         }
 
         controller.LocalEntityId = _host.ResolveLocalEntityId();
+        // Before the character is asked to take a step, make sure it is the
+        // character's own cycles it takes that step by.
+        _motionArming?.EnsureArmed(controller);
 
         bool hidden = _host.IsHidden;
         if (_host.ObjectClockDisposition

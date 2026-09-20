@@ -33,7 +33,7 @@ internal sealed class PlayerModeController :
     private readonly object _datLock;
     private readonly LiveCollisionAssetPublisher _collisionAssets;
     private readonly LiveEntityAnimationRuntimeView<LiveEntityAnimationState> _animations;
-    private readonly LocalPlayerAnimationController _animation;
+    private readonly RuntimeLocalPlayerMotionArming _motionArming;
     private readonly LocalPlayerShadowSynchronizer _shadow;
     private readonly ILocalPlayerTeleportInputLifetime _input;
     private readonly ILiveInWorldSource _session;
@@ -57,7 +57,7 @@ internal sealed class PlayerModeController :
         object datLock,
         LiveCollisionAssetPublisher collisionAssets,
         LiveEntityAnimationRuntimeView<LiveEntityAnimationState> animations,
-        LocalPlayerAnimationController animation,
+        RuntimeLocalPlayerMotionArming motionArming,
         LocalPlayerShadowSynchronizer shadow,
         ILocalPlayerTeleportInputLifetime input,
         ILiveInWorldSource session,
@@ -80,7 +80,8 @@ internal sealed class PlayerModeController :
         _collisionAssets = collisionAssets ??
             throw new ArgumentNullException(nameof(collisionAssets));
         _animations = animations ?? throw new ArgumentNullException(nameof(animations));
-        _animation = animation ?? throw new ArgumentNullException(nameof(animation));
+        _motionArming = motionArming
+            ?? throw new ArgumentNullException(nameof(motionArming));
         _shadow = shadow ?? throw new ArgumentNullException(nameof(shadow));
         _input = input ?? throw new ArgumentNullException(nameof(input));
         _session = session ?? throw new ArgumentNullException(nameof(session));
@@ -267,25 +268,12 @@ internal sealed class PlayerModeController :
         LocalPlayerShadowState.Snapshot? priorShadow = _shadow.Capture();
         try
         {
-            if (_animations.TryGetValue(playerEntity.Id, out LiveEntityAnimationState? animation)
-                && animation.Sequencer is { } sequencer)
-            {
-                controller.AttachCycleVelocityAccessor(() => sequencer.CurrentVelocity);
-                controller.ObjectScale = animation.Scale;
-                controller.AttachAnimationRootMotionSource(
-                    _animation.AdvanceRoot,
-                    _animation.CaptureHooks);
-                controller.Motion.RemoveLinkAnimations =
-                    sequencer.Manager.HandleEnterWorld;
-                controller.Motion.InitializeMotionTables =
-                    sequencer.Manager.InitializeState;
-                controller.Motion.CheckForCompletedMotions =
-                    sequencer.Manager.CheckForCompletedMotions;
-                controller.Motion.DefaultSink =
-                    new MotionTableDispatchSink(sequencer);
-                sequencer.Manager.HandleEnterWorld();
-                controller.Motion.HandleExitWorld();
-            }
+            // Taking hold of the character's own body starts its locomotion
+            // afresh, outstanding motions and all. How that locomotion is set
+            // up is the character's own business and is decided in one place
+            // for every client; this only says when it happens here.
+            _motionArming.Rearm();
+            _motionArming.EnsureArmed(controller);
 
             var legacyCamera = new ChaseCamera { Aspect = _viewport.Aspect };
             var retailCamera = new RetailChaseCamera

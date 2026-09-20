@@ -848,6 +848,14 @@ internal sealed class SessionPlayerCompositionPhase
             d.AnimatedEntities,
             live.AnimationPresenter,
             content.AnimationHookFrames);
+        // What this client hangs off the character's own locomotion: the same
+        // one cycle advance, with the poses of its parts built along the way,
+        // and the hooks that advance reached. A client with nothing to draw
+        // hands over neither and covers exactly the same ground.
+        d.Runtime.LocalPlayerMotion.BindPresentation(
+            new AcDream.Runtime.Gameplay.RuntimeLocalPlayerMotionPresentation(
+                localPlayerAnimation.AdvanceRoot,
+                localPlayerAnimation.CaptureHooks));
         var localPlayerShadow = live.LocalPlayerShadowSynchronizer;
         var localPlayerProjection = new LocalPlayerProjectionController(
             new LiveLocalPlayerProjectionRuntime(
@@ -904,7 +912,7 @@ internal sealed class SessionPlayerCompositionPhase
             d.DatLock,
             content.CollisionAssets,
             d.AnimatedEntities,
-            localPlayerAnimation,
+            d.Runtime.LocalPlayerMotion,
             localPlayerShadow,
             gameplayInput,
             liveSessionSource,

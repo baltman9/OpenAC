@@ -466,6 +466,12 @@ public sealed class GameRuntime
                 context.EntityObjects,
                 () => PlayerIdentity.ServerGuid);
             SelectionCycleOwner = new RuntimeSelectionCycle(this);
+            // The character carries itself forward by its own animation
+            // cycles on every client. What a client with something to
+            // draw adds is the pose work, hung off the same one advance.
+            LocalPlayerMotion = new Gameplay.RuntimeLocalPlayerMotionArming(
+                context.EntityObjects,
+                () => PlayerIdentity.ServerGuid);
 
             context.Session.ConfigureAutoSaveTick(
                 session =>
@@ -606,6 +612,13 @@ public sealed class GameRuntime
     /// </summary>
     internal RuntimeInteractionApproachDriver ArmedApproachDrive { get; }
     public RuntimeLocalPlayerMovementState MovementOwner { get; }
+
+    /// <summary>
+    /// Gives the character its own locomotion, on whichever client is
+    /// running. One owner, so the character covers the same ground and turns
+    /// through the same angle with or without a window.
+    /// </summary>
+    internal Gameplay.RuntimeLocalPlayerMotionArming LocalPlayerMotion { get; }
 
     /// <summary>
     /// Re-derives the character's run and jump speed from the numbers the
@@ -815,7 +828,7 @@ public sealed class GameRuntime
         IRuntimeMovementInputSource input)
     {
         ObjectDisposedException.ThrowIf(_disposeRequested || _disposed, this);
-        return new RuntimeLocalPlayerFrameController(
+        var frame = new RuntimeLocalPlayerFrameController(
             host,
             new RuntimeScriptedMovementInputSource(MovementOwner, input),
             () =>
@@ -824,6 +837,8 @@ public sealed class GameRuntime
                 RuntimeVendorRangeQuery.EnforceRange(this);
             },
             ArmedApproachDrive);
+        frame.BindMotionArming(LocalPlayerMotion);
+        return frame;
     }
 
     public void ResetGeneration(
