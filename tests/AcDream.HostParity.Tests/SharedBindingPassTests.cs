@@ -91,7 +91,6 @@ public sealed class SharedBindingPassTests
             static () => true, static () => true),
         AnswerConfirmation = static (_, _) => true,
         ProjectileCollision = physics,
-        RemoteBodiesUnsimulated = true,
     };
 
     private static GameRuntime NewRuntime()

@@ -38,16 +38,16 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
         _isAvailable = isAvailable ?? (static () => true);
     }
 
-    private bool _remoteBodiesUnsimulated;
-
-    /// <summary>A host that never moves a remote entity's physics body reads remote positions from the latest snapshot instead.</summary>
-    public void BindRemoteBodiesUnsimulated() => _remoteBodiesUnsimulated = true;
-
-    private Position? EntityPosition(RuntimeEntityRecord record, uint playerId) =>
-        _remoteBodiesUnsimulated && record.ServerGuid != playerId
-            ? RuntimeNavigationProjection.FromServer(record.Snapshot.Position)
-            : record.PhysicsBody?.CellPosition
-                ?? RuntimeNavigationProjection.FromServer(record.Snapshot.Position);
+    /// <summary>
+    /// Where a thing is: its body, which every client carries between the
+    /// server's updates, and only the server's last word about it when it has
+    /// no body yet.
+    /// </summary>
+    private static Position? EntityPosition(
+        RuntimeEntityRecord record,
+        uint playerId) =>
+        record.PhysicsBody?.CellPosition
+        ?? RuntimeNavigationProjection.FromServer(record.Snapshot.Position);
 
     public void Bind(GameRuntime runtime)
     {

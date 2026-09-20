@@ -715,6 +715,17 @@ navigation calls where a client with a window acts on them. Everything else on
 `Navigation` -- the snapshot, the move channels, `FaceHeading`, `Jump`,
 `TryFindObject` -- is real either way.
 
+Other creatures' bodies come off the same lease. The server says where a
+creature is a few times a second and every client fills the gaps itself from
+the cycle that creature is playing, which needs the animation content those
+files carry. So a session with a lease reads another creature's position from
+its body, moving between updates, on both clients alike -- `Objects`,
+`Navigation.TryGetObject` and every position a plugin is handed. A
+content-less bot has no bodies to carry and reads the server's last word about
+a creature instead, which can be several tenths of a second old while that
+creature is moving. That is the one thing about position a plugin can see
+differ between sessions, and it follows from the content, not from the window.
+
 ### Answered in plain words rather than missing
 
 Two of the client's own chat verbs draw something, and a client with nothing to

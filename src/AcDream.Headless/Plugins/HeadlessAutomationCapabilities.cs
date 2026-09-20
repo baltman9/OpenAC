@@ -54,7 +54,6 @@ internal static partial class HeadlessAutomationCapabilities
             nameof(RuntimeAutomationHostCapabilities.NavigationWalk),
             nameof(RuntimeAutomationHostCapabilities.Logout),
             nameof(RuntimeAutomationHostCapabilities.AnswerConfirmation),
-            nameof(RuntimeAutomationHostCapabilities.RemoteBodiesUnsimulated),
         };
 
     /// <summary>
@@ -66,7 +65,11 @@ internal static partial class HeadlessAutomationCapabilities
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [nameof(RuntimeAutomationHostCapabilities.Content)] =
-                "this session has no lease on the installed data files",
+                "this session has no lease on the installed data files, and "
+                + "without one there is no animation content to carry another "
+                + "creature's body between the server's updates, so a "
+                + "creature's position is the server's last word about it "
+                + "rather than its body",
             [nameof(RuntimeAutomationHostCapabilities.MagicCatalog)] =
                 "the spell catalog comes from the installed data files",
             [nameof(RuntimeAutomationHostCapabilities.NavigationWalk)] =
@@ -104,9 +107,6 @@ internal static partial class HeadlessAutomationCapabilities
                     logout.TryRequestLogout,
                     () => logout.CanRequestLogout),
             AnswerConfirmation = parts.AnswerConfirmation,
-            // Nothing here moves a remote entity's body between server
-            // updates, so positions are read from the last snapshot.
-            RemoteBodiesUnsimulated = true,
         };
     }
 

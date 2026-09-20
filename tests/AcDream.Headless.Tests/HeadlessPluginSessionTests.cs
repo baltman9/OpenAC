@@ -782,8 +782,15 @@ public sealed class HeadlessPluginSessionTests
         Assert.True(session.Plugins.Host.Automation.Equipment.IsAvailable);
     }
 
+    /// <summary>
+    /// A plugin is told where another creature's BODY is, because that body
+    /// is carried between the server's updates and the server's last word
+    /// about the creature is already stale by the time a plugin reads it.
+    /// A creature with no body yet -- which is every creature in a session
+    /// with no content lease -- has only that last word, and gets it.
+    /// </summary>
     [Fact]
-    public void RemoteObjectPositionTracksTheLatestUpdatePositionNotWhereItSpawned()
+    public void ACreaturesPositionIsItsBodyAndFallsBackToTheServersLastWord()
     {
         const uint remote = 0x50000099u;
         const uint cell = 0x01010100u;
@@ -800,35 +807,41 @@ public sealed class HeadlessPluginSessionTests
         RuntimeEntityRecord record = session.Runtime.EntityObjects
             .RegisterEntity(Spawn(remote, 1f, cell))
             .Canonical!;
-        var body = new PhysicsBody { Position = new Vector3(1f, 10f, 5f) };
+
+        // No body yet: the server's last word is all there is.
+        Assert.True(session.Plugins.Host.Automation.Objects.TryGet(
+            remote,
+            out PluginWorldObject bodyless));
+        PluginNavigationPosition spawned =
+            RuntimeAutomationSurface.ProjectNavigationPosition(
+                new Position(
+                    cell,
+                    new Vector3(1f, 10f, 5f),
+                    Quaternion.Identity));
+        Assert.Equal(
+            0d,
+            bodyless.Position.HorizontalDistanceMeters(spawned),
+            3);
+
+        // Given a body, and the body carried fifty metres east of where the
+        // creature spawned, that is where a plugin is told it is.
+        var body = new PhysicsBody { Position = new Vector3(51f, 10f, 5f) };
         body.SnapToCell(cell, body.Position, body.Position);
         session.Runtime.EntityObjects.Entities.SetPhysicsBody(record, body);
-
-        session.Runtime.EntityObjects.TryApplyPosition(
-            new WorldSession.EntityPositionUpdate(
-                remote,
-                new CreateObject.ServerPosition(cell, 51f, 10f, 5f, 1f, 0f, 0f, 0f),
-                Velocity: null,
-                PlacementId: null,
-                IsGrounded: true,
-                InstanceSequence: 0,
-                PositionSequence: 1,
-                TeleportSequence: 0,
-                ForcePositionSequence: 0),
-            isLocalPlayer: false,
-            forcePositionRotation: null,
-            currentLocalVelocity: null,
-            acknowledgeProjection: null,
-            out _,
-            out _,
-            out _);
 
         Assert.True(session.Plugins.Host.Automation.Objects.TryGet(
             remote,
             out PluginWorldObject value));
-        PluginNavigationPosition moved = RuntimeAutomationSurface.ProjectNavigationPosition(
-            new Position(cell, new Vector3(51f, 10f, 5f), Quaternion.Identity));
-        Assert.Equal(0d, value.Position.HorizontalDistanceMeters(moved), 3);
+        PluginNavigationPosition carried =
+            RuntimeAutomationSurface.ProjectNavigationPosition(
+                new Position(
+                    cell,
+                    new Vector3(51f, 10f, 5f),
+                    Quaternion.Identity));
+        Assert.Equal(0d, value.Position.HorizontalDistanceMeters(carried), 3);
+        Assert.True(
+            value.Position.HorizontalDistanceMeters(spawned) > 40d,
+            "The creature's position is still where it spawned.");
     }
 
     [Trait("Lane", "InstalledDat")]

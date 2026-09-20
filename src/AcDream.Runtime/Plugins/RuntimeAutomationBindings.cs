@@ -85,7 +85,7 @@ internal sealed record RuntimeAutomationHostCapabilities
     public RuntimeAutomationLogoutCommands? Logout { get; init; }
     public Func<uint, bool, bool>? AnswerConfirmation { get; init; }
     public PhysicsEngine? ProjectileCollision { get; init; }
-    public bool RemoteBodiesUnsimulated { get; init; }
+
 
     /// <summary>The names of the properties that are not the host's own bookkeeping.</summary>
     internal static IReadOnlyList<PropertyInfo> CapabilityProperties { get; } =
@@ -204,8 +204,7 @@ internal static class RuntimeAutomationBindings
                 nameof(RuntimeAutomationHostCapabilities.Content),
             ["BindProjectileCollision"] =
                 nameof(RuntimeAutomationHostCapabilities.ProjectileCollision),
-            ["BindRemoteBodiesUnsimulated"] =
-                nameof(RuntimeAutomationHostCapabilities.RemoteBodiesUnsimulated),
+
         };
 
     /// <summary>
@@ -389,11 +388,6 @@ internal static class RuntimeAutomationBindings
         {
             surface.BindProjectileCollision(projectilePhysics);
             bound.Add(nameof(surface.BindProjectileCollision));
-        }
-        if (capabilities.RemoteBodiesUnsimulated)
-        {
-            surface.BindRemoteBodiesUnsimulated();
-            bound.Add("BindRemoteBodiesUnsimulated");
         }
 
         ReportDeclaredButUnfilled(capabilities, bound);

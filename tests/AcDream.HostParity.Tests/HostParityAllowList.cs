@@ -55,12 +55,7 @@ internal static class HostParityAllowList
     /// </summary>
     internal static IReadOnlyList<ParityAllowance> Seams { get; } =
     [
-        new("BindRemoteBodiesUnsimulated", ParityHost.Windowed,
-            "The windowed host moves a remote body between server updates, so "
-            + "it must not read positions off the last snapshot; one host "
-            + "advancing remote bodies and the other not is the difference to "
-            + "remove, and this flag goes with it.",
-            ParityStage.MoveTheOperationIntoTheRuntime),
+
         new("BindProjectileCollision", ParityHost.Windowed,
             "Neither host fills the projectile seam; plugins that ask get "
             + "nothing. It needs a runtime source before either can.",

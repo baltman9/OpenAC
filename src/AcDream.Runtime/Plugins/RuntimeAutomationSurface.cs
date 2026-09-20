@@ -105,7 +105,6 @@ internal sealed class RuntimeAutomationSurface
         _trackedEnchantments = [];
     private long _trackedCastCompletionRevision;
     private bool _disposed;
-    private bool _remoteBodiesUnsimulated;
 
     /// <summary>
     /// The creature the outstanding plugin-driven swing was armed at, so a
@@ -644,13 +643,6 @@ internal sealed class RuntimeAutomationSurface
             _paletteColors = resolver;
     }
 
-    // A host that never moves a remote entity's PhysicsBody reads its position from the snapshot instead.
-    internal void BindRemoteBodiesUnsimulated()
-    {
-        lock (_gate)
-            _remoteBodiesUnsimulated = true;
-        _navigation.BindRemoteBodiesUnsimulated();
-    }
 
     public void BindEquipment(
         Func<uint, uint, bool> equip,
@@ -2310,8 +2302,7 @@ internal sealed class RuntimeAutomationSurface
             item,
             playerId,
             runtime.InventoryOwner.Objects,
-            activeSpellIdsForPlayer: _activeSpellIdsForPlayer,
-            remoteBodiesUnsimulated: _remoteBodiesUnsimulated);
+            activeSpellIdsForPlayer: _activeSpellIdsForPlayer);
 
     private static bool HasPropertyData(PropertyBundle properties) =>
         RuntimeWorldObjectProjection.HasPropertyData(properties);
