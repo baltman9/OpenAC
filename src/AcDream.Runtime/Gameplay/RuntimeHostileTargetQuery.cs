@@ -78,8 +78,18 @@ public static class RuntimeHostileTargetQuery
         {
             return false;
         }
-        if (scope == HostileTargetScope.Classified)
-            return true;
+        return scope == HostileTargetScope.Classified
+            || CanBeSeenAndIsAlive(record, runtime);
+    }
+
+    /// <summary>
+    /// The two terms a person picking a target expects of anything they pick:
+    /// it can be seen, and it is not already dead.
+    /// </summary>
+    private static bool CanBeSeenAndIsAlive(
+        RuntimeEntityRecord record,
+        GameRuntime runtime)
+    {
         if ((record.FinalPhysicsState
             & (PhysicsStateFlags.Hidden | PhysicsStateFlags.NoDraw)) != 0)
         {
@@ -87,6 +97,36 @@ public static class RuntimeHostileTargetQuery
         }
         return !runtime.ActionOwner.Combat.HasHealth(record.ServerGuid)
             || runtime.ActionOwner.Combat.GetHealthPercent(record.ServerGuid) > 0f;
+    }
+
+    /// <summary>
+    /// Whether an object a player has picked out may be attacked. This is
+    /// wider than <see cref="IsHostile"/>, which answers only for monsters:
+    /// another player sharing a player-killer status may be attacked when
+    /// selected, and is never acquired automatically.
+    /// </summary>
+    public static bool IsAttackableSelection(GameRuntime runtime, uint objectId)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        uint playerGuid = runtime.PlayerIdentity.ServerGuid;
+        if (objectId == 0u
+            || playerGuid == 0u
+            || objectId == playerGuid
+            || !runtime.EntityObjects.Entities.TryGetActive(
+                objectId,
+                out RuntimeEntityRecord record)
+            || record.Snapshot.Position is null)
+        {
+            return false;
+        }
+
+        ClientObjectTable objects = runtime.InventoryOwner.Objects;
+        return SelectedObjectHealthPolicy.ObjectIsAttackable(
+                playerGuid,
+                objects.Get(playerGuid),
+                objectId,
+                objects.Get(objectId))
+            && CanBeSeenAndIsAlive(record, runtime);
     }
 
     public static IReadOnlyList<RuntimeHostileTargetSnapshot> Capture(
