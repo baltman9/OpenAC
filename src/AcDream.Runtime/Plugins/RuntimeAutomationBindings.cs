@@ -449,6 +449,16 @@ internal static class RuntimeAutomationBindings
         runtime.CommunicationOwner.ChatPoses =
             AcDream.Runtime.Chat.ChatPoseCatalog.Load(content, ContentReadLock);
 
+        // What a contract is called and what it asks for is authored in
+        // the same files. Read the first time a plugin opens the
+        // character's contracts and not again, so a session that never
+        // asks never pays for it.
+        runtime.ContractsOwner.BindCatalog(() =>
+        {
+            lock (ContentReadLock)
+                return AcDream.Content.ContractTableReader.Load(content);
+        });
+
         surface.BindPaletteColorResolver(
             new AcDream.Content.CharGen.ChargenAppearanceCatalog(content));
         bound.Add(nameof(surface.BindPaletteColorResolver));

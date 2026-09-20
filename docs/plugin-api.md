@@ -733,6 +733,11 @@ with a window does the work:
   sees the character's skills unnamed.
 - The species a creature belongs to, and the colours a character was made
   with, come from the same files.
+- `State.Contracts` is answered either way, and the character's contracts,
+  their stages and their progress are real on a content-less session. What
+  comes out of the files is the authored words about them: without the
+  files `Name`, `Description` and `Status` are empty strings and a plugin
+  has the contract id and nothing to read out.
 - How much of a skill the server credits the character with is worked out from
   formulas in those files. Without them a content-less session reads its own
   skills below what the server allows it -- which also means it runs at the

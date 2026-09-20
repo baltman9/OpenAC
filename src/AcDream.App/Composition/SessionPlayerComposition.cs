@@ -278,21 +278,10 @@ internal sealed class SessionPlayerCompositionPhase
             d.DatLock,
             world.TerrainBuild.HeightTable,
             d.Options.DumpSceneryZ);
-        AcDream.Core.Quests.ContractCatalog? pluginContractCatalog = null;
-        d.WorldGameState.ContractsSource = () =>
-        {
-            if (pluginContractCatalog is null)
-            {
-                lock (d.DatLock)
-                    pluginContractCatalog =
-                        AcDream.Content.ContractTableReader.Load(content.Dats);
-            }
-
-            return AcDream.Runtime.Gameplay.ContractPluginProjection.Project(
-                d.Runtime.ContractsOwner.View,
-                pluginContractCatalog,
-                DateTime.UtcNow);
-        };
+        // One answer for both clients, named from the one table the
+        // shared content pass read.
+        d.WorldGameState.ContractsSource =
+            d.Runtime.ContractsOwner.ProjectForPlugins;
 
         var streamerLease = scope.Acquire(
             "landblock streamer",

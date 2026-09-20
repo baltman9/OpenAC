@@ -89,6 +89,9 @@ internal sealed class WindowedArm : ParityArm
             Runtime,
             _warnings.Add);
         _state.BindWorldEntities(_worldEntities);
+        // The character's contracts, exactly as the window binds them:
+        // the runtime's own answer, words and all.
+        _state.ContractsSource = Runtime.ContractsOwner.ProjectForPlugins;
         _events.BindWorldEntities(_worldEntities);
         _sessionSource = new LiveSessionAppSource(Runtime.Session, _commands);
         _bindings.Add(_feedback.BindOwned(text =>

@@ -69,7 +69,9 @@ internal static partial class HeadlessAutomationCapabilities
                 + "without one there is no animation content to carry another "
                 + "creature's body between the server's updates, so a "
                 + "creature's position is the server's last word about it "
-                + "rather than its body",
+                + "rather than its body, and no authored words about the "
+                + "character's contracts, so a plugin reads them by "
+                + "number alone",
             [nameof(RuntimeAutomationHostCapabilities.MagicCatalog)] =
                 "the spell catalog comes from the installed data files",
             [nameof(RuntimeAutomationHostCapabilities.NavigationWalk)] =

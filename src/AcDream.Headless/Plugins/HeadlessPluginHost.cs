@@ -242,10 +242,7 @@ internal sealed class HeadlessPluginHost
         get
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            return AcDream.Runtime.Gameplay.ContractPluginProjection.Project(
-                _runtime.ContractsOwner.View,
-                catalog: null,
-                now: DateTime.UtcNow);
+            return _runtime.ContractsOwner.ProjectForPlugins();
         }
     }
 
