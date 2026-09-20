@@ -103,6 +103,12 @@ internal sealed class RuntimeAutomationSurface
     private bool _disposed;
     private bool _remoteBodiesUnsimulated;
 
+    /// <summary>
+    /// The creature the outstanding plugin-driven swing was armed at, so a
+    /// request aimed somewhere else can end it rather than queue behind it.
+    /// </summary>
+    private uint _armedAttackTarget;
+
     private IReadOnlyList<PluginSpellInfo> _knownSelfBuffs = Array.Empty<PluginSpellInfo>();
     private IReadOnlyList<PluginSpellInfo> _knownAttackSpells =
         Array.Empty<PluginSpellInfo>();
@@ -3958,11 +3964,20 @@ internal sealed class RuntimeAutomationSurface
         }
 
         RuntimeCombatAttackState attack = runtime.ActionOwner.CombatAttack;
-        if (attack.AttackRequestInProgress
+        bool outstanding = attack.AttackRequestInProgress
             || attack.AttackServerResponsePending
-            || attack.RepeatAttackInProgress)
+            || attack.RepeatAttackInProgress;
+        if (outstanding)
         {
-            return new(PluginCombatCommandStatus.Busy);
+            // A swing at the same creature is the ordinary pace of a fight:
+            // the caller waits for it. A swing at a different one is the
+            // caller having moved on -- most often because the first creature
+            // is dead -- and waiting there is what leaves a character standing
+            // in front of a corpse while everything else closes in. That swing
+            // is ended and the new one starts in the same breath.
+            if (_armedAttackTarget == targetObjectId)
+                return new(PluginCombatCommandStatus.Busy);
+            attack.AbortAutomaticAttack();
         }
 
         runtime.ActionOwner.Selection.Select(
@@ -3970,11 +3985,15 @@ internal sealed class RuntimeAutomationSurface
             SelectionChangeSource.Plugin);
         attack.SetDesiredPower(Math.Clamp(power, 0f, 1f));
         attack.PressAttack(Project(height));
-        return attack.AttackRequestInProgress
-            ? new(PluginCombatCommandStatus.Started)
-            : new(
+        if (!attack.AttackRequestInProgress)
+        {
+            _armedAttackTarget = 0u;
+            return new(
                 PluginCombatCommandStatus.Refused,
                 DescribeAttackRefusal(runtime, targetObjectId));
+        }
+        _armedAttackTarget = targetObjectId;
+        return new(PluginCombatCommandStatus.Started);
     }
 
     /// <summary>
@@ -4010,8 +4029,19 @@ internal sealed class RuntimeAutomationSurface
         RuntimeCombatAttackState attack = runtime.ActionOwner.CombatAttack;
         if (!attack.AttackRequestInProgress)
             return new(PluginCombatCommandStatus.Refused);
-        attack.ReleaseAttack();
-        return new(PluginCombatCommandStatus.Released);
+        if (attack.ReleaseAttack())
+            return new(PluginCombatCommandStatus.Released);
+        // The request ended without a swing leaving the client. Saying
+        // "released" here would start a wait on a result that is never coming.
+        // The server still holding the last swing is a moment to wait out; the
+        // creature no longer being attackable is not.
+        if (attack.AttackServerResponsePending)
+            return new(PluginCombatCommandStatus.Busy);
+        uint armed = _armedAttackTarget;
+        _armedAttackTarget = 0u;
+        return new(
+            PluginCombatCommandStatus.Refused,
+            DescribeAttackRefusal(runtime, armed));
     }
 
     public PluginCombatCommandResult AbortPhysicalAttack()
@@ -4021,6 +4051,7 @@ internal sealed class RuntimeAutomationSurface
             runtime = _runtime;
         if (runtime is null)
             return new(PluginCombatCommandStatus.Unavailable);
+        _armedAttackTarget = 0u;
         runtime.ActionOwner.CombatAttack.AbortAutomaticAttack();
         return new(PluginCombatCommandStatus.Stopped);
     }
@@ -4106,6 +4137,7 @@ internal sealed class RuntimeAutomationSurface
             _selectionAction = null;
             DetachLocked();
         }
+        _armedAttackTarget = 0u;
         _knownSelfBuffs = Array.Empty<PluginSpellInfo>();
         _knownAttackSpells = Array.Empty<PluginSpellInfo>();
         _knownCombatSpells = Array.Empty<PluginSpellInfo>();
