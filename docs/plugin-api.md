@@ -656,12 +656,11 @@ except what this section names.**
 
 ### Not available without a window
 
-Two seams, each because the operation behind it still lives in windowed-host
-code rather than in the runtime:
+One seam, because the operation behind it still lives in windowed-host code
+rather than in the runtime:
 
 | Seam | What a plugin loses |
 |---|---|
-| `BindGhostDeletion` | Letting go of a target the client still believes in. |
 | `BindSelectionActions` | Cycling the selection (previous selection, previous player, next player). `Selection` itself -- what is selected, and selecting by id -- is real on both. |
 
 The selection also lets go of its object on both clients: when the server

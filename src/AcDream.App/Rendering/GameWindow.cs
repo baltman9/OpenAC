@@ -250,7 +250,6 @@ public sealed class GameWindow :
     // owners; the one wiring pass at the end of load hands them over.
     private AcDream.Runtime.Navigation.NavigationWalkController? _navigationWalk;
     private AcDream.App.Runtime.CurrentGameRuntimeAdapter? _pluginSessionCommands;
-    private AcDream.App.World.LiveEntityDeletionController? _liveEntityDeletion;
 
     private AcDream.Core.Vfx.EmitterDescRegistry? _emitterRegistry;
     private AcDream.Core.Vfx.ParticleSystem? _particleSystem;
@@ -1096,7 +1095,6 @@ public sealed class GameWindow :
         _worldReveal = result.WorldReveal;
         _spawnClaimHydration = result.SpawnClaimHydration;
         _liveEntityHydration = result.Hydration;
-        _liveEntityDeletion = result.Deletion;
         _liveEntityNetworkUpdates = result.NetworkUpdates;
         _liveEntityLiveness = result.Liveness;
         _liveEntitySessionEvents = result.SessionEvents;
@@ -1156,7 +1154,6 @@ public sealed class GameWindow :
                     Teleport = _localPlayerTeleport,
                     RetainedUi = _retailUiRuntime,
                     Selection = _selectionInteractions,
-                    EntityDeletion = _liveEntityDeletion,
                     Input = _inputDispatcher,
                     Events = _worldEvents,
                     NavigationGrid = _worldSceneDebugState.ToggleNavMesh,

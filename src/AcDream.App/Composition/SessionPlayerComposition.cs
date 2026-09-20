@@ -539,6 +539,10 @@ internal sealed class SessionPlayerCompositionPhase
             d.EntityObjects,
             teardown,
             d.PlayerIdentity);
+        // Dismissing an object the client still believes in is decided by the
+        // runtime; this client has a drawn world to take down as well, so it
+        // lends the route it already runs for an authoritative delete.
+        d.Runtime.GhostDismissalOwner.BindAuthoritativeDelete(deletion.Delete);
         live.LiveEntities.Physics.BindObjectTableHostResolver(
             guid => d.MotionBindings.ResolvePhysicsHost(guid));
         IPreparedCollisionSource firstEntryCollision =

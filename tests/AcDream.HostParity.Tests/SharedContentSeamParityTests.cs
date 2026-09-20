@@ -112,8 +112,6 @@ public sealed class SharedContentSeamParityTests
                 RetainedUi = Part<AcDream.App.UI.RetailUiRuntime>(),
                 Selection =
                     Part<AcDream.App.Interaction.SelectionInteractionController>(),
-                EntityDeletion =
-                    Part<AcDream.App.World.LiveEntityDeletionController>(),
                 Input = Part<AcDream.UI.Abstractions.Input.InputDispatcher>(),
             })
             : HeadlessAutomationCapabilities.Build(new HeadlessAutomationParts

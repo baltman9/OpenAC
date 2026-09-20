@@ -28,7 +28,6 @@ internal sealed record GraphicalAutomationParts
     public AcDream.App.Streaming.LocalPlayerTeleportController? Teleport { get; init; }
     public AcDream.App.UI.RetailUiRuntime? RetainedUi { get; init; }
     public AcDream.App.Interaction.SelectionInteractionController? Selection { get; init; }
-    public AcDream.App.World.LiveEntityDeletionController? EntityDeletion { get; init; }
     public InputDispatcher? Input { get; init; }
 
     /// <summary>The tick the plugin surface and its own verbs follow.</summary>
@@ -60,7 +59,6 @@ internal static class GraphicalAutomationCapabilities
             nameof(RuntimeAutomationHostCapabilities.NavigationWalk),
             nameof(RuntimeAutomationHostCapabilities.Logout),
             nameof(RuntimeAutomationHostCapabilities.AnswerConfirmation),
-            nameof(RuntimeAutomationHostCapabilities.DismissGhost),
             nameof(RuntimeAutomationHostCapabilities.SelectionAction),
         };
 
@@ -127,9 +125,6 @@ internal static class GraphicalAutomationCapabilities
             AnswerConfirmation = retainedUi is null
                 ? null
                 : retainedUi.TryAnswerConfirmation,
-            DismissGhost = parts.EntityDeletion is not { } deletion
-                ? null
-                : deletion.DeleteClientGhost,
             SelectionAction = selection is null
                 ? null
                 : action => selection.HandleInputAction(action switch

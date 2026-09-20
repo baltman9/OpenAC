@@ -55,10 +55,6 @@ internal static class HostParityAllowList
     /// </summary>
     internal static IReadOnlyList<ParityAllowance> Seams { get; } =
     [
-        new("BindGhostDeletion", ParityHost.Windowless,
-            "Letting go of a target the client still believes in is done by "
-            + "the windowed host's entity deletion owner.",
-            ParityStage.MoveTheOperationIntoTheRuntime),
         new("BindSelectionActions", ParityHost.Windowless,
             "Cycling the selection is an input action of the windowed host; "
             + "the cycle itself belongs over the entity directory.",

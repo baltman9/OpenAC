@@ -84,7 +84,6 @@ internal sealed record RuntimeAutomationHostCapabilities
     public NavigationWalkController? NavigationWalk { get; init; }
     public RuntimeAutomationLogoutCommands? Logout { get; init; }
     public Func<uint, bool, bool>? AnswerConfirmation { get; init; }
-    public Func<uint, bool>? DismissGhost { get; init; }
     public Func<PluginSelectionAction, bool>? SelectionAction { get; init; }
     public PhysicsEngine? ProjectileCollision { get; init; }
     public bool RemoteBodiesUnsimulated { get; init; }
@@ -171,8 +170,7 @@ internal static class RuntimeAutomationBindings
             ["BindDialogs"] =
                 nameof(RuntimeAutomationHostCapabilities.AnswerConfirmation),
             ["BindWorldObjectUse"] = null,
-            ["BindGhostDeletion"] =
-                nameof(RuntimeAutomationHostCapabilities.DismissGhost),
+            ["BindGhostDeletion"] = null,
             ["BindSelectionActions"] =
                 nameof(RuntimeAutomationHostCapabilities.SelectionAction),
             ["BindChatInputActive"] = null,
@@ -331,11 +329,12 @@ internal static class RuntimeAutomationBindings
             objectId => RuntimeAutomationSurface.MapWorldObjectUseOutcome(
                 runtime.WorldObjectUseOwner.TryUse(objectId)));
         bound.Add(nameof(surface.BindWorldObjectUse));
-        if (capabilities.DismissGhost is { } dismissGhost)
-        {
-            surface.BindGhostDeletion(dismissGhost);
-            bound.Add(nameof(surface.BindGhostDeletion));
-        }
+        // Letting go of an object the client still believes in is a decision
+        // about the entity directory, so both clients answer it from the same
+        // owner; the one that draws has already lent it the route that takes
+        // down what it drew.
+        surface.BindGhostDeletion(runtime.GhostDismissalOwner.Dismiss);
+        bound.Add(nameof(surface.BindGhostDeletion));
         if (capabilities.SelectionAction is { } selectionAction)
         {
             surface.BindSelectionActions(selectionAction);

@@ -441,6 +441,9 @@ public sealed class GameRuntime
                         ? record.Snapshot.Useability
                         : null,
                 dependencies.Log);
+            GhostDismissalOwner = new Entities.RuntimeGhostDismissal(
+                context.EntityObjects,
+                () => PlayerIdentity.ServerGuid);
 
             context.Session.ConfigureAutoSaveTick(
                 session =>
@@ -531,6 +534,13 @@ public sealed class GameRuntime
     /// is walked to and opened the same way with or without a window.
     /// </summary>
     internal RuntimeWorldObjectUse WorldObjectUseOwner { get; }
+
+    /// <summary>
+    /// Letting go of an object the client still believes in. The decision is
+    /// the same on every client; a client that draws lends the route that
+    /// takes down what it drew.
+    /// </summary>
+    public Entities.RuntimeGhostDismissal GhostDismissalOwner { get; }
 
     /// <summary>
     /// Where walks sent by that route report that they arrived or were called

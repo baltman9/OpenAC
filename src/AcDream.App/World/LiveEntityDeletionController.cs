@@ -47,17 +47,6 @@ internal sealed class LiveEntityDeletionController : ILiveEntityPruneSink
             removeRetainedObject: true);
     }
 
-    public bool DeleteClientGhost(uint serverGuid)
-    {
-        if (serverGuid == 0u
-            || serverGuid == _identity.ServerGuid
-            || !_runtime.TryGetRecord(serverGuid, out LiveEntityRecord record))
-        {
-            return false;
-        }
-        return Delete(new DeleteObject.Parsed(serverGuid, record.Generation));
-    }
-
     /// <summary>
     /// Destroys an object whose 25-second out-of-visibility deadline expired.
     /// This is a full delete, the same as a server delete: the server forgets

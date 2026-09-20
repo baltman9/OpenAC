@@ -66,11 +66,11 @@ public sealed class SharedBindingPassTests
                     {
                         HostName = "a host under test",
                         Declared = new HashSet<string>(StringComparer.Ordinal),
-                        DismissGhost = static _ => true,
+                        SelectionAction = static _ => true,
                     }));
 
         Assert.Contains(
-            nameof(RuntimeAutomationHostCapabilities.DismissGhost),
+            nameof(RuntimeAutomationHostCapabilities.SelectionAction),
             refused.Message,
             StringComparison.Ordinal);
     }
@@ -90,7 +90,6 @@ public sealed class SharedBindingPassTests
         Logout = new RuntimeAutomationLogoutCommands(
             static () => true, static () => true),
         AnswerConfirmation = static (_, _) => true,
-        DismissGhost = static _ => true,
         SelectionAction = static _ => true,
         ProjectileCollision = physics,
         RemoteBodiesUnsimulated = true,
