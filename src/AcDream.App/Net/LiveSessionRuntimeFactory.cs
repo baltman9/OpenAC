@@ -180,64 +180,32 @@ internal sealed class LiveSessionRuntimeFactory
                 failure.Command,
                 failure.Error),
             _timeProvider);
-        return new LiveSessionHost(controller, new LiveSessionHostBindings(
-            Routing: new(
-                CreateEventRouter,
-                session => _commands.Attach(new LiveSessionCommandRouter(
-                    CreateCommandBindings(session)))),
-            Reset: reset.Execute,
-            Selection: new(
-                SetPlayerIdentity: id => _player.Identity.ServerGuid = id,
-                SetVitalsIdentity: id => _ui.Vitals?.SetLocalPlayerGuid(id),
-                SetChatIdentity: _domain.Communication.Chat.SetLocalPlayerGuid,
-                MarkPersistent: _world.WorldState.MarkPersistent,
-                SetVanishProbeIdentity: id => EntityVanishProbe.PlayerGuid = id,
-                ClearCombat: _domain.Actions.Combat.Clear,
-                ArmLoginTunnel: _world.Teleport.ArmLoginTunnel),
-            EnteredWorld: new(
-                SetActiveCharacter: _interaction.Settings.SetActiveCharacter,
-                RestoreLayout: () =>
-                {
-                    _interaction.Settings.SetGameplayDisplay(true);
-                    _ui.RetailUi?.RestoreLayout();
-                    _ui.RetailUi?.InventoryPanelController?.Populate();
-                    _ui.Paperdoll?.MarkDirty();
-                    _ui.RetailUi?.RedeclareSocialPanelAfterWorldEntry();
-                },
-                SyncToolbar: () => _ui.RetailUi?.SyncToolbarWindowButtons(),
-                LoadCharacterSettings: name =>
-                {
-                    _interaction.Settings.LoadCharacterContext(name);
-                    _ui.RetailUi?.LoadJournal(name);
-                },
-                ArmPlayerModeAutoEntry: _interaction.PlayerModeAutoEntry.Arm,
-                ResumeWorldAudio: () => _world.WorldAudio?.ResumeForWorldEntry()),
-            Connecting: (host, port, user) =>
-                _domain.Communication.Chat.OnSystemMessage(
-                    $"connecting to {host}:{port} as {user}",
-                    chatType: 1),
-            Connected: () =>
-            {
-                _domain.Communication.Chat.OnSystemMessage(
-                    "connected — character list received",
-                    chatType: 1);
-                _statusWriter.Connected(_sessionId);
-            },
-            Roster: roster => _statusWriter.CharacterList(_sessionId, roster),
-            CharacterEntered: selection => _statusWriter.EnteredWorld(
-                _sessionId,
-                selection.CharacterId,
-                selection.CharacterName),
-            LoginCommands: loginCommands,
-            CharacterCreated: identity => _statusWriter.CharacterCreated(
-                _sessionId,
-                identity.Guid,
-                identity.Name),
-            CreationFailed: rejection => _statusWriter.CreationFailed(
-                _sessionId,
-                rejection.RawCode,
-                rejection.Reason,
-                rejection.AttemptedName)),
+        return new LiveSessionHost(
+            controller,
+            AcDream.App.Plugins.GraphicalAutomationCapabilities
+                .BuildSessionHostBindings(
+                    new AcDream.App.Plugins.GraphicalSessionHostParts
+                    {
+                        CreateEvents = CreateEventRouter,
+                        CreateCommands = session => _commands.Attach(
+                            new LiveSessionCommandRouter(
+                                CreateCommandBindings(session))),
+                        Reset = reset.Execute,
+                        Identity = _player.Identity,
+                        Communication = _domain.Communication,
+                        Combat = _domain.Actions.Combat,
+                        Settings = _interaction.Settings,
+                        PlayerModeAutoEntry = _interaction.PlayerModeAutoEntry,
+                        WorldState = _world.WorldState,
+                        Teleport = _world.Teleport,
+                        StatusWriter = _statusWriter,
+                        SessionId = _sessionId,
+                        Vitals = _ui.Vitals,
+                        RetainedUi = _ui.RetailUi,
+                        Paperdoll = _ui.Paperdoll,
+                        WorldAudio = _world.WorldAudio,
+                        LoginCommands = loginCommands,
+                    }),
             connectOptions with { PollConnectionDuringTicks = true },
             _domain.Runtime);
     }
@@ -397,28 +365,18 @@ internal sealed class LiveSessionRuntimeFactory
         SkillTable? skillTable)
     {
         var skillCreditResolver = new LiveSkillCreditResolver(skillTable);
-        return new LiveCharacterSessionBindings(
-            _domain.Actions.Combat,
-            _domain.Character,
-            ResolveSkillFormulaBonus: skillCreditResolver.Resolve,
-            OnSkillsUpdated: (runSkill, jumpSkill) =>
-                _movementStats.Apply("skills"),
-            OnConfirmationRequest: request =>
-                _ui.RetailUi?.HandleConfirmationRequest(request),
-            OnConfirmationDone: done =>
-                _ui.RetailUi?.HandleConfirmationDone(done),
-            ClientTime: ClientTimerNow,
-            OnMovementStatsUpdated: () => _movementStats.Apply("stats"),
-            OnCharacterOptionsChanged: (_, options2) =>
-            {
-                _interaction.Settings.SyncChatFromServerOptions(options2);
-                _interaction.Settings.SetUiLocked(
-                    _domain.Character.Options.GetOptionBit(CharacterOptionId.LockUI));
-                // OP4 re-review R2: open option-bearing panels re-read live
-                // bits at every seed (login + reconnect) — see
-                // RuntimeSettingsController.ServerOptionsSeeded.
-                _interaction.Settings.NotifyServerOptionsSeeded();
-            });
+        return AcDream.App.Plugins.GraphicalAutomationCapabilities
+            .BuildCharacterSessionBindings(
+                new AcDream.App.Plugins.GraphicalCharacterSessionParts
+                {
+                    Character = _domain.Character,
+                    Combat = _domain.Actions.Combat,
+                    Settings = _interaction.Settings,
+                    ApplyMovementStats = reason => _movementStats.Apply(reason),
+                    ResolveSkillFormulaBonus = skillCreditResolver.Resolve,
+                    ClientTime = ClientTimerNow,
+                    RetainedUi = _ui.RetailUi,
+                });
     }
 
     private LiveSessionCommandBindings CreateCommandBindings(

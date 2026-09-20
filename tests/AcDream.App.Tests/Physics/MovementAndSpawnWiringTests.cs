@@ -44,11 +44,32 @@ public sealed class MovementAndSpawnWiringTests
             call =>
                 call.Target.DeclaringType == typeof(LiveMovementStatsApplier)
                 && call.Target.Name == nameof(LiveMovementStatsApplier.Reset));
-        Assert.Equal(
-            2,
-            factoryCalls.Count(call =>
+        Assert.Single(
+            factoryCalls,
+            call =>
                 call.Target.DeclaringType == typeof(LiveMovementStatsApplier)
-                && call.Target.Name == nameof(LiveMovementStatsApplier.Apply)));
+                && call.Target.Name == nameof(LiveMovementStatsApplier.Apply));
+        // The two occasions to re-derive it -- a skill raise and a movement
+        // stat update -- are named where the character bindings are built.
+        MethodInfo buildCharacterBindings = typeof(AcDream.App.Plugins
+            .GraphicalAutomationCapabilities).GetMethod(
+                "BuildCharacterSessionBindings",
+                BindingFlags.Static | BindingFlags.NonPublic)!;
+        MethodBase[] reasons = CompiledCallGraph
+            .ReadMethodReferences(buildCharacterBindings)
+            .Select(call => call.Target)
+            .Where(target => target.Name.Contains('<', StringComparison.Ordinal)
+                && target.GetMethodBody() is not null)
+            .Distinct()
+            .ToArray();
+        _ = Assert.Single(
+            reasons,
+            reason => CompiledCallGraph.ReadStringLiterals(reason)
+                .Contains("skills"));
+        _ = Assert.Single(
+            reasons,
+            reason => CompiledCallGraph.ReadStringLiterals(reason)
+                .Contains("stats"));
         Assert.DoesNotContain(
             factoryCalls,
             call => call.Target.DeclaringType == typeof(MotionInterpreter)

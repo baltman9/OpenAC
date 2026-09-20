@@ -42,7 +42,7 @@ internal sealed record HeadlessAutomationParts
 /// the census builds the record <see cref="Build"/> really makes, so the claim
 /// cannot drift away from the code.
 /// </summary>
-internal static class HeadlessAutomationCapabilities
+internal static partial class HeadlessAutomationCapabilities
 {
     internal static IReadOnlySet<string> Declared { get; } =
         new HashSet<string>(StringComparer.Ordinal)
@@ -174,16 +174,9 @@ internal static class HeadlessAutomationCapabilities
             nameof(LiveSessionHostBindings.CharacterCreated),
             nameof(LiveSessionHostBindings.CreationFailed),
             nameof(LiveSessionSelectionBindings.SetPlayerIdentity),
-            nameof(LiveSessionSelectionBindings.SetVitalsIdentity),
             nameof(LiveSessionSelectionBindings.SetChatIdentity),
-            nameof(LiveSessionSelectionBindings.MarkPersistent),
-            nameof(LiveSessionSelectionBindings.SetVanishProbeIdentity),
             nameof(LiveSessionSelectionBindings.ClearCombat),
             nameof(LiveSessionEnteredWorldBindings.SetActiveCharacter),
-            nameof(LiveSessionEnteredWorldBindings.RestoreLayout),
-            nameof(LiveSessionEnteredWorldBindings.SyncToolbar),
-            nameof(LiveSessionEnteredWorldBindings.LoadCharacterSettings),
-            nameof(LiveSessionEnteredWorldBindings.ArmPlayerModeAutoEntry),
         };
 
     /// <summary>Which character-session bindings this host fills in.</summary>

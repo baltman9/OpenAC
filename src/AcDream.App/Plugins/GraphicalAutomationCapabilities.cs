@@ -47,7 +47,7 @@ internal sealed record GraphicalAutomationParts
 /// the census builds the record <see cref="Build"/> really makes, so the claim
 /// cannot drift away from the code.
 /// </summary>
-internal static class GraphicalAutomationCapabilities
+internal static partial class GraphicalAutomationCapabilities
 {
     internal static IReadOnlySet<string> Declared { get; } =
         new HashSet<string>(StringComparer.Ordinal)

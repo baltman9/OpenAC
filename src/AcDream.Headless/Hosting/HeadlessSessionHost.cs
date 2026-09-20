@@ -343,70 +343,43 @@ internal sealed class HeadlessSessionHost : IDisposable
             // nothing is built for them here.
             var liveSession = new LiveSessionHost(
                 runtime.Session,
-                new LiveSessionHostBindings(
-                    new LiveSessionRoutingFactories(
-                        CreateEventRoute,
-                        session => new SessionCommandRoute(
-                            gameplay.CreateRoute(session),
-                            commands.CreateRoute(session),
-                            chatCommandSurface.Attach(
-                                new LiveChatCommandRoute(
-                                    CreateChatCommandBindings(
-                                        session,
-                                        runtime))))),
-                    generation =>
-                        runtime.ResetGeneration(generation, _resetHost),
-                    new LiveSessionSelectionBindings(
-                        id => runtime.PlayerIdentity.ServerGuid = id,
-                        _ => { },
-                        runtime.CommunicationOwner.Chat.SetLocalPlayerGuid,
-                        _ => { },
-                        _ => { },
-                        runtime.ActionOwner.Combat.Clear),
-                    new LiveSessionEnteredWorldBindings(
-                        name =>
+                AcDream.Headless.Plugins.HeadlessAutomationCapabilities
+                    .BuildSessionHostBindings(
+                        new AcDream.Headless.Plugins.HeadlessSessionHostParts
                         {
-                            ActiveCharacterName = name;
-                            if (descriptor.Policy?.Role
-                                    == HeadlessBotPolicyRole.Recruit
-                                && gateCoordinator is not null)
+                            CreateEvents = CreateEventRoute,
+                            CreateCommands = session => new SessionCommandRoute(
+                                gameplay.CreateRoute(session),
+                                commands.CreateRoute(session),
+                                chatCommandSurface.Attach(
+                                    new LiveChatCommandRoute(
+                                        CreateChatCommandBindings(
+                                            session,
+                                            runtime)))),
+                            Reset = generation =>
+                                runtime.ResetGeneration(generation, _resetHost),
+                            Identity = runtime.PlayerIdentity,
+                            Communication = runtime.CommunicationOwner,
+                            Combat = runtime.ActionOwner.Combat,
+                            NoteActiveCharacter = name =>
                             {
-                                gateCoordinator.RecruitCharacterName = name;
-                            }
-                        },
-                        () => { },
-                        () => { },
-                        _ => { },
-                        () => { }),
-                    (host, port, user) =>
-                        diagnostics.Message(
-                            descriptor.Id,
-                            $"connecting:{host}:{port}:{user}",
-                            runtime.Generation.Value),
-                    () =>
-                    {
-                        diagnostics.Message(
-                            descriptor.Id,
-                            "connected",
-                            runtime.Generation.Value);
-                        statusWriter.Connected(descriptor.Id);
-                        _hasConnected = true;
-                    },
-                    roster => statusWriter.CharacterList(descriptor.Id, roster),
-                    selection => statusWriter.EnteredWorld(
-                        descriptor.Id,
-                        selection.CharacterId,
-                        selection.CharacterName),
-                    loginCommands,
-                    CharacterCreated: identity => statusWriter.CharacterCreated(
-                        descriptor.Id,
-                        identity.Guid,
-                        identity.Name),
-                    CreationFailed: rejection => statusWriter.CreationFailed(
-                        descriptor.Id,
-                        rejection.RawCode,
-                        rejection.Reason,
-                        rejection.AttemptedName)),
+                                ActiveCharacterName = name;
+                                if (descriptor.Policy?.Role
+                                        == HeadlessBotPolicyRole.Recruit
+                                    && gateCoordinator is not null)
+                                {
+                                    gateCoordinator.RecruitCharacterName = name;
+                                }
+                            },
+                            Diagnostic = message => diagnostics.Message(
+                                descriptor.Id,
+                                message,
+                                runtime.Generation.Value),
+                            StatusWriter = statusWriter,
+                            SessionId = descriptor.Id,
+                            NoteConnected = () => _hasConnected = true,
+                            LoginCommands = loginCommands,
+                        }),
                 runtime: runtime);
 
             Runtime = runtime;
@@ -936,30 +909,28 @@ internal sealed class HeadlessSessionHost : IDisposable
     /// far below what the server credits it with.
     /// </summary>
     internal LiveCharacterSessionBindings CreateCharacterBindings() =>
-        new(
-            Runtime.ActionOwner.Combat,
-            Runtime.CharacterOwner,
-            ResolveSkillFormulaBonus: CreateSkillFormulaBonusResolver(),
-            OnSkillsUpdated: null,
-            OnConfirmationRequest: request =>
-            {
-                Console.WriteLine(
-                    $"[fa6-diag] OnConfirmationRequest received type="
-                    + $"{request.Type} context={request.ContextId} "
-                    + $"text='{request.Message}'");
-                _pendingConfirmation = request;
-                _pluginSession.Host.RaiseConfirmationRequested(
-                    new PluginConfirmation(
-                        request.ContextId,
-                        (int)request.Type,
-                        request.Message));
-            },
-            OnConfirmationDone: HandleConfirmationDone,
-            ClientTime: () =>
-                Runtime.Clock.SimulationTimeSeconds,
-            OnMovementStatsUpdated: null,
-            OnCharacterOptionsChanged: (_, _) =>
-                _optionsSeeder?.NoteOptionsSeeded());
+        AcDream.Headless.Plugins.HeadlessAutomationCapabilities
+            .BuildCharacterSessionBindings(
+                new AcDream.Headless.Plugins.HeadlessCharacterSessionParts
+                {
+                    Character = Runtime.CharacterOwner,
+                    Combat = Runtime.ActionOwner.Combat,
+                    ResolveSkillFormulaBonus =
+                        CreateSkillFormulaBonusResolver(),
+                    ClientTime = () => Runtime.Clock.SimulationTimeSeconds,
+                    OnConfirmationRequest = request =>
+                    {
+                        _pendingConfirmation = request;
+                        _pluginSession.Host.RaiseConfirmationRequested(
+                            new PluginConfirmation(
+                                request.ContextId,
+                                (int)request.Type,
+                                request.Message));
+                    },
+                    OnConfirmationDone = HandleConfirmationDone,
+                    NoteOptionsSeeded = () =>
+                        _optionsSeeder?.NoteOptionsSeeded(),
+                });
 
     private ILiveSessionEventRouting CreateEventRoute(
         AcDream.Core.Net.WorldSession session)

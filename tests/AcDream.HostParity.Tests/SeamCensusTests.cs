@@ -22,6 +22,11 @@ namespace AcDream.HostParity.Tests;
 /// under another verb; those entry points are invisible to the discovery and
 /// are named in <see cref="HostPushedEntryPoints"/> instead.
 ///
+/// A binding that is there and does nothing is read as absent: see
+/// <see cref="InertBindings"/>. Until that rule existed a host could satisfy
+/// every claim in this file with an empty lambda, which is what the windowless
+/// host did for arriving in the world.
+///
 /// Mutation checks (2026-09-20):
 /// * removing the session-commands capability from the windowless host's
 ///   declared set turned
@@ -153,7 +158,8 @@ public sealed class SeamCensusTests
         foreach (string host in ParityHost.Both)
         {
             IReadOnlySet<string> supplied =
-                ObservedHostRecords.CapabilitiesFor(host).Supplied();
+                ObservedHostRecords.SuppliedCapabilities(
+                    ObservedHostRecords.CapabilitiesFor(host));
             IReadOnlySet<string> declared = DeclaredCapabilities(host);
             AssertSameMembers(
                 declared,
@@ -179,6 +185,48 @@ public sealed class SeamCensusTests
                 host,
                 "runtime dependency",
                 "the record it builds the runtime with");
+        }
+    }
+
+    /// <summary>
+    /// The same, for the bindings each host hands the live-session host. This
+    /// is the record that carried the longest-lived hand-written claim in the
+    /// census, and the one where a host can hand over a binding that does
+    /// nothing at all.
+    /// </summary>
+    [Fact]
+    public void EachHostDeclaresExactlyWhatItsSessionHostBindingsSupply()
+    {
+        foreach (string host in ParityHost.Both)
+        {
+            AssertSameMembers(
+                host == ParityHost.Windowed
+                    ? GraphicalAutomationCapabilities.DeclaredSessionHostBindings
+                    : HeadlessAutomationCapabilities.DeclaredSessionHostBindings,
+                ObservedHostRecords.SuppliedSessionHostMembersFor(host),
+                host,
+                "live-session host binding",
+                "the record it builds the session host with");
+        }
+    }
+
+    /// <summary>The same, for the bindings that follow one character.</summary>
+    [Fact]
+    public void EachHostDeclaresExactlyWhatItsCharacterSessionBindingsSupply()
+    {
+        foreach (string host in ParityHost.Both)
+        {
+            AssertSameMembers(
+                host == ParityHost.Windowed
+                    ? GraphicalAutomationCapabilities
+                        .DeclaredCharacterSessionBindings
+                    : HeadlessAutomationCapabilities
+                        .DeclaredCharacterSessionBindings,
+                ObservedHostRecords.SuppliedMembers(
+                    ObservedHostRecords.CharacterSessionBindingsFor(host)),
+                host,
+                "character-session binding",
+                "the record it builds the event router with");
         }
     }
 

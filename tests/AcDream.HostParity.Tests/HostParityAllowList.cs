@@ -111,6 +111,35 @@ internal static class HostParityAllowList
         new("ResumeWorldAudio", ParityHost.Windowless,
             "There is no mixer to resume without a window.",
             ParityStage.AnswerItFromOneSource),
+        new("SetVitalsIdentity", ParityHost.Windowless,
+            "The vitals bar is a drawn panel; whose vitals it shows is a "
+            + "question only a host with one can answer.",
+            ParityStage.AnswerItFromOneSource),
+        new("MarkPersistent", ParityHost.Windowless,
+            "Keeping the character's own drawable from being evicted is "
+            + "bookkeeping for a drawn world, and there is none here.",
+            ParityStage.AnswerItFromOneSource),
+        new("SetVanishProbeIdentity", ParityHost.Windowless,
+            "A diagnostic that watches for the character's drawable going "
+            + "missing; nothing draws it here, so there is nothing to watch.",
+            ParityStage.AnswerItFromOneSource),
+        new("RestoreLayout", ParityHost.Windowless,
+            "Putting the panels back where the player left them needs a "
+            + "panel tree.",
+            ParityStage.AnswerItFromOneSource),
+        new("SyncToolbar", ParityHost.Windowless,
+            "The toolbar buttons are drawn; there are none to match up here.",
+            ParityStage.AnswerItFromOneSource),
+        new("ArmPlayerModeAutoEntry", ParityHost.Windowless,
+            "Entering player mode on arrival is about where the camera goes "
+            + "and what the keyboard steers, and there is neither here.",
+            ParityStage.AnswerItFromOneSource),
+        new("LoadCharacterSettings", ParityHost.Windowless,
+            "The windowed host reads this character's own saved preferences "
+            + "on arrival and the windowless host reads nothing, so the two "
+            + "can disagree about settings a plugin can see. The preferences "
+            + "have no runtime owner yet.",
+            ParityStage.MoveTheOperationIntoTheRuntime),
     ];
 
     /// <summary>Character-session bindings one host fills in and the other does not.</summary>
