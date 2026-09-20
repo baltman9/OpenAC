@@ -1998,6 +1998,31 @@ internal sealed class RuntimeAutomationSurface
         get { lock (_gate) return _lastRecallRequest; }
     }
 
+    IReadOnlyList<PluginRecallLocation> IRecallAutomation.CaptureLocations()
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        if (runtime is null || !IsAvailable)
+            return Array.Empty<PluginRecallLocation>();
+
+        AcDream.Core.Net.Messages.CreateObject.ServerPosition? house =
+            runtime.HouseOwner.Position;
+        AcDream.Core.Physics.Position? position =
+            RuntimeWorldObjectProjection.ConvertPosition(house);
+        if (position is null)
+            return Array.Empty<PluginRecallLocation>();
+        return
+        [
+            new PluginRecallLocation(
+                PluginRecallKind.House,
+                RuntimeWorldObjectProjection.ProjectNavigationPosition(position.Value),
+                "House",
+                1,
+                true),
+        ];
+    }
+
     PluginRecallResult IRecallAutomation.Recall(PluginRecallKind kind)
     {
         GameRuntime? runtime;

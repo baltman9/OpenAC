@@ -28,6 +28,14 @@ public enum PluginRecallStatus
     Refused,
 }
 
+/// <summary>A recall destination known to the current session.</summary>
+public readonly record struct PluginRecallLocation(
+    PluginRecallKind Kind,
+    PluginNavigationPosition Position,
+    string Name,
+    long Revision,
+    bool IsKnown);
+
 /// <summary>The most recent recall request issued by this surface.</summary>
 public readonly record struct PluginRecallRequest(
     long Revision,
@@ -44,8 +52,8 @@ public readonly record struct PluginRecallResult(
 }
 
 /// <summary>
-/// Issues generation-safe recall requests. Completion and destination state
-/// are reported separately through <see cref="IEvents.PortalTransition"/>.
+/// Issues generation-safe recall requests and exposes destinations learned
+/// authoritatively by the host.
 /// </summary>
 public interface IRecallAutomation
 {
@@ -54,6 +62,10 @@ public interface IRecallAutomation
 
     /// <summary>The most recent request, or a zero-revision default.</summary>
     PluginRecallRequest LastRequest => default;
+
+    /// <summary>Returns authoritative destinations learned by this session.</summary>
+    IReadOnlyList<PluginRecallLocation> CaptureLocations() =>
+        Array.Empty<PluginRecallLocation>();
 
     /// <summary>Requests one of the host's supported recall destinations.</summary>
     PluginRecallResult Recall(PluginRecallKind kind) =>
