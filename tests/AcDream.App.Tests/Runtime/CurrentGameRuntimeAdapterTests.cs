@@ -446,12 +446,15 @@ public sealed class CurrentGameRuntimeAdapterTests
             recording.Entries,
             entry => entry.Kind == RuntimeTraceKind.Entity
                 && entry.PrimaryObjectId == Harness.TargetGuid);
-        Assert.Equal(1, harness.EntityObjects.Events.SubscriberCount);
+        // The runtime keeps one observer of its own on this stream -- the
+        // one that lets the selection go when its object leaves the world --
+        // so the count here is that one plus this test's own.
+        Assert.Equal(2, harness.EntityObjects.Events.SubscriberCount);
         Assert.Equal(0, harness.EntityObjects.Events.DispatchFailureCount);
 
         first.Dispose();
         second.Dispose();
-        Assert.Equal(0, harness.EntityObjects.Events.SubscriberCount);
+        Assert.Equal(1, harness.EntityObjects.Events.SubscriberCount);
     }
 
     [Fact]

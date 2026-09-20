@@ -831,8 +831,7 @@ public sealed class LandblockPlacementPublicationCompositionTests
                     identity,
                     origin,
                     new LocalPlayerShadowState()),
-                () => guid,
-                static _ => { });
+                () => guid);
         }
 
         internal LandblockStreamResult.Loaded Result()

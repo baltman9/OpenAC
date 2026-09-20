@@ -234,7 +234,6 @@ public sealed class RuntimeForcePositionRenderCommitTests
                 new EntityEffectPoseRegistry(),
                 localShadowSynchronizer,
                 () => PlayerGuid,
-                _ => { },
                 [(_, _) => { }]);
             _ = new AcDream.Runtime.Physics.RuntimePlacementProjectionSubscription(
                 EntityObjects.Placements,

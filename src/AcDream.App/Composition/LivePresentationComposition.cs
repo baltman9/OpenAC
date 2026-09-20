@@ -515,15 +515,6 @@ internal sealed class LivePresentationCompositionPhase
                 d.EffectPoses,
                 localPlayerShadowSynchronizer,
                 () => d.PlayerIdentity.ServerGuid,
-                guid =>
-                {
-                    if (d.Selection.SelectedObjectId == guid)
-                    {
-                        d.Selection.Clear(
-                            SelectionChangeSource.System,
-                            SelectionChangeReason.SelectedObjectRemoved);
-                    }
-                },
                 placementVisibilitySinks);
             Fault(LivePresentationCompositionPoint.ProjectionVisibilityBound);
 

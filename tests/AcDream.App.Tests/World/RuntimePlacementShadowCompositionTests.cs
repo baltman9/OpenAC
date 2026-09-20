@@ -355,7 +355,6 @@ public sealed class RuntimePlacementShadowCompositionTests
                 effectPoses,
                 synchronizer,
                 () => Guid,
-                _ => { },
                 [(_, _) => { }]);
         }
 

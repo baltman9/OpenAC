@@ -663,6 +663,11 @@ code rather than in the runtime:
 |---|---|
 | `BindGhostDeletion` | Letting go of a target the client still believes in. |
 | `BindSelectionActions` | Cycling the selection (previous selection, previous player, next player). `Selection` itself -- what is selected, and selecting by id -- is real on both. |
+
+The selection also lets go of its object on both clients: when the server
+takes the selected object out of the world, or stops showing it, `Selection`
+clears rather than keeping a guid nothing will answer to. That used to happen
+only where there was something drawing the object.
 | `BindSpeciesNameResolver` | Creature display names by species; the table is still loaded by windowed layout code. |
 
 One more seam is empty on **both** clients, so it is not a windowless

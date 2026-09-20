@@ -1108,7 +1108,8 @@ public sealed class SelectionInteractionControllerTests
         h.Controller.OnEntityHidden(Target);
         h.Controller.DrainOutbound();
 
-        Assert.Null(h.Selection.SelectedObjectId);
+        // Letting the selection go is the runtime's now, for every client;
+        // what this controller still owes is the cancel.
         Assert.Empty(h.Transport.Uses);
         Assert.Equal(0, h.Items.BusyCount);
     }

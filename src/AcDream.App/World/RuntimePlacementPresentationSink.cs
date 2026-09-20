@@ -18,7 +18,6 @@ internal sealed class RuntimePlacementPresentationSink
     private readonly EntityEffectPoseRegistry _effectPoses;
     private readonly LocalPlayerShadowSynchronizer _localPlayerShadowSync;
     private readonly Func<uint> _localPlayerGuid;
-    private readonly Action<uint> _clearSelectionForUnavailableEntity;
     private readonly Action<LiveEntityRecord, bool>[] _visibilitySinks;
 
     public RuntimePlacementPresentationSink(
@@ -29,7 +28,6 @@ internal sealed class RuntimePlacementPresentationSink
         EntityEffectPoseRegistry effectPoses,
         LocalPlayerShadowSynchronizer localPlayerShadowSync,
         Func<uint> localPlayerGuid,
-        Action<uint> clearSelectionForUnavailableEntity,
         IEnumerable<Action<LiveEntityRecord, bool>>? visibilitySinks = null)
     {
         _liveEntities = liveEntities
@@ -43,9 +41,6 @@ internal sealed class RuntimePlacementPresentationSink
             ?? throw new ArgumentNullException(nameof(localPlayerShadowSync));
         _localPlayerGuid = localPlayerGuid
             ?? throw new ArgumentNullException(nameof(localPlayerGuid));
-        _clearSelectionForUnavailableEntity = clearSelectionForUnavailableEntity
-            ?? throw new ArgumentNullException(
-                nameof(clearSelectionForUnavailableEntity));
         _visibilitySinks = visibilitySinks?.ToArray()
             ?? Array.Empty<Action<LiveEntityRecord, bool>>();
         if (_visibilitySinks.Any(static sink => sink is null))
@@ -205,7 +200,6 @@ internal sealed class RuntimePlacementPresentationSink
         }
         if (!IsCurrent(record, entity))
             return false;
-        _clearSelectionForUnavailableEntity(record.ServerGuid);
         return IsCurrent(record, entity);
     }
 

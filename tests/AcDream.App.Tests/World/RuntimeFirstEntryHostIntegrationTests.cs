@@ -463,7 +463,6 @@ public sealed class RuntimeFirstEntryHostIntegrationTests
                 new EntityEffectPoseRegistry(),
                 localShadowSynchronizer,
                 () => playerGuid,
-                _ => { },
                 [
                     (record, visible) =>
                     {

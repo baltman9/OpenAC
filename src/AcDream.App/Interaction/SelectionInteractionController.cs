@@ -851,12 +851,6 @@ internal sealed class SelectionInteractionController : ISelectionInputActions
         }
         if (_transactions.TryCancelPendingUse(serverGuid, out RuntimePendingUse cancelledUse))
             cancelledUse.Reservation?.CancelBeforeDispatch();
-        if (_selection.SelectedObjectId == serverGuid)
-        {
-            _selection.Clear(
-                SelectionChangeSource.System,
-                SelectionChangeReason.Cleared);
-        }
     }
 
     public void OnEntityRemoved(LiveEntityRecord record, bool replacementExists)

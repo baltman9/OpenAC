@@ -117,7 +117,6 @@ public sealed class RuntimePlacementPresentationSinkTests
         Assert.Equal(0, fixture.EffectPoses.Count);
         Assert.Null(fixture.LocalShadow.Current);
         Assert.Equal((record, false), Assert.Single(fixture.Visibility));
-        Assert.Equal(Guid, Assert.Single(fixture.ClearedSelection));
     }
 
     [Fact]
@@ -875,7 +874,6 @@ public sealed class RuntimePlacementPresentationSinkTests
                 effectPoses,
                 synchronizer,
                 () => Guid,
-                ClearedSelection.Add,
                 [
                     (record, visible) =>
                     {
@@ -899,7 +897,6 @@ public sealed class RuntimePlacementPresentationSinkTests
         internal LocalPlayerShadowState LocalShadow { get; }
         internal LocalPlayerShadowSynchronizer Synchronizer { get; }
         internal List<(LiveEntityRecord Record, bool Visible)> Visibility { get; } = [];
-        internal List<uint> ClearedSelection { get; } = [];
         internal int VisibilityFailuresRemaining { get; set; }
         internal RuntimePlacementPresentationSink Sink { get; }
 
@@ -1110,7 +1107,6 @@ public sealed class RuntimePlacementPresentationSinkTests
                 effectPoses,
                 synchronizer,
                 () => Guid,
-                _ => { },
                 [
                     (candidate, visible) =>
                     {

@@ -197,12 +197,9 @@ internal sealed class LiveEntityMotionRuntimeController
 
     public void ClearTargetForHiddenEntity(uint serverGuid)
     {
+        // Letting the selection go is the runtime's, for every client.
         if (_selectionInteractions() is { } interactions)
             interactions.OnEntityHidden(serverGuid);
-        else if (_selection.SelectedObjectId == serverGuid)
-            _selection.Clear(
-                AcDream.Core.Selection.SelectionChangeSource.System,
-                AcDream.Core.Selection.SelectionChangeReason.Cleared);
 
         if (_liveEntities?.TryGetPhysicsHost(serverGuid, out var hiddenHost) == true
             && hiddenHost is EntityPhysicsHost hiddenEntityHost)

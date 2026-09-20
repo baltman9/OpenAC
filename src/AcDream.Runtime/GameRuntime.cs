@@ -419,6 +419,13 @@ public sealed class GameRuntime
             // The walk-to-then-use route. It is built here, from runtime
             // state alone, so a client with no window reaches an object the
             // character does not own exactly the way a client with one does.
+            // The selection follows the world: when the object the player
+            // has selected is taken out of it, or the world stops showing
+            // it, the selection lets it go. One owner, for every client.
+            _selectionFollowsEntities = new RuntimeSelectionEntityFollower(
+                context.EntityObjects.Events,
+                context.Actions.Selection);
+
             ApproachCompletions = new RuntimeApproachCompletionState();
             context.Movement.AttachApproachCompletions(ApproachCompletions);
             WorldObjectUseOwner = new RuntimeWorldObjectUse(
@@ -490,6 +497,9 @@ public sealed class GameRuntime
     /// </summary>
     private readonly LocalPlayerOutboundController _attackRequestOutbound =
         new(static (_, _, _, _, _, _) => { });
+
+    /// <summary>Clears the selection when its object leaves the world.</summary>
+    private readonly RuntimeSelectionEntityFollower? _selectionFollowsEntities;
 
     public GameRuntimeClock Clock { get; }
     public LiveSessionController Session { get; }
@@ -932,6 +942,7 @@ public sealed class GameRuntime
                 }
                 return true;
             case 1:
+                _selectionFollowsEntities?.Dispose();
                 _events.Dispose();
                 return _events.CaptureOwnership().IsConverged;
             case 2:
