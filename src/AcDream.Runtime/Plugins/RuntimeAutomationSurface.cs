@@ -36,8 +36,7 @@ internal sealed class RuntimeAutomationSurface
     private const double PeerHeartbeatSeconds = 5d;
     private readonly object _gate = new();
     private readonly AcDream.Runtime.Navigation.RuntimeNavigationAutomation _navigation;
-    private readonly IEvents? _events;
-    private readonly WorldEvents? _pluginEvents;
+    private readonly AcDream.Core.Plugins.IPluginEventSink? _events;
     private readonly LocalPluginPeerRegistry _peers;
     private readonly string[] _peerTags;
     private double _peerHeartbeatRemaining;
@@ -131,7 +130,7 @@ internal sealed class RuntimeAutomationSurface
     }
 
     internal RuntimeAutomationSurface(
-        IEvents? events,
+        AcDream.Core.Plugins.IPluginEventSink? events,
         LocalPluginPeerRegistry? peers = null,
         IReadOnlyList<string>? peerTags = null)
     {
@@ -139,7 +138,6 @@ internal sealed class RuntimeAutomationSurface
         _activeSpellIdsForPlayer = _ => _enchantments.Select(static enchantment => enchantment.SpellId).ToArray();
         _pluginCommands = new PluginCommandRegistry(ReportPluginCommandFailure);
         _events = events;
-        _pluginEvents = events as WorldEvents;
         _peers = peers ?? new LocalPluginPeerRegistry(Path.Combine(
             AcDream.Platform.ApplicationPathSet.Resolve().DataDirectory,
             "plugin-peers"));
@@ -1462,9 +1460,9 @@ internal sealed class RuntimeAutomationSurface
         }
 
         if (isInWorld)
-            _pluginEvents?.FireLoginComplete();
+            _events?.FireLoginComplete();
         else
-            _pluginEvents?.FireLogoff();
+            _events?.FireLogoff();
     }
 
     void IRuntimeEventObserver.OnCommand(in RuntimeCommandDelta delta) { }
@@ -1479,7 +1477,7 @@ internal sealed class RuntimeAutomationSurface
     /// </summary>
     void IRuntimeEventObserver.OnEntity(in RuntimeEntityDelta delta)
     {
-        WorldEvents? events = _pluginEvents;
+        AcDream.Core.Plugins.IPluginEventSink? events = _events;
         if (events is null)
             return;
         PluginObjectChangeKind kind = delta.Change switch
@@ -1511,7 +1509,7 @@ internal sealed class RuntimeAutomationSurface
             PublishInitialEquipmentPlacement(delta.Item);
         }
 
-        WorldEvents? events = _pluginEvents;
+        AcDream.Core.Plugins.IPluginEventSink? events = _events;
         if (events is null)
             return;
         PluginObjectChangeKind kind = delta.Change switch
@@ -1562,11 +1560,11 @@ internal sealed class RuntimeAutomationSurface
     void IRuntimeEventObserver.OnCombat(in RuntimeCombatDelta delta) { }
 
     private void OnLocalPlayerDied(string deathMessage) =>
-        _pluginEvents?.FireLocalPlayerDied(deathMessage);
+        _events?.FireLocalPlayerDied(deathMessage);
 
     private void OnExternalContainerChanged(ExternalContainerTransition transition)
     {
-        WorldEvents? events = _pluginEvents;
+        AcDream.Core.Plugins.IPluginEventSink? events = _events;
         if (events is null)
             return;
         switch (transition.Kind)
@@ -1584,7 +1582,7 @@ internal sealed class RuntimeAutomationSurface
     }
 
     private void OnAppraisalReceived(uint objectId) =>
-        _pluginEvents?.FireObjectChanged(new PluginObjectChange(
+        _events?.FireObjectChanged(new PluginObjectChange(
             objectId,
             PluginObjectChangeKind.IdentReceived));
 
@@ -1608,7 +1606,7 @@ internal sealed class RuntimeAutomationSurface
 
     /// <summary>Called by the host whenever it shows a confirmation dialog.</summary>
     public void RaiseConfirmationRequested(PluginConfirmation confirmation) =>
-        _pluginEvents?.FireConfirmationRequested(confirmation);
+        _events?.FireConfirmationRequested(confirmation);
 
     public IReadOnlyList<PluginSpellInfo> All
     {

@@ -335,49 +335,31 @@ public sealed class HeadlessPluginApiSurfaceTests
                 Directory.Delete(root, recursive: true);
         }
     }
-
+    /// <summary>
+    /// A client with no window turns what the runtime did into what a plugin
+    /// hears through the same shared surface the client with a window uses,
+    /// rather than through a mapping of its own. This drives the runtime and
+    /// reads what the plugin got, so the whole road is under it: an answered
+    /// description reaches a plugin as that object having been identified.
+    /// </summary>
     [Fact]
-    public void ObjectChangedMapsEntityAndInventoryDeltasToPluginKinds()
+    public void ObjectChangesReachAPluginFromTheRuntimeWithNoWindow()
     {
         using GameRuntime runtime = NewRuntime();
         using var host = NewHost(runtime);
         var seen = new List<PluginObjectChange>();
         host.Events.ObjectChanged += seen.Add;
-        var observer = (IRuntimeEventObserver)host;
-        RuntimeEventStamp stamp = default;
 
-        observer.OnEntity(new RuntimeEntityDelta(
-            stamp,
-            RuntimeEntityChange.Registered,
-            new RuntimeEntitySnapshot(
-                new RuntimeEntityIdentity(100u, 1u, 1), 0u, 0u, null)));
-        observer.OnEntity(new RuntimeEntityDelta(
-            stamp,
-            RuntimeEntityChange.Rebucketed,
-            new RuntimeEntitySnapshot(
-                new RuntimeEntityIdentity(100u, 1u, 1), 0u, 0u, null)));
-        observer.OnEntity(new RuntimeEntityDelta(
-            stamp,
-            RuntimeEntityChange.Deleted,
-            new RuntimeEntitySnapshot(
-                new RuntimeEntityIdentity(100u, 1u, 1), 0u, 0u, null)));
-        observer.OnInventory(new RuntimeInventoryDelta(
-            stamp,
-            RuntimeInventoryChange.Added,
-            new RuntimeInventoryItemSnapshot(
-                200u, 1, "Item", 0u, 0, 0u, 0u, 0, 0)));
-        observer.OnInventory(new RuntimeInventoryDelta(
-            stamp,
-            RuntimeInventoryChange.Cleared,
-            default));
+        Assert.True(runtime.ActionOwner.Transactions.TryRequestAppraisal(
+            100u,
+            static _ => { },
+            AppraisalRequestOrigin.Automation));
+        _ = runtime.ActionOwner.Transactions.AcceptAppraisalResponse(100u);
 
         Assert.Equal(
             new (uint ObjectId, PluginObjectChangeKind Kind)[]
             {
-                (100u, PluginObjectChangeKind.Created),
-                (100u, PluginObjectChangeKind.Moved),
-                (100u, PluginObjectChangeKind.Released),
-                (200u, PluginObjectChangeKind.Created),
+                (100u, PluginObjectChangeKind.IdentReceived),
             },
             seen.Select(static c => (c.ObjectId, c.Kind)));
     }

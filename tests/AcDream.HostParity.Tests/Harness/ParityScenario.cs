@@ -35,14 +35,36 @@ internal static class ParityScenario
         CompareTranscripts(windowed, windowless, expectedDifferences);
     }
 
+    /// <summary>
+    /// The same, for a scenario about the arrival in the world itself. The
+    /// script runs with the character not yet in, and walks it in when it is
+    /// ready, so what it subscribes to beforehand is in place in time to hear
+    /// the arrival.
+    /// </summary>
+    internal static void RunFromLogin(
+        Action<ParityArm, ParityTranscript> script,
+        params ParityExpectedDifference[] expectedDifferences)
+    {
+        ArgumentNullException.ThrowIfNull(script);
+
+        ParityTranscript windowed =
+            Play(new WindowedArm(), script, enterWorld: false);
+        ParityTranscript windowless =
+            Play(new WindowlessArm(), script, enterWorld: false);
+
+        Compare(windowed, windowless, expectedDifferences);
+    }
+
     private static ParityTranscript Play(
         ParityArm arm,
-        Action<ParityArm, ParityTranscript> script)
+        Action<ParityArm, ParityTranscript> script,
+        bool enterWorld = true)
     {
         using (arm)
         {
             var transcript = new ParityTranscript();
-            arm.EnterWorld();
+            if (enterWorld)
+                arm.EnterWorld();
             script(arm, transcript);
             return transcript;
         }

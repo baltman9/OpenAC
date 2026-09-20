@@ -9,8 +9,12 @@ namespace AcDream.App.Plugins;
 /// </summary>
 internal sealed record GraphicalSurfaceInputParts
 {
-    /// <summary>The tick the surface announces this client on.</summary>
-    public required AcDream.Plugin.Abstractions.IEvents Events { get; init; }
+    /// <summary>
+    /// The one object this client hands the surface for world events: the
+    /// tick it announces this client on, and where it raises what happened
+    /// for plugins to hear.
+    /// </summary>
+    public required AcDream.Core.Plugins.IPluginEventSink Events { get; init; }
 
     /// <summary>This client's own data directory.</summary>
     public required string DataDirectory { get; init; }

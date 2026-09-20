@@ -115,6 +115,15 @@ internal abstract class ParityArm : IDisposable
     /// <summary>What the binding pass said about seams this arm left empty.</summary>
     internal abstract IReadOnlyList<string> Warnings { get; }
 
+    /// <summary>
+    /// The client is asking the player to accept or decline something, raised
+    /// from the same place this client raises it for real. Nothing here draws
+    /// a dialog; what a scenario is after is whether a plugin is told.
+    /// </summary>
+    /// <param name="confirmation">What is being asked, and under which id.</param>
+    internal abstract void ShowConfirmation(
+        AcDream.Plugin.Abstractions.PluginConfirmation confirmation);
+
     /// <summary>Opens the session and walks it into the world.</summary>
     internal void EnterWorld()
     {

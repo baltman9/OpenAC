@@ -12,15 +12,13 @@ internal sealed class HeadlessPluginHost
     : IPluginHost,
       IPerPluginSessionSettings,
       IGameState,
-      IEvents,
-      IRuntimeEventObserver,
+      AcDream.Core.Plugins.IPluginEventSink,
       IDisposable
 {
     private static readonly IReadOnlyDictionary<string, string> EmptySettings =
         new Dictionary<string, string>();
 
     private readonly GameRuntime _runtime;
-    private readonly IDisposable _eventSubscription;
     private readonly RuntimeWorldEntityProjection _worldEntities;
     private readonly object _eventGate = new();
     private readonly RuntimeAutomationSurface _automation;
@@ -35,7 +33,6 @@ internal sealed class HeadlessPluginHost
     private Action<uint>? _containerOpened;
     private Action<uint>? _containerClosed;
     private Action<PluginConfirmation>? _confirmationRequested;
-    private bool _wasInWorld;
     private bool _disposed;
 
     internal HeadlessPluginHost(
@@ -102,11 +99,10 @@ internal sealed class HeadlessPluginHost
                 AnswerConfirmation = answerConfirmation,
                 Events = this,
             }));
-        _wasInWorld = runtime.Lifecycle.State == RuntimeLifecycleState.InWorld;
-        runtime.CommunicationOwner.LocalPlayerDied += OnLocalPlayerDied;
-        runtime.InventoryOwner.ExternalContainers.Changed += OnExternalContainerChanged;
-        runtime.ActionOwner.Transactions.AppraisalReceived += OnAppraisalReceived;
-        _eventSubscription = runtime.Subscribe(this);
+        // Which runtime happening becomes which plugin event is the shared
+        // surface's job, on both clients: it watches the runtime and raises
+        // them here. Watching the runtime a second time from this host would
+        // mean a plugin hearing every event twice.
         // The one producer of what a plugin sees in the world, shared with
         // the client that has a window.
         _worldEntities = new RuntimeWorldEntityProjection(runtime);
@@ -287,40 +283,23 @@ internal sealed class HeadlessPluginHost
             _containerClosed = null;
             _confirmationRequested = null;
         }
-        _runtime.CommunicationOwner.LocalPlayerDied -= OnLocalPlayerDied;
-        _runtime.InventoryOwner.ExternalContainers.Changed -= OnExternalContainerChanged;
-        _runtime.ActionOwner.Transactions.AppraisalReceived -= OnAppraisalReceived;
-        _eventSubscription.Dispose();
         _automation.Dispose();
     }
 
-    public void OnEntity(in RuntimeEntityDelta delta)
-    {
-        RaiseObjectChanged(
-            delta.Entity.Identity.ServerGuid,
-            delta.Change switch
-            {
-                RuntimeEntityChange.Registered => PluginObjectChangeKind.Created,
-                RuntimeEntityChange.Rebucketed => PluginObjectChangeKind.Moved,
-                RuntimeEntityChange.Withdrawn => PluginObjectChangeKind.Released,
-                RuntimeEntityChange.Deleted => PluginObjectChangeKind.Released,
-                _ => PluginObjectChangeKind.Updated,
-            });
-    }
+    /// <summary>
+    /// The character has arrived in the world. Raised by the shared surface,
+    /// which is what decides that a lifecycle change means this.
+    /// </summary>
+    public void FireLoginComplete() => FireLifecycle(arrived: true);
 
-    public void OnLifecycle(in RuntimeLifecycleDelta delta)
-    {
-        bool isInWorld = delta.Current == RuntimeLifecycleState.InWorld;
-        lock (_eventGate)
-        {
-            if (_disposed || _wasInWorld == isInWorld)
-                return;
-            _wasInWorld = isInWorld;
-        }
+    /// <summary>The character has left the world.</summary>
+    public void FireLogoff() => FireLifecycle(arrived: false);
 
+    private void FireLifecycle(bool arrived)
+    {
         Action? handlers;
         lock (_tickGate)
-            handlers = isInWorld ? _loginComplete : _logoff;
+            handlers = arrived ? _loginComplete : _logoff;
         if (handlers is null)
             return;
         foreach (Delegate handler in handlers.GetInvocationList())
@@ -387,7 +366,9 @@ internal sealed class HeadlessPluginHost
         }
     }
 
-    private void OnLocalPlayerDied(string deathMessage)
+    /// <summary>The character died, with the message the server sent.</summary>
+    /// <param name="deathMessage">What the server said about the death.</param>
+    public void FireLocalPlayerDied(string deathMessage)
     {
         Action<string>? handlers;
         lock (_tickGate)
@@ -475,31 +456,20 @@ internal sealed class HeadlessPluginHost
         }
     }
 
-    public void OnCommand(in RuntimeCommandDelta delta) { }
-
-    public void OnInventory(in RuntimeInventoryDelta delta)
-    {
-        if (delta.Change == RuntimeInventoryChange.Cleared)
-            return;
-        RaiseObjectChanged(
-            delta.Item.ObjectId,
-            delta.Change switch
-            {
-                RuntimeInventoryChange.Added => PluginObjectChangeKind.Created,
-                RuntimeInventoryChange.Moved => PluginObjectChangeKind.Moved,
-                RuntimeInventoryChange.Removed => PluginObjectChangeKind.Released,
-                _ => PluginObjectChangeKind.Updated,
-            });
-    }
-
-    private void RaiseObjectChanged(uint objectId, PluginObjectChangeKind kind)
+    /// <summary>
+    /// An object appeared, moved, changed or went away. Which runtime
+    /// happening that was -- an object arriving, an inventory move, an
+    /// answered description -- is decided by the shared surface, so both
+    /// clients report the same kind for the same happening.
+    /// </summary>
+    /// <param name="change">Which object, and what happened to it.</param>
+    public void FireObjectChanged(PluginObjectChange change)
     {
         Action<PluginObjectChange>? handlers;
         lock (_tickGate)
             handlers = _objectChanged;
         if (handlers is null)
             return;
-        var change = new PluginObjectChange(objectId, kind);
         foreach (Delegate handler in handlers.GetInvocationList())
         {
             try { ((Action<PluginObjectChange>)handler)(change); }
@@ -510,31 +480,28 @@ internal sealed class HeadlessPluginHost
         }
     }
 
-    private void OnExternalContainerChanged(
-        AcDream.Core.Items.ExternalContainerTransition transition)
-    {
-        switch (transition.Kind)
-        {
-            case AcDream.Core.Items.ExternalContainerTransitionKind.Opened:
-                RaiseUInt(ref _containerOpened, transition.ContainerId);
-                break;
-            case AcDream.Core.Items.ExternalContainerTransitionKind.ReplacementRequested:
-            case AcDream.Core.Items.ExternalContainerTransitionKind.Closed:
-            case AcDream.Core.Items.ExternalContainerTransitionKind.Reset:
-                if (transition.PreviousContainerId != 0u)
-                    RaiseUInt(ref _containerClosed, transition.PreviousContainerId);
-                break;
-        }
-    }
-
-    private void OnAppraisalReceived(uint objectId) =>
-        RaiseObjectChanged(objectId, PluginObjectChangeKind.IdentReceived);
-
-    private void RaiseUInt(ref Action<uint>? field, uint value)
+    /// <summary>A container the character can see inside was opened.</summary>
+    /// <param name="containerObjectId">The container that opened.</param>
+    public void FireContainerOpened(uint containerObjectId)
     {
         Action<uint>? handlers;
         lock (_tickGate)
-            handlers = field;
+            handlers = _containerOpened;
+        FireContainer(handlers, containerObjectId);
+    }
+
+    /// <summary>A container the character could see inside was closed.</summary>
+    /// <param name="containerObjectId">The container that closed.</param>
+    public void FireContainerClosed(uint containerObjectId)
+    {
+        Action<uint>? handlers;
+        lock (_tickGate)
+            handlers = _containerClosed;
+        FireContainer(handlers, containerObjectId);
+    }
+
+    private void FireContainer(Action<uint>? handlers, uint value)
+    {
         if (handlers is null)
             return;
         foreach (Delegate handler in handlers.GetInvocationList())
@@ -547,8 +514,18 @@ internal sealed class HeadlessPluginHost
         }
     }
 
-    /// <summary>Called by the session host whenever it records a confirmation request.</summary>
-    internal void RaiseConfirmationRequested(PluginConfirmation confirmation)
+    /// <summary>
+    /// Called by the session host whenever it records a confirmation
+    /// request. It goes through the shared surface rather than straight to
+    /// the handlers, so this client raises it by the same road as the one
+    /// with a window.
+    /// </summary>
+    internal void RaiseConfirmationRequested(PluginConfirmation confirmation) =>
+        _automation.RaiseConfirmationRequested(confirmation);
+
+    /// <summary>The player is being asked to accept or decline something.</summary>
+    /// <param name="confirmation">What is being asked, and under which id.</param>
+    public void FireConfirmationRequested(PluginConfirmation confirmation)
     {
         Action<PluginConfirmation>? handlers;
         lock (_tickGate)
@@ -564,9 +541,4 @@ internal sealed class HeadlessPluginHost
             }
         }
     }
-
-    public void OnChat(in RuntimeChatDelta delta) { }
-    public void OnMovement(in RuntimeMovementDelta delta) { }
-    public void OnPortal(in RuntimePortalDelta delta) { }
-    public void OnCombat(in RuntimeCombatDelta delta) { }
 }

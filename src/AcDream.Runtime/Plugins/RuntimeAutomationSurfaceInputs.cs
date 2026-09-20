@@ -20,12 +20,14 @@ internal sealed record RuntimeAutomationSurfaceInputs
     public required string HostName { get; init; }
 
     /// <summary>
-    /// The tick the surface follows. Every host has one; which object it is
-    /// is the host's own business. Without it the surface never announces
-    /// this client to the other clients on this machine and never polls the
-    /// owners that need a heartbeat.
+    /// The one object this host hands the surface for world events: the tick
+    /// the surface follows, and where it raises what happened for plugins to
+    /// hear. Every host has one; which object it is is the host's own
+    /// business. Without it the surface never announces this client to the
+    /// other clients on this machine, never polls the owners that need a
+    /// heartbeat, and no world event ever reaches a plugin.
     /// </summary>
-    public required IEvents PluginEvents { get; init; }
+    public required AcDream.Core.Plugins.IPluginEventSink PluginEvents { get; init; }
 
     /// <summary>
     /// This client's own data directory. The clients on one machine find one

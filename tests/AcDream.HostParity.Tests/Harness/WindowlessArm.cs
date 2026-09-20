@@ -74,6 +74,10 @@ internal sealed class WindowlessArm : ParityArm
 
     internal override IReadOnlyList<string> Warnings => _log.Lines;
 
+    /// <summary>Where this client's session host raises it.</summary>
+    internal override void ShowConfirmation(PluginConfirmation confirmation) =>
+        _host.RaiseConfirmationRequested(confirmation);
+
     /// <summary>
     /// The windowless host drives the surface's bookkeeping and its plugin
     /// ticks from the session tick.

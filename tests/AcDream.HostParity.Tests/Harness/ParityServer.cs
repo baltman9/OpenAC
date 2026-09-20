@@ -244,6 +244,35 @@ internal sealed class ParityServer(WorldSession session, Func<uint> playerGuid)
         GameEvent(GameEventType.UpdateHealth, payload);
     }
 
+    /// <summary>
+    /// The server closes a container the character had open, which is what
+    /// really ends a looting session: the client asks, the server says so.
+    /// </summary>
+    /// <param name="containerGuid">The container that is now closed.</param>
+    internal void ClosedTheContainer(uint containerGuid)
+    {
+        var payload = new byte[4];
+        BinaryPrimitives.WriteUInt32LittleEndian(payload, containerGuid);
+        GameEvent(GameEventType.CloseGroundContainer, payload);
+    }
+
+    /// <summary>
+    /// The character was killed, with the line the server sends about it.
+    /// </summary>
+    /// <param name="deathMessage">What the server says happened.</param>
+    internal void KilledTheCharacter(string deathMessage)
+    {
+        ArgumentNullException.ThrowIfNull(deathMessage);
+        byte[] text = System.Text.Encoding.Latin1.GetBytes(deathMessage);
+        // Length, the line itself, then padding up to the next four bytes:
+        // the shape every length-prefixed line on the wire has.
+        int size = 2 + text.Length;
+        var payload = new byte[size + ((4 - (size & 3)) & 3)];
+        BinaryPrimitives.WriteUInt16LittleEndian(payload, (ushort)text.Length);
+        text.CopyTo(payload, 2);
+        GameEvent(GameEventType.VictimNotification, payload);
+    }
+
     /// <summary>A line of text from the server itself.</summary>
     internal void SystemMessage(string text, uint chatType) =>
         Raise(

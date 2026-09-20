@@ -2,7 +2,7 @@ using AcDream.Plugin.Abstractions;
 
 namespace AcDream.Core.Plugins;
 
-public sealed class WorldEvents : IEvents
+public sealed class WorldEvents : IPluginEventSink
 {
     private readonly object _lock = new();
     private IPluginWorldEntities? _worldEntities;

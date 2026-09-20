@@ -148,6 +148,10 @@ internal sealed class WindowedArm : ParityArm
 
     internal override IReadOnlyList<string> Warnings => _warnings;
 
+    /// <summary>Where the window raises it: the shared plugin surface.</summary>
+    internal override void ShowConfirmation(PluginConfirmation confirmation) =>
+        _automation.RaiseConfirmationRequested(confirmation);
+
     /// <summary>
     /// The window drives the surface's own bookkeeping off the plugin event
     /// tick rather than off the session tick, so the arm does the same.

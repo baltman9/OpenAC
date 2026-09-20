@@ -122,7 +122,10 @@ internal static class ObservedHostRecords
             Content = Part<AcDream.Content.RuntimeDatCollection>(),
             MagicCatalog = Part<AcDream.Content.MagicCatalog>(),
             SubmitChatText = NoteAndAccept,
-            SessionCommands = Part<AcDream.App.Runtime.CurrentGameRuntimeAdapter>(),
+            // This client's own command adapter, not the other client's:
+            // standing the windowed one in here would have the census
+            // comparing a host against a part it never passes.
+            SessionCommands = Part<DirectGameRuntimeCommandAdapter>(),
             NavigationWalk = Part<AcDream.Runtime.Navigation.NavigationWalkController>(),
             Logout = Part<AcDream.Headless.Hosting.HeadlessLogoutAutomation>(),
             AnswerConfirmation = NoteAndAnswer,
@@ -282,7 +285,9 @@ internal static class ObservedHostRecords
         HeadlessAutomationCapabilities.BuildSurfaceInputs(
             new HeadlessSurfaceInputParts
             {
-                Events = Part<AcDream.Core.Plugins.WorldEvents>(),
+                // The object this client really hands the surface is the
+                // plugin host itself, which is also what it hands plugins.
+                Events = Part<HeadlessPluginHost>(),
                 DataDirectory = "census",
                 PluginTags = ["census"],
             });
