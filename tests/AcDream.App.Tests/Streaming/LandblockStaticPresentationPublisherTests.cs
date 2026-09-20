@@ -324,8 +324,8 @@ public sealed class LandblockStaticPresentationPublisherTests
 
     /// <summary>
     /// What the publisher remembers per landblock is the source id, not the
-    /// whole plugin snapshot: a republication that moves a static still
-    /// refreshes it, and the plugin world state carries the new position.
+    /// whole snapshot: a republication that moves a static still refreshes
+    /// it, and the scenery store carries the new position.
     /// </summary>
     [Fact]
     public void Reapply_RememberedSourceDoesNotStandInForThePluginSnapshot()
@@ -337,7 +337,9 @@ public sealed class LandblockStaticPresentationPublisherTests
         Publish(fixture, Build(LandblockId, [first], BundleWithLight()));
         Publish(fixture, Build(LandblockId, [moved], BundleWithLight()));
 
-        Assert.Equal(moved.Position, Assert.Single(fixture.World.Entities).Position);
+        Assert.Equal(
+            moved.Position,
+            Assert.Single(fixture.World.SceneryObjects).Position);
         Assert.Equal(1, fixture.Publisher.Diagnostics.PluginSpawnCount);
         Assert.Equal(1, fixture.Publisher.Diagnostics.PluginRefreshCount);
     }
