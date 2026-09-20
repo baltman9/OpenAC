@@ -80,6 +80,137 @@ internal static class ParityWorld
         PublicWeenieBitfield = 0u,
     };
 
+    // ── things to carry, and things to open ─────────────────────────────
+
+    /// <summary>A healing kit: usable on its own, carried in the main pack.</summary>
+    internal const uint Kit = 0x50000040u;
+
+    /// <summary>A side pack, carried, with room for four things.</summary>
+    internal const uint SidePack = 0x50000041u;
+
+    /// <summary>A tinkering tool, which is what a salvage request needs.</summary>
+    internal const uint SalvageTool = 0x50000042u;
+
+    /// <summary>Something to salvage with it.</summary>
+    internal const uint ScrapItem = 0x50000043u;
+
+    /// <summary>An item that cannot be used without naming a target.</summary>
+    internal const uint TargetedItem = 0x50000044u;
+
+    /// <summary>A corpse lying three metres out, openable.</summary>
+    internal const uint Corpse = 0x50000050u;
+
+    /// <summary>Inside the corpse: something plain, and something worth a look.</summary>
+    internal const uint CorpseCoin = 0x50000051u;
+    internal const uint CorpseGem = 0x50000052u;
+
+    /// <summary>
+    /// Fills the character's packs: a kit to use, a side pack to move things
+    /// into, a tinkering tool and something to salvage with it, and an item
+    /// that refuses to be used without a target. The player object itself is
+    /// given room, because where a picked-up item goes is decided by the
+    /// client, not the server, and a container with no room decides
+    /// differently.
+    /// </summary>
+    internal static void StageCarriedItems(GameRuntime runtime)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        ClientObjectTable objects = runtime.InventoryOwner.Objects;
+        ClientObject player = PlayerObject(Player);
+        player.ItemsCapacity = 10;
+        player.ContainersCapacity = 2;
+        objects.AddOrUpdate(player);
+        objects.AddOrUpdate(Carried(Kit, "Healing Kit", ItemUseability.Contained));
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = SidePack,
+            Type = ItemType.Container,
+            Name = "Side Pack",
+            ContainerId = Player,
+            WeenieClassId = 0x0000_0834u,
+            ItemsCapacity = 4,
+            ContainerTypeHint = 1,
+            StackSize = 1,
+            Useability = ItemUseability.Contained,
+        });
+        ClientObject tool = Carried(
+            SalvageTool, "Tinkering Tool", ItemUseability.Contained);
+        tool.Type = ItemType.TinkeringTool;
+        objects.AddOrUpdate(tool);
+        objects.AddOrUpdate(Carried(ScrapItem, "Scrap", ItemUseability.Contained));
+        objects.AddOrUpdate(Carried(
+            TargetedItem,
+            "Mana Stone",
+            ItemUseability.Contained | (ItemUseability.Contained << 16)));
+    }
+
+    /// <summary>
+    /// Lays a corpse on the ground three metres out with nothing visible in
+    /// it yet, the way one looks before it has been opened. Its contents
+    /// arrive from <see cref="DeliverCorpseContents"/>.
+    /// </summary>
+    internal static void StageCorpse(GameRuntime runtime)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        Add(runtime, Corpse, PlayerX + 3f, new ClientObject
+        {
+            ObjectId = Corpse,
+            Type = ItemType.Container,
+            Name = "Corpse of Monster",
+            ItemsCapacity = 8,
+            StackSize = 1,
+            Useability = ItemUseability.Remote,
+            PublicWeenieBitfield =
+                (uint)(PublicWeenieFlags.Corpse | PublicWeenieFlags.Openable),
+        });
+    }
+
+    /// <summary>
+    /// What the server says once the corpse has been used: the two things
+    /// inside it, and the answer that the listing is complete.
+    /// </summary>
+    internal static void DeliverCorpseContents(GameRuntime runtime)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        ClientObjectTable objects = runtime.InventoryOwner.Objects;
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = CorpseCoin,
+            Type = ItemType.Money,
+            Name = "Pyreal",
+            ContainerId = Corpse,
+            WeenieClassId = 0x0000_0111u,
+            StackSize = 250,
+            StackSizeMax = 25000,
+            Useability = ItemUseability.Contained,
+        });
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = CorpseGem,
+            Type = ItemType.Gem,
+            Name = "Gem",
+            ContainerId = Corpse,
+            WeenieClassId = 0x0000_0222u,
+            StackSize = 1,
+            Useability = ItemUseability.Contained,
+        });
+        // The listing the server sends with the contents, in its order.
+        objects.ReplaceContents(Corpse, [CorpseCoin, CorpseGem]);
+        _ = runtime.InventoryOwner.ExternalContainers.ApplyViewContents(Corpse);
+    }
+
+    private static ClientObject Carried(
+        uint objectId, string name, uint useability) => new()
+    {
+        ObjectId = objectId,
+        Type = ItemType.Misc,
+        Name = name,
+        ContainerId = Player,
+        WeenieClassId = objectId & 0xFFFFu,
+        StackSize = 1,
+        Useability = useability,
+    };
+
     internal static void Add(
         GameRuntime runtime,
         uint guid,

@@ -30,8 +30,11 @@ namespace AcDream.HostParity.Tests;
 ///   deletion controller and the input dispatcher, each of which needs a
 ///   presentation tree, so the seams they feed stay empty here exactly as
 ///   they do in a run with no window;
-/// * the item-interaction owner, which the window builds with roughly forty
-///   presentation-shaped callbacks;
+/// * the three extras the window adds to the shared item owner -- the
+///   walk-to-then-act route, which pack the inventory panel has open, and
+///   how much of a stack the split control is asking for -- which need a
+///   presentation tree; the item commands themselves come from the runtime
+///   and are under this arm;
 /// * the spell-cast operations, which the windowed host only binds once a
 ///   spell catalog has been read out of the installed data files.
 /// Each is reported through <see cref="Warnings"/> rather than faked, and a
