@@ -52,7 +52,7 @@ internal static class ParityScenario
         ParityTranscript windowless =
             Play(new WindowlessArm(), script, enterWorld: false);
 
-        Compare(windowed, windowless, expectedDifferences);
+        CompareTranscripts(windowed, windowless, expectedDifferences);
     }
 
     private static ParityTranscript Play(
