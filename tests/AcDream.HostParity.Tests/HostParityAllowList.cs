@@ -188,15 +188,22 @@ internal static class HostParityAllowList
             "Entering player mode on arrival is about where the camera goes "
             + "and what the keyboard steers, and there is neither here."),
 
-        // The one debt on this list: a character's saved preferences are not a
-        // drawn-world fact, they are settings a plugin can read, and they have
-        // no runtime owner yet.
-        ParityAllowance.Debt("LoadCharacterSettings", ParityHost.Windowless,
-            "The windowed host reads this character's own saved preferences "
-            + "on arrival and the windowless host reads nothing, so the two "
-            + "can disagree about settings a plugin can see. The preferences "
-            + "have no runtime owner yet.",
-            ParityStage.MoveTheOperationIntoTheRuntime),
+        // This read as the one debt on the list, on the reasoning that saved
+        // preferences are settings a plugin can see. They are not: the loaded
+        // record has no reader at all. Nothing in the runtime, nothing a
+        // plugin is handed and nothing in the client's behaviour asks it what
+        // the default chat channel is, whether to auto-attack, whether to
+        // confirm a salvage or whether to print pickup messages -- pinned by
+        // CharacterSettingsHaveNoRuntimeReaderTests, which turns this row back
+        // into a debt the day a reader appears. What the step really does is
+        // put the journal panel back, and there is no panel tree here.
+        ParityAllowance.InherentToDrawing(
+            "LoadCharacterSettings", ParityHost.Windowless,
+            "Putting the journal panel back where this character left it "
+            + "needs a panel tree. The saved preferences loaded alongside it "
+            + "decide nothing: no runtime or plugin-facing code reads the "
+            + "record, so there is no answer for a windowless client to give "
+            + "differently."),
     ];
 
     /// <summary>Character-session bindings one host fills in and the other does not.</summary>
