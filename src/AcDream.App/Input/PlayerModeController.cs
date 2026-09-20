@@ -35,14 +35,12 @@ internal sealed class PlayerModeController :
     private readonly LiveEntityAnimationRuntimeView<LiveEntityAnimationState> _animations;
     private readonly LocalPlayerAnimationController _animation;
     private readonly LocalPlayerShadowSynchronizer _shadow;
-    private readonly IPlayerApproachCompletionLifetimeOwner _approachCompletions;
     private readonly ILocalPlayerTeleportInputLifetime _input;
     private readonly ILiveInWorldSource _session;
     private readonly MovementTruthDiagnosticController _movementDiagnostics;
     private readonly RuntimeMovementSkillState _skills;
     private readonly IViewportAspectSource _viewport;
     private PlayerModeAutoEntry? _autoEntry;
-    private IPlayerApproachCompletionSink? _approachLifetime;
 
     public PlayerModeController(
         LocalPlayerModeState mode,
@@ -61,7 +59,6 @@ internal sealed class PlayerModeController :
         LiveEntityAnimationRuntimeView<LiveEntityAnimationState> animations,
         LocalPlayerAnimationController animation,
         LocalPlayerShadowSynchronizer shadow,
-        IPlayerApproachCompletionLifetimeOwner approachCompletions,
         ILocalPlayerTeleportInputLifetime input,
         ILiveInWorldSource session,
         MovementTruthDiagnosticController movementDiagnostics,
@@ -85,8 +82,6 @@ internal sealed class PlayerModeController :
         _animations = animations ?? throw new ArgumentNullException(nameof(animations));
         _animation = animation ?? throw new ArgumentNullException(nameof(animation));
         _shadow = shadow ?? throw new ArgumentNullException(nameof(shadow));
-        _approachCompletions = approachCompletions
-            ?? throw new ArgumentNullException(nameof(approachCompletions));
         _input = input ?? throw new ArgumentNullException(nameof(input));
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _movementDiagnostics = movementDiagnostics
@@ -161,8 +156,6 @@ internal sealed class PlayerModeController :
         catch (Exception error) { failures.Add(error); }
         try { _camera.ExitChaseMode(); }
         catch (Exception error) { failures.Add(error); }
-        try { RetireApproachLifetime(); }
-        catch (Exception error) { failures.Add(error); }
         _mode.IsPlayerMode = false;
         _hostSlot.Host = null;
         _chase.Legacy = null;
@@ -196,8 +189,6 @@ internal sealed class PlayerModeController :
         _autoEntry?.Cancel();
         var failures = new List<Exception>();
         try { _camera.ExitChaseMode(); }
-        catch (Exception error) { failures.Add(error); }
-        try { RetireApproachLifetime(); }
         catch (Exception error) { failures.Add(error); }
         _mode.ResetSession();
         _hostSlot.Host = null;
@@ -270,28 +261,12 @@ internal sealed class PlayerModeController :
                 + "local physics host.");
         }
 
-        IPlayerApproachCompletionSink approachLifetime =
-            _approachCompletions.BeginControllerLifetime();
-        bool lifetimeCommitted = false;
         bool cameraAttempted = false;
         bool shadowAttempted = false;
         CameraController.CameraState priorCamera = _camera.CaptureState();
         LocalPlayerShadowState.Snapshot? priorShadow = _shadow.Capture();
         try
         {
-            if (controller.MoveTo is { } moveTo)
-            {
-                moveTo.MoveToComplete = error =>
-                {
-                    if (error == WeenieError.None)
-                        approachLifetime.PublishNaturalCompletion();
-                    else
-                        approachLifetime.PublishCancellation(error);
-                };
-                moveTo.MoveToCancelled = error =>
-                    approachLifetime.PublishCancellation(error);
-            }
-
             if (_animations.TryGetValue(playerEntity.Id, out LiveEntityAnimationState? animation)
                 && animation.Sequencer is { } sequencer)
             {
@@ -334,8 +309,6 @@ internal sealed class PlayerModeController :
             _chase.Retail = retailCamera;
             _mode.IsPlayerMode = true;
             _mode.ChaseModeEverEntered = true;
-            _approachLifetime = approachLifetime;
-            lifetimeCommitted = true;
         }
         catch (Exception error)
         {
@@ -362,19 +335,5 @@ internal sealed class PlayerModeController :
                     failures);
             throw;
         }
-        finally
-        {
-            if (!lifetimeCommitted)
-                _approachCompletions.RetireControllerLifetime(approachLifetime);
-        }
     }
-
-    private void RetireApproachLifetime()
-    {
-        if (_approachLifetime is not { } lifetime)
-            return;
-        _approachLifetime = null;
-        _approachCompletions.RetireControllerLifetime(lifetime);
-    }
-
 }

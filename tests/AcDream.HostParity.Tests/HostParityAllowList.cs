@@ -55,11 +55,6 @@ internal static class HostParityAllowList
     /// </summary>
     internal static IReadOnlyList<ParityAllowance> Seams { get; } =
     [
-
-        new("BindWorldObjectUse", ParityHost.Windowless,
-            "Using an object the player does not own walks to it first, and "
-            + "that walk-then-use route is still windowed-host code.",
-            ParityStage.MoveTheOperationIntoTheRuntime),
         new("BindGhostDeletion", ParityHost.Windowless,
             "Letting go of a target the client still believes in is done by "
             + "the windowed host's entity deletion owner.",

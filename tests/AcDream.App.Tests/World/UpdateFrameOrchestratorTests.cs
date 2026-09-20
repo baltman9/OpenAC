@@ -662,20 +662,25 @@ public sealed class UpdateFrameOrchestratorTests
                 BindingFlags.Instance | BindingFlags.NonPublic),
             field => typeof(Delegate).IsAssignableFrom(field.FieldType));
 
-        FieldInfo approachCompletions = Assert.Single(
+        // Which run of walks the character is on belongs to whoever owns the
+        // body, which is the runtime on both clients. A window that kept its
+        // own hold on it could only agree with the other client by accident.
+        Assert.DoesNotContain(
             typeof(AcDream.App.Input.PlayerModeController).GetFields(
                 BindingFlags.Instance | BindingFlags.NonPublic),
-            field => field.Name == "_approachCompletions");
-        Assert.Equal(
-            typeof(AcDream.App.Interaction.IPlayerApproachCompletionLifetimeOwner),
-            approachCompletions.FieldType);
+            field => field.FieldType
+                    == typeof(AcDream.Runtime.Gameplay
+                        .IRuntimeApproachCompletionLifetimeOwner)
+                || field.FieldType
+                    == typeof(AcDream.Runtime.Gameplay
+                        .IRuntimeApproachCompletionSink));
         Assert.DoesNotContain(
             typeof(AcDream.App.Input.PlayerModeController).GetFields(
                 BindingFlags.Instance | BindingFlags.NonPublic),
             field => field.FieldType
                 == typeof(AcDream.App.Interaction.SelectionInteractionController));
         Assert.DoesNotContain(
-            typeof(AcDream.App.Interaction.PlayerApproachCompletionState).GetFields(
+            typeof(AcDream.Runtime.Gameplay.RuntimeApproachCompletionState).GetFields(
                 BindingFlags.Instance | BindingFlags.NonPublic),
             field => typeof(Delegate).IsAssignableFrom(field.FieldType));
 

@@ -84,8 +84,8 @@ public sealed class ProductionUseApproachWiringTests
         public readonly RuntimeEntityObjectLifetime RuntimeLifetime = new();
         public readonly Query Query = new();
         public readonly Transport Transport = new();
-        public readonly PlayerApproachCompletionState Completions = new();
-        public readonly IPlayerApproachCompletionSink CompletionLifetime;
+        public readonly RuntimeApproachCompletionState Completions = new();
+        public readonly IRuntimeApproachCompletionSink CompletionLifetime;
         public readonly SelectionState Selection = new();
         public readonly CombatState Combat = new();
         public readonly RuntimeCombatTargetState CombatTarget;
@@ -209,18 +209,27 @@ public sealed class ProductionUseApproachWiringTests
                     selectionController!.SendPickup(item, container, placement),
                 requestUse: (guid, reservation) =>
                     selectionController!.RequestUse(guid, reservation));
+            var movementSink = new PlayerInteractionMovementSink(
+                () => MovementController,
+                Completions);
+            WorldObjectUse = new RuntimeWorldObjectUse(
+                Items,
+                Transport,
+                new SinkApproachSource(Query, movementSink),
+                guid => Query.IsUseable(guid) ? ItemUseability.Remote : null);
             Controller = selectionController = new SelectionInteractionController(
                 Selection,
                 Query,
                 Items,
                 Transport,
-                new PlayerInteractionMovementSink(
-                    () => MovementController,
-                    Completions),
+                movementSink,
                 CombatTarget,
+                WorldObjectUse,
                 toast: null,
-                Completions);
+                approachCompletions: Completions);
         }
+
+        public readonly RuntimeWorldObjectUse WorldObjectUse;
 
         public void AddFarTarget(uint serverGuid, Vector3 position)
         {
@@ -254,6 +263,53 @@ public sealed class ProductionUseApproachWiringTests
                 getObjectA: static _ => null,
                 handleUpdateTarget: static _ => { },
                 interruptCurrentMovement: static () => { });
+        }
+
+        /// <summary>
+        /// Lets the shared walk-then-use route walk the real body this rig
+        /// builds, so the route under test is the production one.
+        /// </summary>
+        private sealed class SinkApproachSource(
+            IWorldSelectionQuery query,
+            IPlayerInteractionMovementSink sink)
+            : IRuntimeApproachSource
+        {
+            private InteractionApproach _planned;
+
+            public bool TryPlanApproach(
+                uint serverGuid,
+                out RuntimeApproachPlan plan)
+            {
+                if (!query.TryGetApproach(
+                        serverGuid,
+                        out InteractionApproach approach))
+                {
+                    plan = default;
+                    return false;
+                }
+                _planned = approach;
+                plan = new RuntimeApproachPlan(
+                    approach.Target.ServerGuid,
+                    approach.Target.LocalEntityId,
+                    approach.Target.Entity.Position,
+                    approach.Player.CellId,
+                    approach.UseRadius,
+                    approach.IsCloseRange,
+                    approach.CanCharge,
+                    approach.TargetRadius,
+                    approach.TargetHeight);
+                return true;
+            }
+
+            public bool BeginApproach(
+                in RuntimeApproachPlan plan,
+                Action<RuntimeInteractionApproachToken>? arm = null) =>
+                sink.BeginApproach(_planned, arm);
+
+            public uint? StalledTicks() =>
+                sink.CurrentApproachFailProgressCount();
+
+            public void CancelApproach() => sink.CancelApproach();
         }
 
         public void Dispose()

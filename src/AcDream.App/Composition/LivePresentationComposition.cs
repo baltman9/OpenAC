@@ -65,7 +65,7 @@ internal sealed record LivePresentationDependencies(
     LocalPlayerIdentityState PlayerIdentity,
     ChaseCameraInputState ChaseCameraInput,
     PointerPositionState PointerPosition,
-    PlayerApproachCompletionState PlayerApproachCompletions,
+    RuntimeApproachCompletionState RuntimeApproachCompletions,
     GameRenderResourceLifetime RenderResourceLifetime,
     TransferableResourceSlot<PortalTunnelPresentation> PortalTunnelFallback,
     AnimationHookRouter HookRouter,
@@ -845,10 +845,11 @@ internal sealed class LivePresentationCompositionPhase
                 () => interaction.LateBindings.Session.CurrentSession),
             new PlayerInteractionMovementSink(
                 () => d.PlayerController.Controller,
-                d.PlayerApproachCompletions),
+                d.RuntimeApproachCompletions),
             d.Runtime.ActionOwner.CombatTarget,
+            d.Runtime.WorldObjectUseOwner,
             d.Toast,
-            d.PlayerApproachCompletions,
+            d.RuntimeApproachCompletions,
             splitStack: guid =>
                 interaction.RetainedUi?.Runtime.SelectedObjectController?
                     .FocusSplitStackEntry(guid) ?? false,

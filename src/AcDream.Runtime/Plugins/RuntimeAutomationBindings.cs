@@ -84,7 +84,6 @@ internal sealed record RuntimeAutomationHostCapabilities
     public NavigationWalkController? NavigationWalk { get; init; }
     public RuntimeAutomationLogoutCommands? Logout { get; init; }
     public Func<uint, bool, bool>? AnswerConfirmation { get; init; }
-    public Func<uint, PluginItemCommandResult>? UseWorldObject { get; init; }
     public Func<uint, bool>? DismissGhost { get; init; }
     public Func<PluginSelectionAction, bool>? SelectionAction { get; init; }
     public Func<int, string>? SpeciesName { get; init; }
@@ -172,8 +171,7 @@ internal static class RuntimeAutomationBindings
             ["BindLogout"] = nameof(RuntimeAutomationHostCapabilities.Logout),
             ["BindDialogs"] =
                 nameof(RuntimeAutomationHostCapabilities.AnswerConfirmation),
-            ["BindWorldObjectUse"] =
-                nameof(RuntimeAutomationHostCapabilities.UseWorldObject),
+            ["BindWorldObjectUse"] = null,
             ["BindGhostDeletion"] =
                 nameof(RuntimeAutomationHostCapabilities.DismissGhost),
             ["BindSelectionActions"] =
@@ -327,11 +325,13 @@ internal static class RuntimeAutomationBindings
             surface.BindDialogs(answerConfirmation);
             bound.Add(nameof(surface.BindDialogs));
         }
-        if (capabilities.UseWorldObject is { } useWorldObject)
-        {
-            surface.BindWorldObjectUse(useWorldObject);
-            bound.Add(nameof(surface.BindWorldObjectUse));
-        }
+        // Using an object the character does not own walks to it first, and
+        // that walk-then-use route is a runtime owner, so both clients give a
+        // plugin the same walk, the same use and the same refusals.
+        surface.BindWorldObjectUse(
+            objectId => RuntimeAutomationSurface.MapWorldObjectUseOutcome(
+                runtime.WorldObjectUseOwner.TryUse(objectId)));
+        bound.Add(nameof(surface.BindWorldObjectUse));
         if (capabilities.DismissGhost is { } dismissGhost)
         {
             surface.BindGhostDeletion(dismissGhost);

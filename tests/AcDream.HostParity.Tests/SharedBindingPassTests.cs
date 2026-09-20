@@ -90,8 +90,6 @@ public sealed class SharedBindingPassTests
         Logout = new RuntimeAutomationLogoutCommands(
             static () => true, static () => true),
         AnswerConfirmation = static (_, _) => true,
-        UseWorldObject = static _ =>
-            new PluginItemCommandResult(PluginItemCommandStatus.Started),
         DismissGhost = static _ => true,
         SelectionAction = static _ => true,
         SpeciesName = static _ => string.Empty,

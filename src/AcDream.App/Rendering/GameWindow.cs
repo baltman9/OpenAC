@@ -425,8 +425,6 @@ public sealed class GameWindow :
     private readonly AcDream.App.Input.ViewportAspectState _viewportAspect = new();
     private readonly FramebufferResizeController _framebufferResize;
     private AcDream.App.Input.PlayerModeController? _playerModeController;
-    private readonly AcDream.App.Interaction.PlayerApproachCompletionState
-        _playerApproachCompletions = new();
     private AcDream.App.Input.LocalPlayerAnimationController?
         _localPlayerAnimation;
     private AcDream.App.Physics.LocalPlayerShadowSynchronizer?
@@ -1422,7 +1420,7 @@ public sealed class GameWindow :
                     _localPlayerIdentity,
                     _chaseCameraInput,
                     _pointerPosition,
-                    _playerApproachCompletions,
+                    _runtime.ApproachCompletions,
                     _renderResourceLifetime,
                     _portalTunnelFallback,
                     _hookRouter,
@@ -1484,7 +1482,7 @@ public sealed class GameWindow :
                     _renderRange,
                     _localPlayerShadow,
                     _viewportAspect,
-                    _playerApproachCompletions,
+                    _runtime.ApproachCompletions,
                     _pointerPosition,
                     _movementInput,
                     _inputCapture,

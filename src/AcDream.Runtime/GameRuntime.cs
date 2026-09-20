@@ -416,6 +416,25 @@ public sealed class GameRuntime
             GenerationReset = generationReset;
             _events = context.Events;
 
+            // The walk-to-then-use route. It is built here, from runtime
+            // state alone, so a client with no window reaches an object the
+            // character does not own exactly the way a client with one does.
+            ApproachCompletions = new RuntimeApproachCompletionState();
+            context.Movement.AttachApproachCompletions(ApproachCompletions);
+            WorldObjectUseOwner = new RuntimeWorldObjectUse(
+                context.ItemInteraction,
+                new RuntimeSessionInteractionTransport(
+                    () => context.Session.CurrentSession),
+                new RuntimeApproachSource(this, ApproachCompletions),
+                guid =>
+                    guid != 0u
+                    && context.EntityObjects.Entities.TryGetActive(
+                        guid,
+                        out Entities.RuntimeEntityRecord record)
+                        ? record.Snapshot.Useability
+                        : null,
+                dependencies.Log);
+
             context.Session.ConfigureAutoSaveTick(
                 session =>
                 {
@@ -495,6 +514,20 @@ public sealed class GameRuntime
     /// so a plugin gets the same answers with or without a window.
     /// </summary>
     public RuntimeItemInteraction ItemInteractionOwner { get; }
+
+    /// <summary>
+    /// The one walk-to-then-use route for objects the character does not own.
+    /// Both clients answer a plugin from this, so a corpse several meters off
+    /// is walked to and opened the same way with or without a window.
+    /// </summary>
+    internal RuntimeWorldObjectUse WorldObjectUseOwner { get; }
+
+    /// <summary>
+    /// Where walks sent by that route report that they arrived or were called
+    /// off. Whoever gives the character its body begins a run of walks here
+    /// and ends it when the body goes.
+    /// </summary>
+    internal RuntimeApproachCompletionState ApproachCompletions { get; }
     public RuntimeLocalPlayerMovementState MovementOwner { get; }
     internal RuntimeLocalPlayerPhysicsPublicationState
         LocalPlayerPhysicsPublication => MovementOwner.PhysicsPublication;

@@ -60,6 +60,8 @@ public sealed class RuntimeLocalPlayerMovementState
     private bool _disposed;
     private long _revision;
     private Action<string, RetailLogTextType>? _onInterfaceText;
+    private RuntimeApproachCompletionState? _approachCompletions;
+    private IRuntimeApproachCompletionSink? _approachLifetime;
 
     public Action<string, RetailLogTextType>? OnInterfaceText
     {
@@ -82,6 +84,9 @@ public sealed class RuntimeLocalPlayerMovementState
                 return;
             _controller?.RetireRuntimePublication();
             _scripted.Lose();
+            // The body walking is changing, so whatever was armed for the
+            // walk it was on can no longer be about this one.
+            RetireApproachLifetime();
             _controller = value;
             if (_controller is not null)
                 _controller.OnInterfaceText = _onInterfaceText;
@@ -474,6 +479,8 @@ public sealed class RuntimeLocalPlayerMovementState
         _commandInterpreterDisabled = false;
         _commandInput = default;
         _scripted.Lose();
+        RetireApproachLifetime();
+        _approachCompletions?.Clear();
         if (_controller is not null)
         {
             _controller.RetireRuntimePublication();
@@ -504,6 +511,7 @@ public sealed class RuntimeLocalPlayerMovementState
         _hasCommandInput = false;
         _commandInput = default;
         _scripted.Lose();
+        RetireApproachLifetime();
         _physicsPublication?.Dispose();
         if (_controller is not null)
         {
@@ -542,8 +550,70 @@ public sealed class RuntimeLocalPlayerMovementState
         _scripted.Lose();
         _controller = controller;
         controller.OnInterfaceText = _onInterfaceText;
+        BeginApproachLifetime();
         ControllerOwnershipEpoch++;
         Interlocked.Increment(ref _revision);
+    }
+
+    /// <summary>
+    /// Names where walks sent to reach something report that they arrived or
+    /// were called off. Bound once, by the runtime that owns both.
+    /// </summary>
+    internal void AttachApproachCompletions(
+        RuntimeApproachCompletionState completions)
+    {
+        ArgumentNullException.ThrowIfNull(completions);
+        if (_approachCompletions is not null)
+        {
+            throw new InvalidOperationException(
+                "The approach-completion owner is already bound.");
+        }
+        _approachCompletions = completions;
+    }
+
+    /// <summary>
+    /// Starts the run of walks belonging to a body the character has just
+    /// taken, and points that body's walk at it. Every client does this here,
+    /// so a walk-to-then-act works the same with or without a window.
+    /// </summary>
+    private void BeginApproachLifetime()
+    {
+        RetireApproachLifetime();
+        if (_approachCompletions is not { } completions)
+            return;
+        _approachLifetime = completions.BeginControllerLifetime();
+    }
+
+    /// <summary>
+    /// Points a body's walks at the character's current run of walks. Called
+    /// while the body is still being built, because a committed one can no
+    /// longer be rewired; the answers themselves are matched to whichever run
+    /// is current when the walk ends, so a body built and then discarded
+    /// reports nothing.
+    /// </summary>
+    internal void WireApproachCompletions(
+        AcDream.Core.Physics.Motion.MoveToManager? moveTo)
+    {
+        if (moveTo is null)
+            return;
+        moveTo.MoveToComplete = error =>
+        {
+            if (error == WeenieError.None)
+                _approachLifetime?.PublishNaturalCompletion();
+            else
+                _approachLifetime?.PublishCancellation(error);
+        };
+        moveTo.MoveToCancelled = error =>
+            _approachLifetime?.PublishCancellation(error);
+    }
+
+    /// <summary>Ends that run when the body goes.</summary>
+    private void RetireApproachLifetime()
+    {
+        if (_approachLifetime is not { } lifetime)
+            return;
+        _approachLifetime = null;
+        _approachCompletions?.RetireControllerLifetime(lifetime);
     }
 
     private void EndMotionPreparation(PlayerMovementController controller)

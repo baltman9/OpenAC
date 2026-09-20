@@ -60,7 +60,6 @@ internal static class GraphicalAutomationCapabilities
             nameof(RuntimeAutomationHostCapabilities.NavigationWalk),
             nameof(RuntimeAutomationHostCapabilities.Logout),
             nameof(RuntimeAutomationHostCapabilities.AnswerConfirmation),
-            nameof(RuntimeAutomationHostCapabilities.UseWorldObject),
             nameof(RuntimeAutomationHostCapabilities.DismissGhost),
             nameof(RuntimeAutomationHostCapabilities.SelectionAction),
             nameof(RuntimeAutomationHostCapabilities.SpeciesName),
@@ -144,10 +143,6 @@ internal static class GraphicalAutomationCapabilities
             AnswerConfirmation = retainedUi is null
                 ? null
                 : retainedUi.TryAnswerConfirmation,
-            UseWorldObject = selection is null
-                ? null
-                : objectId => RuntimeAutomationSurface.MapWorldObjectUseOutcome(
-                    selection.TryUseForAutomation(objectId)),
             DismissGhost = parts.EntityDeletion is not { } deletion
                 ? null
                 : deletion.DeleteClientGhost,

@@ -853,7 +853,8 @@ public sealed class CurrentGameRuntimeAdapterTests
                 _items,
                 new SelectionTransport(() => _session?.IsInWorld == true),
                 new NoopInteractionMovement(),
-                _gameRuntime.ActionOwner.CombatTarget);
+                _gameRuntime.ActionOwner.CombatTarget,
+                _gameRuntime.WorldObjectUseOwner);
 
             Host = CreateHost(
                 _session,
@@ -1409,7 +1410,7 @@ public sealed class CurrentGameRuntimeAdapterTests
     {
         public bool BeginApproach(
             InteractionApproach approach,
-            Action<PlayerApproachToken>? armAfterCancel = null) => false;
+            Action<RuntimeInteractionApproachToken>? armAfterCancel = null) => false;
 
         public uint? CurrentApproachFailProgressCount() => null;
 

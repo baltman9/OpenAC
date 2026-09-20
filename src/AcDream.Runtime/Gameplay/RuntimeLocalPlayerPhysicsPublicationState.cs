@@ -279,6 +279,10 @@ internal sealed class RuntimeLocalPlayerPhysicsPublicationState : IDisposable
                 movement.CancelMoveTo(WeenieError.ActionCancelled);
             });
         movement.MakeMoveToManager();
+        // Point this body's walks at wherever the character's current run of
+        // walks reports its ends, while the body is still being built: once
+        // it is committed its wiring is sealed.
+        _movement.WireApproachCompletions(movement.MoveTo);
         motion.CheckForCompletedMotions ??=
             () => CompleteDispatchedMotions(motion);
         motion.UnstickFromObject = physicsHost.PositionManager.UnStick;

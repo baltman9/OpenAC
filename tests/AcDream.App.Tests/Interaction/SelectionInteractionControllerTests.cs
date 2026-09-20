@@ -125,7 +125,7 @@ public sealed class SelectionInteractionControllerTests
         }
     }
 
-    private sealed class Movement(IPlayerApproachTokenSource approachTokens)
+    private sealed class Movement(IRuntimeApproachTokenSource approachTokens)
         : IPlayerInteractionMovementSink
     {
         public List<InteractionApproach> Approaches { get; } = new();
@@ -136,10 +136,10 @@ public sealed class SelectionInteractionControllerTests
 
         public bool BeginApproach(
             InteractionApproach approach,
-            Action<PlayerApproachToken>? armAfterCancel = null)
+            Action<RuntimeInteractionApproachToken>? armAfterCancel = null)
         {
             Approaches.Add(approach);
-            if (!Starts || !approachTokens.TryBeginApproach(out PlayerApproachToken token))
+            if (!Starts || !approachTokens.TryBeginApproach(out RuntimeInteractionApproachToken token))
                 return false;
             armAfterCancel?.Invoke(token);
             AfterArm?.Invoke();
@@ -149,6 +149,47 @@ public sealed class SelectionInteractionControllerTests
         public uint? CurrentApproachFailProgressCount() => FailProgressCount;
 
         public void CancelApproach() => CancelCount++;
+    }
+
+    /// <summary>
+    /// Lets the shared walk-then-use route reach this suite's own world and
+    /// its own body, so the route under test is the production one.
+    /// </summary>
+    private sealed class ApproachAdapter(Query query, Movement movement)
+        : IRuntimeApproachSource
+    {
+        private InteractionApproach _planned;
+
+        public bool TryPlanApproach(uint serverGuid, out RuntimeApproachPlan plan)
+        {
+            if (!query.TryGetApproach(serverGuid, out InteractionApproach approach))
+            {
+                plan = default;
+                return false;
+            }
+            _planned = approach;
+            plan = new RuntimeApproachPlan(
+                approach.Target.ServerGuid,
+                approach.Target.LocalEntityId,
+                approach.Target.Entity.Position,
+                approach.Player.CellId,
+                approach.UseRadius,
+                approach.IsCloseRange,
+                approach.CanCharge,
+                approach.TargetRadius,
+                approach.TargetHeight);
+            return true;
+        }
+
+        public bool BeginApproach(
+            in RuntimeApproachPlan plan,
+            Action<RuntimeInteractionApproachToken>? arm = null) =>
+            movement.BeginApproach(_planned, arm);
+
+        public uint? StalledTicks() =>
+            movement.CurrentApproachFailProgressCount();
+
+        public void CancelApproach() => movement.CancelApproach();
     }
 
     private sealed class CombatTargetOperations(SelectionState selection)
@@ -172,8 +213,8 @@ public sealed class SelectionInteractionControllerTests
     {
         public readonly Query Query = new();
         public readonly Transport Transport = new();
-        public readonly PlayerApproachCompletionState Completions = new();
-        public readonly IPlayerApproachCompletionSink CompletionLifetime;
+        public readonly RuntimeApproachCompletionState Completions = new();
+        public readonly IRuntimeApproachCompletionSink CompletionLifetime;
         public readonly Movement Movement;
         public readonly SelectionState Selection = new();
         public readonly ClientObjectTable Objects = new();
@@ -186,6 +227,7 @@ public sealed class SelectionInteractionControllerTests
         public readonly CombatTargetOperations CombatTargetOperations;
         public readonly RuntimeCombatTargetState CombatTarget;
         public readonly SelectionInteractionController Controller;
+        public readonly RuntimeWorldObjectUse WorldObjectUse;
         public uint GroundObjectId { get; set; }
         public uint? RequestedExternalContainerId { get; private set; }
 
@@ -232,6 +274,11 @@ public sealed class SelectionInteractionControllerTests
                 Combat,
                 Selection,
                 CombatTargetOperations);
+            WorldObjectUse = new RuntimeWorldObjectUse(
+                Items,
+                Transport,
+                new ApproachAdapter(Query, Movement),
+                guid => Query.IsUseable(guid) ? ItemUseability.Remote : null);
             Controller = controller = new SelectionInteractionController(
                 Selection,
                 Query,
@@ -239,6 +286,7 @@ public sealed class SelectionInteractionControllerTests
                 Transport,
                 Movement,
                 CombatTarget,
+                WorldObjectUse,
                 Toasts.Add,
                 Completions);
             Items.PendingBackpackPlacementRequested += PendingPlacements.Add;
@@ -541,7 +589,7 @@ public sealed class SelectionInteractionControllerTests
         var h = new Harness();
         h.SetApproach(closeRange: false);
 
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(Target);
 
         Assert.Equal(AutomationUseOutcome.Started, outcome);
         PlayerInteractionMovementSinkAssertSingleApproach(h, Target);
@@ -572,7 +620,7 @@ public sealed class SelectionInteractionControllerTests
         var h = new Harness();
         h.SetApproach(closeRange: false);
 
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(Target);
         Assert.Equal(AutomationUseOutcome.Started, outcome);
         Assert.Equal(1, h.Items.BusyCount);
         Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
@@ -607,7 +655,7 @@ public sealed class SelectionInteractionControllerTests
         var h = new Harness();
         h.SetApproach(closeRange: false);
 
-        h.Controller.TryUseForAutomation(Target);
+        h.WorldObjectUse.TryUse(Target);
         h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks;
         h.Controller.DrainOutbound();
 
@@ -638,7 +686,7 @@ public sealed class SelectionInteractionControllerTests
         var h = new Harness();
         h.SetApproach(closeRange: false);
 
-        h.Controller.TryUseForAutomation(Target);
+        h.WorldObjectUse.TryUse(Target);
 
         for (int i = 0; i < 500; i++)
         {
@@ -680,7 +728,7 @@ public sealed class SelectionInteractionControllerTests
         var h = new Harness();
         h.SetApproach(closeRange: true);
 
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(Target);
 
         Assert.Equal(AutomationUseOutcome.Started, outcome);
         Assert.Empty(h.Movement.Approaches);
@@ -711,7 +759,7 @@ public sealed class SelectionInteractionControllerTests
         });
         h.SetApproach(closeRange: true);
 
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(Target);
 
         Assert.Equal(AutomationUseOutcome.Started, outcome);
         Assert.Equal(Target, h.RequestedExternalContainerId);
@@ -732,7 +780,7 @@ public sealed class SelectionInteractionControllerTests
         });
         h.SetApproach(closeRange: true);
 
-        h.Controller.TryUseForAutomation(Target);
+        h.WorldObjectUse.TryUse(Target);
 
         Assert.Null(h.RequestedExternalContainerId);
     }
@@ -755,7 +803,7 @@ public sealed class SelectionInteractionControllerTests
         });
         h.SetApproach(closeRange: true);
 
-        h.Controller.TryUseForAutomation(Target);
+        h.WorldObjectUse.TryUse(Target);
 
         Assert.Null(h.RequestedExternalContainerId);
     }
@@ -787,7 +835,7 @@ public sealed class SelectionInteractionControllerTests
         Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
 
         h.SetApproach(closeRange: true, serverGuid: otherContainer);
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(otherContainer);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(otherContainer);
 
         Assert.Equal(AutomationUseOutcome.Busy, outcome);
         Assert.Null(h.RequestedExternalContainerId);
@@ -802,7 +850,7 @@ public sealed class SelectionInteractionControllerTests
         h.Query.Useable = false;
         h.SetApproach(closeRange: false);
 
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(Target);
 
         Assert.Equal(AutomationUseOutcome.NotUseable, outcome);
         Assert.Empty(h.Movement.Approaches);
@@ -815,14 +863,14 @@ public sealed class SelectionInteractionControllerTests
         var h = new Harness();
         h.SetApproach(closeRange: true);
 
-        AutomationUseOutcome first = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome first = h.WorldObjectUse.TryUse(Target);
         Assert.Equal(AutomationUseOutcome.Started, first);
         Assert.Single(h.Transport.Uses);
 
         // A second automation call made immediately after (well inside
         // RuntimeInteractionTransactionState.RetailUseThrottleMs) must be
         // refused by the same throttle a click is held to, not bypass it.
-        AutomationUseOutcome second = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome second = h.WorldObjectUse.TryUse(Target);
 
         Assert.Equal(AutomationUseOutcome.Busy, second);
         Assert.Single(h.Transport.Uses);
@@ -839,7 +887,7 @@ public sealed class SelectionInteractionControllerTests
         ItemUseRequestReservation blocking =
             h.Items.RuntimeTransactions.BeginUseRequestReservation();
 
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(Target);
 
         Assert.Equal(AutomationUseOutcome.Busy, outcome);
         Assert.Empty(h.Transport.Uses);
@@ -858,7 +906,7 @@ public sealed class SelectionInteractionControllerTests
         h.SetApproach(closeRange: true);
         h.Transport.ThrowOnSend = new InvalidOperationException("transport fault");
 
-        Assert.Throws<InvalidOperationException>(() => h.Controller.TryUseForAutomation(Target));
+        Assert.Throws<InvalidOperationException>(() => h.WorldObjectUse.TryUse(Target));
 
         Assert.Equal(0, h.Items.BusyCount);
         Assert.True(h.Items.EnsureInventoryRequestReady());
@@ -870,7 +918,7 @@ public sealed class SelectionInteractionControllerTests
         var h = new Harness();
         h.SetApproach(closeRange: true);
 
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(Target);
 
         Assert.Equal(AutomationUseOutcome.Started, outcome);
         Assert.Equal(1, h.Items.BusyCount);
@@ -889,7 +937,7 @@ public sealed class SelectionInteractionControllerTests
         PlayerInteractionMovementSinkAssertSingleApproach(h, Target);
         Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
 
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(Target);
 
         Assert.Equal(AutomationUseOutcome.Busy, outcome);
         // The original click-driven approach is still armed, not
@@ -912,7 +960,7 @@ public sealed class SelectionInteractionControllerTests
         var tradesRequested = new List<uint>();
         h.Items.SecureTradeRequested += (guid, _) => tradesRequested.Add(guid);
 
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(otherPlayer);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(otherPlayer);
 
         Assert.Equal(AutomationUseOutcome.NotUseable, outcome);
         Assert.Empty(tradesRequested);
@@ -928,7 +976,7 @@ public sealed class SelectionInteractionControllerTests
         // from NotInWorld and from the busy gates above.
         h.Transport.RefuseSend = true;
 
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(Target);
 
         Assert.Equal(AutomationUseOutcome.Unavailable, outcome);
         Assert.Empty(h.Transport.Uses);
