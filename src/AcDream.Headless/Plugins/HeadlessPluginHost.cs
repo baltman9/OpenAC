@@ -37,6 +37,7 @@ internal sealed class HeadlessPluginHost
     private long _objectChangeRevision;
     private Action<PluginPortalTransition>? _portalTransition;
     private long _portalTransitionRevision;
+    private RuntimePortalSnapshot? _lastPublishedPortalSnapshot;
     private Action<PluginItemUseCompletion>? _itemUseCompleted;
     private Action<PluginGoToReport>? _navigationChanged;
     private long _lastNavigationSequence;
@@ -754,6 +755,13 @@ internal sealed class HeadlessPluginHost
     public void OnMovement(in RuntimeMovementDelta delta) { }
     public void OnPortal(in RuntimePortalDelta delta)
     {
+        lock (_tickGate)
+        {
+            if (_lastPublishedPortalSnapshot is { } previous
+                && previous.Equals(delta.Portal))
+                return;
+            _lastPublishedPortalSnapshot = delta.Portal;
+        }
         PluginPortalTransition transition = new(
             Revision: Interlocked.Increment(ref _portalTransitionRevision),
             Generation: delta.Portal.Generation,

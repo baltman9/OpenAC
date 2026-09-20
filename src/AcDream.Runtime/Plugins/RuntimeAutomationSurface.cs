@@ -39,6 +39,7 @@ internal sealed class RuntimeAutomationSurface
     private double _peerHeartbeatRemaining;
     private long _lastNavigationSequence;
     private PluginGoToState _lastNavigationState;
+    private RuntimePortalSnapshot? _lastPublishedPortalSnapshot;
 
     private GameRuntime? _runtime;
     private AcDream.Runtime.Gameplay.RuntimeTradeAutomation? _tradeAutomation;
@@ -634,6 +635,7 @@ internal sealed class RuntimeAutomationSurface
         _runtimeEventSubscription?.Dispose();
         _runtimeEventSubscription = null;
         _wasInWorld = false;
+        _lastPublishedPortalSnapshot = null;
         _chatMessages.Clear();
         if (_spellbook is not null)
         {
@@ -1292,6 +1294,13 @@ internal sealed class RuntimeAutomationSurface
     void IRuntimeEventObserver.OnMovement(in RuntimeMovementDelta delta) { }
     void IRuntimeEventObserver.OnPortal(in RuntimePortalDelta delta)
     {
+        lock (_gate)
+        {
+            if (_lastPublishedPortalSnapshot is { } previous
+                && previous.Equals(delta.Portal))
+                return;
+            _lastPublishedPortalSnapshot = delta.Portal;
+        }
         _pluginEvents?.FirePortalTransition(new PluginPortalTransition(
             Revision: 0,
             Generation: delta.Portal.Generation,

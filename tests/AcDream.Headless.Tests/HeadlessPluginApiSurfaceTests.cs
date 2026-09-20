@@ -359,6 +359,30 @@ public sealed class HeadlessPluginApiSurfaceTests
     }
 
     [Fact]
+    public void PortalTransitionCoalescesDuplicateRuntimeSnapshots()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        var seen = new List<PluginPortalTransition>();
+        host.Events.PortalTransition += seen.Add;
+        var observer = (IRuntimeEventObserver)host;
+        RuntimePortalSnapshot snapshot = RuntimePortalSnapshot.Idle with
+        {
+            Generation = 4,
+            Materialized = false,
+        };
+
+        observer.OnPortal(new RuntimePortalDelta(default, snapshot));
+        observer.OnPortal(new RuntimePortalDelta(default, snapshot));
+        observer.OnPortal(new RuntimePortalDelta(
+            default,
+            snapshot with { Materialized = true }));
+
+        Assert.Equal(2, seen.Count);
+        Assert.Equal([1L, 2L], seen.Select(static item => item.Revision));
+    }
+
+    [Fact]
     public void ContainerOpenedAndClosedFollowExternalContainerTransitions()
     {
         using GameRuntime runtime = NewRuntime();
