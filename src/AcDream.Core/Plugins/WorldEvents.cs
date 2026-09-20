@@ -5,6 +5,7 @@ namespace AcDream.Core.Plugins;
 public sealed class WorldEvents : IPluginEventSink
 {
     private readonly object _lock = new();
+    private readonly Action<string>? _report;
     private IPluginWorldEntities? _worldEntities;
     private Action<double>? _tick;
     private Action? _loginComplete;
@@ -14,6 +15,28 @@ public sealed class WorldEvents : IPluginEventSink
     private Action<uint>? _containerOpened;
     private Action<uint>? _containerClosed;
     private Action<PluginConfirmation>? _confirmationRequested;
+
+    /// <summary>
+    /// Raises plugin events with nowhere to name a handler that threw.
+    /// </summary>
+    public WorldEvents()
+        : this(null)
+    {
+    }
+
+    /// <summary>
+    /// Raises plugin events, naming a handler that threw.
+    /// </summary>
+    /// <param name="report">
+    /// Where a plugin handler that threw is named. A plugin's failure is its
+    /// own and never stops the client telling the next one, but a client that
+    /// says nothing about it leaves a plugin author with a handler that
+    /// silently stopped running and no idea why.
+    /// </param>
+    public WorldEvents(Action<string>? report)
+    {
+        _report = report;
+    }
 
     /// <summary>
     /// Names the producer that raises <see cref="EntitySpawned"/> and
@@ -197,7 +220,7 @@ public sealed class WorldEvents : IPluginEventSink
         foreach (Delegate handler in handlers.GetInvocationList())
         {
             try { ((Action<string>)handler)(deathMessage); }
-            catch { /* plugin errors do not propagate out of event dispatch */ }
+            catch (Exception error) { Report("death", error); }
         }
     }
 
@@ -211,7 +234,7 @@ public sealed class WorldEvents : IPluginEventSink
         foreach (Delegate handler in handlers.GetInvocationList())
         {
             try { ((Action<PluginObjectChange>)handler)(change); }
-            catch { /* plugin errors do not propagate out of event dispatch */ }
+            catch (Exception error) { Report("object-change", error); }
         }
     }
 
@@ -241,31 +264,39 @@ public sealed class WorldEvents : IPluginEventSink
         foreach (Delegate handler in handlers.GetInvocationList())
         {
             try { ((Action<PluginConfirmation>)handler)(confirmation); }
-            catch { /* plugin errors do not propagate out of event dispatch */ }
+            catch (Exception error) { Report("confirmation", error); }
         }
     }
 
-    private static void FireUInt(Action<uint>? handlers, uint value)
+    private void FireUInt(Action<uint>? handlers, uint value)
     {
         if (handlers is null)
             return;
         foreach (Delegate handler in handlers.GetInvocationList())
         {
             try { ((Action<uint>)handler)(value); }
-            catch { /* plugin errors do not propagate out of event dispatch */ }
+            catch (Exception error) { Report("container", error); }
         }
     }
 
-    private static void Fire(Action? handlers)
+    private void Fire(Action? handlers)
     {
         if (handlers is null)
             return;
         foreach (Delegate handler in handlers.GetInvocationList())
         {
             try { ((Action)handler)(); }
-            catch { /* plugin errors do not propagate out of event dispatch */ }
+            catch (Exception error) { Report("lifecycle", error); }
         }
     }
+
+    /// <summary>
+    /// Names a plugin handler that threw. One plugin's failure is its own:
+    /// it neither reaches the caller that raised the event nor stops the
+    /// next handler hearing about the same event.
+    /// </summary>
+    private void Report(string kindName, Exception error) =>
+        _report?.Invoke($"Plugin {kindName} handler threw: {error}");
 
     public void FireTick(double elapsedSeconds)
     {
@@ -278,7 +309,7 @@ public sealed class WorldEvents : IPluginEventSink
         foreach (Delegate handler in handlers.GetInvocationList())
         {
             try { ((Action<double>)handler)(elapsedSeconds); }
-            catch { /* plugin errors do not propagate out of event dispatch */ }
+            catch (Exception error) { Report("tick", error); }
         }
     }
 

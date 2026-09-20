@@ -134,7 +134,11 @@ if (runtimeOptions.DevTools)
 }
 
 var worldGameState = new AcDream.Core.Plugins.WorldGameState();
-var worldEvents = new AcDream.Core.Plugins.WorldEvents();
+// A plugin handler that throws is skipped, not hidden: a plugin author
+// whose handler stopped running needs to be told why, in the same words
+// whichever client is running.
+var worldEvents = new AcDream.Core.Plugins.WorldEvents(
+    line => Log.Warning("{Line}", line));
 var uiRegistry = new AcDream.App.Plugins.BufferedUiRegistry();
 using var renderPackRegistry = new AcDream.App.Plugins.BufferedRenderPackRegistry();
 using IDisposable atmosphericPackRegistration = renderPackRegistry.Register(
