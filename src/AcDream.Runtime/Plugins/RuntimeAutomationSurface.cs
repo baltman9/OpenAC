@@ -74,10 +74,19 @@ internal sealed class RuntimeAutomationSurface
     private Func<uint, bool, bool>? _pickupItem;
     private Func<uint, bool>? _identifyItem;
     private Func<uint, IReadOnlyList<uint>, bool>? _salvageItems;
+    private PluginActivationCompletion _lastActivationCompletion;
+    private PluginRecallKind? _lastSuccessfulRecallKind;
+    private PluginRecallLocation? _lifestoneLocation;
+    private PluginRecallLocation? _marketplaceLocation;
+    private PluginRecallLocation? _mansionLocation;
+    private PluginRecallLocation? _allegianceLocation;
+    private long _lifestoneRevision;
+    private long _marketplaceRevision;
+    private long _mansionRevision;
+    private long _allegianceRevision;
     private Func<uint, uint, int, bool>? _sellItem;
     private Func<uint, bool>? _dismissGhost;
     private Func<PluginSelectionAction, bool>? _selectionAction;
-    private PluginActivationCompletion _lastActivationCompletion;
     private PhysicsEngine? _projectilePhysics;
     private IReadOnlyList<PluginProjectileDebugSample> _projectileDebugSamples =
         Array.Empty<PluginProjectileDebugSample>();
@@ -1370,6 +1379,17 @@ internal sealed class RuntimeAutomationSurface
                     }
                     _pendingActivationObjectIds.Clear();
                 }
+
+                // When a portal transition completes with a correlated recall
+                // request, learn the destination as a recall location.
+                if (delta.Portal.IsCompleted && recallRequestRevision > 0
+                    && _lastSuccessfulRecallKind is { } kind)
+                {
+                    GameRuntime? rt = _runtime;
+                    if (rt is not null)
+                        CaptureRecallLocation(kind, rt, recallRequestRevision, delta.Portal.DestinationCell);
+                    _lastSuccessfulRecallKind = null;
+                }
             }
         }
     }
@@ -2044,11 +2064,12 @@ internal sealed class RuntimeAutomationSurface
 
     bool IRecallAutomation.IsAvailable => IsAvailable;
 
+    bool IAllegianceAutomation.IsAvailable => IsAvailable;
+
     PluginActivationCompletion IWorldObjectAutomation.LastActivationCompletion
     {
         get { lock (_gate) return _lastActivationCompletion; }
     }
-    bool IAllegianceAutomation.IsAvailable => IsAvailable;
 
     PluginAllegianceSnapshot IAllegianceAutomation.Snapshot
     {
@@ -2084,21 +2105,34 @@ internal sealed class RuntimeAutomationSurface
         if (runtime is null || !IsAvailable)
             return Array.Empty<PluginRecallLocation>();
 
+        var results = new List<PluginRecallLocation>(5);
+
+        // House location from the house owner data.
         AcDream.Core.Net.Messages.CreateObject.ServerPosition? house =
             runtime.HouseOwner.Position;
         AcDream.Core.Physics.Position? position =
             RuntimeWorldObjectProjection.ConvertPosition(house);
-        if (position is null)
-            return Array.Empty<PluginRecallLocation>();
-        return
-        [
-            new PluginRecallLocation(
+        if (position is not null)
+        {
+            results.Add(new PluginRecallLocation(
                 PluginRecallKind.House,
                 RuntimeWorldObjectProjection.ProjectNavigationPosition(position.Value),
                 "House",
                 runtime.HouseOwner.Revision,
-                true),
-        ];
+                true));
+        }
+
+        // Learned recall locations.
+        if (_lifestoneLocation is { } ls && ls.IsKnown)
+            results.Add(ls);
+        if (_marketplaceLocation is { } mp && mp.IsKnown)
+            results.Add(mp);
+        if (_mansionLocation is { } mn && mn.IsKnown)
+            results.Add(mn);
+        if (_allegianceLocation is { } al && al.IsKnown)
+            results.Add(al);
+
+        return results;
     }
 
     PluginRecallResult IRecallAutomation.Recall(PluginRecallKind kind)
@@ -2138,10 +2172,93 @@ internal sealed class RuntimeAutomationSurface
             _pendingRecallRequestRevision = status == PluginRecallStatus.Started
                 ? _lastRecallRequest.Revision
                 : 0;
+            if (status == PluginRecallStatus.Started)
+                _lastSuccessfulRecallKind = kind;
         }
         return new(status, status == PluginRecallStatus.Refused
             ? result.Status.ToString()
             : null);
+    }
+
+    private void CaptureRecallLocation(
+        PluginRecallKind kind, GameRuntime runtime, long revision, uint destinationCell)
+    {
+        // Learn the arrival position after a successful recall.
+        // For marketplace, use a known fixed location since the
+        // destination is always the same.
+        if (kind == PluginRecallKind.Marketplace)
+        {
+            // Marketplace town center. The cell is 0x0166 in the
+            // original client; the position is the standard arrival
+            // point after a marketplace recall.
+            _marketplaceLocation = new PluginRecallLocation(
+                PluginRecallKind.Marketplace,
+                new PluginNavigationPosition(
+                    CellId: 0x0166u,
+                    EastWest: 0.05, NorthSouth: 0.05, Elevation: 0.0,
+                    HeadingDegrees: 0.0f,
+                    IsOutdoor: true),
+                "Marketplace",
+                ++_marketplaceRevision,
+                true);
+            return;
+        }
+
+        // For house, use the data already available from the house owner.
+        if (kind == PluginRecallKind.House)
+        {
+            // Already tracked by CaptureLocations() from runtime.HouseOwner.
+            return;
+        }
+
+        // For mansion, check if the house data has a mansion position.
+        if (kind == PluginRecallKind.Mansion)
+        {
+            AcDream.Core.Net.Messages.CreateObject.ServerPosition? house =
+                runtime.HouseOwner.Position;
+            AcDream.Core.Physics.Position? position =
+                RuntimeWorldObjectProjection.ConvertPosition(house);
+            if (position is not null)
+            {
+                _mansionLocation = new PluginRecallLocation(
+                    PluginRecallKind.Mansion,
+                    RuntimeWorldObjectProjection.ProjectNavigationPosition(position.Value),
+                    "Mansion",
+                    ++_mansionRevision,
+                    true);
+            }
+            return;
+        }
+
+        // For lifestone, capture the destination cell from the portal transition.
+        if (kind == PluginRecallKind.Lifestone && destinationCell != 0u)
+        {
+            _lifestoneLocation = new PluginRecallLocation(
+                PluginRecallKind.Lifestone,
+                new PluginNavigationPosition(
+                    CellId: destinationCell,
+                    EastWest: 0.0, NorthSouth: 0.0, Elevation: 0.0,
+                    HeadingDegrees: 0.0f,
+                    IsOutdoor: true),
+                "Lifestone",
+                ++_lifestoneRevision,
+                true);
+        }
+
+        // For allegiance hometown, capture the destination cell from the portal transition.
+        if (kind == PluginRecallKind.Allegiance && destinationCell != 0u)
+        {
+            _allegianceLocation = new PluginRecallLocation(
+                PluginRecallKind.Allegiance,
+                new PluginNavigationPosition(
+                    CellId: destinationCell,
+                    EastWest: 0.0, NorthSouth: 0.0, Elevation: 0.0,
+                    HeadingDegrees: 0.0f,
+                    IsOutdoor: true),
+                "Allegiance Hometown",
+                ++_allegianceRevision,
+                true);
+        }
     }
 
     uint IWorldObjectAutomation.OpenContainerObjectId
