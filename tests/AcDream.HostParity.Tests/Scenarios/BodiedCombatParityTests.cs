@@ -92,14 +92,12 @@ public sealed class BodiedCombatParityTests
             arm.Advance();
             transcript.RecordOutbound(arm);
 
+            // The kill arrives the way the server sends it -- a health
+            // update and a line of text -- through each client's own inbound
+            // route, rather than being poked into the runtime by hand.
             transcript.Step("it dies");
-            arm.Deliver(static runtime =>
-            {
-                runtime.ActionOwner.Combat.OnUpdateHealth(
-                    ParityWorld.Monster, 0f);
-                runtime.CommunicationOwner.Chat.OnSystemMessage(
-                    "You have slain the creature!", chatType: 0x00u);
-            });
+            arm.Server.UpdateHealth(ParityWorld.Monster, 0f);
+            arm.Server.SystemMessage("You have slain the creature!", chatType: 0x00u);
             arm.Advance();
             transcript.Record(
                 "selected", arm.Host.Selection.SelectedObjectId);
@@ -108,6 +106,15 @@ public sealed class BodiedCombatParityTests
                     ParityWorld.Monster));
             transcript.Record(
                 "chat.lines", arm.Runtime.CommunicationOwner.Chat.Count);
+            // Said outright: two clients that both heard nothing would
+            // agree, and agreeing is not the point.
+            Assert.True(arm.Runtime.ActionOwner.Combat.HasHealth(
+                ParityWorld.Monster));
+            Assert.Equal(
+                0f,
+                arm.Runtime.ActionOwner.Combat.GetHealthPercent(
+                    ParityWorld.Monster));
+            Assert.True(arm.Runtime.CommunicationOwner.Chat.Count > 0);
             RecordTargets(transcript, combat);
 
             transcript.Step("begin on the next creature");
