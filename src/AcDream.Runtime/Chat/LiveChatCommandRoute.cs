@@ -17,10 +17,10 @@ public sealed record LiveChatCommandBindings(
     Action<uint, string> SendTalkDirect,
     Action<uint, string> SendChannel,
     Action<uint, uint, uint, uint, string, uint> SendTurbineChat,
-    Action<string>? Log = null,
-    Func<string, RetailChatPose?>? ResolvePose = null,
-    Action<uint>? ExecuteMotion = null,
-    Action<string>? SendSoulEmote = null);
+    Func<string, RetailChatPose?> ResolvePose,
+    Action<uint> ExecuteMotion,
+    Action<string> SendSoulEmote,
+    Action<string>? Log = null);
 
 public sealed class LiveChatCommandRoute
     : ILiveSessionCommandRouting,
@@ -56,6 +56,11 @@ public sealed class LiveChatCommandRoute
         ArgumentNullException.ThrowIfNull(bindings.SendTalkDirect);
         ArgumentNullException.ThrowIfNull(bindings.SendChannel);
         ArgumentNullException.ThrowIfNull(bindings.SendTurbineChat);
+        // A pose in a line of speech is not a window feature: both hosts play
+        // the motion and print the line, so neither may leave these out.
+        ArgumentNullException.ThrowIfNull(bindings.ResolvePose);
+        ArgumentNullException.ThrowIfNull(bindings.ExecuteMotion);
+        ArgumentNullException.ThrowIfNull(bindings.SendSoulEmote);
 
         var commands = new LiveCommandBus();
         commands.Register<ExecuteClientCommandCmd>(command =>

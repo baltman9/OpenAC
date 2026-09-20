@@ -58,10 +58,10 @@ internal sealed record LiveSessionCommandBindings(
     Action<uint> SendAllegianceKick,
     Action<string> SendAllegianceInfoRequest,
     Action<bool> SendAllegianceUpdateRequest,
-    Action<string>? Log = null,
-    Func<string, RetailChatPose?>? ResolvePose = null,
-    Action<uint>? ExecuteMotion = null,
-    Action<string>? SendSoulEmote = null);
+    Func<string, RetailChatPose?> ResolvePose,
+    Action<uint> ExecuteMotion,
+    Action<string> SendSoulEmote,
+    Action<string>? Log = null);
 
 internal readonly record struct AddShortcutRuntimeCmd(ShortcutEntry Entry);
 internal readonly record struct RemoveShortcutRuntimeCmd(uint Index);
@@ -167,10 +167,10 @@ internal sealed class LiveSessionCommandRouter : ILiveSessionCommandRouting
             bindings.SendTalkDirect,
             bindings.SendChannel,
             bindings.SendTurbineChat,
-            bindings.Log,
             bindings.ResolvePose,
             bindings.ExecuteMotion,
-            bindings.SendSoulEmote));
+            bindings.SendSoulEmote,
+            bindings.Log));
         commands.Register<AddShortcutRuntimeCmd>(
             command => SendIfActive(() => bindings.AddShortcut(command.Entry)));
         commands.Register<RemoveShortcutRuntimeCmd>(

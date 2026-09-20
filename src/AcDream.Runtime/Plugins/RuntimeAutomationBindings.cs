@@ -134,6 +134,12 @@ internal static class RuntimeAutomationBindings
     private const uint SkillTableId = 0x0E000004u;
 
     /// <summary>
+    /// Held while this pass reads the installed data files: a reader is not
+    /// safe to use from two threads at once.
+    /// </summary>
+    private static readonly object ContentReadLock = new();
+
+    /// <summary>
     /// Which capability each seam needs, or <see langword="null"/> when the
     /// seam is filled from the runtime itself and therefore exists on every
     /// host. A key of the form <c>Method.parameter</c> is an optional
@@ -238,7 +244,7 @@ internal static class RuntimeAutomationBindings
         bound.Add("Bind");
 
         if (capabilities.Content is { } content)
-            BindContent(surface, content, capabilities.Warn, bound);
+            BindContent(surface, runtime, content, capabilities.Warn, bound);
         if (capabilities.MagicCatalog is { } magicCatalog)
         {
             surface.BindMagicCatalog(magicCatalog);
@@ -383,10 +389,18 @@ internal static class RuntimeAutomationBindings
     /// </summary>
     private static void BindContent(
         RuntimeAutomationSurface surface,
+        GameRuntime runtime,
         IDatReaderWriter content,
         Action<string>? warn,
         HashSet<string> bound)
     {
+        // The poses a line of speech can carry come out of the same files, and
+        // both hosts read them here so "hello *wave*" does the same thing on
+        // either. Nothing on the plugin surface needs them; the chat command
+        // route does.
+        runtime.CommunicationOwner.ChatPoses =
+            AcDream.Runtime.Chat.ChatPoseCatalog.Load(content, ContentReadLock);
+
         surface.BindPaletteColorResolver(
             new AcDream.Content.CharGen.ChargenAppearanceCatalog(content));
         bound.Add(nameof(surface.BindPaletteColorResolver));

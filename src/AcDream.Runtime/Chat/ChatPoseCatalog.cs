@@ -1,21 +1,36 @@
-using AcDream.Runtime.Chat;
 using AcDream.Content;
 using DatReaderWriter;
 using DatReaderWriter.DBObjs;
 using DatMotionCommand = DatReaderWriter.Enums.MotionCommand;
 
-namespace AcDream.App.Net;
+namespace AcDream.Runtime.Chat;
 
-internal sealed class DatChatPoseCatalog
+/// <summary>
+/// The poses a player can put in a line of speech, such as
+/// <c>hello *wave*</c>: which animation each word plays and what the client
+/// says about it, read from the installed data files. Both front ends read
+/// the same table, so the same line does the same thing at a console as in a
+/// chat box.
+/// </summary>
+public sealed class ChatPoseCatalog
 {
     private const uint ChatPoseTableId = 0x0E000007u;
     private readonly IReadOnlyDictionary<string, RetailChatPose> _poses;
 
-    private DatChatPoseCatalog(
+    /// <summary>A catalog with no poses in it, for a client with no data files.</summary>
+    public static ChatPoseCatalog Empty { get; } =
+        new(new Dictionary<string, RetailChatPose>(
+            StringComparer.OrdinalIgnoreCase));
+
+    private ChatPoseCatalog(
         IReadOnlyDictionary<string, RetailChatPose> poses) =>
         _poses = poses;
 
-    public static DatChatPoseCatalog Load(IDatReaderWriter dats, object datLock)
+    /// <param name="datLock">
+    /// Held while the table is read: the data files are not safe to read from
+    /// two threads at once.
+    /// </param>
+    public static ChatPoseCatalog Load(IDatReaderWriter dats, object datLock)
     {
         ArgumentNullException.ThrowIfNull(dats);
         ArgumentNullException.ThrowIfNull(datLock);
@@ -23,7 +38,7 @@ internal sealed class DatChatPoseCatalog
         {
             ChatPoseTable? table = dats.Get<ChatPoseTable>(ChatPoseTableId);
             if (table is null)
-                return new DatChatPoseCatalog(
+                return new ChatPoseCatalog(
                     new Dictionary<string, RetailChatPose>(
                         StringComparer.OrdinalIgnoreCase));
 
@@ -56,10 +71,16 @@ internal sealed class DatChatPoseCatalog
                     text.Self ?? string.Empty,
                     text.Others ?? string.Empty);
             }
-            return new DatChatPoseCatalog(poses);
+            return new ChatPoseCatalog(poses);
         }
     }
 
+    /// <summary>
+    /// The pose a word in speech names, or null when it names none.
+    /// </summary>
+    /// <param name="male">
+    /// Which possessive the line about it reads with.
+    /// </param>
     public RetailChatPose? Resolve(string command, bool male)
     {
         if (!_poses.TryGetValue(command, out RetailChatPose pose))

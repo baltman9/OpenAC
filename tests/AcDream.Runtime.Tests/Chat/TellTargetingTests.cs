@@ -27,7 +27,10 @@ public sealed class TellTargetingTests
                 (target, text) => Sent.Add($"tell:{target}:{text}"),
                 (guid, text) => Sent.Add($"talkdirect:{guid:X8}:{text}"),
                 (channel, text) => Sent.Add($"channel:{channel:X8}:{text}"),
-                (_, _, _, _, text, _) => Sent.Add($"turbine:{text}")));
+                (_, _, _, _, text, _) => Sent.Add($"turbine:{text}"),
+                _ => null,
+                motion => Sent.Add($"motion:{motion}"),
+                text => Sent.Add($"soul:{text}")));
             Route.Activate();
             Feedback = new RuntimeChatCommandFeedback(Communication);
         }

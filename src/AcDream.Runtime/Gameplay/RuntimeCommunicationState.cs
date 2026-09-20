@@ -90,6 +90,13 @@ public sealed class RuntimeCommunicationState : IDisposable
     /// </summary>
     public RuntimeChatEntryOwner ChatEntryOwner { get; }
 
+    /// <summary>
+    /// The poses a line of speech can carry, such as <c>hello *wave*</c>.
+    /// Empty until the shared content pass reads the table out of the
+    /// installed data files; a client without them simply has no poses.
+    /// </summary>
+    public ChatPoseCatalog ChatPoses { get; set; } = ChatPoseCatalog.Empty;
+
     public SpewBoxState SpewBox { get; }
 
     public Func<bool>? DisplayTimestampsSource

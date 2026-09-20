@@ -734,6 +734,9 @@ public sealed class LiveSessionCommandRouterTests
             SendAllegianceKick: _ => { },
             SendAllegianceInfoRequest: _ => { },
             SendAllegianceUpdateRequest: _ => { },
+            ResolvePose: _ => null,
+            ExecuteMotion: _ => { },
+            SendSoulEmote: _ => { },
             Log: log));
 
     [MethodImpl(MethodImplOptions.NoInlining)]

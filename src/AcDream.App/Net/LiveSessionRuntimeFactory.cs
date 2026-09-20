@@ -109,7 +109,6 @@ internal sealed class LiveSessionRuntimeFactory
     private readonly IReadOnlyList<string> _loginCommands;
     private readonly TimeSpan _loginCommandDelay;
     private readonly TimeProvider _timeProvider;
-    private readonly DatChatPoseCatalog _chatPoses;
 
     private readonly string _chatLogDirectory;
 
@@ -152,7 +151,6 @@ internal sealed class LiveSessionRuntimeFactory
         _loginCommands = loginCommands is null ? [] : [.. loginCommands];
         _loginCommandDelay = TimeSpan.FromMilliseconds(loginCommandDelayMs);
         _timeProvider = timeProvider ?? TimeProvider.System;
-        _chatPoses = DatChatPoseCatalog.Load(_world.Dats, _world.DatLock);
         _movementStats = new LiveMovementStatsApplier(
             _player.Controller,
             _domain.Character.MovementSkills,
@@ -544,11 +542,12 @@ internal sealed class LiveSessionRuntimeFactory
         SendAllegianceInfoRequest: session.SendAllegianceInfoRequest,
         SendAllegianceUpdateRequest: session.SendAllegianceUpdateRequest,
         Log: _log,
-        ResolvePose: command => _chatPoses.Resolve(
-            command,
-            male: _domain.EntityObjects.Objects
-                .Get(_player.Identity.ServerGuid)?
-                .Properties.GetInt(0x71u) == 1),
+        ResolvePose: command =>
+            _domain.Communication.ChatPoses.Resolve(
+                command,
+                male: _domain.EntityObjects.Objects
+                    .Get(_player.Identity.ServerGuid)?
+                    .Properties.GetInt(0x71u) == 1),
         ExecuteMotion: motion => _player.Controller.ExecuteMotion(motion),
         SendSoulEmote: session.SendSoulEmote);
     }

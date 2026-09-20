@@ -933,6 +933,17 @@ internal sealed class HeadlessSessionHost : IDisposable
         SendTalkDirect: session.SendTalkDirect,
         SendChannel: session.SendChannel,
         SendTurbineChat: session.SendTurbineChatTo,
+        // A pose in a line of speech plays the same motion and prints the same
+        // line without a window as with one; the table behind it is read in
+        // the shared content pass.
+        ResolvePose: command =>
+            runtime.CommunicationOwner.ChatPoses.Resolve(
+                command,
+                male: runtime.EntityObjects.Objects
+                    .Get(runtime.PlayerIdentity.ServerGuid)?
+                    .Properties.GetInt(0x71u) == 1),
+        ExecuteMotion: motion => runtime.MovementOwner.ExecuteMotion(motion),
+        SendSoulEmote: session.SendSoulEmote,
         Log: message => _diagnostics.Message(
             _descriptor.Id,
             message,
