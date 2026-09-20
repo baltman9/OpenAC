@@ -262,8 +262,8 @@ the right path automatically:
   arrives. `Started` here means the walk (or the immediate use, if already
   in range) began, not that a container is open yet; watch
   `IEvents.ContainerOpened` or the vendor automation's own `Opened` event
-  for that. **On a client with no window the arrival step does not run yet**
-  -- see "Begun, but not finished, without a window" under Headless.
+  for that. The walk, the use it sends on arrival and the give-up on a walk
+  that never gets there are the same on a client with no window.
 
 The world-object path is held to the same gates a click (or an owned
 item's own automation) is held to, rather than bypassing them:
@@ -668,26 +668,15 @@ One seam is empty on **both** clients: `BindProjectileCollision`. A plugin
 that asks about projectile collision gets nothing anywhere, and it needs a
 runtime source before either client can fill it.
 
-### Begun, but not finished, without a window
+### Walking to something and then using it
 
-`Items.Use` on a world object out of reach walks to it on both clients --
-the walk is the runtime's, and it is armed with the use to send on arrival.
-Sending it once the walk ends, and giving up on a walk that stops getting
-anywhere, are still driven by windowed-host code. **So on a client with no
-window that use begins and never completes:** the character walks to the
-corpse, the chest or the vendor and stands there, `Started` is the last
-thing the plugin heard, and no `ContainerOpened` follows. A walk that stalls
-against something in the way is worse than that: the one-request-at-a-time
-gate stays held, so every later `Use`, `Open` or pickup in that session
-answers `Busy`.
-
-Until that drive moves into the runtime, a plugin on a windowless client
-that means to use something out of reach should walk itself
-(`Navigation.GoTo` with the installed data files, or the move channels) and
-call `Items.Use` once it is in range, where the use is sent immediately.
-`Loot.Open` is unaffected -- it does not walk on either client, so it sends
-its use straight away from wherever the character is standing, which is its
-own mismatch with `Items.Use` on the very same corpse.
+`Items.Use` on a world object out of reach walks to it, sends the use once
+the character is there, and gives up on a walk that has stopped getting
+anywhere -- all of it one runtime owner, driven once a frame from the
+per-frame local-player step, so all of it happens on a client with no
+window too. `Loot.Open` does not walk on either client: it sends its use
+straight away from wherever the character is standing, which is its own
+mismatch with `Items.Use` on the very same corpse.
 
 ### Available, but only with the installed data files
 

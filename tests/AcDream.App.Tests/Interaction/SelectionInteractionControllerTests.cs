@@ -228,8 +228,27 @@ public sealed class SelectionInteractionControllerTests
         public readonly RuntimeCombatTargetState CombatTarget;
         public readonly SelectionInteractionController Controller;
         public readonly RuntimeWorldObjectUse WorldObjectUse;
+
+        /// <summary>
+        /// The shared per-frame step that ends an armed walk. The client that
+        /// draws no longer takes it itself, so the harness takes it where the
+        /// per-frame local-player step would.
+        /// </summary>
+        public readonly RuntimeInteractionApproachDriver ArmedApproaches;
+
         public uint GroundObjectId { get; set; }
         public uint? RequestedExternalContainerId { get; private set; }
+
+        /// <summary>
+        /// One frame's worth of interaction work in the order a client does
+        /// it: the shared drive ends the walks that have ended, then this
+        /// client sends what its own clicks have queued.
+        /// </summary>
+        public void DriveFrame()
+        {
+            ArmedApproaches.DriveArmedApproaches();
+            Controller.DrainOutbound();
+        }
 
         public Harness()
         {
@@ -279,6 +298,11 @@ public sealed class SelectionInteractionControllerTests
                 Transport,
                 new ApproachAdapter(Query, Movement),
                 guid => Query.IsUseable(guid) ? ItemUseability.Remote : null);
+            ArmedApproaches = new RuntimeInteractionApproachDriver(
+                Completions,
+                Items.RuntimeTransactions,
+                WorldObjectUse,
+                new ApproachAdapter(Query, Movement));
             Controller = controller = new SelectionInteractionController(
                 Selection,
                 Query,
@@ -287,8 +311,10 @@ public sealed class SelectionInteractionControllerTests
                 Movement,
                 CombatTarget,
                 WorldObjectUse,
+                ArmedApproaches,
                 Toasts.Add,
                 Completions);
+            _ = ArmedApproaches.BindPresentationOwned(controller);
             Items.PendingBackpackPlacementRequested += PendingPlacements.Add;
             Items.PendingBackpackPlacementCancelled += CancelledPlacements.Add;
         }
@@ -485,13 +511,13 @@ public sealed class SelectionInteractionControllerTests
         h.Selection.Select(Target, SelectionChangeSource.World);
 
         h.Controller.HandleInputAction(InputAction.UseSelected);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(1, h.Items.BusyCount);
         Assert.Equal(new[] { Target }, h.Transport.Uses);
 
         h.CompletionLifetime.PublishCancellation(WeenieError.ActionCancelled);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(1, h.Items.BusyCount);
         Assert.False(h.Items.CanMakeInventoryRequest);
@@ -510,7 +536,7 @@ public sealed class SelectionInteractionControllerTests
         h.Selection.Select(Target, SelectionChangeSource.World);
 
         h.Controller.HandleInputAction(InputAction.UseSelected);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(new[] { Target }, h.Transport.Uses);
         Assert.Equal(1, h.Items.BusyCount);
@@ -530,7 +556,7 @@ public sealed class SelectionInteractionControllerTests
         h.Selection.Select(Target, SelectionChangeSource.World);
 
         h.Controller.HandleInputAction(InputAction.UseSelected);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(1, h.Items.BusyCount);
         Assert.Equal(new[] { Target }, h.Transport.Uses);
@@ -545,7 +571,7 @@ public sealed class SelectionInteractionControllerTests
         h.Selection.Select(Target, SelectionChangeSource.World);
 
         h.Controller.HandleInputAction(InputAction.UseSelected);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(0, h.Items.BusyCount);
         Assert.Empty(h.Transport.Uses);
@@ -573,7 +599,7 @@ public sealed class SelectionInteractionControllerTests
         h.Selection.Select(Target, SelectionChangeSource.World);
 
         h.Controller.HandleInputAction(InputAction.UseSelected);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(new[] { Target }, h.Transport.Uses);
         Assert.Equal(1, h.Items.BusyCount);
@@ -628,7 +654,7 @@ public sealed class SelectionInteractionControllerTests
         // Short of the threshold: the fail counter is climbing (the move
         // is stalled) but hasn't crossed the line yet, so nothing changes.
         h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks - 1;
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
         Assert.Equal(1, h.Items.BusyCount);
@@ -637,7 +663,7 @@ public sealed class SelectionInteractionControllerTests
         // At the threshold: the host gives up, frees the gate, and cancels
         // the underlying move-to so the player stops walking into it.
         h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks;
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.False(h.Items.RuntimeTransactions.HasPendingUse);
         Assert.Equal(0, h.Items.BusyCount);
@@ -657,7 +683,7 @@ public sealed class SelectionInteractionControllerTests
 
         h.WorldObjectUse.TryUse(Target);
         h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks;
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Empty(h.Toasts);
     }
@@ -670,7 +696,7 @@ public sealed class SelectionInteractionControllerTests
 
         h.Controller.SendUse(Target);
         h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks;
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Single(h.Toasts);
     }
@@ -693,9 +719,9 @@ public sealed class SelectionInteractionControllerTests
             // Climbs partway, then progress resets it, over and over --
             // it never accumulates to the threshold.
             h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks - 1;
-            h.Controller.DrainOutbound();
+            h.DriveFrame();
             h.Movement.FailProgressCount = 0;
-            h.Controller.DrainOutbound();
+            h.DriveFrame();
         }
 
         Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
@@ -716,7 +742,7 @@ public sealed class SelectionInteractionControllerTests
         Assert.True(h.Items.RuntimeTransactions.HasPendingPickup);
 
         h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks;
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.False(h.Items.RuntimeTransactions.HasPendingPickup);
         Assert.Equal(1, h.Movement.CancelCount);
@@ -1106,7 +1132,7 @@ public sealed class SelectionInteractionControllerTests
         h.Controller.HandleInputAction(InputAction.UseSelected);
 
         h.Controller.OnEntityHidden(Target);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         // Letting the selection go is the runtime's now, for every client;
         // what this controller still owes is the cancel.
@@ -1124,7 +1150,7 @@ public sealed class SelectionInteractionControllerTests
         Assert.True(h.Controller.HandleInputAction(InputAction.SelectionPickUp));
         Assert.Empty(h.Transport.Pickups);
 
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(new[] { (Target, Player, 0) }, h.Transport.Pickups);
     }
@@ -1166,7 +1192,7 @@ public sealed class SelectionInteractionControllerTests
         h.Items.InteractionState.EnterExamine();
 
         h.Controller.ResetSession();
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
         h.Controller.OnNaturalMoveToComplete();
 
         Assert.Null(h.Selection.SelectedObjectId);
@@ -1269,13 +1295,13 @@ public sealed class SelectionInteractionControllerTests
 
         h.Selection.Select(Target, SelectionChangeSource.World);
         h.Controller.HandleInputAction(InputAction.UseSelected);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(new[] { Target }, h.Transport.Uses);
         Assert.Empty(h.Transport.Pickups);
 
         h.CompletionLifetime.PublishNaturalCompletion();
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(new[] { Target }, h.Transport.Uses);
         Assert.Empty(h.Transport.Pickups);
@@ -1290,7 +1316,7 @@ public sealed class SelectionInteractionControllerTests
         h.CompletionLifetime.PublishNaturalCompletion();
 
         h.Completions.RetireControllerLifetime(h.CompletionLifetime);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Empty(h.Transport.Pickups);
         h.Controller.OnNaturalMoveToComplete();
@@ -1322,7 +1348,7 @@ public sealed class SelectionInteractionControllerTests
         h.Selection.Select(Target, SelectionChangeSource.World);
 
         h.Controller.HandleInputAction(InputAction.SelectionPickUp);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Empty(h.PendingPlacements);
         Assert.Empty(h.Transport.Pickups);
@@ -1341,7 +1367,7 @@ public sealed class SelectionInteractionControllerTests
 
         h.Controller.HandleInputAction(action);
         h.Query.Current = false;
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Empty(h.Transport.Uses);
         Assert.Empty(h.Transport.Pickups);
@@ -1354,7 +1380,7 @@ public sealed class SelectionInteractionControllerTests
         var control = new Harness();
         control.Query.Picked = Target;
         control.Controller.HandleInputAction(InputAction.SelectDblLeft);
-        control.Controller.DrainOutbound();
+        control.DriveFrame();
         Assert.NotEmpty(control.Transport.Uses);
 
         var h = new Harness();
@@ -1362,7 +1388,7 @@ public sealed class SelectionInteractionControllerTests
         h.Query.WieldedByPlayer = true;
 
         h.Controller.HandleInputAction(InputAction.SelectDblLeft);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(Target, h.Selection.SelectedObjectId);
         Assert.Contains("pulse", h.Query.Events);
@@ -1397,7 +1423,7 @@ public sealed class SelectionInteractionControllerTests
         h.Selection.Select(RemoteWeapon, SelectionChangeSource.World);
 
         Assert.True(h.Controller.HandleInputAction(InputAction.SelectionPickUp));
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Contains(
             $"The Target {RemoteWeapon:X8} is being wielded by someone else!",
@@ -1456,7 +1482,7 @@ public sealed class SelectionInteractionControllerTests
         h.Selection.Select(GroundWeapon, SelectionChangeSource.World);
 
         Assert.True(h.Controller.HandleInputAction(InputAction.SelectionPickUp));
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(new[] { (GroundWeapon, Player, 0) }, h.Transport.Pickups);
         Assert.Single(h.Movement.Approaches);
@@ -1473,7 +1499,7 @@ public sealed class SelectionInteractionControllerTests
         h.Selection.Select(OwnWeapon, SelectionChangeSource.World);
 
         Assert.True(h.Controller.HandleInputAction(InputAction.SelectionPickUp));
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(new[] { (OwnWeapon, Player, 0) }, h.Transport.Pickups);
         Assert.Empty(h.Movement.Approaches);
@@ -1537,7 +1563,7 @@ public sealed class SelectionInteractionControllerTests
 
         h.Controller.HandleInputAction(InputAction.SelectLeft);
         h.Controller.HandleInputAction(InputAction.SelectDblLeft);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Null(h.Selection.SelectedObjectId);
         Assert.Empty(h.Transport.Uses);
@@ -1567,7 +1593,7 @@ public sealed class SelectionInteractionControllerTests
         h.Selection.Select(Target, SelectionChangeSource.World);
 
         h.Controller.HandleInputAction(InputAction.SelectionPickUp);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Single(h.PendingPlacements);
         Assert.Empty(h.CancelledPlacements);

@@ -105,6 +105,15 @@ internal static class ParityWorld
     internal const uint CorpseGem = 0x50000052u;
 
     /// <summary>
+    /// A corpse the character can never get within reach of: three metres out
+    /// and four metres up, on a ledge nothing here can climb.
+    /// </summary>
+    internal const uint CorpseOutOfEveryReach = 0x50000053u;
+
+    /// <summary>How far above the ground that one sits, in metres.</summary>
+    private const float OutOfEveryReachHeight = 4f;
+
+    /// <summary>
     /// Fills the character's packs: a kit to use, a side pack to move things
     /// into, a tinkering tool and something to salvage with it, and an item
     /// that refuses to be used without a target. The player object itself is
@@ -164,6 +173,32 @@ internal static class ParityWorld
                 (uint)(PublicWeenieFlags.Corpse | PublicWeenieFlags.Openable),
         },
         useability: ItemUseability.Remote);
+    }
+
+    /// <summary>
+    /// Lays a second corpse three metres out and four metres up. Asking to use
+    /// it begins a walk -- how far off it is is judged across the ground, and
+    /// across the ground it is three metres away -- and that walk can never
+    /// arrive, because the gap the walk measures counts the four metres of air
+    /// as well. It is the ordinary shape of a walk that never gets there: a
+    /// target the character cannot reach and keeps trying to.
+    /// </summary>
+    internal static void StageCorpseOutOfEveryReach(GameRuntime runtime)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        Add(runtime, CorpseOutOfEveryReach, PlayerX + 3f, new ClientObject
+        {
+            ObjectId = CorpseOutOfEveryReach,
+            Type = ItemType.Container,
+            Name = "Corpse on a Ledge",
+            ItemsCapacity = 8,
+            StackSize = 1,
+            Useability = ItemUseability.Remote,
+            PublicWeenieBitfield =
+                (uint)(PublicWeenieFlags.Corpse | PublicWeenieFlags.Openable),
+        },
+        useability: ItemUseability.Remote,
+        z: ParityPlayerBody.GroundHeight + OutOfEveryReachHeight);
     }
 
     /// <summary>
@@ -239,13 +274,18 @@ internal static class ParityWorld
     /// ground with nothing said here is refused before the use is ever
     /// composed, on every client.
     /// </param>
+    /// <param name="z">
+    /// How high off the ground it sits, in metres. Everything stands on the
+    /// ground unless a scenario needs otherwise.
+    /// </param>
     internal static void Add(
         GameRuntime runtime,
         uint guid,
         float x,
         ClientObject item,
         PhysicsStateFlags state = 0,
-        uint? useability = null)
+        uint? useability = null,
+        float? z = null)
     {
         RuntimeEntityRecord record = runtime.EntityObjects
             .RegisterEntity(Spawn(
@@ -254,7 +294,8 @@ internal static class ParityWorld
                 PlayerY,
                 ParityPlayerBody.Cell,
                 state,
-                useability))
+                useability,
+                z))
             .Canonical!;
         runtime.EntityObjects.ApplyAcceptedSpawn(
             record,
@@ -271,10 +312,18 @@ internal static class ParityWorld
         float y,
         uint cell,
         PhysicsStateFlags state,
-        uint? useability = null)
+        uint? useability = null,
+        float? z = null)
     {
         var position = new CreateObject.ServerPosition(
-            cell, x, y, ParityPlayerBody.GroundHeight, 1f, 0f, 0f, 0f);
+            cell,
+            x,
+            y,
+            z ?? ParityPlayerBody.GroundHeight,
+            1f,
+            0f,
+            0f,
+            0f);
         var timestamps = new PhysicsTimestamps(
             Position: 1,
             Movement: 1,

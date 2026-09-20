@@ -16,21 +16,20 @@ namespace AcDream.HostParity.Tests;
 /// description was turned away before it was composed. Two clients that both
 /// refuse agree line for line. Here the character really covers the ground.
 ///
-/// A gap these scenarios found and deliberately stop short of: the step that
-/// SENDS the use once the walk has arrived, and the one that gives up on a
-/// walk going nowhere, are driven only by the windowed client's own
-/// interaction controller, which cannot exist without a presentation tree.
-/// Nothing in the runtime drives either. So a client with no window walks to
-/// the corpse and then stands there: the use is never sent, and a walk that
-/// stalls leaves the one-request-at-a-time gate held for the rest of the
-/// session. Neither is claimed below, because neither happens here; both are
-/// reported, and the arming, the walk and the silence before arrival are
-/// pinned so that the fix has something to turn green.
+/// The whole walk is under test here: the arming, the silence while the
+/// character is under way, the use that goes out on arrival and the give-up on
+/// a walk that never arrives. All four are one runtime owner driven once a
+/// frame from the per-frame local-player step, so they happen with or without
+/// a window. The last two used to be driven only by the client that draws, so
+/// a client with nothing to draw on walked to the corpse and stood there, and
+/// a stalled walk held the one-request-at-a-time gate for the rest of the
+/// session.
 ///
-/// Mutation check (2026-09-20), run: making the shared route send the use
-/// immediately instead of arming it for arrival turned two of the three red
+/// Mutation checks (2026-09-20), both run: making the shared route send the
+/// use immediately instead of arming it for arrival turned two scenarios red
 /// -- no walk installed, and a use among what was sent before the character
-/// had got anywhere. Restoring it turned them green.
+/// had got anywhere. Taking the per-frame drive back out turned the arrival
+/// and the give-up red on both clients. Restoring each turned them green.
 /// </summary>
 public sealed class WalkThenUseParityTests
 {
@@ -42,6 +41,13 @@ public sealed class WalkThenUseParityTests
 
     /// <summary>Long enough for the pacing between two uses to lapse.</summary>
     private const int TicksPastTheUsePacing = 40;
+
+    /// <summary>
+    /// Long enough for a walk that gets nowhere to be given up on: the route
+    /// waits out a floor of about five seconds of standstill, plus the grace
+    /// the walk itself gives before it counts a standstill at all.
+    /// </summary>
+    private const int TicksUntilTheWalkIsGivenUpOn = 1200;
 
     /// <summary>
     /// Asking to use a corpse three metres off: the walk is armed and aimed
@@ -88,6 +94,91 @@ public sealed class WalkThenUseParityTests
                 Distance(arm, ParityWorld.Corpse) < 1d,
                 $"The walk stopped {Distance(arm, ParityWorld.Corpse):0.00} m "
                 + "short of the corpse.");
+        });
+
+    /// <summary>
+    /// The other half of the same walk: once the character is there, the use
+    /// goes out and the client starts waiting for the corpse's contents. This
+    /// is what used to happen only where there was something drawing the
+    /// world -- a client with no window walked to the corpse and stood there.
+    /// </summary>
+    [Fact]
+    public void ArrivingSendsTheArmedUseOnBothClients() =>
+        ParityScenario.Run(static (arm, transcript) =>
+        {
+            ILootAutomation loot = Stage(arm);
+            IItemAutomation items = arm.Host.Automation.Items;
+
+            transcript.Step("ask to use a corpse three metres off");
+            Record(transcript, "use", items.Use(ParityWorld.Corpse));
+            AssertNoUseWasSent(arm);
+            transcript.RecordOutbound(arm);
+
+            transcript.Step("the character arrives");
+            Advance(arm, TicksForTheWholeWalk);
+            RecordWalk(transcript, arm);
+            RecordLoot(transcript, loot);
+            transcript.Record("distance", Distance(arm, ParityWorld.Corpse));
+            // Said outright, because two clients that both sent nothing agree
+            // line for line: the use really went out, and the client is now
+            // waiting on this corpse rather than on nothing.
+            AssertTheUseWasSent(arm);
+            Assert.Equal(ParityWorld.Corpse, loot.RequestedContainerId);
+            transcript.RecordOutbound(arm);
+
+            transcript.Step("the corpse answers");
+            arm.Server.UseDone();
+            ParityWorld.DeliverCorpseContents(arm.Runtime);
+            arm.Advance();
+            RecordLoot(transcript, loot);
+            transcript.Record("busy", items.IsBusy);
+        });
+
+    /// <summary>
+    /// A walk that can never arrive: the corpse is on a ledge four metres up.
+    /// The route gives up on it, stops the character walking into the wall
+    /// under it, and lets the next request through -- on both clients. Without
+    /// the give-up the one-request-at-a-time gate stayed held and every later
+    /// use in the session answered busy.
+    /// </summary>
+    [Fact]
+    public void AWalkThatNeverArrivesIsGivenUpOnOnBothClients() =>
+        ParityScenario.Run(static (arm, transcript) =>
+        {
+            _ = Stage(arm);
+            ParityWorld.StageCorpseOutOfEveryReach(arm.Runtime);
+            IItemAutomation items = arm.Host.Automation.Items;
+
+            transcript.Step("ask to use the corpse on the ledge");
+            Record(
+                transcript,
+                "use",
+                items.Use(ParityWorld.CorpseOutOfEveryReach));
+            RecordWalk(transcript, arm);
+            Assert.True(Walk(arm).IsMovingTo());
+            transcript.RecordOutbound(arm);
+
+            transcript.Step("the walk stops getting anywhere");
+            Advance(arm, TicksUntilTheWalkIsGivenUpOn);
+            RecordWalk(transcript, arm);
+            transcript.Record("busy", items.IsBusy);
+            // Said outright: the walk was called off, and nothing was sent
+            // for a use whose walk never arrived.
+            Assert.False(
+                Walk(arm).IsMovingTo(),
+                "The character is still walking at something it cannot reach.");
+            AssertNoUseWasSent(arm);
+            transcript.RecordOutbound(arm);
+
+            transcript.Step("the next request is let through");
+            Advance(arm, TicksPastTheUsePacing);
+            PluginItemCommandResult again = items.Use(ParityWorld.Corpse);
+            Record(transcript, "use", again);
+            RecordWalk(transcript, arm);
+            // The gate is free again: this is the request that answered busy
+            // for the rest of the session before the give-up existed.
+            Assert.Equal(PluginItemCommandStatus.Started, again.Status);
+            transcript.RecordOutbound(arm);
         });
 
     /// <summary>
@@ -191,12 +282,27 @@ public sealed class WalkThenUseParityTests
     /// </summary>
     private static void AssertNoUseWasSent(ParityArm arm)
     {
-        const uint UseAction = 0x0036u;
         IReadOnlyList<ParityOutbound> sent = arm.Operations.Outbound;
         Assert.DoesNotContain(
             UseAction,
             sent.Select(static message => message.GameAction ?? 0u));
     }
+
+    /// <summary>
+    /// That a use HAS gone out. The counterpart of the above, and the one a
+    /// scenario about arriving needs: without it both clients standing still
+    /// would agree.
+    /// </summary>
+    private static void AssertTheUseWasSent(ParityArm arm)
+    {
+        IReadOnlyList<ParityOutbound> sent = arm.Operations.Outbound;
+        Assert.Contains(
+            UseAction,
+            sent.Select(static message => message.GameAction ?? 0u));
+    }
+
+    /// <summary>The client action that says "use that".</summary>
+    private const uint UseAction = 0x0036u;
 
     private static void Advance(ParityArm arm, int ticks)
     {

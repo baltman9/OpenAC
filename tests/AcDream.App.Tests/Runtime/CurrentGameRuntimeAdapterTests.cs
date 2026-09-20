@@ -857,7 +857,8 @@ public sealed class CurrentGameRuntimeAdapterTests
                 new SelectionTransport(() => _session?.IsInWorld == true),
                 new NoopInteractionMovement(),
                 _gameRuntime.ActionOwner.CombatTarget,
-                _gameRuntime.WorldObjectUseOwner);
+                _gameRuntime.WorldObjectUseOwner,
+                _gameRuntime.ArmedApproachDrive);
 
             Host = CreateHost(
                 _session,

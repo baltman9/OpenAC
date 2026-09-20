@@ -38,6 +38,7 @@ public sealed class RuntimeLocalPlayerFrameController
     private readonly IRuntimeLocalPlayerFrameHost _host;
     private readonly IRuntimeMovementInputSource _input;
     private readonly Action? _publishMovement;
+    private readonly IRuntimeArmedApproachDrive? _armedApproaches;
     private AdvancedFrame? _advancedFrame;
 
     private readonly record struct AdvancedFrame(
@@ -47,14 +48,24 @@ public sealed class RuntimeLocalPlayerFrameController
         bool Hidden,
         bool ObjectQuantumAdvanced);
 
+    /// <param name="host">Whoever gives this frame its body and its world.</param>
+    /// <param name="input">Where the character's own movement comes from.</param>
+    /// <param name="publishMovement">Told once the frame has closed.</param>
+    /// <param name="armedApproaches">
+    /// The end of a walk begun in order to act on something, taken once each
+    /// frame right after the body has advanced. Absent leaves the character
+    /// walking with nothing to finish what the walk was for.
+    /// </param>
     public RuntimeLocalPlayerFrameController(
         IRuntimeLocalPlayerFrameHost host,
         IRuntimeMovementInputSource input,
-        Action? publishMovement = null)
+        Action? publishMovement = null,
+        IRuntimeArmedApproachDrive? armedApproaches = null)
     {
         _host = host ?? throw new ArgumentNullException(nameof(host));
         _input = input ?? throw new ArgumentNullException(nameof(input));
         _publishMovement = publishMovement;
+        _armedApproaches = armedApproaches;
     }
 
     public bool HiddenPartPoseDirty => _advancedFrame is
@@ -64,6 +75,18 @@ public sealed class RuntimeLocalPlayerFrameController
     };
 
     public void AdvanceBeforeNetwork(float deltaSeconds)
+    {
+        AdvancePlayerBeforeNetwork(deltaSeconds);
+        // A walk begun in order to act on something ends here, right after
+        // the body has had its step: an arrival sends what was armed for it,
+        // and a walk that has stopped getting anywhere is given up on. It
+        // runs whether or not the body advanced this frame, because a walk
+        // that ended while the body was standing still still has to be
+        // answered.
+        _armedApproaches?.DriveArmedApproaches();
+    }
+
+    private void AdvancePlayerBeforeNetwork(float deltaSeconds)
     {
         _advancedFrame = null;
         PlayerMovementController? controller = _host.Controller;

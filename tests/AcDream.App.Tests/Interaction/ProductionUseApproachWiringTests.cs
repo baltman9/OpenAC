@@ -212,11 +212,17 @@ public sealed class ProductionUseApproachWiringTests
             var movementSink = new PlayerInteractionMovementSink(
                 () => MovementController,
                 Completions);
+            var approachSource = new SinkApproachSource(Query, movementSink);
             WorldObjectUse = new RuntimeWorldObjectUse(
                 Items,
                 Transport,
-                new SinkApproachSource(Query, movementSink),
+                approachSource,
                 guid => Query.IsUseable(guid) ? ItemUseability.Remote : null);
+            ArmedApproaches = new RuntimeInteractionApproachDriver(
+                Completions,
+                Transactions,
+                WorldObjectUse,
+                approachSource);
             Controller = selectionController = new SelectionInteractionController(
                 Selection,
                 Query,
@@ -225,11 +231,30 @@ public sealed class ProductionUseApproachWiringTests
                 movementSink,
                 CombatTarget,
                 WorldObjectUse,
+                ArmedApproaches,
                 toast: null,
                 approachCompletions: Completions);
+            _ = ArmedApproaches.BindPresentationOwned(selectionController);
         }
 
         public readonly RuntimeWorldObjectUse WorldObjectUse;
+
+        /// <summary>
+        /// The shared per-frame step that ends an armed walk, which the
+        /// client that draws no longer takes itself.
+        /// </summary>
+        public readonly RuntimeInteractionApproachDriver ArmedApproaches;
+
+        /// <summary>
+        /// One frame's worth of interaction work, in the order a client does
+        /// it: the shared drive ends the walks that have ended, then this
+        /// client sends what its own clicks have queued.
+        /// </summary>
+        public void DriveFrame()
+        {
+            ArmedApproaches.DriveArmedApproaches();
+            Controller.DrainOutbound();
+        }
 
         public void AddFarTarget(uint serverGuid, Vector3 position)
         {
@@ -332,7 +357,7 @@ public sealed class ProductionUseApproachWiringTests
 
         Assert.Empty(h.Transport.Uses);
 
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(new[] { Vendor }, h.Transport.Uses);
         Assert.Equal(1, h.Inventory.BusyCount);
@@ -360,7 +385,7 @@ public sealed class ProductionUseApproachWiringTests
             WeenieError.ActionCancelled);
         Assert.Equal(1, h.Inventory.BusyCount);
 
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Empty(h.Transport.Uses);
         Assert.Equal(0, h.Inventory.BusyCount);
@@ -385,7 +410,7 @@ public sealed class ProductionUseApproachWiringTests
 
         Assert.Equal(1, h.Inventory.BusyCount);
 
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(new[] { OtherVendor }, h.Transport.Uses);
         Assert.Equal(1, h.Inventory.BusyCount);
@@ -402,7 +427,7 @@ public sealed class ProductionUseApproachWiringTests
             h.Transactions.BeginUseRequestReservation();
 
         h.Controller.RequestUse(Vendor, reservation);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         // Armed but inert — the live vendor-diag pathology.
         Assert.True(h.MoveTo.IsMovingTo());
@@ -413,7 +438,7 @@ public sealed class ProductionUseApproachWiringTests
 
         h.MovementController.Movement.CancelMoveTo(
             WeenieError.ActionCancelled);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Empty(h.Transport.Uses);
         Assert.Equal(0, h.Inventory.BusyCount);

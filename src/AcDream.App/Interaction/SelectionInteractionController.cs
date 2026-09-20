@@ -23,7 +23,8 @@ internal interface ISelectionInputActions
     bool HandleInputAction(InputAction action);
 }
 
-internal sealed class SelectionInteractionController : ISelectionInputActions
+internal sealed class SelectionInteractionController
+    : ISelectionInputActions, IRuntimeInteractionArrivalPresentation
 {
     /// <summary>
     /// How many consecutive stalled ticks of the local player's active
@@ -68,6 +69,11 @@ internal sealed class SelectionInteractionController : ISelectionInputActions
     // reaches the same route from the runtime, without a window in the way.
     private readonly RuntimeWorldObjectUse _worldObjectUse;
 
+    // Who ends a walk armed to act on something, once per frame, on every
+    // client. This one lends it the pickup half and the words a person who
+    // clicked is told; it does not end anything itself.
+    private readonly RuntimeInteractionApproachDriver _armedApproaches;
+
     // Whether the currently armed pending pickup wants to be told in words
     // when its walk is given up on. Every route that arms one does today;
     // tracking it keeps the shape ready for one that does not.
@@ -81,6 +87,7 @@ internal sealed class SelectionInteractionController : ISelectionInputActions
         IPlayerInteractionMovementSink movement,
         RuntimeCombatTargetState combatTarget,
         RuntimeWorldObjectUse worldObjectUse,
+        RuntimeInteractionApproachDriver armedApproaches,
         Action<string>? toast = null,
         RuntimeApproachCompletionState? approachCompletions = null,
         Func<uint, bool>? splitStack = null,
@@ -96,6 +103,8 @@ internal sealed class SelectionInteractionController : ISelectionInputActions
             ?? throw new ArgumentNullException(nameof(combatTarget));
         _worldObjectUse = worldObjectUse
             ?? throw new ArgumentNullException(nameof(worldObjectUse));
+        _armedApproaches = armedApproaches
+            ?? throw new ArgumentNullException(nameof(armedApproaches));
         _toast = toast;
         _approachCompletions = approachCompletions
             ?? new RuntimeApproachCompletionState();
@@ -676,36 +685,27 @@ internal sealed class SelectionInteractionController : ISelectionInputActions
     {
         if (_transactions.TryGetPendingPickup(out RuntimePendingPickup pendingPickup))
         {
-            HandleApproachCompletion(pendingPickup.ApproachToken, natural: true);
+            _armedApproaches.ResolveApproachCompletion(
+                pendingPickup.ApproachToken,
+                natural: true);
             return;
         }
         if (_transactions.TryGetPendingUse(out RuntimePendingUse pendingUse))
-            HandleApproachCompletion(pendingUse.ApproachToken, natural: true);
-    }
-
-    private void HandleApproachCompletion(
-        RuntimeInteractionApproachToken approachToken,
-        bool natural)
-    {
-        bool pickupAccepted = _transactions.TryResolveApproachCompletion(
-            approachToken,
-            natural,
-            out RuntimePendingPickup pendingPickup);
-        if (pendingPickup.Token != 0u)
         {
-            HandlePickupApproachCompletion(pendingPickup, pickupAccepted);
-            return;
+            _armedApproaches.ResolveApproachCompletion(
+                pendingUse.ApproachToken,
+                natural: true);
         }
-
-        bool useAccepted = _transactions.TryResolveUseApproachCompletion(
-            approachToken,
-            natural,
-            out RuntimePendingUse pendingUse);
-        if (pendingUse.Token != 0u)
-            HandleUseApproachCompletion(pendingUse, useAccepted);
     }
 
-    private void HandlePickupApproachCompletion(
+    /// <summary>
+    /// The walk armed for a pickup has ended. What comes of it is a change to
+    /// what this client draws, which is why this half stays here while the
+    /// shared route owns the decision to take it.
+    /// </summary>
+    /// <param name="pending">What was armed.</param>
+    /// <param name="accepted">Whether the walk arrived rather than being called off.</param>
+    public void CompletePickupApproach(
         RuntimePendingPickup pending,
         bool accepted)
     {
@@ -743,96 +743,46 @@ internal sealed class SelectionInteractionController : ISelectionInputActions
         }
     }
 
-    /// <summary>
-    /// The walk armed for a use has ended. Sending the use is the shared
-    /// route's business; this only says the one thing a person is told.
-    /// </summary>
-    private void HandleUseApproachCompletion(
-        RuntimePendingUse pending,
-        bool accepted)
-    {
-        if (_worldObjectUse.CompleteArmedUse(pending, accepted)
-            == RuntimeInteractionDispatchResult.NotInWorld)
-        {
-            _toast?.Invoke("Not in world");
-        }
-    }
+    /// <summary>Says to whoever clicked what came of it.</summary>
+    /// <param name="text">What to tell them.</param>
+    public void Say(string text) => _toast?.Invoke(text);
 
-    public void DrainOutbound()
-    {
-        while (_approachCompletions.TryTake(out RuntimeApproachCompletion completion))
-        {
-            HandleApproachCompletion(
-                new RuntimeInteractionApproachToken(
-                    completion.Token.ControllerLifetime,
-                    completion.Token.ApproachGeneration),
-                completion.IsNatural);
-        }
-        ExpireStalledApproach();
+    /// <summary>
+    /// Sends what this client's own clicks have queued. Ending the walks
+    /// armed to act on something is not here any more: that is one shared
+    /// step, taken once a frame by every client from the per-frame
+    /// local-player step, so a use out of reach finishes without a window
+    /// too.
+    /// </summary>
+    public void DrainOutbound() =>
         _transactions.DrainOutbound(DispatchQueuedInteraction);
-    }
 
     /// <summary>
-    /// Forces a definite outcome on an armed walk-then-use or
-    /// walk-then-pickup whose move-to has stalled for
+    /// Gives up on an armed walk-then-pickup whose move-to has stalled for
     /// <see cref="StalledApproachGiveUpTicks"/> consecutive ticks with no
-    /// arrival signal (see that constant's own comment for why the
-    /// movement layer alone never resolves this). Without this, an
-    /// obstructed target left the reservation held and HasPendingUse (or
-    /// HasPendingPickup) true for the rest of the session -- every later
-    /// Use or pickup, from a click or a plugin, reported Busy forever.
-    /// Only one of the two can be pending at a time (arming either always
-    /// supersedes or is refused against the other), so one shared read of
-    /// the active move-to's stall counter is enough to judge both.
+    /// arrival signal. Whether that threshold has been reached, and whether
+    /// an armed use gets the same treatment first, is the shared route's
+    /// judgement; only what this client drew about the pickup is here.
+    /// Without the give-up, an obstructed target left the reservation held
+    /// and HasPendingPickup true for the rest of the session -- every later
+    /// pickup, from a click or a plugin, reported Busy forever.
     /// </summary>
-    private void ExpireStalledApproach()
+    /// <param name="stalledTicks">How long the walk has been stalled.</param>
+    public void GiveUpOnStalledPickupApproach(uint stalledTicks)
     {
-        if (_movement.CurrentApproachFailProgressCount() is not { } failCount)
+        if (!_transactions.TryCancelPendingPickup(
+                out RuntimePendingPickup pendingPickup))
         {
-            // No move-to is actively in progress at all. This should be
-            // unreachable while a use/pickup is still pending: arming
-            // either always starts a move-to, and PlayerModeController
-            // wires both MoveToComplete and MoveToCancelled to publish a
-            // completion unconditionally, which clears the pending state
-            // through HandleApproachCompletion either way. If this ever
-            // logs, the real bug is upstream of this method (a pending
-            // state surviving a move-to that already ended some other
-            // way) -- log it rather than guessing at a watchdog to paper
-            // over an invariant that should never break.
-            if (_transactions.HasPendingUse || _transactions.HasPendingPickup)
-            {
-                Console.WriteLine(
-                    "[interaction] invariant violation: a pending use or pickup is armed with no active move-to in progress");
-            }
             return;
         }
-
-        if (failCount < StalledApproachGiveUpTicks)
-            return;
-
-        // Giving up on an armed use, and stopping the character walking into
-        // whatever is in the way, is the shared route's business.
-        if (_worldObjectUse.TryGiveUpOnStalledUse(
-                failCount,
-                out _,
-                out bool spokenFor))
-        {
-            if (spokenFor)
-                _toast?.Invoke("Your approach never completed.");
-            return;
-        }
-
-        if (_transactions.TryCancelPendingPickup(out RuntimePendingPickup pendingPickup))
-        {
-            _movement.CancelApproach();
-            CancelPickupPresentation(
-                pendingPickup.ServerGuid,
-                pendingPickup.PendingPlacementToken);
-            Console.WriteLine(
-                $"[interaction] pickup item=0x{pendingPickup.ServerGuid:X8} approach stalled for {failCount} tick(s) -- refused");
-            if (_pendingPickupToastEnabled)
-                _toast?.Invoke("Your approach never completed.");
-        }
+        _movement.CancelApproach();
+        CancelPickupPresentation(
+            pendingPickup.ServerGuid,
+            pendingPickup.PendingPlacementToken);
+        Console.WriteLine(
+            $"[interaction] pickup item=0x{pendingPickup.ServerGuid:X8} approach stalled for {stalledTicks} tick(s) -- refused");
+        if (_pendingPickupToastEnabled)
+            _toast?.Invoke("Your approach never completed.");
     }
 
     public void OnMoveToCancelled(WeenieError _) => CancelPendingApproach();

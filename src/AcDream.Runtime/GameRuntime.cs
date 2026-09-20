@@ -428,11 +428,14 @@ public sealed class GameRuntime
 
             ApproachCompletions = new RuntimeApproachCompletionState();
             context.Movement.AttachApproachCompletions(ApproachCompletions);
+            var approachSource = new RuntimeApproachSource(
+                this,
+                ApproachCompletions);
             WorldObjectUseOwner = new RuntimeWorldObjectUse(
                 context.ItemInteraction,
                 new RuntimeSessionInteractionTransport(
                     () => context.Session.CurrentSession),
-                new RuntimeApproachSource(this, ApproachCompletions),
+                approachSource,
                 guid =>
                     guid != 0u
                     && context.EntityObjects.Entities.TryGetActive(
@@ -440,6 +443,17 @@ public sealed class GameRuntime
                         out Entities.RuntimeEntityRecord record)
                         ? record.Snapshot.Useability
                         : null,
+                dependencies.Log);
+            // The end of that walk: arrival sends what was armed for it, and a
+            // walk that has stopped getting anywhere is given up on. Both are
+            // taken once per frame, from the per-frame local-player step every
+            // client takes, so a use out of reach finishes with or without a
+            // window.
+            ArmedApproachDrive = new RuntimeInteractionApproachDriver(
+                ApproachCompletions,
+                context.ItemInteraction.RuntimeTransactions,
+                WorldObjectUseOwner,
+                approachSource,
                 dependencies.Log);
             GhostDismissalOwner = new Entities.RuntimeGhostDismissal(
                 context.EntityObjects,
@@ -556,6 +570,14 @@ public sealed class GameRuntime
     /// and ends it when the body goes.
     /// </summary>
     internal RuntimeApproachCompletionState ApproachCompletions { get; }
+
+    /// <summary>
+    /// Ends the walks armed to act on something once they are over. Driven
+    /// once per frame from the per-frame local-player step, on every client;
+    /// a client with something to draw on lends it the walk-then-pickup half
+    /// and the words a person who clicked is told.
+    /// </summary>
+    internal RuntimeInteractionApproachDriver ArmedApproachDrive { get; }
     public RuntimeLocalPlayerMovementState MovementOwner { get; }
     internal RuntimeLocalPlayerPhysicsPublicationState
         LocalPlayerPhysicsPublication => MovementOwner.PhysicsPublication;
@@ -737,7 +759,8 @@ public sealed class GameRuntime
             {
                 _events.EmitMovement(MovementOwner.Snapshot);
                 RuntimeVendorRangeQuery.EnforceRange(this);
-            });
+            },
+            ArmedApproachDrive);
     }
 
     public void ResetGeneration(

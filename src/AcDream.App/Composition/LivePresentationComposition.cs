@@ -852,6 +852,7 @@ internal sealed class LivePresentationCompositionPhase
                 d.RuntimeApproachCompletions),
             d.Runtime.ActionOwner.CombatTarget,
             d.Runtime.WorldObjectUseOwner,
+            d.Runtime.ArmedApproachDrive,
             d.Toast,
             d.RuntimeApproachCompletions,
             splitStack: guid =>
@@ -860,6 +861,13 @@ internal sealed class LivePresentationCompositionPhase
             fellowshipMembers: () =>
                 d.Runtime.Fellowship.GetMembers().Select(static member => member.Guid));
         selectionInteractionSource.Bind(selectionInteractions);
+        // This client's own half of ending an armed walk: the pickup, whose
+        // outcome changes what is drawn, and the words a person who clicked
+        // is told. The decision to end the walk is the shared drive's.
+        bindings.Adopt(
+            "armed approach presentation",
+            d.Runtime.ArmedApproachDrive.BindPresentationOwned(
+                selectionInteractions));
         bindings.Adopt(
             "world selection",
             interaction.LateBindings.Selection.Bind(
