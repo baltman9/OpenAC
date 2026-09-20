@@ -9,6 +9,19 @@ public class WorldEventsTests
     private static WorldEntitySnapshot S(uint id) => new(id, SourceId: 0x01000000u, Position: Vector3.Zero, Rotation: Quaternion.Identity);
 
     [Fact]
+    public void RecallLocationRevisionCanRejectStaleState()
+    {
+        var location = new PluginRecallLocation(
+            PluginRecallKind.House,
+            default,
+            "House",
+            2,
+            true);
+        Assert.False(location.IsStaleComparedTo(1));
+        Assert.True(location.IsStaleComparedTo(2));
+    }
+
+    [Fact]
     public void PortalTransitionRevisionCanRejectStaleNotifications()
     {
         var transition = new PluginPortalTransition(6, 2, 3u, true, true, false, false);

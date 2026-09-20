@@ -34,7 +34,12 @@ public readonly record struct PluginRecallLocation(
     PluginNavigationPosition Position,
     string Name,
     long Revision,
-    bool IsKnown);
+    bool IsKnown)
+{
+    /// <summary>True when this location revision predates handled state.</summary>
+    public bool IsStaleComparedTo(long handledRevision) =>
+        Revision != 0 && handledRevision > 0 && Revision <= handledRevision;
+}
 
 /// <summary>The most recent recall request issued by this surface.</summary>
 public readonly record struct PluginRecallRequest(
