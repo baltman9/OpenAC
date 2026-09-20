@@ -328,7 +328,7 @@ internal static class RuntimeAutomationBindings
             itemOwner.TryMergeItemsForAutomation,
             itemOwner.TryDropItemForAutomation,
             itemOwner.TryGiveItemForAutomation,
-            itemOwner.PlaceWorldItemInBackpack,
+            itemOwner.TryPlaceWorldItemInBackpack,
             itemOwner.TryAppraiseForAutomation,
             itemOwner.TrySalvageItemsForAutomation,
             (vendorId, itemId, amount) =>

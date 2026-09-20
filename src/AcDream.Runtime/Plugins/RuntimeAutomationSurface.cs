@@ -67,7 +67,7 @@ internal sealed class RuntimeAutomationSurface
     private Func<uint, uint, uint, bool>? _mergeItems;
     private Func<uint, uint, bool>? _dropItem;
     private Func<uint, uint, uint, bool>? _giveItem;
-    private Func<uint, bool, bool>? _pickupItem;
+    private Func<uint, bool, AcDream.Runtime.Gameplay.RuntimeBackpackPlacementOutcome>? _pickupItem;
     private Func<uint, bool>? _identifyItem;
     private Func<uint, IReadOnlyList<uint>, bool>? _salvageItems;
     private Func<uint, uint, int, bool>? _sellItem;
@@ -677,7 +677,7 @@ internal sealed class RuntimeAutomationSurface
         Func<uint, uint, uint, bool> mergeItems,
         Func<uint, uint, bool> dropItem,
         Func<uint, uint, uint, bool> giveItem,
-        Func<uint, bool, bool> pickupItem,
+        Func<uint, bool, AcDream.Runtime.Gameplay.RuntimeBackpackPlacementOutcome> pickupItem,
         Func<uint, bool> identifyItem,
         Func<uint, IReadOnlyList<uint>, bool>? salvageItems = null,
         Func<uint, uint, int, bool>? sellItem = null)
@@ -3409,7 +3409,8 @@ internal sealed class RuntimeAutomationSurface
     public PluginItemCommandResult Pickup(uint objectId, bool mainPack = false)
     {
         GameRuntime? runtime;
-        Func<uint, bool, bool>? pickup;
+        Func<uint, bool, AcDream.Runtime.Gameplay.RuntimeBackpackPlacementOutcome>?
+            pickup;
         lock (_gate)
         {
             runtime = _runtime;
@@ -3428,9 +3429,28 @@ internal sealed class RuntimeAutomationSurface
         }
         if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
             return new(PluginItemCommandStatus.Busy);
-        return pickup(objectId, mainPack)
-            ? new(PluginItemCommandStatus.Started)
-            : new(PluginItemCommandStatus.Refused);
+        // The placement has four endings that send nothing, and this used to
+        // answer Started for all of them: a plugin looting a corpse into a
+        // full pack was told its request was on its way and then waited for
+        // a completion that could never arrive.
+        return pickup(objectId, mainPack) switch
+        {
+            AcDream.Runtime.Gameplay.RuntimeBackpackPlacementOutcome.Sent =>
+                new(PluginItemCommandStatus.Started),
+            AcDream.Runtime.Gameplay.RuntimeBackpackPlacementOutcome.NoRoom =>
+                new(
+                    PluginItemCommandStatus.Refused,
+                    "no pack the player has open has room for it"),
+            AcDream.Runtime.Gameplay.RuntimeBackpackPlacementOutcome
+                .AlreadyPending =>
+                new(PluginItemCommandStatus.Busy),
+            AcDream.Runtime.Gameplay.RuntimeBackpackPlacementOutcome
+                .NotDispatched =>
+                new(
+                    PluginItemCommandStatus.Refused,
+                    "the merge this would have become did not go out"),
+            _ => new(PluginItemCommandStatus.Refused),
+        };
     }
 
     private static HashSet<uint> CaptureContainerIds(

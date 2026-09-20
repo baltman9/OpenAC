@@ -129,7 +129,8 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
             mergeItems: (_, _, _) => false,
             dropItem: (_, _) => false,
             giveItem: (_, _, _) => false,
-            pickupItem: (_, _) => false,
+            pickupItem: (_, _) => AcDream.Runtime.Gameplay
+                .RuntimeBackpackPlacementOutcome.NotThisClients,
             identifyItem: _ => false);
 
         // A landscape vendor at distance -- not in the player's
@@ -177,7 +178,8 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
             mergeItems: (_, _, _) => false,
             dropItem: (_, _) => false,
             giveItem: (_, _, _) => false,
-            pickupItem: (_, _) => false,
+            pickupItem: (_, _) => AcDream.Runtime.Gameplay
+                .RuntimeBackpackPlacementOutcome.NotThisClients,
             identifyItem: _ => false);
 
         uint playerId = runtime.PlayerIdentity.ServerGuid;
@@ -211,7 +213,8 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
             mergeItems: (_, _, _) => false,
             dropItem: (_, _) => false,
             giveItem: (_, _, _) => false,
-            pickupItem: (_, _) => false,
+            pickupItem: (_, _) => AcDream.Runtime.Gameplay
+                .RuntimeBackpackPlacementOutcome.NotThisClients,
             identifyItem: _ => false);
 
         const uint vendorId = 0x8000_0002u;
@@ -730,7 +733,8 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
             mergeItems: (_, _, _) => false,
             dropItem: (_, _) => false,
             giveItem: (_, _, _) => false,
-            pickupItem: (_, _) => false,
+            pickupItem: (_, _) => AcDream.Runtime.Gameplay
+                .RuntimeBackpackPlacementOutcome.NotThisClients,
             identifyItem: id => runtime.ActionOwner.Transactions.TryRequestAppraisal(
                 id,
                 sent => sentTo = sent));

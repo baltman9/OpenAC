@@ -980,11 +980,29 @@ public sealed class RuntimeItemInteraction : IDisposable
     /// pack with room, and when nothing has room the "completely full"
     /// notice is shown and nothing is sent. The server fills exactly the
     /// pack it is asked for, so the choice must be made here.
+    ///
+    /// Answers true when the request was the client's to handle, which is not
+    /// the same as it having been sent: the three ways it can come to nothing
+    /// all answer true here, because a caller driving the inventory panel has
+    /// already been told through the notice. A caller that has to act on the
+    /// outcome -- automation, which has no one to read a notice -- asks
+    /// <see cref="TryPlaceWorldItemInBackpack"/> instead.
     /// </summary>
-    public bool PlaceWorldItemInBackpack(uint itemGuid, bool mainPack = false)
+    public bool PlaceWorldItemInBackpack(uint itemGuid, bool mainPack = false) =>
+        TryPlaceWorldItemInBackpack(itemGuid, mainPack)
+            != RuntimeBackpackPlacementOutcome.NotThisClients;
+
+    /// <summary>
+    /// The same placement, saying which of its endings it reached. Four of
+    /// them send nothing, and a caller that cannot read a notice needs to
+    /// tell them apart from the one that does.
+    /// </summary>
+    public RuntimeBackpackPlacementOutcome TryPlaceWorldItemInBackpack(
+        uint itemGuid,
+        bool mainPack = false)
     {
         if (itemGuid == 0u || _placeInBackpack is null)
-            return false;
+            return RuntimeBackpackPlacementOutcome.NotThisClients;
 
         uint root = _playerGuid();
         uint target = PreferredBackpackContainer(mainPack);
@@ -1000,12 +1018,12 @@ public sealed class RuntimeItemInteraction : IDisposable
             {
                 ReportClientLocal(fullNotice);
             }
-            return true;
+            return RuntimeBackpackPlacementOutcome.NoRoom;
         }
 
         if (TryPlanAutoMerge(itemGuid) is { } merge)
         {
-            if (!TryDispatchPendingBackpackPlacement(
+            return TryDispatchPendingBackpackPlacement(
                     itemGuid,
                     containerId,
                     placement,
@@ -1020,11 +1038,9 @@ public sealed class RuntimeItemInteraction : IDisposable
                             merge.SourceObjectId,
                             merge.TargetObjectId);
                         return true;
-                    }))
-            {
-                return true;
-            }
-            return true;
+                    })
+                ? RuntimeBackpackPlacementOutcome.Sent
+                : RuntimeBackpackPlacementOutcome.NotDispatched;
         }
 
         if (!TryBeginPendingBackpackPlacement(
@@ -1033,10 +1049,10 @@ public sealed class RuntimeItemInteraction : IDisposable
                 placement,
                 out _))
         {
-            return true;
+            return RuntimeBackpackPlacementOutcome.AlreadyPending;
         }
         _placeInBackpack(itemGuid, containerId, placement);
-        return true;
+        return RuntimeBackpackPlacementOutcome.Sent;
     }
 
     private StackMergePlan? TryPlanAutoMerge(uint sourceId)

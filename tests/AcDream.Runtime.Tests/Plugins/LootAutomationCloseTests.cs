@@ -100,7 +100,7 @@ public sealed class LootAutomationCloseTests
             host.Runtime.ItemInteractionOwner.TryMergeItemsForAutomation,
             host.Runtime.ItemInteractionOwner.TryDropItemForAutomation,
             host.Runtime.ItemInteractionOwner.TryGiveItemForAutomation,
-            host.Runtime.ItemInteractionOwner.PlaceWorldItemInBackpack,
+            host.Runtime.ItemInteractionOwner.TryPlaceWorldItemInBackpack,
             host.Runtime.ItemInteractionOwner.TryAppraiseForAutomation);
         AddCorpse(host.Runtime.InventoryOwner.Objects, corpse);
         AddCorpse(host.Runtime.InventoryOwner.Objects, nextCorpse);

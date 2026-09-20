@@ -698,7 +698,8 @@ public sealed class HeadlessPluginSessionTests
             mergeItems: static (_, _, _) => true,
             dropItem: static (_, _) => true,
             giveItem: static (_, _, _) => true,
-            pickupItem: static (_, _) => true,
+            pickupItem: static (_, _) =>
+                AcDream.Runtime.Gameplay.RuntimeBackpackPlacementOutcome.Sent,
             identifyItem: static _ => true);
 
         Assert.Equal(
@@ -750,7 +751,8 @@ public sealed class HeadlessPluginSessionTests
             mergeItems: static (_, _, _) => true,
             dropItem: (_, _) => { dropCalls++; return true; },
             giveItem: (_, _, _) => { giveCalls++; return true; },
-            pickupItem: static (_, _) => true,
+            pickupItem: static (_, _) =>
+                AcDream.Runtime.Gameplay.RuntimeBackpackPlacementOutcome.Sent,
             identifyItem: static _ => true);
 
         Assert.Equal(
