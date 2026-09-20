@@ -258,7 +258,10 @@ public sealed class RuntimeWorldEntityProjection
         // giving two answers about the same object: a walk aimed at where
         // the creature was a moment ago rather than where it is.
         AcDream.Core.Physics.Position? position =
-            (known ? record.PhysicsBody?.CellPosition : null)
+            (known
+                ? AcDream.Runtime.Gameplay.RuntimeEntityBodyPlacement
+                    .SettledPosition(record)
+                : null)
             ?? entity.Position;
         return new WorldEntitySnapshot(
             entity.Identity.LocalEntityId,
