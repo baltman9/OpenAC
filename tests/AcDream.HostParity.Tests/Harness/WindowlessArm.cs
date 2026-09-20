@@ -1,5 +1,6 @@
 using AcDream.Core.Net;
 using AcDream.Headless.Hosting;
+using AcDream.Runtime.Chat;
 using AcDream.Headless.Plugins;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
@@ -27,6 +28,13 @@ internal sealed class WindowlessArm : ParityArm
     private readonly HeadlessGameplayOperations _gameplay;
     private readonly HeadlessPluginHost _host;
     private readonly RecordingPluginLogger _log = new();
+
+    /// <summary>
+    /// Where a typed line goes on this client, exactly as its session host
+    /// hangs it: the shared chat command route behind the surface the host
+    /// hands its console and its plugins.
+    /// </summary>
+    private readonly LiveChatCommandSurface _chatCommands = new();
     private DirectGameRuntimeCommandAdapter _commands = null!;
 
     internal WindowlessArm()
@@ -59,6 +67,9 @@ internal sealed class WindowlessArm : ParityArm
 
     internal override IPluginHost Host => _host;
 
+    internal override AcDream.Runtime.Chat.IPluginCommandBus Commands =>
+        _chatCommands;
+
     internal override IReadOnlyList<string> Warnings => _log.Lines;
 
     /// <summary>
@@ -80,25 +91,29 @@ internal sealed class WindowlessArm : ParityArm
     /// </summary>
     protected override ILiveSessionCommandRouting CreateCommandRoute(
         WorldSession session) =>
-        new BothRoutes(
+        new EveryRoute(
             _gameplay.CreateRoute(session),
-            _commands.CreateRoute(session));
+            _commands.CreateRoute(session),
+            // The third is the chat command route, which this client's
+            // session host hangs beside the other two: without it a typed
+            // line reaches nothing and every chat scenario compares silence.
+            _chatCommands.Attach(new LiveChatCommandRoute(
+                RuntimeChatCommandBindings.Create(Runtime, session))));
 
-    private sealed class BothRoutes(
-        ILiveSessionCommandRouting first,
-        ILiveSessionCommandRouting second)
+    private sealed class EveryRoute(
+        params ILiveSessionCommandRouting[] routes)
         : ILiveSessionCommandRouting
     {
         public void Activate()
         {
-            first.Activate();
-            second.Activate();
+            foreach (ILiveSessionCommandRouting route in routes)
+                route.Activate();
         }
 
         public void Dispose()
         {
-            second.Dispose();
-            first.Dispose();
+            for (int index = routes.Length - 1; index >= 0; index--)
+                routes[index].Dispose();
         }
     }
 

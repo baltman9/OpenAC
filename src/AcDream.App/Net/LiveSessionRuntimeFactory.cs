@@ -422,135 +422,42 @@ internal sealed class LiveSessionRuntimeFactory
     }
 
     private LiveSessionCommandBindings CreateCommandBindings(
-        WorldSession session)
-    {
-        void SendSingleCharacterOption(uint optionId, bool value) =>
-            _domain.Character.Options.TrySetOption(
-                optionId,
-                value,
-                sendAutoSave: session.SendSetSingleCharacterOption);
-
-        void SaveCharacterOptionsIfDirty() =>
-            _domain.Character.Options.TryFlush(() =>
-            {
-                CharacterOptionsBlobEcho echo = CharacterOptionsBlobSource.Capture(
-                    _domain.Character,
-                    _domain.Inventory.Shortcuts);
-                session.SendSetCharacterOptions(
-                    echo.Options1,
-                    echo.Options2,
-                    echo.Shortcuts,
-                    echo.FavoriteSpells,
-                    echo.DesiredComponents,
-                    echo.SpellbookFilters);
-            });
-
-        return new(
-        ClientCommands: RuntimeClientCommandBindings.Build(
+        WorldSession session) =>
+        LiveSessionCommandBindingFactory.Create(
             _domain.Runtime,
             session,
-            new RuntimeClientCommandHostBindings
-            {
-                ToggleFrameRate = _interaction.Settings.ToggleFrameRate,
-                SetUiLocked = _interaction.Settings.SetUiLocked,
-                ShowConfirmation = (message, completed) =>
-                    _ui.RetailUi?.ShowConfirmation(message, completed),
-                SaveUi = name => _ui.RetailUi?.SaveNamedLayout(name),
-                LoadUi = name => _ui.RetailUi?.RestoreNamedLayout(name),
-                SaveAutoUi = () => _ui.RetailUi?.SaveLayout(),
-                LoadAutoUi = () => _ui.RetailUi?.RestoreLayout(),
-                FillComponentBuyList = (category, maximumPrice) =>
-                    _ui.RetailUi?.FillComponentBuyList(
-                        category ?? VendorComponentFill.AnyCategory,
-                        maximumPrice),
-                SetLandscapeRadius = radius =>
-                    _interaction.Settings.SaveDisplay(
-                        _interaction.Settings.Display with
-                        {
-                            LandscapeDrawDistance = radius,
-                        }),
-                SetFieldOfView = degrees =>
-                    _interaction.Settings.SaveDisplay(
-                        _interaction.Settings.Display with
-                        {
-                            FieldOfView = degrees,
-                        }),
-            },
-            SetChatLogFile),
-        _domain.Communication.Chat,
-        _domain.Communication.TurbineChat,
-        PlayerGuid: () => _player.Identity.ServerGuid,
-        SendTalk: session.SendTalk,
-        SendTell: session.SendTell,
-        SendTalkDirect: session.SendTalkDirect,
-        SendChannel: session.SendChannel,
-        SendTurbineChat: (
-            roomId,
-            chatType,
-            dispatchType,
-            senderGuid,
-            text,
-            cookie) => session.SendTurbineChatTo(
-                roomId,
-                chatType,
-                dispatchType,
-                senderGuid,
-                text,
-                cookie),
-        AddShortcut: session.SendAddShortcut,
-        RemoveShortcut: session.SendRemoveShortcut,
-        AddFavorite: session.SendAddSpellFavorite,
-        RemoveFavorite: session.SendRemoveSpellFavorite,
-        SetSpellbookFilter: session.SendSpellbookFilter,
-        ForgetSpell: session.SendRemoveSpell,
-        SetDesiredComponent: session.SendSetDesiredComponentLevel,
-        ClearDesiredComponents: session.SendClearDesiredComponents,
-        RaiseAttribute: session.SendRaiseAttribute,
-        RaiseVital: session.SendRaiseVital,
-        RaiseSkill: session.SendRaiseSkill,
-        TrainSkill: session.SendTrainSkill,
-        AddFriend: session.SendAddFriend,
-        RemoveFriend: session.SendRemoveFriend,
-        ClearFriends: session.SendClearFriends,
-        RequestLegacyFriends: session.SendLegacyFriendsListRequest,
-        OpenTradeNegotiations: session.SendOpenTradeNegotiations,
-        CloseTradeNegotiations: session.SendCloseTradeNegotiations,
-        AddToTrade: item => session.SendAddToTrade(item),
-        AcceptTrade: (partner, selfAccepted, partnerAccepted) =>
-            session.SendAcceptTrade(
-                partner, 0d, 0u, partner, selfAccepted, partnerAccepted),
-        DeclineTrade: session.SendDeclineTrade,
-        ResetTrade: session.SendResetTrade,
-        ModifyCharacterSquelch: session.SendModifyCharacterSquelch,
-        ModifyAccountSquelch: session.SendModifyAccountSquelch,
-        ModifyGlobalSquelch: session.SendModifyGlobalSquelch,
-        Communication: _domain.Communication,
-        CharacterState: _domain.Character,
-        SendSingleCharacterOption: SendSingleCharacterOption,
-        SaveCharacterOptions: SaveCharacterOptionsIfDirty,
-        SendSetTitle: session.SendSetTitle,
-        SendFellowshipCreate: session.SendFellowshipCreate,
-        SendFellowshipRecruit: session.SendFellowshipRecruit,
-        SendFellowshipDismiss: session.SendFellowshipDismiss,
-        SendFellowshipQuit: session.SendFellowshipQuit,
-        SendFellowshipAssignNewLeader: session.SendFellowshipAssignNewLeader,
-        SendFellowshipChangeOpenness: session.SendFellowshipChangeOpenness,
-        SendFellowshipUpdateRequest: session.SendFellowshipUpdateRequest,
-        SendAllegianceSwear: session.SendAllegianceSwear,
-        SendAllegianceBreak: session.SendAllegianceBreak,
-        SendAllegianceKick: session.SendAllegianceKick,
-        SendAllegianceInfoRequest: session.SendAllegianceInfoRequest,
-        SendAllegianceUpdateRequest: session.SendAllegianceUpdateRequest,
-        Log: _log,
-        ResolvePose: command =>
-            _domain.Communication.ChatPoses.Resolve(
-                command,
-                male: _domain.EntityObjects.Objects
-                    .Get(_player.Identity.ServerGuid)?
-                    .Properties.GetInt(0x71u) == 1),
-        ExecuteMotion: motion => _player.Controller.ExecuteMotion(motion),
-        SendSoulEmote: session.SendSoulEmote);
-    }
+            RuntimeClientCommandBindings.Build(
+                _domain.Runtime,
+                session,
+                new RuntimeClientCommandHostBindings
+                {
+                    ToggleFrameRate = _interaction.Settings.ToggleFrameRate,
+                    SetUiLocked = _interaction.Settings.SetUiLocked,
+                    ShowConfirmation = (message, completed) =>
+                        _ui.RetailUi?.ShowConfirmation(message, completed),
+                    SaveUi = name => _ui.RetailUi?.SaveNamedLayout(name),
+                    LoadUi = name => _ui.RetailUi?.RestoreNamedLayout(name),
+                    SaveAutoUi = () => _ui.RetailUi?.SaveLayout(),
+                    LoadAutoUi = () => _ui.RetailUi?.RestoreLayout(),
+                    FillComponentBuyList = (category, maximumPrice) =>
+                        _ui.RetailUi?.FillComponentBuyList(
+                            category ?? VendorComponentFill.AnyCategory,
+                            maximumPrice),
+                    SetLandscapeRadius = radius =>
+                        _interaction.Settings.SaveDisplay(
+                            _interaction.Settings.Display with
+                            {
+                                LandscapeDrawDistance = radius,
+                            }),
+                    SetFieldOfView = degrees =>
+                        _interaction.Settings.SaveDisplay(
+                            _interaction.Settings.Display with
+                            {
+                                FieldOfView = degrees,
+                            }),
+                },
+                SetChatLogFile),
+            _log);
 
     private static double ClientTimerNow() =>
         Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;

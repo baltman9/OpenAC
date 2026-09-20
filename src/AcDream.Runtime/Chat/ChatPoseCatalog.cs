@@ -26,6 +26,28 @@ public sealed class ChatPoseCatalog
         IReadOnlyDictionary<string, RetailChatPose> poses) =>
         _poses = poses;
 
+    /// <summary>
+    /// A catalog of named poses, for a caller that has them already rather
+    /// than a data file to read them out of.
+    /// </summary>
+    /// <param name="poses">
+    /// The word used in speech against the pose it names. Words are matched
+    /// without regard to letter case, as they are in the table.
+    /// </param>
+    public static ChatPoseCatalog Of(
+        IEnumerable<KeyValuePair<string, RetailChatPose>> poses)
+    {
+        ArgumentNullException.ThrowIfNull(poses);
+        var table = new Dictionary<string, RetailChatPose>(
+            StringComparer.OrdinalIgnoreCase);
+        foreach (KeyValuePair<string, RetailChatPose> pose in poses)
+        {
+            if (!string.IsNullOrEmpty(pose.Key))
+                table[pose.Key] = pose.Value;
+        }
+        return new ChatPoseCatalog(table);
+    }
+
     /// <param name="datLock">
     /// Held while the table is read: the data files are not safe to read from
     /// two threads at once.

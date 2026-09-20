@@ -881,38 +881,22 @@ internal sealed class HeadlessSessionHost : IDisposable
         }
     }
 
+    /// <summary>
+    /// What a typed line needs to become speech, a tell, a channel message,
+    /// a pose or a client command. It is the one runtime construction both
+    /// clients use; this client lends it no window and no chat-log file, and
+    /// the commands that need those say so.
+    /// </summary>
     private LiveChatCommandBindings CreateChatCommandBindings(
         AcDream.Core.Net.WorldSession session,
-        GameRuntime runtime) => new(
-        // The client commands are one dispatcher in the runtime, so a line
-        // typed at the console does what the same line does in a chat box.
-        ExecuteClientCommand: new RuntimeClientCommandDispatcher(
-            RuntimeClientCommandBindings.Build(runtime, session)).Execute,
-        Communication: runtime.CommunicationOwner,
-        Chat: runtime.CommunicationOwner.Chat,
-        TurbineChat: runtime.CommunicationOwner.TurbineChat,
-        CharacterState: runtime.CharacterOwner,
-        PlayerGuid: () => runtime.PlayerIdentity.ServerGuid,
-        SendTalk: session.SendTalk,
-        SendTell: session.SendTell,
-        SendTalkDirect: session.SendTalkDirect,
-        SendChannel: session.SendChannel,
-        SendTurbineChat: session.SendTurbineChatTo,
-        // A pose in a line of speech plays the same motion and prints the same
-        // line without a window as with one; the table behind it is read in
-        // the shared content pass.
-        ResolvePose: command =>
-            runtime.CommunicationOwner.ChatPoses.Resolve(
-                command,
-                male: runtime.EntityObjects.Objects
-                    .Get(runtime.PlayerIdentity.ServerGuid)?
-                    .Properties.GetInt(0x71u) == 1),
-        ExecuteMotion: motion => runtime.MovementOwner.ExecuteMotion(motion),
-        SendSoulEmote: session.SendSoulEmote,
-        Log: message => _diagnostics.Message(
-            _descriptor.Id,
-            message,
-            runtime.Generation.Value));
+        GameRuntime runtime) =>
+        RuntimeChatCommandBindings.Create(
+            runtime,
+            session,
+            log: message => _diagnostics.Message(
+                _descriptor.Id,
+                message,
+                runtime.Generation.Value));
 
 
     /// <summary>The game-data file every host reads skill formulas from.</summary>

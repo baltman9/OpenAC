@@ -75,6 +75,13 @@ internal abstract class ParityArm : IDisposable
     /// <summary>What a plugin sees. Built by the host, not by the harness.</summary>
     internal abstract IPluginHost Host { get; }
 
+    /// <summary>
+    /// Where a line typed into the chat box goes on this client: the host's
+    /// own outbound command route, which is what turns a submitted line into
+    /// speech, a tell, a channel message, a client command or nothing.
+    /// </summary>
+    internal abstract AcDream.Runtime.Chat.IPluginCommandBus Commands { get; }
+
     /// <summary>What the binding pass said about seams this arm left empty.</summary>
     internal abstract IReadOnlyList<string> Warnings { get; }
 

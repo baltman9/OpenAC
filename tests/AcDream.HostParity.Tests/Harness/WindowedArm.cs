@@ -7,6 +7,7 @@ using AcDream.Core.Net;
 using AcDream.Core.Plugins;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
+using AcDream.Runtime.Chat;
 using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Plugins;
 using AcDream.Runtime.Session;
@@ -146,14 +147,23 @@ internal sealed class WindowedArm : ParityArm
         _events.FireTick(TickSeconds);
     }
 
+    internal override AcDream.Runtime.Chat.IPluginCommandBus Commands =>
+        _commands;
+
     /// <summary>
-    /// The windowed combat and cast paths read the world connection off the
-    /// session controller, not off the command route, so the route the window
-    /// builds -- a chat and client-command surface -- has nothing to do with
-    /// what these scenarios exercise.
+    /// The windowed client's own outbound command route, over the same
+    /// bindings its session factory builds -- the chat route, the client
+    /// commands and every other send it offers. The two things a window
+    /// lends its client commands are absent here, as they are in a run with
+    /// no window, so those commands answer that they need one.
     /// </summary>
     protected override ILiveSessionCommandRouting CreateCommandRoute(
-        WorldSession session) => new InertCommandRoute();
+        WorldSession session) =>
+        _commands.Attach(new LiveSessionCommandRouter(
+            LiveSessionCommandBindingFactory.Create(
+                Runtime,
+                session,
+                RuntimeClientCommandBindings.Build(Runtime, session))));
 
     /// <summary>
     /// The windowed client's own frame host, built from the real classes:
@@ -295,16 +305,6 @@ internal sealed class WindowedArm : ParityArm
         public bool IsHeld(MouseButton button) => false;
     }
 
-    private sealed class InertCommandRoute : ILiveSessionCommandRouting
-    {
-        public void Activate()
-        {
-        }
-
-        public void Dispose()
-        {
-        }
-    }
 
     protected override void DisposeHost()
     {
