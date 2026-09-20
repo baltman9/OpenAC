@@ -103,6 +103,14 @@ if (sessionConfigFlagPath is not null)
         Log.Error("--session-config credential unavailable: {Error}", error.Message);
         return 2;
     }
+    // A settings map written into the document is refused here in the same
+    // words a settings file is refused below, rather than ending the client
+    // with a stack trace.
+    catch (AcDream.Runtime.Plugins.PluginSessionSettingsException error)
+    {
+        Log.Error("--session-config plugin settings invalid: {Error}", error.Message);
+        return 2;
+    }
     finally
     {
         secret?.Dispose();

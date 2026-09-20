@@ -27,7 +27,12 @@ What a plugin may rely on:
   behind, so the wall clock can jump between two ticks even though the
   elapsed value does not;
 - a stall longer than about 0.2 s is dropped rather than replayed: the
-  client does not owe a plugin the ticks it missed while it was away;
+  client does not owe a plugin the ticks it missed while it was away. So
+  elapsed time added up across ticks is a count of the steps a plugin was
+  given, not a clock: every stall leaves it further behind the wall clock,
+  and it never catches up. Time a thing by the wall clock -- when it should
+  next happen, checked each tick -- rather than by adding up steps, or a
+  macro drifts by whatever the session has stalled for since it started;
 - the tick keeps running while there is no world -- at login, and while the
   character is between worlds going through a portal -- even though the
   world's own clock is standing still, so a plugin waiting for the world to

@@ -113,7 +113,7 @@ libraries directly. It does not require those environment variables.
 | `ACDREAM_HEADLESS_CONSOLE=0\|1` | Headless interactive console; defaults to on when stdin is a terminal |
 | `ACDREAM_HEADLESS_CONSOLE_STREAM=stderr\|stdout` | Which stream that console prints to; `stderr` by default |
 | `ACDREAM_PLUGIN_TAGS=a,b` | Words this client wants to be found by; plugins on the clients running on this machine can see one another's tags and filter on them. The headless config's `pluginTags` is the same option |
-| `ACDREAM_PLUGIN_SETTINGS_FILE=<path>` | Path to a JSON file holding the startup settings each plugin is given. The file is the same map the headless config names under `pluginSettings`, so a plugin reads the same settings whichever client is running. A named file that is missing, unreadable or the wrong shape stops startup with the reason; unset means no settings |
+| `ACDREAM_PLUGIN_SETTINGS_FILE=<path>` | Path to a JSON file holding the startup settings each plugin is given, on either client. The file is the same map the headless config names under `pluginSettings`, which outranks it; a session that names none falls back to this file. A named file that is missing, unreadable or the wrong shape stops startup with the reason; unset means no settings |
 
 A few other `ACDREAM_*` variables switch original-client behaviors that are
 on by default (`ACDREAM_RETAIL_CHASE`, `ACDREAM_CAMERA_COLLIDE`,
@@ -180,9 +180,9 @@ settings per plugin id. A plugin reads only its own, through
 }
 ```
 
-The graphical client takes the same map from a file of its own:
-`ACDREAM_PLUGIN_SETTINGS_FILE=<path>`, where the whole file is that map and
-nothing else:
+A session that names none takes the same map from a file instead, on either
+client: `ACDREAM_PLUGIN_SETTINGS_FILE=<path>`, where the whole file is that
+map and nothing else:
 
 ```json
 {
@@ -190,9 +190,10 @@ nothing else:
 }
 ```
 
-Both clients read it the same way and refuse the same mistakes: a plugin id
-with nothing behind it, or a setting with no value, stops startup and says
-which one. A file the graphical client was told to read and could not is a
+Both clients read both places the same way, in the same order — what the
+session names wins and leaves the file unread — and refuse the same mistakes:
+a plugin id with nothing behind it, or a setting with no value, stops startup
+and says which one. A file a client was told to read and could not is a
 startup error too, never a quiet run with no settings — a plugin that decides
 what to do on login from a setting would otherwise behave differently under a
 window than it does without one.
@@ -220,7 +221,7 @@ no windowed session to show.
 Where a document and a startup option say the same thing, the document wins:
 its `pluginTags` outranks `ACDREAM_PLUGIN_TAGS`, and its `pluginSettings`
 outranks `ACDREAM_PLUGIN_SETTINGS_FILE`, which is left unread. A field the
-document leaves out still falls back to the startup option.
+document leaves out still falls back to the startup option, on either client.
 
 For a single local session, `run` also accepts `--user` and `--password`. Add
 more session entries for a multi-session process. Built-in policies:
