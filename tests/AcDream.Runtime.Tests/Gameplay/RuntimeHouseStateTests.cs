@@ -20,6 +20,23 @@ public sealed class RuntimeHouseStateTests
     }
 
     [Fact]
+    public void RevisionAdvancesForAuthoritativeHouseStateChanges()
+    {
+        var house = new RuntimeHouseState();
+        Assert.Equal(0, house.Revision);
+
+        house.ApplyHouseData(SampleHouseData(), Self);
+        long learned = house.Revision;
+        Assert.True(learned > 0);
+
+        house.ApplyRentTime(123u, Self);
+        Assert.True(house.Revision > learned);
+
+        house.ApplyHouseStatus(0u, Self);
+        Assert.True(house.Revision > learned);
+    }
+
+    [Fact]
     public void HouseStatus_FreshCharacterWithNoTimestamp_ShowsBothHouselessLines()
     {
         var objects = new ClientObjectTable();
