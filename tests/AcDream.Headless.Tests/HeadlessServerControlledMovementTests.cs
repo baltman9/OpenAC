@@ -215,7 +215,9 @@ public sealed class HeadlessServerControlledMovementTests
         private readonly RuntimeRemoteBodyDrive _remoteBodies;
         private ushort _targetPositionSequence = 1;
 
-        internal Fixture(float targetGirth = 0f)
+        internal Fixture(
+            float targetGirth = 0f,
+            IRuntimeMotionContentSource? animationContent = null)
         {
             _credential = new HeadlessCredentialSecret("fixture", "password");
             _host = new HeadlessSessionHost(
@@ -251,6 +253,14 @@ public sealed class HeadlessServerControlledMovementTests
 
             _target = Register(Spawn(Target, TargetStart), isLocalPlayer: false);
             _targetMotion = ArmTargetBody();
+            // A session that holds a lease on the content files has cycles
+            // for its character to move itself by. This stands in for that
+            // lease with content authored by hand.
+            if (animationContent is not null)
+            {
+                Runtime.EntityObjects.Physics.BindMotionContentSource(
+                    animationContent);
+            }
 
             _inertSession = HeadlessSessionHostTests
                 .CreateInertLiveSessionHost();
@@ -472,6 +482,165 @@ public sealed class HeadlessServerControlledMovementTests
     /// A client with no installed content still knows a part layout: enough
     /// for a body to be carried and swept, with no cycles to play.
     /// </summary>
+    /// <summary>A fortieth of a turn a frame, thirty frames a second.</summary>
+    private const float AuthoredTurnPerFrame = MathF.Tau / 40f;
+
+    /// <summary>
+    /// The fixed rate a character with no cycles is turned at, per unit of
+    /// the turn speed the command carries. It is here to be compared against,
+    /// not to be met.
+    /// </summary>
+    private const float RateWithNoCycles = 1.5f;
+
+    [Fact]
+    public void AWindowlessCharacterTurnsAtItsOwnCyclesRateAndNotAFixedOne()
+    {
+        using var world = new Fixture(
+            animationContent: new TurningContent(SetupId));
+
+        world.Runtime.MovementOwner.SetCommandInput(
+            new MovementInput(TurnRight: true, Run: true));
+        float before = world.Controller.Yaw;
+        // Half a second: long enough to measure, short enough that the
+        // character has not come round far enough for the angle to wrap.
+        world.Advance(0.5f);
+        float turnedPerSecond = MathF.Abs(world.Controller.Yaw - before) * 2f;
+
+        // The character turned by its own cycle: a fortieth of a turn a frame
+        // at thirty frames a second, taken at the speed the turn command
+        // carries. The first steps go on finding the cycle, so this is within
+        // a fifth of that and not to the last radian.
+        float carried = world.Controller.Motion.InterpretedState.TurnSpeed;
+        float fromTheCycle = AuthoredTurnPerFrame * 30f * carried;
+        Assert.True(
+            MathF.Abs(turnedPerSecond - fromTheCycle) < fromTheCycle * 0.2f,
+            $"turned {turnedPerSecond:0.000} rad/s, not the cycle's "
+            + $"{fromTheCycle:0.000} rad/s.");
+        // And not at the fixed rate a character with no cycles is turned at,
+        // which is what a windowless session used to do: the two are far
+        // enough apart to leave the character off its bearing through a
+        // corner, which is the whole difference.
+        Assert.True(
+            MathF.Abs(turnedPerSecond - (RateWithNoCycles * carried)) > 1f,
+            $"turned {turnedPerSecond:0.000} rad/s, which is the fixed rate "
+            + $"{RateWithNoCycles * carried:0.000} rad/s and not the cycle's.");
+    }
+
+    /// <summary>
+    /// Animation content with one part layout and one table: standing still,
+    /// and turning to the right by a hundredth of a turn a frame.
+    /// </summary>
+    private sealed class TurningContent : IRuntimeMotionContentSource
+    {
+        private const uint MotionTableId = 0x09000001u;
+        private const uint StandingAnimation = 0x03000001u;
+        private const uint TurningAnimation = 0x03000002u;
+        private const uint NonCombat = 0x8000003Du;
+
+        private readonly uint _setupId;
+        private readonly Loader _loader = new();
+        private readonly DatReaderWriter.DBObjs.MotionTable _table;
+
+        internal TurningContent(uint setupId)
+        {
+            _setupId = setupId;
+            _loader.Add(StandingAnimation, Authored(0f));
+            _loader.Add(TurningAnimation, Authored(-AuthoredTurnPerFrame));
+            _table = new DatReaderWriter.DBObjs.MotionTable
+            {
+                DefaultStyle =
+                    (DatReaderWriter.Enums.MotionCommand)NonCombat,
+            };
+            _table.StyleDefaults[
+                (DatReaderWriter.Enums.MotionCommand)NonCombat] =
+                (DatReaderWriter.Enums.MotionCommand)MotionCommand.Ready;
+            Cycle(MotionCommand.Ready, StandingAnimation);
+            Cycle(MotionCommand.TurnRight, TurningAnimation);
+            Cycle(MotionCommand.TurnLeft, TurningAnimation);
+        }
+
+        public IAnimationLoader AnimationLoader => _loader;
+
+        public DatReaderWriter.DBObjs.MotionTable? TryGetMotionTable(
+            uint motionTableId) =>
+            motionTableId == MotionTableId ? _table : null;
+
+        public DatReaderWriter.DBObjs.Setup? TryGetSetup(uint id)
+        {
+            if (id != _setupId)
+                return null;
+            var setup = new DatReaderWriter.DBObjs.Setup
+            {
+                DefaultMotionTable =
+                    (DatReaderWriter.Types.QualifiedDataId<
+                        DatReaderWriter.DBObjs.MotionTable>)MotionTableId,
+            };
+            setup.Parts.Add(0x01000000u);
+            setup.DefaultScale.Add(Vector3.One);
+            return setup;
+        }
+
+        private void Cycle(uint command, uint animationId)
+        {
+            var data = new DatReaderWriter.Types.MotionData();
+            data.Anims.Add(new DatReaderWriter.Types.AnimData
+            {
+                AnimId = (DatReaderWriter.Types.QualifiedDataId<
+                    DatReaderWriter.DBObjs.Animation>)animationId,
+                LowFrame = 0,
+                HighFrame = -1,
+                Framerate = 30f,
+            });
+            _table.Cycles[(int)((NonCombat << 16) | (command & 0xFFFFFFu))] =
+                data;
+        }
+
+        private static DatReaderWriter.DBObjs.Animation Authored(float turn)
+        {
+            var animation = new DatReaderWriter.DBObjs.Animation
+            {
+                Flags = DatReaderWriter.Enums.AnimationFlags.PosFrames,
+            };
+            for (int frame = 0; frame < 4; frame++)
+            {
+                var partFrame = new DatReaderWriter.Types.AnimationFrame(1);
+                partFrame.Frames.Add(new DatReaderWriter.Types.Frame
+                {
+                    Origin = Vector3.Zero,
+                    Orientation = Quaternion.Identity,
+                });
+                animation.PartFrames.Add(partFrame);
+                animation.PosFrames.Add(new DatReaderWriter.Types.Frame
+                {
+                    Origin = Vector3.Zero,
+                    Orientation = turn == 0f
+                        ? Quaternion.Identity
+                        : Quaternion.CreateFromAxisAngle(Vector3.UnitZ, turn),
+                });
+            }
+            return animation;
+        }
+
+        private sealed class Loader : IAnimationLoader
+        {
+            private readonly Dictionary<uint, DatReaderWriter.DBObjs.Animation>
+                _animations = new();
+
+            internal void Add(
+                uint id,
+                DatReaderWriter.DBObjs.Animation animation) =>
+                _animations[id] = animation;
+
+            public DatReaderWriter.DBObjs.Animation? LoadAnimation(
+                uint requested) =>
+                _animations.TryGetValue(
+                    requested,
+                    out DatReaderWriter.DBObjs.Animation? animation)
+                    ? animation
+                    : null;
+        }
+    }
+
     private sealed class PartLayoutOnlyContent(uint setupId)
         : IRuntimeMotionContentSource
     {

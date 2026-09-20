@@ -400,7 +400,47 @@ internal sealed class WindowedArm : ParityArm
             new LocalPlayerOutboundController(
                 static (_, _, _, _, _, _) => { }),
             _sessionSource);
+        // What this client hangs off the character's own locomotion: the
+        // same one cycle advance, with the poses of its parts built along the
+        // way. Nothing is drawn here, so the pose work ends at the poses that
+        // advance hands back, which is as far as this path goes without a
+        // graphics card.
+        Runtime.LocalPlayerMotion.BindPresentation(
+            new RuntimeLocalPlayerMotionPresentation(AdvanceRootAndBuildPoses));
         return Runtime.CreateLocalPlayerFrameController(frameRuntime, input);
+    }
+
+    /// <summary>
+    /// One step of the character's cycle, poses and all, the way the client
+    /// with a window takes it.
+    /// </summary>
+    private void AdvanceRootAndBuildPoses(
+        float deltaSeconds,
+        AcDream.Core.Physics.Motion.MotionDeltaFrame output)
+    {
+        output.Reset();
+        if (Runtime.EntityObjects.Physics.EntityRemoteAnimation(
+                Runtime.PlayerIdentity.ServerGuid)
+            is not { Sequencer: { } sequencer } animation)
+        {
+            return;
+        }
+        DatReaderWriter.Types.Frame root = animation.RootMotionScratch;
+        root.Origin = System.Numerics.Vector3.Zero;
+        root.Orientation = System.Numerics.Quaternion.Identity;
+        LastPartPoses = sequencer.Advance(deltaSeconds, root);
+        output.Origin = root.Origin;
+        output.Orientation = root.Orientation;
+    }
+
+    /// <summary>
+    /// The poses the last step left. Nothing looks at them here; they exist
+    /// so that the pose work this client really does is really done.
+    /// </summary>
+    internal IReadOnlyList<AcDream.Core.Physics.PartTransform>? LastPartPoses
+    {
+        get;
+        private set;
     }
 
     /// <summary>

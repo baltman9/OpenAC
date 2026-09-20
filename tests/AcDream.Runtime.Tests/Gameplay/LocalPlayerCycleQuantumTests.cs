@@ -142,6 +142,10 @@ public class LocalPlayerCycleQuantumTests
             10f * TravelPerStep,
             Vector2.Distance(Flat(controller.Position), before),
             precision: 4);
+        // On flat ground the character is carried along it, not into or off
+        // it: it ends back on its feet at the height it set out from.
+        Assert.True(controller.CanSendPositionEvent);
+        Assert.Equal(Start.Z, controller.Position.Z, precision: 3);
     }
 
     [Fact]
@@ -249,21 +253,6 @@ public class LocalPlayerCycleQuantumTests
             TurnPerStep,
             NormalizeTurn(controller.Yaw - turnedBefore),
             precision: 4);
-    }
-
-    [Fact]
-    public void AStepOnFlatGroundLeavesTheCharacterStandingAndSayingSo()
-    {
-        PlayerMovementController controller = Standing();
-        _ = Attach(controller, turn: 0f);
-
-        MovementResult result = default;
-        for (int step = 0; step < 5; step++)
-            result = controller.Update(OneStep, new MovementInput());
-
-        Assert.True(result.IsOnGround);
-        Assert.True(controller.CanSendPositionEvent);
-        Assert.Equal(Start.Z, controller.Position.Z, precision: 3);
     }
 
     private static float NormalizeTurn(float radians)

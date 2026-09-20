@@ -1876,6 +1876,14 @@ public sealed class PlayerMovementController
                     : Vector3.Zero;
                 pmDelta.Orientation = _animationRootMotionScratch.Orientation;
             }
+            // A character with no cycles to play has no travel and no turn of
+            // its own, so the two branches below shove its body along by the
+            // speed it has declared and turn it at a fixed rate instead. That
+            // is not how a character moves and it is measurably not the same:
+            // it is only here for a body with no animation content behind it
+            // at all, which is every body built without the content files --
+            // most of the movement tests, and any session holding no lease on
+            // them. A body that has its cycles never reaches either branch.
             else if (_motion.InterpretedState.TurnCommand == MotionCommand.TurnRight)
             {
                 Yaw -= 1.5f
