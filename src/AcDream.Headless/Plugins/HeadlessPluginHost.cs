@@ -628,9 +628,16 @@ internal sealed class HeadlessPluginHost
             handlers = _objectChanged;
         if (handlers is null)
             return;
+        PluginWorldObject? current = null;
+        if (kind != PluginObjectChangeKind.Released
+            && ((IWorldObjectAutomation)_automation).TryGet(objectId, out PluginWorldObject snapshot))
+        {
+            current = snapshot;
+        }
         var change = new PluginObjectChange(objectId, kind)
         {
             Revision = Interlocked.Increment(ref _objectChangeRevision),
+            Current = current,
         };
         foreach (Delegate handler in handlers.GetInvocationList())
         {
