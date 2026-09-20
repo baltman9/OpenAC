@@ -40,6 +40,9 @@ internal sealed class ParityServer(WorldSession session, Func<uint> playerGuid)
 
     private uint _gameEventSequence;
 
+    /// <summary>Numbers the statements the server makes about the character.</summary>
+    private byte _characterSequence;
+
     /// <summary>
     /// The last step of letting a character in: the connection is in the
     /// world from here on.
@@ -255,6 +258,44 @@ internal sealed class ParityServer(WorldSession session, Func<uint> playerGuid)
         BinaryPrimitives.WriteUInt32LittleEndian(payload, containerGuid);
         GameEvent(GameEventType.CloseGroundContainer, payload);
     }
+
+    /// <summary>
+    /// The server states one of the character's own skills, which is how a
+    /// skill is raised mid-session.
+    /// </summary>
+    /// <param name="skillId">Which skill; 24 is run and 22 is jump.</param>
+    /// <param name="ranks">How much of it the character has trained.</param>
+    internal void SkillUpdate(uint skillId, uint ranks) =>
+        Raise(
+            nameof(WorldSession.SkillUpdated),
+            new PrivateUpdateSkill.Parsed(
+                Sequence: ++_characterSequence,
+                SkillId: skillId,
+                Ranks: ranks,
+                AdjustPP: 0,
+                // Trained, which is what a raised skill is.
+                AdvancementClass: 2u,
+                Xp: 0u,
+                Init: 0u,
+                Resistance: 0u,
+                LastUsed: 0d));
+
+    /// <summary>
+    /// The server states one of the character's vitals in full: how much of
+    /// it there is and how much is left.
+    /// </summary>
+    /// <param name="vitalId">Which vital; 4 is stamina.</param>
+    /// <param name="current">How much of it is left.</param>
+    internal void VitalUpdate(uint vitalId, uint current) =>
+        Raise(
+            nameof(WorldSession.VitalUpdated),
+            new PrivateUpdateVital.ParsedFull(
+                Sequence: ++_characterSequence,
+                VitalId: vitalId,
+                Ranks: 0u,
+                Start: 100u,
+                Xp: 0u,
+                Current: current));
 
     /// <summary>
     /// The character was killed, with the line the server sends about it.

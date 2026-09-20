@@ -50,30 +50,23 @@ internal abstract class ParityArm : IDisposable
         Dependencies = buildDependencies(Operations);
         Runtime = new GameRuntime(Dependencies);
         _hostLease = Runtime.AcquireHostLease($"{name} parity arm");
+        // This client's OWN session bindings, from its own builder. They used
+        // to be one record written here for both arms, which meant the thing
+        // each client really hands its session host -- the record that decides
+        // what happens on connect, on taking hold of a character and on
+        // arriving in the world -- was the one thing in the harness no
+        // scenario ran. It is built here rather than after the constructor
+        // because the session host takes it at birth, so an arm's builder may
+        // only read what is already standing: the runtime, this arm's scratch
+        // folder, and its own field initialisers.
         Session = new LiveSessionHost(
             Runtime.Session,
-            new LiveSessionHostBindings(
+            CreateSessionHostBindings(
                 new LiveSessionRoutingFactories(
                     CreateEventRoute,
                     CreateCommandRoute),
-                generation => Runtime.ResetGeneration(generation, InertReset.Instance),
-                new LiveSessionSelectionBindings(
-                    id => Runtime.PlayerIdentity.ServerGuid = id,
-                    _ => { },
-                    Runtime.CommunicationOwner.Chat.SetLocalPlayerGuid,
-                    _ => { },
-                    _ => { },
-                    Runtime.ActionOwner.Combat.Clear),
-                new LiveSessionEnteredWorldBindings(
-                    _ => { },
-                    () => { },
-                    () => { },
-                    _ => { },
-                    () => { }),
-                (_, _, _) => { },
-                () => { },
-                _ => { },
-                _ => { }),
+                generation =>
+                    Runtime.ResetGeneration(generation, InertReset.Instance)),
             new LiveSessionConnectOptions(
                 true, "127.0.0.1", 9000, "parity", "parity"),
             runtime: Runtime);
@@ -116,6 +109,26 @@ internal abstract class ParityArm : IDisposable
     internal abstract IReadOnlyList<string> Warnings { get; }
 
     /// <summary>
+    /// The bindings this client really hands its session host, from this
+    /// client's own builder, with the parts it can supply here. A part that
+    /// only a drawn world or a console can provide is stood in for and said
+    /// so; nothing is written here that the client does not write itself.
+    /// </summary>
+    /// <param name="routing">How this arm takes hold of a world connection.</param>
+    /// <param name="reset">Puts every owner back for a new generation.</param>
+    protected abstract LiveSessionHostBindings CreateSessionHostBindings(
+        LiveSessionRoutingFactories routing,
+        Action<RuntimeGenerationToken> reset);
+
+    /// <summary>
+    /// The bindings this client really hands its inbound event route for the
+    /// character it is playing: the skill formulas, the confirmation hooks,
+    /// and what happens when the server changes how fast the character runs.
+    /// </summary>
+    internal abstract LiveCharacterSessionBindings
+        CreateCharacterSessionBindings();
+
+    /// <summary>
     /// The client is asking the player to accept or decline something, raised
     /// from the same place this client raises it for real. Nothing here draws
     /// a dialog; what a scenario is after is whether a plugin is told.
@@ -134,6 +147,15 @@ internal abstract class ParityArm : IDisposable
         // refused outright until then, on both clients alike.
         Server.LetTheCharacterIn();
         Runtime.SyncLifecycleEmission();
+        // Each client says its own lines about the session opening, and says
+        // them in its own place: the one with a window writes them into the
+        // chat log the player reads, the one without writes them to its
+        // console. That is a real difference and has a test of its own
+        // (see the session-opening lines test on the chat route); every other
+        // scenario is about what happens once the character is in, so the
+        // log starts empty here rather than carrying one client's opening
+        // lines and not the other's.
+        Runtime.CommunicationOwner.Chat.Clear();
     }
 
     /// <summary>
@@ -208,7 +230,10 @@ internal abstract class ParityArm : IDisposable
         _server = new ParityServer(
             session,
             () => Runtime.PlayerIdentity.ServerGuid);
-        return ParityInboundRoute.Create(Runtime, session);
+        return ParityInboundRoute.Create(
+            Runtime,
+            session,
+            CreateCharacterSessionBindings());
     }
 
     /// <summary>Delivers something the server would have said.</summary>

@@ -28,6 +28,8 @@ internal sealed class WindowlessArm : ParityArm
     private readonly HeadlessGameplayOperations _gameplay;
     private readonly HeadlessPluginHost _host;
     private readonly RecordingPluginLogger _log = new();
+    private readonly AcDream.Runtime.Session.SessionStatusWriter _status =
+        new(path: null);
 
     /// <summary>
     /// Where a typed line goes on this client, exactly as its session host
@@ -77,6 +79,60 @@ internal sealed class WindowlessArm : ParityArm
     /// <summary>Where this client's session host raises it.</summary>
     internal override void ShowConfirmation(PluginConfirmation confirmation) =>
         _host.RaiseConfirmationRequested(confirmation);
+
+    /// <summary>
+    /// The windowless client's own session bindings, from its own builder.
+    /// Every part is real: this client's identity owner, its chat identity,
+    /// its console lines and its status file. There is nothing it needs a
+    /// window for.
+    /// </summary>
+    protected override LiveSessionHostBindings CreateSessionHostBindings(
+        LiveSessionRoutingFactories routing,
+        Action<RuntimeGenerationToken> reset) =>
+        HeadlessAutomationCapabilities.BuildSessionHostBindings(
+            new HeadlessSessionHostParts
+            {
+                CreateEvents = routing.CreateEvents,
+                CreateCommands = routing.CreateCommands,
+                Reset = reset,
+                Identity = Runtime.PlayerIdentity,
+                Communication = Runtime.CommunicationOwner,
+                Combat = Runtime.ActionOwner.Combat,
+                NoteActiveCharacter = name =>
+                    _log.Info($"active character: {name}"),
+                Diagnostic = _log.Info,
+                StatusWriter = _status,
+                SessionId = Name,
+                NoteConnected = () => _log.Info("connected"),
+                LoginCommands = null,
+                Warn = _log.Warn,
+            });
+
+    /// <summary>
+    /// The windowless client's own character bindings. A bot session with no
+    /// lease on the installed data files has no skill formulas, which is the
+    /// difference the census carries; everything else is this client's.
+    /// </summary>
+    internal override LiveCharacterSessionBindings
+        CreateCharacterSessionBindings() =>
+        HeadlessAutomationCapabilities.BuildCharacterSessionBindings(
+            new HeadlessCharacterSessionParts
+            {
+                Character = Runtime.CharacterOwner,
+                Combat = Runtime.ActionOwner.Combat,
+                ResolveSkillFormulaBonus = null,
+                ClientTime = () => Runtime.Clock.SimulationTimeSeconds,
+                OnConfirmationRequest = request =>
+                    _host.RaiseConfirmationRequested(
+                        new PluginConfirmation(
+                            request.ContextId,
+                            (int)request.Type,
+                            request.Message)),
+                OnConfirmationDone = _ => { },
+                MovementStats = Runtime.MovementStats,
+                NoteOptionsSeeded = () => _log.Info("options seeded"),
+                Warn = _log.Warn,
+            });
 
     /// <summary>
     /// The windowless host drives the surface's bookkeeping and its plugin

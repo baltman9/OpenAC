@@ -332,10 +332,21 @@ public sealed class ChatRouteParityTests
         IReadOnlyList<RuntimeChatLine> lines =
             arm.Runtime.CommunicationOwner.ChatFeed.Snapshot();
         transcript.Record("feed.count", lines.Count);
+        // The place in the order, not the running number the client stamps.
+        // Both clients write the same in-world lines in the same order; the
+        // number they start from depends on what each client said about the
+        // session opening before the character was in, and the two say that
+        // in different places -- the one with a window in the chat log the
+        // player reads, the one without on its console. What a reader is
+        // handed is the order, so the order is what is compared.
+        long previous = long.MinValue;
         for (int index = 0; index < lines.Count; index++)
         {
             RuntimeChatLine line = lines[index];
-            transcript.Record($"feed[{index}].sequence", line.Sequence);
+            transcript.Record(
+                $"feed[{index}].afterThePreviousLine",
+                line.Sequence > previous);
+            previous = line.Sequence;
             transcript.Record($"feed[{index}].kind", line.Kind.ToString());
             transcript.Record($"feed[{index}].logText", line.LogTextType.ToString());
             transcript.Record($"feed[{index}].text", line.Text);

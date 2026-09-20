@@ -55,6 +55,18 @@ internal sealed class WindowedArm : ParityArm
     private readonly AcDream.App.Runtime.CurrentGameRuntimeAdapter _sessionCommands;
     private InputDispatcher? _dispatcher;
 
+    /// <summary>
+    /// The parts of its own session bindings this client builds while the
+    /// session host is being built, so they are made in that builder rather
+    /// than in the constructor body.
+    /// </summary>
+    private readonly AcDream.App.Streaming.GpuWorldState _worldState = new();
+    private readonly AcDream.Runtime.Session.SessionStatusWriter _status =
+        new(path: null);
+    private AcDream.App.Settings.RuntimeSettingsController? _settings;
+    private AcDream.App.Streaming.DeferredLocalPlayerTeleportNetworkSink?
+        _teleport;
+
     internal WindowedArm()
         : base(
             ParityHost.Windowed,
@@ -151,6 +163,124 @@ internal sealed class WindowedArm : ParityArm
     /// <summary>Where the window raises it: the shared plugin surface.</summary>
     internal override void ShowConfirmation(PluginConfirmation confirmation) =>
         _automation.RaiseConfirmationRequested(confirmation);
+
+    /// <summary>
+    /// The windowed client's own session bindings, from its own builder. The
+    /// parts a drawn world owns are stood in for and reported: there is no
+    /// vitals bar, no panel tree, no paperdoll and no mixer, and the login
+    /// tunnel is a presentation effect with nothing to show. Everything else
+    /// is the real thing -- this client's settings store on disk, its
+    /// player-mode arming, its persistent-drawable bookkeeping.
+    /// </summary>
+    protected override LiveSessionHostBindings CreateSessionHostBindings(
+        LiveSessionRoutingFactories routing,
+        Action<RuntimeGenerationToken> reset)
+    {
+        _settings = new AcDream.App.Settings.RuntimeSettingsController(
+            new AcDream.App.Settings.JsonRuntimeSettingsStorage(
+                Path.Combine(DataDirectory, "settings")),
+            log: _warnings.Add);
+        _teleport = new AcDream.App.Streaming
+            .DeferredLocalPlayerTeleportNetworkSink();
+        _teleport.Bind(new UndrawnTeleportPresentation(_warnings.Add));
+        return GraphicalAutomationCapabilities.BuildSessionHostBindings(
+            new GraphicalSessionHostParts
+            {
+                CreateEvents = routing.CreateEvents,
+                CreateCommands = routing.CreateCommands,
+                Reset = reset,
+                Identity = new AcDream.App.Input.LocalPlayerIdentityState(
+                    Runtime.PlayerIdentity),
+                Communication = Runtime.CommunicationOwner,
+                Combat = Runtime.ActionOwner.Combat,
+                Settings = _settings,
+                PlayerModeAutoEntry = new AcDream.App.Input.PlayerModeAutoEntry(
+                    isLiveInWorld: () => Runtime.Lifecycle.State
+                        == RuntimeLifecycleState.InWorld,
+                    isPlayerEntityPresent: () => HasLiveBody,
+                    isPlayerControllerReady: () => HasLiveBody,
+                    // Player mode is about where the camera goes and what the
+                    // keyboard steers, so a run with nothing drawn never
+                    // reaches it. It is armed all the same, from the real
+                    // class, so the arming itself is under the harness.
+                    isWorldReady: () => false,
+                    enterPlayerMode: () => _warnings.Add(
+                        "player mode: nothing is drawn, so there is no camera "
+                        + "to put behind the character")),
+                WorldState = _worldState,
+                Teleport = _teleport,
+                StatusWriter = _status,
+                SessionId = Name,
+                // The four a drawn client lends its session host, absent here
+                // for the same reason the census says they are.
+                Vitals = null,
+                RetainedUi = null,
+                Paperdoll = null,
+                WorldAudio = null,
+                LoginCommands = null,
+                Warn = _warnings.Add,
+            });
+    }
+
+    /// <summary>
+    /// The windowed client's own character bindings. The skill formulas are
+    /// the real resolver over no installed data files, which is what this
+    /// client does before it has read them; the confirmation hooks belong to
+    /// the panel tree and are absent.
+    /// </summary>
+    internal override LiveCharacterSessionBindings
+        CreateCharacterSessionBindings() =>
+        GraphicalAutomationCapabilities.BuildCharacterSessionBindings(
+            new GraphicalCharacterSessionParts
+            {
+                Character = Runtime.CharacterOwner,
+                Combat = Runtime.ActionOwner.Combat,
+                Settings = _settings!,
+                MovementStats = Runtime.MovementStats,
+                ResolveSkillFormulaBonus =
+                    new AcDream.Content.Skills.LiveSkillCreditResolver(
+                        skillTable: null).Resolve,
+                ClientTime = () => Runtime.Clock.SimulationTimeSeconds,
+                RetainedUi = null,
+                Warn = _warnings.Add,
+            });
+
+    /// <summary>
+    /// What the windowed client does about a teleport when nothing is drawn.
+    /// The real sink is the drawn world's; every call is reported rather than
+    /// faked, so a scenario that depends on one is visible as a warning
+    /// instead of quietly passing.
+    /// </summary>
+    private sealed class UndrawnTeleportPresentation(Action<string> report)
+        : AcDream.App.Streaming.ILocalPlayerTeleportNetworkSink
+    {
+        public void OnTeleportStarted(uint sequence) =>
+            report($"teleport {sequence}: nothing is drawn");
+
+        public void OfferDestination(
+            AcDream.Runtime.RuntimeTeleportDestination destination,
+            bool teleportTimestampAdvanced) =>
+            report("teleport destination: nothing is drawn");
+
+        public void OnLocalPlayerFirstEntryCompleted() =>
+            report("first entry: nothing is drawn");
+
+        public void ArmLoginTunnel() =>
+            report("login tunnel: nothing is drawn");
+
+        public void RequestLogout() => report("logout: nothing is drawn");
+
+        public bool TryRequestLogout()
+        {
+            report("logout: nothing is drawn");
+            return false;
+        }
+
+        public void ResetSession() => report("session reset: nothing is drawn");
+
+        public void ResetGenerationPresentation() =>
+            report("generation reset: nothing is drawn");
+    }
 
     /// <summary>
     /// The window drives the surface's own bookkeeping off the plugin event

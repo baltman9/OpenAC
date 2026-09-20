@@ -28,12 +28,22 @@ namespace AcDream.HostParity.Tests;
 /// </summary>
 internal static class ParityInboundRoute
 {
+    /// <param name="runtime">The owners the route feeds.</param>
+    /// <param name="session">This arm's own world connection.</param>
+    /// <param name="character">
+    /// The character bindings this arm's own client builds. They used to be
+    /// written here with the skill formulas and the movement-stat hooks left
+    /// out, which left how fast the character runs -- and everything a plugin
+    /// reads off that -- outside the harness entirely.
+    /// </param>
     internal static LiveSessionEventRouter Create(
         GameRuntime runtime,
-        WorldSession session)
+        WorldSession session,
+        LiveCharacterSessionBindings character)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(character);
         var entities = new RuntimeLiveEntitySessionController(runtime, session);
         return new LiveSessionEventRouter(
             session,
@@ -62,14 +72,7 @@ internal static class ParityInboundRoute
                     runtime.InventoryOwner.Objects
                         .Get(runtime.PlayerIdentity.ServerGuid)?.Name
                     ?? string.Empty),
-            new LiveCharacterSessionBindings(
-                runtime.ActionOwner.Combat,
-                runtime.CharacterOwner,
-                ResolveSkillFormulaBonus: null,
-                OnSkillsUpdated: null,
-                OnConfirmationRequest: null,
-                OnConfirmationDone: null,
-                ClientTime: () => runtime.Clock.SimulationTimeSeconds),
+            character,
             new LiveSocialSessionBindings(
                 runtime.CommunicationOwner.Chat,
                 runtime.CommunicationOwner.TurbineChat,
