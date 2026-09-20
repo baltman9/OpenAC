@@ -1,6 +1,30 @@
 namespace AcDream.Plugin.Abstractions;
 
 /// <summary>
+/// Semantic operations and roles the host recognizes for an object.
+/// </summary>
+[Flags]
+public enum PluginObjectCapabilities
+{
+    /// <summary>No normalized capability is known.</summary>
+    None = 0,
+    /// <summary>The object can be activated or otherwise interacted with.</summary>
+    Interactable = 1 << 0,
+    /// <summary>The object is a portal device or portal target.</summary>
+    Portal = 1 << 1,
+    /// <summary>The object is a door.</summary>
+    Door = 1 << 2,
+    /// <summary>The object is a vendor.</summary>
+    Vendor = 1 << 3,
+    /// <summary>The object is a container.</summary>
+    Container = 1 << 4,
+    /// <summary>The object is a player character.</summary>
+    Player = 1 << 5,
+    /// <summary>The object is a non-player character.</summary>
+    Npc = 1 << 6,
+}
+
+/// <summary>
 /// A broad category for an object, worked out from its item type and its
 /// public flags. It is a convenience for plugins that want to say "this is a
 /// weapon" without decoding bit masks themselves.
@@ -253,6 +277,13 @@ public readonly record struct PluginWorldObject(
     uint ContainerObjectId,
     uint WielderObjectId)
 {
+    /// <summary>
+    /// Semantic operations the host can perform or recognize for this object.
+    /// Plugins should use these flags instead of decoding item-type or public
+    /// weenie bitfields themselves.
+    /// </summary>
+    public PluginObjectCapabilities Capabilities { get; init; }
+
     /// <summary>
     /// True when the local player owns the object, counting anything nested
     /// inside a pack they carry.

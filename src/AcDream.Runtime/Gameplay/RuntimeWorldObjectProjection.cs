@@ -47,15 +47,17 @@ public static class RuntimeWorldObjectProjection
             ? activeSpellIdsForPlayer?.Invoke(playerId) ?? Array.Empty<uint>()
             : Array.Empty<uint>();
         uint publicFlags = item?.PublicWeenieBitfield ?? 0u;
+        PluginObjectClass objectClass = ClassifyObject(item);
         return new PluginWorldObject(
             objectId,
             item?.WeenieClassId ?? 0u,
             item?.Name ?? record?.Snapshot.Name ?? $"0x{objectId:X8}",
-            ClassifyObject(item),
+            objectClass,
             (uint)(item?.Type ?? ItemType.None),
             item?.ContainerId ?? 0u,
             item?.WielderId ?? 0u)
         {
+            Capabilities = CapabilitiesFor(objectClass),
             IsOwned = owned,
             IsLandscape = source is not null
                 && !owned
@@ -83,6 +85,24 @@ public static class RuntimeWorldObjectProjection
             IconId = item?.IconId ?? 0u,
         };
     }
+
+    private static PluginObjectCapabilities CapabilitiesFor(PluginObjectClass objectClass) =>
+        objectClass switch
+        {
+            PluginObjectClass.Portal => PluginObjectCapabilities.Interactable
+                | PluginObjectCapabilities.Portal,
+            PluginObjectClass.Door => PluginObjectCapabilities.Interactable
+                | PluginObjectCapabilities.Door,
+            PluginObjectClass.Vendor => PluginObjectCapabilities.Interactable
+                | PluginObjectCapabilities.Vendor,
+            PluginObjectClass.Container => PluginObjectCapabilities.Interactable
+                | PluginObjectCapabilities.Container,
+            PluginObjectClass.Player => PluginObjectCapabilities.Interactable
+                | PluginObjectCapabilities.Player,
+            PluginObjectClass.Npc => PluginObjectCapabilities.Interactable
+                | PluginObjectCapabilities.Npc,
+            _ => PluginObjectCapabilities.None,
+        };
 
     public static bool IsPlayerOwned(
         ClientObject item,
