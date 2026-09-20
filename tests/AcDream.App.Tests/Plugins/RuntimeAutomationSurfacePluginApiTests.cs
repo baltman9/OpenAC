@@ -683,6 +683,35 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
         Assert.Equal(0u, loot.Appraisal.AwaitingObjectId);
     }
 
+    /// <summary>
+    /// A description in flight must not make the surface refuse the next
+    /// item action. A looter describes what it is about to take, and while
+    /// the two shared one count its own next Open or Pickup came back Busy,
+    /// so it retried the corpse it could have opened at once. Mutation:
+    /// count an appraisal on the item-action count again and the loot
+    /// surface reports itself busy.
+    /// </summary>
+    [Fact]
+    public void AnOutstandingIdentifyDoesNotMakeTheItemSurfaceBusy()
+    {
+        var events = new WorldEvents();
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new RuntimeAutomationSurface(events);
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+
+        Assert.True(runtime.ActionOwner.Transactions.TryRequestAppraisal(
+            702u,
+            static _ => { },
+            AppraisalRequestOrigin.Automation));
+
+        Assert.False(surface.Loot.IsBusy);
+        Assert.False(surface.Items.IsBusy);
+        Assert.True(runtime.InventoryOwner.Transactions.CanBeginRequest);
+
+        // And one description at a time is still the rule.
+        Assert.False(runtime.InventoryOwner.Transactions.CanBeginAppraisal);
+    }
+
     [Fact]
     public void WorldObjectIdentifyAcceptsAnOwnedInventoryItemAndReportsIdentReceived()
     {
