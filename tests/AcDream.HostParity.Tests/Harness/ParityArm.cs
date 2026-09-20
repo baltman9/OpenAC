@@ -36,7 +36,7 @@ internal abstract class ParityArm : IDisposable
             Runtime.Session,
             new LiveSessionHostBindings(
                 new LiveSessionRoutingFactories(
-                    _ => new InertEventRoute(),
+                    CreateEventRoute,
                     CreateCommandRoute),
                 generation => Runtime.ResetGeneration(generation, InertReset.Instance),
                 new LiveSessionSelectionBindings(
@@ -135,6 +135,31 @@ internal abstract class ParityArm : IDisposable
     {
     }
 
+    /// <summary>
+    /// The server, for this arm. Available once the session has opened; a
+    /// scenario scripts what the server said through it and the arm's own
+    /// inbound route carries it the rest of the way.
+    /// </summary>
+    internal ParityServer Server => _server
+        ?? throw new InvalidOperationException(
+            "This arm has no world connection yet.");
+
+    private ParityServer? _server;
+
+    /// <summary>
+    /// The route both clients build: the production live-session event router
+    /// over the runtime's own entity controller, attached to this arm's world
+    /// connection. See <see cref="ParityInboundRoute"/> for the three host
+    /// hooks that cannot be built windowless.
+    /// </summary>
+    private ILiveSessionEventRouting CreateEventRoute(WorldSession session)
+    {
+        _server = new ParityServer(
+            session,
+            () => Runtime.PlayerIdentity.ServerGuid);
+        return ParityInboundRoute.Create(Runtime, session);
+    }
+
     /// <summary>Delivers something the server would have said.</summary>
     internal void Deliver(Action<GameRuntime> delivery)
     {
@@ -161,22 +186,6 @@ internal abstract class ParityArm : IDisposable
 
     protected virtual void DisposeHost()
     {
-    }
-
-    /// <summary>
-    /// Inbound routing is not what these scenarios drive: they hand the
-    /// runtime what the server said directly, so both arms see exactly the
-    /// same thing at exactly the same step.
-    /// </summary>
-    private sealed class InertEventRoute : ILiveSessionEventRouting
-    {
-        public void Attach()
-        {
-        }
-
-        public void Dispose()
-        {
-        }
     }
 
     private sealed class InertReset : IRuntimeGenerationResetHost
