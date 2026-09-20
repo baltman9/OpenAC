@@ -451,7 +451,6 @@ internal sealed class LivePresentationCompositionPhase
                 new DeferredSelectionInteractionSource();
             var motionRuntime = new LiveEntityMotionRuntimeController(
                 liveEntities,
-                d.PhysicsDataCache,
                 () => selectionInteractionSource.Current,
                 d.Selection,
                 d.WorldOrigin);

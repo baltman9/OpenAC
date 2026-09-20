@@ -34,7 +34,6 @@ public sealed class LiveEntityMotionRuntimeControllerTests
         origin.Recenter(1, 1);
         var controller = new LiveEntityMotionRuntimeController(
             runtime,
-            new PhysicsDataCache(),
             static () => null,
             new SelectionState(),
             origin);

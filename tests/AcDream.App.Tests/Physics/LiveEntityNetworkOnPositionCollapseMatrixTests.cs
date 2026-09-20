@@ -1142,7 +1142,6 @@ public sealed class LiveEntityNetworkOnPositionCollapseMatrixTests
                     static (_, _) => { }),
                 new LiveEntityMotionRuntimeController(
                     Runtime,
-                    new PhysicsDataCache(),
                     static () => null,
                     new AcDream.Core.Selection.SelectionState(),
                     origin),

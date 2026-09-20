@@ -550,6 +550,13 @@ internal sealed class SessionPlayerCompositionPhase
             ?? throw new NotSupportedException(
                 "Production prepared assets must expose the matching "
                 + "prepared-collision catalog.");
+        // The shared physics owner is told where authored shapes come from, the
+        // same catalog and on the same terms as the windowless host. Both hosts
+        // then answer how wide and how tall a thing is from one place; with a
+        // window the streamed cache usually answers first, and this is what
+        // keeps the answer from being zero in the moment before a newly
+        // arrived creature's shape has been published.
+        live.LiveEntities.Physics.BindSetupCollisionSource(firstEntryCollision);
         uint firstEntryCylinderLocalId = 0u;
         float firstEntryCylinderRadius = 0f;
         float firstEntryCylinderHeight = 0f;

@@ -12,20 +12,17 @@ internal sealed class LiveEntityMotionRuntimeController
     : ILiveEntityMotionRuntimeBindings
 {
     private readonly LiveEntityRuntime _liveEntities;
-    private readonly PhysicsDataCache _physicsDataCache;
     private readonly Func<SelectionInteractionController?> _selectionInteractions;
     private readonly SelectionState _selection;
     private readonly LiveWorldOriginState _origin;
 
     public LiveEntityMotionRuntimeController(
         LiveEntityRuntime liveEntities,
-        PhysicsDataCache physicsDataCache,
         Func<SelectionInteractionController?> selectionInteractions,
         SelectionState selection,
         LiveWorldOriginState origin)
     {
         _liveEntities = liveEntities ?? throw new ArgumentNullException(nameof(liveEntities));
-        _physicsDataCache = physicsDataCache ?? throw new ArgumentNullException(nameof(physicsDataCache));
         _selectionInteractions = selectionInteractions ?? throw new ArgumentNullException(nameof(selectionInteractions));
         _selection = selection ?? throw new ArgumentNullException(nameof(selection));
         _origin = origin ?? throw new ArgumentNullException(nameof(origin));
@@ -147,39 +144,28 @@ internal sealed class LiveEntityMotionRuntimeController
         return minimal;
     }
 
+    /// <summary>
+    /// How wide and how tall the thing with this id is, in metres.
+    /// </summary>
+    /// <remarks>
+    /// Worked out in ONE place — the shared physics owner, from the authored
+    /// shape and the scale the server gave this particular thing — so that a
+    /// walk ordered at a creature measures the same gap whether or not there
+    /// is a window. This stays as the seam the drawn-world callers already
+    /// hold; the entity they pass no longer decides anything, because the id
+    /// is enough to find the shape.
+    /// </remarks>
     public (float Radius, float Height) GetSetupCylinder(
         uint serverGuid, AcDream.Core.World.WorldEntity entity)
-    {
-        FlatSetupCollision? setup =
-            _physicsDataCache.GetFlatSetup(entity.SourceGfxObjOrSetupId);
-        if (setup is null)
-            return (0f, 0f);
-        float scale =
-            _liveEntities.Snapshots.TryGetValue(serverGuid, out var sp)
-                && sp.ObjScale is { } objScale && objScale > 0f
-            ? objScale
-            : (entity.Scale > 0f ? entity.Scale : 1f);
-        return (setup.Radius * scale, setup.Height * scale);
-    }
+        => _liveEntities.Physics.EntityBodyShape(serverGuid) ?? (0f, 0f);
 
+    /// <summary>
+    /// The shape this thing is swept as while it moves, from the same one
+    /// place and the same authored shape as its girth and height.
+    /// </summary>
     public (ImmutableArray<FlatCollisionSphere> Spheres, float Scale, float StepUpHeight, float StepDownHeight)
         GetSetupMoverShape(uint serverGuid, AcDream.Core.World.WorldEntity entity)
-    {
-        FlatSetupCollision? setup =
-            _physicsDataCache.GetFlatSetup(entity.SourceGfxObjOrSetupId);
-        if (setup is null)
-            return (ImmutableArray<FlatCollisionSphere>.Empty, 1f, 0.4f, 0.4f);
-
-        float scale =
-            _liveEntities.Snapshots.TryGetValue(serverGuid, out var sp)
-                && sp.ObjScale is { } objScale && objScale > 0f
-            ? objScale
-            : (entity.Scale > 0f ? entity.Scale : 1f);
-
-        float stepUp = setup.StepUpHeight > 0f ? setup.StepUpHeight * scale : 0.4f;
-        float stepDown = setup.StepDownHeight > 0f ? setup.StepDownHeight * scale : 0.4f;
-        return (setup.Spheres, scale, stepUp, stepDown);
-    }
+        => _liveEntities.Physics.EntityMoverShape(serverGuid);
 
 
     public void StickToObjectFromWire(

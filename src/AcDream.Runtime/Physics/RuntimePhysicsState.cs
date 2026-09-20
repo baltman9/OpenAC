@@ -1255,6 +1255,46 @@ public sealed class RuntimePhysicsState : IDisposable
             : null;
     }
 
+    /// <summary>
+    /// The shape a moving body is swept as, for the thing with this id: the
+    /// balls its authored shape is built from, the scale they are to be grown
+    /// by, and how high a lip it may step up onto or down off.
+    /// </summary>
+    /// <remarks>
+    /// The same authored shape and the same scale as
+    /// <see cref="EntityBodyShape"/> reads, presented the other way the
+    /// movement code needs it. When the shape is not to hand, or declares no
+    /// step heights of its own, the answer is the ordinary step allowance of
+    /// four tenths of a metre in each direction, which is what a body with no
+    /// declared lip has always been given.
+    /// </remarks>
+    public (ImmutableArray<FlatCollisionSphere> Spheres,
+            float Scale,
+            float StepUpHeight,
+            float StepDownHeight)
+        EntityMoverShape(uint serverGuid)
+    {
+        EnsureNotDisposed();
+        const float DefaultStepHeight = 0.4f;
+        if (!Entities.TryGetActive(serverGuid, out RuntimeEntityRecord record)
+            || !TryGetEntityShape(record, out FlatSetupCollision? setup, out float scale))
+        {
+            return (
+                ImmutableArray<FlatCollisionSphere>.Empty,
+                1f,
+                DefaultStepHeight,
+                DefaultStepHeight);
+        }
+
+        float stepUp = setup!.StepUpHeight > 0f
+            ? setup.StepUpHeight * scale
+            : DefaultStepHeight;
+        float stepDown = setup.StepDownHeight > 0f
+            ? setup.StepDownHeight * scale
+            : DefaultStepHeight;
+        return (setup.Spheres, scale, stepUp, stepDown);
+    }
+
     private bool TryGetEntityShape(
         RuntimeEntityRecord record,
         out FlatSetupCollision? setup,
