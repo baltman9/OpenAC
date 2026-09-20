@@ -301,7 +301,11 @@ public sealed class WorldEvents : IEvents
         Action<PluginObjectChange>? handlers;
         lock (_lock)
         {
-            change = change with { Revision = ++_objectChangeRevision };
+            change = change with
+            {
+                Revision = ++_objectChangeRevision,
+                ChangedFields = PluginObjectChange.FieldsFor(change.Kind),
+            };
             handlers = _objectChanged;
         }
         if (handlers is null)

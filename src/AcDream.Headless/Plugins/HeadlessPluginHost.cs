@@ -658,6 +658,7 @@ internal sealed class HeadlessPluginHost
         var change = new PluginObjectChange(objectId, kind)
         {
             Revision = Interlocked.Increment(ref _objectChangeRevision),
+            ChangedFields = PluginObjectChange.FieldsFor(kind),
             Current = current,
         };
         foreach (Delegate handler in handlers.GetInvocationList())

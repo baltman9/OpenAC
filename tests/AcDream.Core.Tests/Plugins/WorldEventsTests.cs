@@ -47,6 +47,12 @@ public class WorldEventsTests
 
         Assert.Equal([1L, 2L, 3L], seen.Select(static change => change.Revision));
         Assert.Equal("Updated portal", seen[1].Current?.Name);
+        Assert.Equal(
+            PluginObjectChangeFields.Identity,
+            seen[1].ChangedFields);
+        Assert.Equal(
+            PluginObjectChangeFields.Lifecycle,
+            seen[2].ChangedFields);
         Assert.Null(seen[2].Current);
         Assert.All(seen, static change => Assert.Equal(1u, change.ObjectId));
     }
