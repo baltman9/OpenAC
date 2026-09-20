@@ -17,6 +17,7 @@ internal sealed class HeadlessProcessHost : IDisposable
     private readonly HeadlessProcessResourceSampler _resources;
     private readonly CancellationTokenSource _consoleQuitRequested = new();
     private readonly HeadlessConsoleController? _console;
+    private readonly HeadlessConsoleRenderer? _consoleRenderer;
     private readonly IDisposable? _consoleRendererSubscription;
     private int _disposeIndex;
     private bool _disposed;
@@ -31,7 +32,8 @@ internal sealed class HeadlessProcessHost : IDisposable
         IHeadlessProcessContentFactory? contentFactory = null,
         HeadlessDirectCredentials? directCredentials = null,
         bool consoleEnabled = false,
-        bool standardOutputIsTerminal = false)
+        bool standardOutputIsTerminal = false,
+        TextWriter? consoleOutput = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(paths);
@@ -68,7 +70,11 @@ internal sealed class HeadlessProcessHost : IDisposable
         HeadlessProcessContentOwner? content = null;
         HeadlessProcessResourceSampler? resources = null;
         HeadlessConsoleController? console = null;
+        HeadlessConsoleRenderer? consoleRenderer = null;
         IDisposable? consoleRendererSubscription = null;
+        // The diagnostic lines keep the writer they were given; the console's
+        // human-readable stream is a separate one unless the caller has none.
+        TextWriter consoleWriter = consoleOutput ?? diagnostics;
         var gateCoordinator = new FellowshipAllegianceGateCoordinator();
         try
         {
@@ -144,13 +150,15 @@ internal sealed class HeadlessProcessHost : IDisposable
             {
                 HeadlessSessionHost session = _sessions[0];
                 var renderer = new HeadlessConsoleRenderer(
-                    diagnostics,
-                    useColor: standardOutputIsTerminal);
+                    consoleWriter,
+                    useColor: standardOutputIsTerminal,
+                    chat: session.Runtime.CommunicationOwner.ChatFeed);
+                consoleRenderer = renderer;
                 consoleRendererSubscription =
                     session.Runtime.Subscribe(renderer);
                 HeadlessConsoleController controller = new(
                     standardInput,
-                    diagnostics,
+                    consoleWriter,
                     session.SubmitConsoleLine,
                     () => BuildStatusText(session),
                     _consoleQuitRequested);
@@ -170,12 +178,14 @@ internal sealed class HeadlessProcessHost : IDisposable
                 _diagnostics.Message("console", "single-session only");
             }
             _console = console;
+            _consoleRenderer = consoleRenderer;
             _consoleRendererSubscription = consoleRendererSubscription;
         }
         catch
         {
             console?.Dispose();
             consoleRendererSubscription?.Dispose();
+            consoleRenderer?.Dispose();
             resources?.Dispose();
             for (int index = sessions.Count - 1; index >= 0; index--)
                 sessions[index].Dispose();
@@ -312,6 +322,7 @@ internal sealed class HeadlessProcessHost : IDisposable
             return;
         _console?.Dispose();
         _consoleRendererSubscription?.Dispose();
+        _consoleRenderer?.Dispose();
         _consoleQuitRequested.Dispose();
         while (_disposeIndex >= 0)
         {

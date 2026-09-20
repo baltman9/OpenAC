@@ -74,7 +74,9 @@ internal sealed class HeadlessConsoleController : IDisposable
 
     private void WriteLine(string text)
     {
-        _output.WriteLine(text);
+        // Behind the same marker the renderer puts on its notices, so nothing
+        // the console says about itself can be read as a line of chat.
+        _output.WriteLine(HeadlessConsoleRenderer.NoticePrefix + text);
         _output.Flush();
     }
 

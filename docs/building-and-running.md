@@ -110,6 +110,8 @@ libraries directly. It does not require those environment variables.
 | `ACDREAM_UNCAPPED_RENDER=1` | Disable frame pacing (for measurement only) |
 | `ACDREAM_DISPLAY_PROTOCOL=auto\|x11\|wayland` | Linux window backend selection |
 | `ACDREAM_DEVTOOLS=1` | Enable the Vulkan validation and debug-utils layers |
+| `ACDREAM_HEADLESS_CONSOLE=0\|1` | Headless interactive console; defaults to on when stdin is a terminal |
+| `ACDREAM_HEADLESS_CONSOLE_STREAM=stderr\|stdout` | Which stream that console prints to; `stderr` by default |
 
 A few other `ACDREAM_*` variables switch original-client behaviors that are
 on by default (`ACDREAM_RETAIL_CHASE`, `ACDREAM_CAMERA_COLLIDE`,
@@ -157,6 +159,38 @@ dotnet run --project src/AcDream.Headless/AcDream.Headless.csproj -c Release -- 
 For a single local session, `run` also accepts `--user` and `--password`. Add
 more session entries for a multi-session process. Built-in policies:
 `idle`, `lifecycle-smoke`, `observer-movement`, `portal-route-smoke`.
+
+### The headless console
+
+`run --console` turns a single-session process into an interactive client: it
+prints the chat box and reads typed lines. Chat appears with the same wording
+the graphical client's chat window uses, behind a short tag standing in for the
+colour that window would draw the line in, and honouring that window's
+message-type filters:
+
+```
+[say] Bob says, "hi there"
+[tell] Bob tells you, "meet me"
+[fellowship] [Fellowship] Bob says, "group up"
+[combat] A Drudge Slinker slashes you for 9 points of damage!
+[client] navigation route loaded
+-- entered world
+```
+
+Lines the console produces about the session itself start with `--`, so they
+can never be read as chat. `[client]` marks text the client produced for
+itself, which the graphical client shows in its status overlay.
+
+The console is on by default when standard input is a terminal.
+`ACDREAM_HEADLESS_CONSOLE=1` forces it on for a redirected stdin, and `=0`
+turns it off; `--console` overrides both.
+
+**Two streams.** The machine-readable JSON diagnostic lines keep
+standard output, unchanged, so a script can parse them while a person watches
+the console. The console itself prints to standard error. Send it to
+standard output instead with `--console-stream stdout`, or with
+`ACDREAM_HEADLESS_CONSOLE_STREAM=stdout`; `--console-stream stderr` restores
+the default. The flag wins over the variable.
 
 ## Run the launcher from source
 

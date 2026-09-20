@@ -257,77 +257,28 @@ public sealed class HeadlessConsoleTests
     }
 
 
-    [Theory]
-    [InlineData("Bob", 0x50000010u, "hi", "[Local] Bob: hi")]
-    [InlineData("", 0u, "hi", "[Local] You: hi")]
-    public void FormatsLocalSpeechWithTheLocalLabel(
-        string sender, uint senderGuid, string text, string expected)
-    {
-        var entry = new RuntimeChatEntry(
-            Revision: 1,
-            SenderGuid: senderGuid,
-            Kind: (int)ChatKind.LocalSpeech,
-            Sender: sender,
-            Text: text,
-            ChannelName: string.Empty);
-
-        Assert.Equal(expected, HeadlessConsoleChatFormatter.Format(entry));
-    }
-
-    [Fact]
-    public void FormatsChannelBroadcastWithItsFriendlyName()
-    {
-        var entry = new RuntimeChatEntry(
-            Revision: 1,
-            SenderGuid: 0x50000010u,
-            Kind: (int)ChatKind.Channel,
-            Sender: "Bob",
-            Text: "group up",
-            ChannelName: "Fellowship");
-
-        Assert.Equal(
-            "[Fellowship] Bob: group up",
-            HeadlessConsoleChatFormatter.Format(entry));
-    }
-
-    [Theory]
-    [InlineData(0x50000010u, "Bob", "hi", "[Tell] Bob: hi")]
-    [InlineData(0u, "Bob", "hi", "[Tell] You -> Bob: hi")]
-    public void FormatsTellWithDirection(
-        uint senderGuid, string sender, string text, string expected)
-    {
-        var entry = new RuntimeChatEntry(
-            Revision: 1,
-            SenderGuid: senderGuid,
-            Kind: (int)ChatKind.Tell,
-            Sender: sender,
-            Text: text,
-            ChannelName: string.Empty);
-
-        Assert.Equal(expected, HeadlessConsoleChatFormatter.Format(entry));
-    }
+    // The console's own wording is gone: it prints the chat feed's lines.
+    // See HeadlessConsoleChatParityTests.
 
     // ── HeadlessConsoleRenderer: N5 dim-weight rules ─────────────────────
 
     [Fact]
     public void ChatAndInterfaceTextPrintAtDefaultWeightNeverDimmed()
     {
+        var log = new ChatLog();
+        using var feed = new RuntimeChatFeed(log, new ChatWindowState());
         var output = new StringWriter();
-        var renderer = new HeadlessConsoleRenderer(output, useColor: true);
-        var entry = new RuntimeChatEntry(
-            Revision: 1,
-            SenderGuid: 0x50000010u,
-            Kind: (int)ChatKind.LocalSpeech,
-            Sender: "Bob",
-            Text: "hi",
-            ChannelName: string.Empty);
+        using var renderer = new HeadlessConsoleRenderer(
+            output, useColor: true, chat: feed);
 
-        renderer.OnChat(new RuntimeChatDelta(default, entry));
+        log.OnLocalSpeech(
+            "Bob", "hi", 0x50000010u, isRanged: false,
+            logTextType: (uint)RetailLogTextType.Speech);
         renderer.WriteInterfaceText("Unknown command: /x");
 
         string text = output.ToString();
         Assert.DoesNotContain("[2m", text);
-        Assert.Contains("[Local] Bob: hi", text);
+        Assert.Contains("[say] Bob says, \"hi\"", text);
         Assert.Contains("Unknown command: /x", text);
     }
 
@@ -361,6 +312,11 @@ public sealed class HeadlessConsoleTests
             .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal(3, lines.Length);
         Assert.All(lines, line => Assert.Contains("[2m", line));
+        // And each carries the marker that tells a notice from a chat line.
+        Assert.All(
+            lines,
+            line => Assert.Contains(
+                HeadlessConsoleRenderer.NoticePrefix, line, StringComparison.Ordinal));
     }
 
     // ── HeadlessSessionHost.SubmitConsoleLine: the real dispatch pipeline ─
