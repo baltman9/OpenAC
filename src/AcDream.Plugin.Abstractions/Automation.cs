@@ -740,6 +740,9 @@ public interface IAutomationSurface
     /// <summary>The world objects the client is tracking.</summary>
     IWorldObjectAutomation Objects => NoOpAutomationSurface.Instance;
 
+    /// <summary>Generation-safe recall commands and portal transition state.</summary>
+    IRecallAutomation Recalls => NoOpAutomationSurface.Instance;
+
     /// <summary>The in-game clock and calendar.</summary>
     IWorldTimeAutomation WorldTime => NoOpAutomationSurface.Instance;
 
@@ -776,7 +779,7 @@ public sealed class NoOpAutomationSurface
       IPluginChat, ICombatAutomation
       , IEquipmentAutomation, IItemAutomation, ILootAutomation,
       IFellowshipAutomation, IEnchantmentAutomation, INavigationAutomation
-      , IWorldObjectAutomation, IWorldTimeAutomation, ILoginAutomation,
+      , IWorldObjectAutomation, IRecallAutomation, IWorldTimeAutomation, ILoginAutomation,
       INetworkAutomation, IRecoveryAutomation, IProjectileAutomation
       , ISelectionAutomation, IDialogAutomation, ITradeAutomation,
       IVendorAutomation
@@ -829,6 +832,9 @@ public sealed class NoOpAutomationSurface
 
     /// <inheritdoc/>
     public IWorldObjectAutomation Objects => this;
+
+    /// <inheritdoc/>
+    public IRecallAutomation Recalls => this;
 
     /// <inheritdoc/>
     public IWorldTimeAutomation WorldTime => this;

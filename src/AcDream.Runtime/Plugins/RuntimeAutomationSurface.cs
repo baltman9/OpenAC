@@ -23,7 +23,7 @@ internal sealed class RuntimeAutomationSurface
       ICombatAutomation, IEquipmentAutomation, IItemAutomation,
       ILootAutomation, IFellowshipAutomation, IEnchantmentAutomation,
       IRuntimeCommunicationObserver, IRuntimeEventObserver,
-      IWorldObjectAutomation, IWorldTimeAutomation,
+      IWorldObjectAutomation, IRecallAutomation, IWorldTimeAutomation,
       ILoginAutomation, INetworkAutomation, IRecoveryAutomation,
       IProjectileAutomation, ISelectionAutomation, IDialogAutomation, IDisposable
 {
@@ -178,6 +178,7 @@ internal sealed class RuntimeAutomationSurface
     public IEnchantmentAutomation Enchantments => this;
     public INavigationAutomation Navigation => _navigation;
     public IWorldObjectAutomation Objects => this;
+    public IRecallAutomation Recalls => this;
     public IWorldTimeAutomation WorldTime => this;
     public ILoginAutomation Login => this;
     public INetworkAutomation Network => this;
@@ -1948,6 +1949,37 @@ internal sealed class RuntimeAutomationSurface
 
     // ── IWorldObjectAutomation ────────────────────────────────────────────
     bool IWorldObjectAutomation.IsAvailable => IsAvailable;
+
+    bool IRecallAutomation.IsAvailable => IsAvailable;
+
+    PluginRecallResult IRecallAutomation.Recall(PluginRecallKind kind)
+    {
+        GameRuntime? runtime;
+        IGameRuntimeCommands? commands;
+        lock (_gate)
+        {
+            runtime = _runtime;
+            commands = _sessionCommands;
+        }
+        if (runtime is null || commands is null || !IsAvailable)
+            return new(PluginRecallStatus.Unavailable);
+
+        RuntimePortalCommand command = kind switch
+        {
+            PluginRecallKind.Lifestone => RuntimePortalCommand.RecallLifestone,
+            PluginRecallKind.Marketplace => RuntimePortalCommand.RecallMarketplace,
+            PluginRecallKind.House => RuntimePortalCommand.RecallHouse,
+            PluginRecallKind.Mansion => RuntimePortalCommand.RecallMansion,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
+        RuntimeCommandResult result = commands.Portal.Execute(runtime.Generation, command);
+        return result.Status switch
+        {
+            RuntimeCommandStatus.Accepted => new(PluginRecallStatus.Started),
+            RuntimeCommandStatus.Unsupported => new(PluginRecallStatus.Unsupported),
+            _ => new(PluginRecallStatus.Refused, result.Status.ToString()),
+        };
+    }
 
     uint IWorldObjectAutomation.OpenContainerObjectId
     {
