@@ -656,22 +656,16 @@ except what this section names.**
 
 ### Not available without a window
 
-One seam, because the operation behind it still lives in windowed-host code
-rather than in the runtime:
-
-| Seam | What a plugin loses |
-|---|---|
-| `BindSelectionActions` | Cycling the selection (previous selection, previous player, next player). `Selection` itself -- what is selected, and selecting by id -- is real on both. |
+Nothing on `IAutomationSurface` is missing because a client has no window.
 
 The selection also lets go of its object on both clients: when the server
 takes the selected object out of the world, or stops showing it, `Selection`
 clears rather than keeping a guid nothing will answer to. That used to happen
 only where there was something drawing the object.
 
-One more seam is empty on **both** clients, so it is not a windowless
-difference but it is worth knowing: `BindProjectileCollision`. A plugin that
-asks about projectile collision gets nothing anywhere, and it needs a runtime
-source before either client can fill it.
+One seam is empty on **both** clients: `BindProjectileCollision`. A plugin
+that asks about projectile collision gets nothing anywhere, and it needs a
+runtime source before either client can fill it.
 
 ### Available, but only with the installed data files
 

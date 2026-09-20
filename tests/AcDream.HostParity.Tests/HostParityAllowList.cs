@@ -55,10 +55,6 @@ internal static class HostParityAllowList
     /// </summary>
     internal static IReadOnlyList<ParityAllowance> Seams { get; } =
     [
-        new("BindSelectionActions", ParityHost.Windowless,
-            "Cycling the selection is an input action of the windowed host; "
-            + "the cycle itself belongs over the entity directory.",
-            ParityStage.MoveTheOperationIntoTheRuntime),
         new("BindRemoteBodiesUnsimulated", ParityHost.Windowed,
             "The windowed host moves a remote body between server updates, so "
             + "it must not read positions off the last snapshot; one host "

@@ -59,7 +59,6 @@ internal static class GraphicalAutomationCapabilities
             nameof(RuntimeAutomationHostCapabilities.NavigationWalk),
             nameof(RuntimeAutomationHostCapabilities.Logout),
             nameof(RuntimeAutomationHostCapabilities.AnswerConfirmation),
-            nameof(RuntimeAutomationHostCapabilities.SelectionAction),
         };
 
     /// <summary>
@@ -125,20 +124,6 @@ internal static class GraphicalAutomationCapabilities
             AnswerConfirmation = retainedUi is null
                 ? null
                 : retainedUi.TryAnswerConfirmation,
-            SelectionAction = selection is null
-                ? null
-                : action => selection.HandleInputAction(action switch
-                {
-                    AcDream.Plugin.Abstractions.PluginSelectionAction
-                        .PreviousSelection =>
-                        InputAction.SelectionPreviousSelection,
-                    AcDream.Plugin.Abstractions.PluginSelectionAction
-                        .PreviousPlayer =>
-                        InputAction.SelectionPreviousPlayer,
-                    AcDream.Plugin.Abstractions.PluginSelectionAction
-                        .NextPlayer => InputAction.SelectionNextPlayer,
-                    _ => InputAction.None,
-                }),
         };
     }
 

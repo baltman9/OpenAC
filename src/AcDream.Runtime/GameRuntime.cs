@@ -444,6 +444,7 @@ public sealed class GameRuntime
             GhostDismissalOwner = new Entities.RuntimeGhostDismissal(
                 context.EntityObjects,
                 () => PlayerIdentity.ServerGuid);
+            SelectionCycleOwner = new RuntimeSelectionCycle(this);
 
             context.Session.ConfigureAutoSaveTick(
                 session =>
@@ -541,6 +542,13 @@ public sealed class GameRuntime
     /// takes down what it drew.
     /// </summary>
     public Entities.RuntimeGhostDismissal GhostDismissalOwner { get; }
+
+    /// <summary>
+    /// Stepping the selection from one nearby character to the next. The
+    /// order is over the entity directory, so a key press and a plugin call
+    /// land on the same character on either client.
+    /// </summary>
+    public RuntimeSelectionCycle SelectionCycleOwner { get; }
 
     /// <summary>
     /// Where walks sent by that route report that they arrived or were called

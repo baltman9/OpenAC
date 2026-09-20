@@ -84,7 +84,6 @@ internal sealed record RuntimeAutomationHostCapabilities
     public NavigationWalkController? NavigationWalk { get; init; }
     public RuntimeAutomationLogoutCommands? Logout { get; init; }
     public Func<uint, bool, bool>? AnswerConfirmation { get; init; }
-    public Func<PluginSelectionAction, bool>? SelectionAction { get; init; }
     public PhysicsEngine? ProjectileCollision { get; init; }
     public bool RemoteBodiesUnsimulated { get; init; }
 
@@ -171,8 +170,7 @@ internal static class RuntimeAutomationBindings
                 nameof(RuntimeAutomationHostCapabilities.AnswerConfirmation),
             ["BindWorldObjectUse"] = null,
             ["BindGhostDeletion"] = null,
-            ["BindSelectionActions"] =
-                nameof(RuntimeAutomationHostCapabilities.SelectionAction),
+            ["BindSelectionActions"] = null,
             ["BindChatInputActive"] = null,
             ["BindChatComposer"] = null,
             ["BindSpeciesNameResolver"] =
@@ -335,11 +333,21 @@ internal static class RuntimeAutomationBindings
         // down what it drew.
         surface.BindGhostDeletion(runtime.GhostDismissalOwner.Dismiss);
         bound.Add(nameof(surface.BindGhostDeletion));
-        if (capabilities.SelectionAction is { } selectionAction)
+        // Stepping the selection is an ordering over the entity directory, so
+        // both clients step through the same characters in the same order; a
+        // key press reaches the same owner by its own route.
+        RuntimeSelectionCycle selectionCycle = runtime.SelectionCycleOwner;
+        surface.BindSelectionActions(action => action switch
         {
-            surface.BindSelectionActions(selectionAction);
-            bound.Add(nameof(surface.BindSelectionActions));
-        }
+            PluginSelectionAction.PreviousSelection =>
+                selectionCycle.SelectPreviousSelection(),
+            PluginSelectionAction.PreviousPlayer => selectionCycle.SelectPlayer(
+                RuntimeSelectionCycleDirection.Previous),
+            PluginSelectionAction.NextPlayer => selectionCycle.SelectPlayer(
+                RuntimeSelectionCycleDirection.Next),
+            _ => false,
+        });
+        bound.Add(nameof(surface.BindSelectionActions));
         // The chat entry is a runtime owner, so both hosts answer these from
         // the same place: a console front end and a chat box are two ways of
         // driving one entry.

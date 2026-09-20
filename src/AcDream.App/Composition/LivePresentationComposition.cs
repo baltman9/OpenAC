@@ -806,7 +806,21 @@ internal sealed class LivePresentationCompositionPhase
             hasOpenedCorpse:
                 d.Runtime.InventoryOwner.ExternalContainers.HasCorpseBeenOpened,
             combatMode: () => d.Runtime.ActionOwner.Combat.CurrentMode,
-            isFellow: guid => d.Runtime.Fellowship.TryGetMember(guid, out _));
+            isFellow: guid => d.Runtime.Fellowship.TryGetMember(guid, out _),
+            findPlayer: (direction, anchor) =>
+                d.Runtime.SelectionCycleOwner.FindPlayer(
+                    direction switch
+                    {
+                        RetailSelectionDirection.Previous =>
+                            AcDream.Runtime.Gameplay
+                                .RuntimeSelectionCycleDirection.Previous,
+                        RetailSelectionDirection.Next =>
+                            AcDream.Runtime.Gameplay
+                                .RuntimeSelectionCycleDirection.Next,
+                        _ => AcDream.Runtime.Gameplay
+                            .RuntimeSelectionCycleDirection.Closest,
+                    },
+                    anchor));
         var radarSnapshotProvider = new RadarSnapshotProvider(
             d.EntityObjects.Objects,
             liveEntities,

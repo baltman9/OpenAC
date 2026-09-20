@@ -61,31 +61,6 @@ public sealed class SurfaceParityTests
         });
 
     /// <summary>
-    /// Cycling the selection. The windowless client cannot do it at all, and
-    /// under this harness neither can the windowed one: its cycle lives in the
-    /// selection interaction controller, which needs a presentation tree. So
-    /// this records that both refuse today rather than claiming the listed
-    /// difference is covered; driving the windowed cycle for real belongs to
-    /// the stage that moves the cycle onto the entity directory.
-    /// </summary>
-    [Fact]
-    public void CyclingTheSelectionIsRefusedTheSameWayToday() =>
-        ParityScenario.Run(static (arm, transcript) =>
-        {
-            ParityWorld.Stage(arm);
-            ISelectionService selection = arm.Host.Selection;
-            _ = selection.Select(ParityWorld.Monster);
-            arm.Advance();
-
-            transcript.Step("next player");
-            transcript.Record(
-                "executed",
-                arm.Host.Automation.Selection.Execute(
-                    PluginSelectionAction.NextPlayer));
-            transcript.Record("selected", selection.SelectedObjectId);
-        });
-
-    /// <summary>
     /// The plugin UI, hotkeys, the host window, the world-line overlay, the
     /// clipboard and storage: everything a plugin might reach for that only a
     /// window can really do. Each has to come back quietly on both clients.
