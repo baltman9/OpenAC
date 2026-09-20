@@ -8,8 +8,12 @@ namespace AcDream.App.Combat;
 
 internal interface ICombatAttackTargetSource
 {
-    uint? SelectedObjectId { get; }
-    uint? GetSelectedOrClosestCombatTarget(bool autoTarget);
+    /// <summary>
+    /// The creature this attack goes to: the selected one when it can be
+    /// attacked, else the nearest monster when the caller allows the
+    /// substitution and the character's option asks for it.
+    /// </summary>
+    uint? GetSelectedOrClosestCombatTarget(bool allowAutoTarget);
 }
 
 internal interface ICombatGameplaySettingsSource
@@ -192,33 +196,43 @@ internal sealed class LiveCombatAttackOperations
 
     public bool AutoRepeatAttack => _settings.AutoRepeatAttack;
 
-    public bool CanStartAttack(bool allowAutoTarget)
+    public bool CanStartAttack(bool allowAutoTarget) =>
+        ResolveAttackTarget(allowAutoTarget) is not null;
+
+    /// <summary>
+    /// The creature this attack goes to, with the refusals a player sees.
+    /// The swing is sent to what this returns rather than to whatever the
+    /// selection holds when the swing goes out: the two are the same thing
+    /// for a player, and they are not when something else moves the
+    /// selection between the request and the swing.
+    /// </summary>
+    private uint? ResolveAttackTarget(bool allowAutoTarget)
     {
         if (!_inWorld.IsInWorld)
-            return false;
+            return null;
 
         if (!CombatInputPlanner.SupportsTargetedAttack(_combat.CurrentMode))
         {
             Console.WriteLine(
                 "combat: attack ignored; not in melee/missile combat mode");
-            return false;
+            return null;
         }
 
-        if (_targets.GetSelectedOrClosestCombatTarget(allowAutoTarget && _settings.AutoTarget) is null)
+        if (_targets.GetSelectedOrClosestCombatTarget(allowAutoTarget)
+            is not { } target)
         {
             _feedback.Show(AcDream.Core.Chat.ClientTextRefusals.MustSelectCombatTarget);
             Console.WriteLine("combat: attack ignored; no creature target found");
-            return false;
+            return null;
         }
 
-        return true;
+        return target;
     }
 
     public bool SendAttack(AttackHeight height, float power, bool allowAutoTarget)
     {
-        if (!CanStartAttack(allowAutoTarget)
-            || _session.CurrentSession is not { } session
-            || _targets.SelectedObjectId is not { } target)
+        if (ResolveAttackTarget(allowAutoTarget) is not { } target
+            || _session.CurrentSession is not { } session)
         {
             return false;
         }

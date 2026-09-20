@@ -131,27 +131,10 @@ internal sealed class HeadlessGameplayOperations
     public bool AutoTarget =>
         RequireRuntime().CharacterOwner.Options.GetOptionBit(CharacterOptionId.AutoTarget);
 
-    public uint? SelectClosestTarget()
-    {
-        GameRuntime runtime = RequireRuntime();
-        // Auto-target means the same thing here as it does under a window: a
-        // monster that cannot be seen, or one already dead, is not picked.
-        uint? closest = RuntimeHostileTargetQuery.FindClosest(
-            runtime,
-            HostileTargetScope.Selectable);
-        if (closest is { } target)
-        {
-            runtime.ActionOwner.Selection.Select(
-                target,
-                AcDream.Core.Selection.SelectionChangeSource.Keyboard);
-        }
-        else
-        {
-            runtime.ActionOwner.Selection.Clear(
-                AcDream.Core.Selection.SelectionChangeSource.Keyboard);
-        }
-        return closest;
-    }
+    // Auto-target means the same thing here as it does under a window: one
+    // owner answers for both hosts.
+    public uint? SelectClosestTarget() =>
+        RuntimeAttackTargetResolver.SelectClosest(RequireRuntime());
 
     public bool IsInWorld => _runtime?.Session.IsInWorld == true;
     public IReadOnlyList<ClientObject> GetOrderedEquipment()
@@ -241,20 +224,10 @@ internal sealed class HeadlessGameplayOperations
         RequireRuntime().ActionOwner.Transactions
             .IncrementBusyCount();
 
-    private uint? GetSelectedOrClosestTarget(GameRuntime runtime, bool allowAutoTarget)
-    {
-        uint? selected =
-            runtime.ActionOwner.Selection.SelectedObjectId;
-        if (selected is { } target
-            && RuntimeHostileTargetQuery.IsHostile(
-                runtime,
-                target,
-                HostileTargetScope.Selectable))
-        {
-            return target;
-        }
-        return allowAutoTarget && AutoTarget ? SelectClosestTarget() : null;
-    }
+    private static uint? GetSelectedOrClosestTarget(
+        GameRuntime runtime,
+        bool allowAutoTarget) =>
+        RuntimeAttackTargetResolver.Resolve(runtime, allowAutoTarget).Target;
 
     private GameRuntime RequireRuntime() =>
         _runtime

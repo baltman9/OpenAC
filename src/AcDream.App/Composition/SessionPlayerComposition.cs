@@ -723,11 +723,7 @@ internal sealed class SessionPlayerCompositionPhase
             d.CombatAttackOperations.BindOwned(
                 new LiveCombatAttackOperations(
                     d.Actions.Combat,
-                    new CombatAttackTargetSource(
-                        d.Actions.Selection,
-                        live.LiveEntities,
-                        d.EntityObjects.Objects,
-                        d.PlayerIdentity),
+                    new CombatAttackTargetSource(d.Runtime),
                     new CharacterOptionCombatSettingsSource(d.Character.Options),
                     d.PlayerController,
                     d.PlayerOutbound,

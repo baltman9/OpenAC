@@ -6,6 +6,7 @@ using AcDream.Core.Physics;
 using AcDream.Headless.Hosting;
 using AcDream.Runtime;
 using AcDream.Runtime.Entities;
+using AcDream.Runtime.Gameplay;
 
 namespace AcDream.Headless.Tests;
 
@@ -44,6 +45,42 @@ public sealed class HeadlessAutoTargetSelectionTests
         Assert.Equal(
             Visible,
             runtime.ActionOwner.Selection.SelectedObjectId);
+    }
+
+    /// <summary>
+    /// Host parity: the windowless host holds no target rule of its own, so
+    /// its answer is the runtime owner's answer. A graphical session asks the
+    /// same owner, which is what makes a plugin's named target the one that
+    /// is swung at in either host.
+    /// Mutation: give this host back a rule of its own and this diverges.
+    /// </summary>
+    [Fact]
+    public void TheTargetRuleIsTheRuntimeOwnersInThisHostToo()
+    {
+        var gameplay = new HeadlessGameplayOperations();
+        using var runtime = new GameRuntime(new GameRuntimeDependencies(
+            gameplay,
+            gameplay,
+            gameplay,
+            gameplay));
+        gameplay.Bind(runtime, catalog: null, () => "account");
+        runtime.PlayerIdentity.ServerGuid = Player;
+        Add(runtime, Player, 10f, PlayerObject(Player));
+        Add(runtime, Visible, 13f, Monster(Visible));
+
+        // What the automation surface does on a plugin's behalf.
+        runtime.ActionOwner.Selection.Select(
+            Visible,
+            AcDream.Core.Selection.SelectionChangeSource.Plugin);
+
+        Assert.Equal(
+            RuntimeAttackTargetResolver
+                .Resolve(runtime, allowAutoTarget: false)
+                .Target,
+            runtime.ActionOwner.Selection.SelectedObjectId);
+        Assert.Equal(
+            RuntimeAttackTargetResolver.SelectClosest(runtime),
+            gameplay.SelectClosestTarget());
     }
 
     private static ClientObject PlayerObject(uint objectId) => new()
