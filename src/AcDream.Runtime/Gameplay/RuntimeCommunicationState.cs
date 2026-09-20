@@ -1,5 +1,6 @@
 using AcDream.Core.Chat;
 using AcDream.Core.Social;
+using AcDream.Runtime.Chat;
 using AcDream.Plugin.Abstractions;
 
 namespace AcDream.Runtime.Gameplay;
@@ -63,6 +64,7 @@ public sealed class RuntimeCommunicationState : IDisposable
         Friends = new FriendsState();
         Squelch = new SquelchState();
         ChatWindows = new ChatWindowState();
+        ChatFeed = new RuntimeChatFeed(Chat, ChatWindows);
         View = new CommunicationView(Chat);
         SocialView = new CommunicationSocialView(
             TurbineChat,
@@ -73,6 +75,12 @@ public sealed class RuntimeCommunicationState : IDisposable
     public ChatLog Chat { get; }
 
     public ChatWindowState ChatWindows { get; }
+
+    /// <summary>
+    /// The chat box as finished lines, filtered per chat window. Every front
+    /// end that shows chat reads its text from here.
+    /// </summary>
+    public RuntimeChatFeed ChatFeed { get; }
 
     public SpewBoxState SpewBox { get; }
 
@@ -187,6 +195,7 @@ public sealed class RuntimeCommunicationState : IDisposable
         if (_disposed)
             return;
         _disposed = true;
+        ChatFeed.Dispose();
         _events.Dispose();
         CommandTargets.ResetSession();
         CommandTargets.Dispose();

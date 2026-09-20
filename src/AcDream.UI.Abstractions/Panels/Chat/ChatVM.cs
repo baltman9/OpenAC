@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Numerics;
 using AcDream.Core.Chat;
 using AcDream.Core.Combat;
+using AcDream.Runtime.Chat;
 
 namespace AcDream.UI.Abstractions.Panels.Chat;
 
@@ -11,6 +12,7 @@ public sealed class ChatVM : IDisposable, IChatCommandFeedback
     public const int DefaultDisplayLimit = 20;
 
     private readonly ChatLog _log;
+    private readonly RuntimeChatFeed _feed;
     private readonly ChatCommandTargetState _commandTargets;
     private readonly bool _ownsCommandTargets;
     private readonly int _displayLimit;
@@ -45,6 +47,10 @@ public sealed class ChatVM : IDisposable, IChatCommandFeedback
         if (displayLimit < 1)
             throw new ArgumentOutOfRangeException(nameof(displayLimit), displayLimit, "must be >= 1");
         _displayLimit = displayLimit;
+        // The panel shows every line the log holds and leaves per-window
+        // filtering to the window controller, so this view of the feed carries
+        // no filters of its own.
+        _feed = new RuntimeChatFeed(log);
         _commandTargets = commandTargets ?? new ChatCommandTargetState(_log);
         _ownsCommandTargets = commandTargets is null;
     }
@@ -53,6 +59,7 @@ public sealed class ChatVM : IDisposable, IChatCommandFeedback
     {
         if (_disposed)
             return;
+        _feed.Dispose();
         if (_ownsCommandTargets)
             _commandTargets.Dispose();
         _disposed = true;
@@ -97,120 +104,42 @@ public sealed class ChatVM : IDisposable, IChatCommandFeedback
 
     public IReadOnlyList<string> RecentLines()
     {
-        var snap = _log.Snapshot();
-        int start = Math.Max(0, snap.Length - _displayLimit);
-        int count = snap.Length - start;
-        if (count <= 0) return Array.Empty<string>();
+        IReadOnlyList<RuntimeChatLine> lines = _feed.Snapshot(_displayLimit);
+        if (lines.Count == 0) return Array.Empty<string>();
 
-        bool timestamps = _log.DisplayTimestampsSource?.Invoke() == true;
-        var lines = new string[count];
-        for (int i = 0; i < count; i++)
-        {
-            var entry = snap[start + i];
-            lines[i] = timestamps
-                ? ChatLog.FormatTimestampPrefix(entry.Received) + FormatEntry(entry)
-                : FormatEntry(entry);
-        }
-        return lines;
+        var text = new string[lines.Count];
+        for (int i = 0; i < lines.Count; i++)
+            text[i] = lines[i].Text;
+        return text;
     }
 
     public static string FormatEntry(ChatEntry entry)
-        => FormatEntry(entry, static sender => sender);
-
-    private const uint FirstPlayerObjectId = 0x50000001u;
-    private const uint LastPlayerObjectId = 0x6FFFFFFFu;
+        => RuntimeChatFeed.Format(entry);
 
     public static string FormatEntryTagged(ChatEntry entry)
-        => ShouldTagSender(entry)
-            ? FormatEntry(
-                entry,
-                sender =>
-                    $"<Tell:IIDString:{entry.SenderGuid}:{sender}>{sender}<\\Tell>")
-            : FormatEntry(entry);
+        => RuntimeChatFeed.FormatTagged(entry);
 
     internal static bool ShouldTagSender(ChatEntry entry)
-        => entry.SenderGuid >= FirstPlayerObjectId
-            && entry.SenderGuid <= LastPlayerObjectId
-            && !string.IsNullOrEmpty(entry.Sender)
-            && entry.Sender.IndexOf('<') < 0
-            && entry.Sender.IndexOf('>') < 0
-            && !IsOwnSpeaker(entry.Sender)
-            && entry.Kind is ChatKind.LocalSpeech
-                or ChatKind.RangedSpeech
-                or ChatKind.Channel
-                or ChatKind.Tell;
-
-    private static string FormatEntry(
-        ChatEntry entry, Func<string, string> decorateSender) => entry.Kind switch
-    {
-        ChatKind.LocalSpeech   => IsOwnSpeaker(entry.Sender)
-            ? $"You say, \"{entry.Text}\""
-            : $"{decorateSender(entry.Sender)} says, \"{entry.Text}\"",
-        ChatKind.RangedSpeech  => IsOwnSpeaker(entry.Sender)
-            ? $"You shout, \"{entry.Text}\""
-            : $"{decorateSender(entry.Sender)} shouts, \"{entry.Text}\"",
-        ChatKind.Channel       => IsOwnSpeaker(entry.Sender)
-            ? $"[{ChannelLabel(entry)}] You say, \"{entry.Text}\""
-            : $"[{ChannelLabel(entry)}] {decorateSender(entry.Sender)} says, \"{entry.Text}\"",
-        ChatKind.Tell          => entry.SenderGuid != 0
-            ? $"{decorateSender(entry.Sender)} tells you, \"{entry.Text}\""
-            : $"You tell {entry.Sender}, \"{entry.Text}\"",
-        ChatKind.System        => entry.Text,
-        ChatKind.Popup         => $"[Popup] {entry.Text}",
-        ChatKind.Emote         => $"* {entry.Sender} {entry.Text}",
-        ChatKind.SoulEmote     => $"* {entry.Sender} {entry.Text}",
-        ChatKind.Combat        => entry.Text,
-        _                      => entry.Text,
-    };
-
-    private static bool IsOwnSpeaker(string sender) =>
-        string.IsNullOrEmpty(sender) || sender == "You";
-
-    private static string ChannelLabel(ChatEntry entry) =>
-        string.IsNullOrEmpty(entry.ChannelName)
-            ? $"ch {entry.ChannelId}"
-            : entry.ChannelName;
+        => RuntimeChatFeed.ShouldTagSender(entry);
 
     public IReadOnlyList<FormattedLine> RecentLinesDetailed()
     {
-        var snap = _log.Snapshot();
-        int start = Math.Max(0, snap.Length - _displayLimit);
-        int count = snap.Length - start;
-        if (count <= 0) return Array.Empty<FormattedLine>();
+        IReadOnlyList<RuntimeChatLine> lines = _feed.Snapshot(_displayLimit);
+        if (lines.Count == 0) return Array.Empty<FormattedLine>();
 
-        bool timestamps = _log.DisplayTimestampsSource?.Invoke() == true;
-        var lines = new FormattedLine[count];
-        for (int i = 0; i < count; i++)
+        var formatted = new FormattedLine[lines.Count];
+        for (int i = 0; i < lines.Count; i++)
         {
-            var entry = snap[start + i];
-
-            bool tagged = ShouldTagSender(entry);
-            string markup = FormatEntryTagged(entry);
-            IReadOnlyList<ChatTextSpan>? spans = tagged
-                ? ChatTagMarkup.Parse(markup)
-                : null;
-            string text = spans is null
-                ? markup
-                : string.Concat(spans.Select(span => span.Text));
-
-            if (timestamps)
-            {
-                string prefix = ChatLog.FormatTimestampPrefix(entry.Received);
-                spans = new[] { new ChatTextSpan(prefix, null, ChatSpanRole.Timestamp) }
-                    .Concat(spans ?? new[] { new ChatTextSpan(text, null) })
-                    .ToArray();
-                text = prefix + text;
-            }
-
-            lines[i] = new FormattedLine(
-                Text: text,
-                Kind: entry.Kind,
-                CombatKind: entry.CombatKind,
-                LogTextType: entry.LogTextType,
-                Spans: spans,
-                Sequence: entry.Sequence);
+            RuntimeChatLine line = lines[i];
+            formatted[i] = new FormattedLine(
+                Text: line.Text,
+                Kind: line.Kind,
+                CombatKind: line.CombatKind,
+                LogTextType: line.LogTextType,
+                Spans: line.Spans,
+                Sequence: line.Sequence);
         }
-        return lines;
+        return formatted;
     }
 }
 
