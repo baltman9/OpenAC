@@ -946,6 +946,155 @@ public sealed class EquippedChildProjectionWithdrawalTests
             fixture.Controller.AttachedEntityIds);
     }
 
+    /// <summary>
+    /// An item whose wielder was still unknown when its relation arrived, and
+    /// which changed hands before that wielder turned up. The late arrival
+    /// must not put the item back in the first hand.
+    /// </summary>
+    /// <remarks>
+    /// A relation that waits for its wielder can be admitted long after it
+    /// was received. The other order of arrival -- a newer relation landing
+    /// while an older one is still queued -- is already refused; this is the
+    /// same refusal for this order. Without it a bot watching a fight sees a
+    /// weapon it has already seen change hands hanging off the wrong body.
+    ///
+    /// Mutation check: dropping the refusal puts the item back in the first
+    /// wielder's hand and turns this red.
+    /// </remarks>
+    [Fact]
+    public void AWaitingRelationIsDroppedWhenTheItemHasSinceChangedHands()
+    {
+        using var fixture = new ControllerFixture((_, _, _) =>
+            new ExactProjectionWithdrawalOutcome(
+                ExactProjectionWithdrawalDisposition.Completed,
+                Failure: null));
+        const uint firstWielderGuid = 0x50000816u;
+        const uint secondWielderGuid = 0x50000817u;
+        const uint itemGuid = 0x700002A3u;
+
+        LiveEntityRecord secondWielder =
+            fixture.Spawn(secondWielderGuid, generation: 4);
+        fixture.Poses.Publish(
+            secondWielder.WorldEntity!,
+            Array.Empty<Matrix4x4>());
+        fixture.RegisterOnly(itemGuid, generation: 1, hasPosition: false);
+        fixture.CompleteFirstEntry();
+
+        // The item is created carrying a wielder this client has not seen, so
+        // the relation waits for that wielder to turn up.
+        var first = new CreateParentUpdate(
+            itemGuid,
+            firstWielderGuid,
+            ParentLocation: 0,
+            PlacementId: 0,
+            ChildInstanceSequence: 1,
+            ChildPositionSequence: 1);
+        Assert.True(fixture.Live.TryApplyCreateParent(first, out _));
+        fixture.Controller.OnCreateParentAccepted(first);
+        Assert.Equal(
+            1,
+            fixture.Live.ParentAttachments.RelationsAwaitingParentCount);
+
+        // Before that wielder turns up, the item is put in a hand this client
+        // can see, and that is where it hangs.
+        var second = new CreateParentUpdate(
+            itemGuid,
+            secondWielderGuid,
+            ParentLocation: 0,
+            PlacementId: 0,
+            ChildInstanceSequence: 1,
+            ChildPositionSequence: 2);
+        Assert.True(fixture.Live.TryApplyCreateParent(second, out _));
+        fixture.Controller.OnCreateParentAccepted(second);
+        Assert.True(fixture.Live.ParentAttachments.TryGetCommittedParent(
+            itemGuid,
+            out uint committed,
+            out _));
+        Assert.Equal(secondWielderGuid, committed);
+
+        // Put the old relation back in the queue by hand: the client is being
+        // asked what it does with one that outlived its turn, and the only
+        // way to still hold one here is to say so.
+        fixture.Live.ParentAttachments
+            .DeferCreateObjectRelationUntilParentKnown(
+                firstWielderGuid,
+                itemGuid,
+                parentLocation: 0,
+                placementId: 0,
+                childPositionSequence: 1);
+
+        LiveEntityRecord firstWielder =
+            fixture.Spawn(firstWielderGuid, generation: 5);
+        fixture.Poses.Publish(
+            firstWielder.WorldEntity!,
+            Array.Empty<Matrix4x4>());
+        fixture.Controller.OnWorldEntityRegistered(firstWielderGuid);
+        // Carry the client on past the arrival, so anything the arrival
+        // staged would have been applied by now.
+        fixture.Controller.OnPosePublished(firstWielderGuid);
+        fixture.Controller.Tick();
+
+        Assert.Equal(
+            0,
+            fixture.Live.ParentAttachments.RelationsAwaitingParentCount);
+        Assert.True(fixture.Live.ParentAttachments.TryGetCommittedParent(
+            itemGuid,
+            out uint stillCommitted,
+            out _));
+        Assert.Equal(secondWielderGuid, stillCommitted);
+        // And nothing is lined up to move it either: a relation staged now
+        // would be applied the next time the item is projected.
+        Assert.False(
+            fixture.Live.ParentAttachments.TryGetStagedProjection(
+                itemGuid,
+                out ParentAttachmentRelation staged)
+            && staged.ParentGuid == firstWielderGuid,
+            "The item is lined up to go back to the hand it left.");
+    }
+
+    /// <summary>
+    /// An item whose own description is replaced drops the relation the old
+    /// description was waiting on. The replacement arrives carrying its own
+    /// word on where the item hangs, and the old one would otherwise sit in
+    /// the queue for the rest of the session, to be applied to the
+    /// replacement whenever the wielder it names turns up.
+    /// </summary>
+    /// <remarks>
+    /// Mutation check: taking the drop back out leaves the relation waiting
+    /// and turns this red.
+    /// </remarks>
+    [Fact]
+    public void ReplacingTheItemDropsTheRelationItsOldDescriptionWaitedOn()
+    {
+        using var fixture = new ControllerFixture((_, _, _) =>
+            new ExactProjectionWithdrawalOutcome(
+                ExactProjectionWithdrawalDisposition.Completed,
+                Failure: null));
+        const uint wielderGuid = 0x50000818u;
+        const uint itemGuid = 0x700002A4u;
+
+        fixture.RegisterOnly(itemGuid, generation: 1, hasPosition: false);
+        fixture.CompleteFirstEntry();
+        var update = new CreateParentUpdate(
+            itemGuid,
+            wielderGuid,
+            ParentLocation: 0,
+            PlacementId: 0,
+            ChildInstanceSequence: 1,
+            ChildPositionSequence: 1);
+        Assert.True(fixture.Live.TryApplyCreateParent(update, out _));
+        fixture.Controller.OnCreateParentAccepted(update);
+        Assert.Equal(
+            1,
+            fixture.Live.ParentAttachments.RelationsAwaitingParentCount);
+
+        fixture.RegisterOnly(itemGuid, generation: 2, hasPosition: false);
+
+        Assert.Equal(
+            0,
+            fixture.Live.ParentAttachments.RelationsAwaitingParentCount);
+    }
+
     [Fact]
     public void ServerDeletesAnotherPlayersHeldItem_DetachesAndFreesTheDrawnChild()
     {

@@ -749,6 +749,11 @@ public sealed class EquippedChildRenderController : IDisposable
             {
                 continue;
             }
+            // While this one waited, the item may have been told where it
+            // hangs by something newer. The newer word wins: an item that has
+            // changed hands must not be put back in the first one.
+            if (Relations.HasLaterWordOnChild(children[i]))
+                continue;
             Relations.AcceptCreateObjectRelation(new ParentAttachmentRelation(
                 request.ParentGuid,
                 request.ChildGuid,

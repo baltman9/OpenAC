@@ -355,6 +355,22 @@ public sealed class ParentAttachmentState
         out CreateObjectParentRelationRequest request) =>
         _awaitingParentByChild.Remove(childGuid, out request);
 
+    /// <summary>
+    /// Whether a later word on where this child hangs has already landed: a
+    /// relation staged for it, or a parent it is already hanging from.
+    /// </summary>
+    /// <remarks>
+    /// A relation that waited for its parent can be admitted long after it
+    /// was received, and by then the child may have been told something newer
+    /// -- picked up by somebody else, or put somewhere else by the same
+    /// wielder. Applying the old word then would hang the item back in a hand
+    /// that no longer holds it. The other order of arrival is already
+    /// refused; this is the same refusal said for this one.
+    /// </remarks>
+    public bool HasLaterWordOnChild(uint childGuid) =>
+        _stagedByChild.ContainsKey(childGuid)
+        || _lastAcceptedByChild.ContainsKey(childGuid);
+
     public void Enqueue(ParentEvent.Parsed update)
     {
         if (!_unresolvedByChild.TryGetValue(update.ChildGuid, out Queue<ParentAttachmentRelation>? queue))
@@ -674,6 +690,11 @@ public sealed class ParentAttachmentState
     /// </summary>
     public void EndGeneration(uint guid, ushort replacementGeneration)
     {
+        // A relation this generation of the child was created carrying is
+        // about this generation. The replacement arrives with its own word on
+        // where it hangs, so the old one is dropped rather than left to be
+        // admitted later against the replacement.
+        _awaitingParentByChild.Remove(guid);
         FilterDeferredCreates(candidate =>
             candidate.Spawn.Guid != guid
             || candidate.Spawn.InstanceSequence == replacementGeneration
