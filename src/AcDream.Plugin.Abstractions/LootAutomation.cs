@@ -7,7 +7,12 @@ namespace AcDream.Plugin.Abstractions;
 /// <param name="ObjectId">The corpse's object id.</param>
 /// <param name="WeenieClassId">The corpse's class id.</param>
 /// <param name="Name">The corpse's display name.</param>
-/// <param name="Distance">Distance from the local player in metres.</param>
+/// <param name="Distance">
+/// Straight-line distance from the local player in metres, centre to centre
+/// and height included -- the same measure
+/// <see cref="PluginCombatTarget.Distance"/> uses, so a corpse one floor down
+/// does not read as being at your feet.
+/// </param>
 /// <param name="HasBeenOpened">
 /// True when this session has already opened that corpse at least once.
 /// </param>
@@ -106,8 +111,14 @@ public interface ILootAutomation
     bool IsAvailable => false;
 
     /// <summary>
-    /// True while an inventory request is already in flight, so the next
-    /// command here would come back <see cref="PluginItemCommandStatus.Busy"/>.
+    /// True while a command here offered right now would come back
+    /// <see cref="PluginItemCommandStatus.Busy"/>. Two things put it there: a
+    /// request of your own already in flight, and the short pacing the client
+    /// keeps between one use and the next -- opening one corpse straight
+    /// after closing the last runs into the second. Both mean "not yet"
+    /// rather than "no": wait for this to read false and ask again rather
+    /// than counting the refusal as a failed attempt. It never reads false
+    /// while a command would be refused as busy.
     /// </summary>
     bool IsBusy => false;
 

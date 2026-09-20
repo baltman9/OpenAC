@@ -548,8 +548,16 @@ public interface IItemAutomation
     bool IsAvailable => false;
 
     /// <summary>
-    /// True while an inventory request is already in flight, so the next
-    /// command would come back <see cref="PluginItemCommandStatus.Busy"/>.
+    /// True while a use or an inventory request offered right now would come
+    /// back <see cref="PluginItemCommandStatus.Busy"/>. Two things put it
+    /// there: a request of your own already in flight, and the short pacing
+    /// the client keeps between one use and the next. Both mean "not yet"
+    /// rather than "no", so a command refused this way has not failed and
+    /// should not count against whatever attempt limit or back-off you pair
+    /// with a failure -- wait for this to read false and ask again. It never
+    /// reads false while a command would be refused as busy; it may read true
+    /// a moment longer than a move or a merge strictly needs, because those
+    /// do not take the use pacing.
     /// </summary>
     bool IsBusy => false;
 

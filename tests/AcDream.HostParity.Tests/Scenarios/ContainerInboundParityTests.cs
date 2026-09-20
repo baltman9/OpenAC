@@ -201,14 +201,21 @@ public sealed class ContainerInboundParityTests
             transcript.Step("open it again straight away");
             PluginItemCommandResult early = loot.Open(ParityWorld.Corpse);
             Record(transcript, "open", early);
+            RecordLoot(transcript, loot);
             transcript.RecordOutbound(arm);
             // Early, not failed: a bot that reads this as a failure spends
             // one of the corpse's attempts on a fifth of a second's wait.
             Assert.Equal(PluginItemCommandStatus.Busy, early.Status);
+            // And the pacing that put it there is readable, on both clients.
+            // A bot told "busy" with nothing reporting itself as busy has
+            // nothing to wait on and can only ask again blind.
+            Assert.True(loot.IsBusy);
 
             transcript.Step("and again once the pacing has lapsed");
             arm.Server.UseDone();
             Advance(arm, TicksPastTheUsePacing);
+            RecordLoot(transcript, loot);
+            Assert.False(loot.IsBusy);
             PluginItemCommandResult later = loot.Open(ParityWorld.Corpse);
             Record(transcript, "open", later);
             transcript.RecordOutbound(arm);

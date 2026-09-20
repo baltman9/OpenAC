@@ -2652,10 +2652,21 @@ internal sealed class RuntimeAutomationSurface
             GameRuntime? runtime;
             lock (_gate)
                 runtime = _runtime;
-            return runtime is not null
-                && !runtime.InventoryOwner.Transactions.CanBeginRequest;
+            return runtime is not null && IsItemCommandBusy(runtime);
         }
     }
+
+    /// <summary>
+    /// Whether a use or an inventory request offered this instant would come
+    /// back busy. There are two ways it can: a request of the caller's own is
+    /// still in flight and has to finish first, or the short pacing between
+    /// two uses has not lapsed yet. Both mean "not yet" rather than "no", and
+    /// both have to be visible from outside -- a caller that waits for this
+    /// to clear and only then asks must not still be refused.
+    /// </summary>
+    private static bool IsItemCommandBusy(GameRuntime runtime) =>
+        !runtime.InventoryOwner.Transactions.CanBeginRequest
+        || !runtime.ItemInteractionOwner.IsUseThrottleReadyForAutomation;
 
     int IItemAutomation.ActiveOwnedPetCount
     {
@@ -3030,7 +3041,13 @@ internal sealed class RuntimeAutomationSurface
                 PluginItemCommandStatus.Refused,
                 "This item requires a target; call Apply(objectId, targetObjectId) instead.");
         }
-        if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
+        // The owned-item use and apply paths below both take the same pacing
+        // between two uses that a click does, and both answer a refusal there
+        // in a way the caller cannot read: the use path reports it as a plain
+        // refusal, and the apply path reports it as started even though
+        // nothing went out. Name it here instead, as the early answer it is,
+        // and off the same predicate IsBusy reports.
+        if (IsItemCommandBusy(runtime))
             return new(PluginItemCommandStatus.Busy);
         bool started = targetObjectId == 0u
             ? use(objectId)
@@ -3079,8 +3096,7 @@ internal sealed class RuntimeAutomationSurface
             GameRuntime? runtime;
             lock (_gate)
                 runtime = _runtime;
-            return runtime is not null
-                && !runtime.InventoryOwner.Transactions.CanBeginRequest;
+            return runtime is not null && IsItemCommandBusy(runtime);
         }
     }
 
@@ -3314,16 +3330,17 @@ internal sealed class RuntimeAutomationSurface
         {
             return new(PluginItemCommandStatus.InvalidTarget);
         }
-        if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
-            return new(PluginItemCommandStatus.Busy);
-        // The pacing between two uses is the host's own, and it is not a
-        // verdict on this container: an open that arrives inside that window
-        // has not failed, it is early. Saying so keeps the caller from
-        // spending one of the container's attempts -- and arming whatever
-        // back-off it pairs with a failure -- on a fifth of a second's wait,
-        // which is what stood a looter still between one container and the
-        // next after closing the first.
-        if (!runtime.ItemInteractionOwner.IsUseThrottleReadyForAutomation)
+        // Two ways to be early here, and neither is a verdict on this
+        // container: a request of the caller's own is still in flight, or the
+        // short pacing between two uses has not lapsed. An open that arrives
+        // inside either window has not failed, it is early. Saying so keeps
+        // the caller from spending one of the container's attempts -- and
+        // arming whatever back-off it pairs with a failure -- on a fifth of a
+        // second's wait, which is what stood a looter still between one
+        // container and the next after closing the first. IsBusy reports this
+        // same predicate, so a caller that waits for it to clear and asks
+        // again is then accepted rather than refused a second time.
+        if (IsItemCommandBusy(runtime))
             return new(PluginItemCommandStatus.Busy);
         // A corpse or a chest out in the world is reached the same way here as
         // it is through Use on the very same object: walk to it if it is out
@@ -3360,10 +3377,8 @@ internal sealed class RuntimeAutomationSurface
         {
             return new(PluginItemCommandStatus.InvalidTarget);
         }
-        if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
-            return new(PluginItemCommandStatus.Busy);
         // Early rather than failed, the same way an open is.
-        if (!runtime.ItemInteractionOwner.IsUseThrottleReadyForAutomation)
+        if (IsItemCommandBusy(runtime))
             return new(PluginItemCommandStatus.Busy);
         return runtime.ItemInteractionOwner.TryUseItemForAutomation(
             containerObjectId)
