@@ -9,6 +9,11 @@ namespace AcDream.App.Tests.Rendering;
 
 public sealed class GameWindowLogoutBindingTests
 {
+    /// <summary>
+    /// The window no longer fills the seam itself -- the shared binding pass
+    /// does -- but what it hands that pass has to stay the teleport request
+    /// behind the same four guards.
+    /// </summary>
     [Fact]
     public void BindLogoutDelegatesUseTeleportRequestAndTheTransitAndWorldGuards()
     {
@@ -16,8 +21,14 @@ public sealed class GameWindowLogoutBindingTests
 
         Assert.Contains(
             owned,
-            call => call.Target.DeclaringType == typeof(RuntimeAutomationSurface)
-                && call.Target.Name == nameof(RuntimeAutomationSurface.BindLogout));
+            call => call.Target.DeclaringType
+                    == typeof(RuntimeAutomationLogoutCommands)
+                && call.Target.IsConstructor);
+        Assert.Contains(
+            owned,
+            call => call.Target.DeclaringType
+                    == typeof(RuntimeAutomationBindings)
+                && call.Target.Name == nameof(RuntimeAutomationBindings.Apply));
         Assert.Contains(
             owned,
             call => call.Target.DeclaringType == typeof(LocalPlayerTeleportController)

@@ -370,13 +370,13 @@ internal sealed class HeadlessSessionHost : IDisposable
                 logout,
                 AnswerConfirmation,
                 RequestOwnGracefulStop,
-                content: contentLease?.Dats);
-            // The shared surface owns the navigation plugins see; the host binds its
-            // walk controller and movement commands to that one instance.
+                content: contentLease?.Dats,
+                sessionCommands: commands,
+                navigationWalk: navigationWalk);
+            // The shared surface owns the navigation plugins see; the walk
+            // controller and the movement commands were bound into it by the
+            // one binding pass both hosts run.
             RuntimeNavigationAutomation navigation = pluginSession.Host.NavigationAutomation;
-            navigation.BindCommands(commands.Movement, () => runtime.Generation);
-            if (navigationWalk is { } boundWalk)
-                navigation.BindWalk(boundWalk);
             navigationCommands = new NavigationChatCommands(
                     navigation,
                     () => runtime.ActionOwner.Selection.SelectedObjectId,

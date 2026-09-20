@@ -4,6 +4,7 @@ using AcDream.Headless.Diagnostics;
 using AcDream.Headless.Hosting;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
+using AcDream.Runtime.Navigation;
 using AcDream.Runtime.Session;
 
 namespace AcDream.Headless.Plugins;
@@ -53,7 +54,9 @@ internal sealed class HeadlessPluginSession : IDisposable
         HeadlessLogoutAutomation? logout = null,
         Func<uint, bool, bool>? answerConfirmation = null,
         Func<bool>? requestGracefulStop = null,
-        AcDream.Content.IDatReaderWriter? content = null)
+        AcDream.Content.IDatReaderWriter? content = null,
+        IGameRuntimeCommands? sessionCommands = null,
+        NavigationWalkController? navigationWalk = null)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(diagnostics);
@@ -77,7 +80,9 @@ internal sealed class HeadlessPluginSession : IDisposable
             logout,
             answerConfirmation,
             requestGracefulStop,
-            content);
+            content,
+            sessionCommands,
+            navigationWalk);
         var plugins = new PluginSession(
             host,
             status => Report(statusWriter, sessionId, status),

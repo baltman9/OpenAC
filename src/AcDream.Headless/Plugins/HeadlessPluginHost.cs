@@ -65,7 +65,9 @@ internal sealed class HeadlessPluginHost
         HeadlessLogoutAutomation? logout = null,
         Func<uint, bool, bool>? answerConfirmation = null,
         Func<bool>? requestGracefulStop = null,
-        AcDream.Content.IDatReaderWriter? content = null)
+        AcDream.Content.IDatReaderWriter? content = null,
+        IGameRuntimeCommands? sessionCommands = null,
+        NavigationWalkController? navigationWalk = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         Log = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -75,37 +77,47 @@ internal sealed class HeadlessPluginHost
         _sessionSettingsByPlugin = CopySessionSettings(sessionSettings);
         Window = new HeadlessHostWindow(requestGracefulStop);
         _automation = new RuntimeAutomationSurface();
-        _automation.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
-        _automation.BindRemoteBodiesUnsimulated();
-        _automation.BindSubmit(submitChatText);
-        if (magicCatalog is not null)
-            _automation.BindMagicCatalog(magicCatalog);
-        if (content is not null)
-            BindContent(_automation, content, Log);
-        if (items is not null)
-        {
-            _automation.BindItems(
-                items.TryUse,
-                items.TryApply,
-                items.TryMove,
-                items.TryMerge,
-                items.TryDrop,
-                items.TryGive,
-                items.TryPickup,
-                items.TryIdentify);
-            _automation.BindEquipment(
-                items.TryEquip,
-                () => items.EquipmentBusy,
-                items.TryEquipSecondary);
-        }
-        if (logout is not null)
-        {
-            _automation.BindLogout(
-                logout.TryRequestLogout,
-                () => logout.CanRequestLogout);
-        }
-        if (answerConfirmation is not null)
-            _automation.BindDialogs(answerConfirmation);
+        // One wiring, shared with the windowed host: what this host can lend
+        // the plugin surface goes in the capability record, and the runtime
+        // fills the rest.
+        RuntimeAutomationBindings.Apply(
+            _automation,
+            runtime,
+            new RuntimeAutomationHostCapabilities
+            {
+                HostName = "windowless",
+                Declared = HeadlessAutomationCapabilities.Declared,
+                Warn = Log.Warn,
+                Content = content,
+                MagicCatalog = magicCatalog,
+                SubmitChatText = submitChatText,
+                SessionCommands = sessionCommands,
+                NavigationWalk = navigationWalk,
+                Items = items is null ? null : new RuntimeAutomationItemCommands(
+                    items.TryUse,
+                    items.TryApply,
+                    items.TryMove,
+                    items.TryMerge,
+                    items.TryDrop,
+                    items.TryGive,
+                    items.TryPickup,
+                    items.TryIdentify),
+                Equipment = items is null
+                    ? null
+                    : new RuntimeAutomationEquipmentCommands(
+                        items.TryEquip,
+                        () => items.EquipmentBusy,
+                        items.TryEquipSecondary),
+                Logout = logout is null
+                    ? null
+                    : new RuntimeAutomationLogoutCommands(
+                        logout.TryRequestLogout,
+                        () => logout.CanRequestLogout),
+                AnswerConfirmation = answerConfirmation,
+                // Nothing here moves a remote entity's body between server
+                // updates, so positions are read from the last snapshot.
+                RemoteBodiesUnsimulated = true,
+            });
         _wasInWorld = runtime.Lifecycle.State == RuntimeLifecycleState.InWorld;
         runtime.CommunicationOwner.LocalPlayerDied += OnLocalPlayerDied;
         runtime.InventoryOwner.ExternalContainers.Changed += OnExternalContainerChanged;
@@ -133,41 +145,6 @@ internal sealed class HeadlessPluginHost
 
     public bool HasUi => false;
 
-    /// <summary>The retail skill table every host reads skill names and icons from.</summary>
-    private const uint SkillTableId = 0x0E000004u;
-
-    /// <summary>
-    /// What the installed data files lend the plugin surface: palette
-    /// colours for appearance, and the skill table, without which a plugin
-    /// sees the character's skills unnamed and cannot judge what it can
-    /// cast. The graphical client binds the same two from its own load.
-    /// </summary>
-    private static void BindContent(
-        RuntimeAutomationSurface automation,
-        AcDream.Content.IDatReaderWriter content,
-        IPluginLogger log)
-    {
-        automation.BindPaletteColorResolver(
-            new AcDream.Content.CharGen.ChargenAppearanceCatalog(content));
-        if (!content.TryGet<DatReaderWriter.DBObjs.SkillTable>(SkillTableId, out var skillTable)
-            || skillTable is null)
-        {
-            log.Warn(
-                "plugin automation: the retail skill table is missing, so "
-                + "plugins will see unnamed skills");
-            return;
-        }
-
-        var names = new Dictionary<uint, string>(skillTable.Skills.Count);
-        var icons = new Dictionary<uint, uint>(skillTable.Skills.Count);
-        foreach (var entry in skillTable.Skills)
-        {
-            names[(uint)entry.Key] = entry.Value.Name;
-            icons[(uint)entry.Key] = entry.Value.IconId;
-        }
-        automation.BindSkillNames(names);
-        automation.BindSkillIcons(icons);
-    }
     public IPluginLogger Log { get; }
     public IPluginCommandRegistry Commands { get; }
     public IPluginStorage Storage { get; }

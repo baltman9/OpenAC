@@ -402,6 +402,25 @@ internal sealed class RuntimeAutomationSurface
     private static string FormatCalendarName(string value) => value
         .Replace("AndHalf", "-and-Half", StringComparison.Ordinal);
 
+    /// <summary>
+    /// Attach to the runtime's gameplay owners unless already attached to
+    /// that same runtime. Re-attaching would detach and re-subscribe every
+    /// owner, so a host that attached early and a shared binding pass that
+    /// attaches late can both ask for it without the second one undoing the
+    /// first.
+    /// </summary>
+    internal void EnsureBound(
+        GameRuntime runtime, RuntimeCharacterState character, RuntimeSpellCastState cast)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        lock (_gate)
+        {
+            if (_disposed || ReferenceEquals(_runtime, runtime))
+                return;
+        }
+        Bind(runtime, character, cast);
+    }
+
     /// <summary>Bind the surface to the runtime's gameplay owners.</summary>
     public void Bind(
         GameRuntime runtime, RuntimeCharacterState character, RuntimeSpellCastState cast)
