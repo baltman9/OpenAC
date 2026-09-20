@@ -198,7 +198,8 @@ internal sealed class HeadlessSessionHost : IDisposable
         IEnumerable<string>? pluginRoots = null,
         IPluginStorage? storage = null,
         IPluginStorage? vtankProfiles = null,
-        Func<bool>? logoutConfirmedOverride = null)
+        Func<bool>? logoutConfirmedOverride = null,
+        string? dataDirectory = null)
     {
         _descriptor = descriptor
             ?? throw new ArgumentNullException(nameof(descriptor));
@@ -337,7 +338,9 @@ internal sealed class HeadlessSessionHost : IDisposable
                 RequestOwnGracefulStop,
                 content: contentLease?.Dats,
                 sessionCommands: commands,
-                navigationWalk: navigationWalk);
+                navigationWalk: navigationWalk,
+                dataDirectory: dataDirectory,
+                pluginTags: descriptor.PluginTags);
             // /nav and /motor are registered by the one binding pass both
             // hosts run, on the one registry the plugin surface owns, so
             // nothing is built for them here.

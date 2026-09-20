@@ -57,7 +57,9 @@ internal sealed class HeadlessPluginSession : IDisposable
         Func<bool>? requestGracefulStop = null,
         AcDream.Content.IDatReaderWriter? content = null,
         IGameRuntimeCommands? sessionCommands = null,
-        NavigationWalkController? navigationWalk = null)
+        NavigationWalkController? navigationWalk = null,
+        string? dataDirectory = null,
+        IReadOnlyList<string>? pluginTags = null)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(diagnostics);
@@ -85,7 +87,9 @@ internal sealed class HeadlessPluginSession : IDisposable
             (verb, error) => diagnostics.Failure(
                 sessionId,
                 $"plugin-command-{verb}",
-                error));
+                error),
+            dataDirectory,
+            pluginTags);
         var plugins = new PluginSession(
             host,
             status => Report(statusWriter, sessionId, status),

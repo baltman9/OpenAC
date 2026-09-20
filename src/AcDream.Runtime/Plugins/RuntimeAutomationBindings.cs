@@ -137,6 +137,33 @@ internal static class RuntimeAutomationBindings
     private static readonly object ContentReadLock = new();
 
     /// <summary>
+    /// Builds the plugin surface. Both hosts come through here, so the
+    /// construction-time inputs a surface needs -- the tick it announces
+    /// itself on, where the clients on this machine leave their notes, and
+    /// the words this client answers to -- cannot be present on one client
+    /// and quietly absent on the other.
+    /// </summary>
+    /// <param name="inputs">What this host hands the surface at birth.</param>
+    /// <exception cref="ArgumentException">
+    /// The host named no data directory, so the clients on this machine would
+    /// have nowhere to find one another.
+    /// </exception>
+    internal static RuntimeAutomationSurface CreateSurface(
+        RuntimeAutomationSurfaceInputs inputs)
+    {
+        ArgumentNullException.ThrowIfNull(inputs);
+        ArgumentException.ThrowIfNullOrWhiteSpace(
+            inputs.DataDirectory,
+            $"{inputs.HostName}.{nameof(inputs.DataDirectory)}");
+        return new RuntimeAutomationSurface(
+            inputs.PluginEvents,
+            new LocalPluginPeerRegistry(Path.Combine(
+                inputs.DataDirectory,
+                RuntimeAutomationSurfaceInputs.PeerDirectoryName)),
+            inputs.PeerTags);
+    }
+
+    /// <summary>
     /// Which capability each seam needs, or <see langword="null"/> when the
     /// seam is filled from the runtime itself and therefore exists on every
     /// host. A key of the form <c>Method.parameter</c> is an optional

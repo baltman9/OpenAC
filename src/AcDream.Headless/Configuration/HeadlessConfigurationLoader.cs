@@ -287,6 +287,18 @@ internal static class HeadlessConfigurationLoader
             }
         }
 
+        if (session.PluginTags is { } pluginTags)
+        {
+            foreach (string? tag in pluginTags)
+            {
+                if (string.IsNullOrWhiteSpace(tag))
+                {
+                    throw new HeadlessConfigurationException(
+                        $"Session '{session.Id}' pluginTags entries must be non-empty strings.");
+                }
+            }
+        }
+
         if (session.LoginCommandDelayMs < 0)
         {
             throw new HeadlessConfigurationException(

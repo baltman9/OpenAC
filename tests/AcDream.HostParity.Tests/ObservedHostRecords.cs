@@ -262,6 +262,36 @@ internal static class ObservedHostRecords
             ? WindowedCharacterSessionBindings()
             : WindowlessCharacterSessionBindings();
 
+
+    /// <summary>
+    /// What the windowed host really builds its plugin surface from. The
+    /// data directory is the one place the clients on a machine find each
+    /// other, so the census cares that a host names one at all.
+    /// </summary>
+    internal static RuntimeAutomationSurfaceInputs WindowedSurfaceInputs() =>
+        GraphicalAutomationCapabilities.BuildSurfaceInputs(
+            new GraphicalSurfaceInputParts
+            {
+                Events = Part<AcDream.Core.Plugins.WorldEvents>(),
+                DataDirectory = "census",
+                PluginTags = ["census"],
+            });
+
+    /// <summary>The same, for the windowless host.</summary>
+    internal static RuntimeAutomationSurfaceInputs WindowlessSurfaceInputs() =>
+        HeadlessAutomationCapabilities.BuildSurfaceInputs(
+            new HeadlessSurfaceInputParts
+            {
+                Events = Part<AcDream.Core.Plugins.WorldEvents>(),
+                DataDirectory = "census",
+                PluginTags = ["census"],
+            });
+
+    internal static IReadOnlySet<string> SuppliedSurfaceInputsFor(string host) =>
+        (host == ParityHost.Windowed
+            ? WindowedSurfaceInputs()
+            : WindowlessSurfaceInputs()).Supplied();
+
     internal static IReadOnlyDictionary<string, string> ConditionalCapabilities(
         string host) =>
         host == ParityHost.Windowed

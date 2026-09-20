@@ -371,6 +371,45 @@ public sealed class SeamCensusTests
             "character-session binding",
             missingOnBothIsADifference: false);
 
+    /// <summary>
+    /// The same, for what each host hands the surface at construction. These
+    /// are the inputs no later binding can supply: a host that builds its
+    /// surface without them leaves part of the plugin API dead for the whole
+    /// run, which is exactly what the windowless host did with the tick the
+    /// surface announces this client on.
+    /// </summary>
+    [Fact]
+    public void EachHostDeclaresExactlyWhatItsSurfaceInputsSupply()
+    {
+        foreach (string host in ParityHost.Both)
+        {
+            AssertSameMembers(
+                host == ParityHost.Windowed
+                    ? GraphicalAutomationCapabilities.DeclaredSurfaceInputs
+                    : HeadlessAutomationCapabilities.DeclaredSurfaceInputs,
+                ObservedHostRecords.SuppliedSurfaceInputsFor(host),
+                host,
+                "plugin surface input",
+                "the record it builds the surface from");
+        }
+    }
+
+    /// <summary>
+    /// An input one host passes and the other does not is a difference, and
+    /// one neither passes is a surface nothing can announce itself from, so
+    /// both fail here.
+    /// </summary>
+    [Fact]
+    public void EverySurfaceInputIsSuppliedByBothHostsOrAllowListed() =>
+        AssertParity(
+            RuntimeAutomationSurfaceInputs.AllInputNames
+                .OrderBy(static name => name, StringComparer.Ordinal)
+                .ToArray(),
+            ObservedHostRecords.SuppliedSurfaceInputsFor,
+            HostParityAllowList.SurfaceInputs,
+            "plugin surface input",
+            missingOnBothIsADifference: true);
+
     private static void AssertConditionsAreDeclared(
         IReadOnlyDictionary<string, string> conditions,
         IReadOnlySet<string> declared,

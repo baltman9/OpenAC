@@ -66,7 +66,9 @@ internal sealed class HeadlessPluginHost
         AcDream.Content.IDatReaderWriter? content = null,
         IGameRuntimeCommands? sessionCommands = null,
         NavigationWalkController? navigationWalk = null,
-        Action<string, Exception>? pluginCommandFailed = null)
+        Action<string, Exception>? pluginCommandFailed = null,
+        string? dataDirectory = null,
+        IReadOnlyList<string>? pluginTags = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         Log = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -74,7 +76,21 @@ internal sealed class HeadlessPluginHost
         VtankProfiles = vtankProfiles ?? NoOpPluginStorage.Instance;
         _sessionSettingsByPlugin = CopySessionSettings(sessionSettings);
         Window = new HeadlessHostWindow(requestGracefulStop);
-        _automation = new RuntimeAutomationSurface();
+        // One factory, shared with the windowed host. The surface announces
+        // this client to the other clients on this machine off the tick it is
+        // built with, so the tick, the folder they find each other in and the
+        // words this client answers to all have to be passed here; none of
+        // them can be bound later.
+        _automation = RuntimeAutomationBindings.CreateSurface(
+            HeadlessAutomationCapabilities.BuildSurfaceInputs(
+                new HeadlessSurfaceInputParts
+                {
+                    Events = this,
+                    DataDirectory = dataDirectory
+                        ?? AcDream.Platform.ApplicationPathSet.Resolve()
+                            .DataDirectory,
+                    PluginTags = pluginTags,
+                }));
         // One registry, the surface's own, exactly as the windowed host does
         // it: the verbs a plugin registers and the verbs the client registers
         // for itself live together, so a line typed anywhere finds all of them.
@@ -197,7 +213,10 @@ internal sealed class HeadlessPluginHost
 
     internal void FireTick(double elapsedSeconds)
     {
-        _automation.Poll();
+        // The surface polls its own owners off this tick, as the first thing
+        // subscribed to it, which is what the windowed client does too. It is
+        // not polled separately here: two polls a tick on one client and one
+        // on the other is a difference in its own right.
         Action<double>? handlers;
         lock (_tickGate)
             handlers = _tick;

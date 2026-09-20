@@ -146,4 +146,11 @@ internal static class HostParityAllowList
     internal static IReadOnlyList<ParityAllowance> CharacterSessionBindings { get; } =
     [
     ];
+
+    /// <summary>
+    /// Inputs the plugin surface is built from that one host does not pass.
+    /// </summary>
+    internal static IReadOnlyList<ParityAllowance> SurfaceInputs { get; } =
+    [
+    ];
 }

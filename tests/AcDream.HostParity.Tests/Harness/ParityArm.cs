@@ -18,6 +18,15 @@ internal abstract class ParityArm : IDisposable
     /// <summary>The step both arms advance by, every time.</summary>
     internal const double TickSeconds = 0.015d;
 
+    /// <summary>
+    /// The words both arms are configured to be found by. Real clients read
+    /// these from their own configuration -- a launch option on one, the
+    /// session file on the other -- so the arms stand in for that with one
+    /// list, and a client that cannot carry them shows up as a difference.
+    /// </summary>
+    internal static readonly string[] ConfiguredPluginTags =
+        ["parity-tag", "parity-second"];
+
     private readonly IDisposable _hostLease;
     private ParityPlayerBody? _body;
     private RuntimeLocalPlayerFrameController? _frame;
@@ -28,6 +37,15 @@ internal abstract class ParityArm : IDisposable
         Func<ParitySessionOperations, GameRuntimeDependencies> buildDependencies)
     {
         Name = name;
+        // A real client announces itself to the other clients on this machine
+        // by writing into the player's own data folder. Each arm gets a
+        // scratch folder of its own instead, so a scenario can read what this
+        // client announced without touching anything the player owns and
+        // without the two arms seeing each other.
+        DataDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "acdream-parity",
+            $"{name}-{Guid.NewGuid():N}");
         Operations = new ParitySessionOperations();
         Dependencies = buildDependencies(Operations);
         Runtime = new GameRuntime(Dependencies);
@@ -63,6 +81,18 @@ internal abstract class ParityArm : IDisposable
 
     /// <summary>Which client this is, for failure messages.</summary>
     internal string Name { get; }
+
+    /// <summary>This arm's stand-in for the player's own data folder.</summary>
+    internal string DataDirectory { get; }
+
+    /// <summary>
+    /// The folder this client's announcements land in, read by a scenario the
+    /// way a second client on the same machine reads them.
+    /// </summary>
+    internal string PeerDirectory => Path.Combine(
+        DataDirectory,
+        AcDream.Runtime.Plugins.RuntimeAutomationSurfaceInputs
+            .PeerDirectoryName);
 
     internal GameRuntimeDependencies Dependencies { get; }
 
@@ -194,6 +224,17 @@ internal abstract class ParityArm : IDisposable
         DisposeHost();
         _hostLease.Dispose();
         Runtime.Dispose();
+        try
+        {
+            if (Directory.Exists(DataDirectory))
+                Directory.Delete(DataDirectory, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
     }
 
     protected virtual void DisposeHost()

@@ -112,6 +112,7 @@ libraries directly. It does not require those environment variables.
 | `ACDREAM_DEVTOOLS=1` | Enable the Vulkan validation and debug-utils layers |
 | `ACDREAM_HEADLESS_CONSOLE=0\|1` | Headless interactive console; defaults to on when stdin is a terminal |
 | `ACDREAM_HEADLESS_CONSOLE_STREAM=stderr\|stdout` | Which stream that console prints to; `stderr` by default |
+| `ACDREAM_PLUGIN_TAGS=a,b` | Words this client wants to be found by; plugins on the clients running on this machine can see one another's tags and filter on them. The headless config's `pluginTags` is the same option |
 
 A few other `ACDREAM_*` variables switch original-client behaviors that are
 on by default (`ACDREAM_RETAIL_CHASE`, `ACDREAM_CAMERA_COLLIDE`,
@@ -154,6 +155,18 @@ Then:
 export ACDREAM_BOT_PASSWORD='yourpassword'
 dotnet run --project src/AcDream.Headless/AcDream.Headless.csproj -c Release -- validate --config bot.json
 dotnet run --project src/AcDream.Headless/AcDream.Headless.csproj -c Release -- run --config bot.json
+```
+
+Optional per-session fields: `plugins` (which plugin ids to load),
+`pluginSettings`, `loginCommands` / `loginCommandDelayMs`, `statusFile`,
+`characterOptions`, and `pluginTags` — an array of words this session
+wants to be found by, the same option `ACDREAM_PLUGIN_TAGS` gives the
+graphical client. Plugins on the clients running on one machine can see one
+another's tags and filter on them, so a bot that should look like part of a
+group carries the group's word:
+
+```json
+"pluginTags": ["tank", "group-a"]
 ```
 
 For a single local session, `run` also accepts `--user` and `--password`. Add

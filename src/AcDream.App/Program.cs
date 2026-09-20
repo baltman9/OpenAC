@@ -145,12 +145,18 @@ using IDisposable atmosphericPackRegistration = renderPackRegistry.Register(
             "Rendering",
             "Shaders",
             "spv")));
-using var automation = new AcDream.Runtime.Plugins.RuntimeAutomationSurface(
-    worldEvents,
-    new AcDream.Runtime.Plugins.LocalPluginPeerRegistry(Path.Combine(
-        applicationPaths.DataDirectory,
-        "plugin-peers")),
-    runtimeOptions.PluginTags);
+// One factory, shared with the windowless host: what the surface needs
+// before a plugin can reach it cannot be present on one client and quietly
+// absent on the other.
+using var automation = AcDream.Runtime.Plugins.RuntimeAutomationBindings
+    .CreateSurface(
+        AcDream.App.Plugins.GraphicalAutomationCapabilities.BuildSurfaceInputs(
+            new AcDream.App.Plugins.GraphicalSurfaceInputParts
+            {
+                Events = worldEvents,
+                DataDirectory = applicationPaths.DataDirectory,
+                PluginTags = runtimeOptions.PluginTags,
+            }));
 var lootClassifiers = new AcDream.Core.Plugins.PluginLootClassifierRegistry();
 var hotkeyRegistry = new AcDream.App.Input.AppHotkeyRegistry(
     Path.Combine(applicationPaths.ConfigDirectory, "plugin-hotkeys.json"));

@@ -111,7 +111,14 @@ internal sealed class WindowedArm : ParityArm
             Runtime,
             Session,
             _commands);
-        _automation = new RuntimeAutomationSurface(_events);
+        _automation = RuntimeAutomationBindings.CreateSurface(
+            GraphicalAutomationCapabilities.BuildSurfaceInputs(
+                new GraphicalSurfaceInputParts
+                {
+                    Events = _events,
+                    DataDirectory = DataDirectory,
+                    PluginTags = ConfiguredPluginTags,
+                }));
         RuntimeAutomationBindings.Apply(
             _automation,
             Runtime,

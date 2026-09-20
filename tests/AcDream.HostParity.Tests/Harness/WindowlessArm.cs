@@ -62,7 +62,9 @@ internal sealed class WindowlessArm : ParityArm
         _host = new HeadlessPluginHost(
             Runtime,
             _log,
-            sessionCommands: _commands);
+            sessionCommands: _commands,
+            dataDirectory: DataDirectory,
+            pluginTags: ConfiguredPluginTags);
     }
 
     internal override IPluginHost Host => _host;
