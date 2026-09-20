@@ -167,6 +167,28 @@ public sealed class RuntimeAutomationSurfaceTests
     }
 
     [Fact]
+    public void PortalTransitionCoalescesDuplicateRuntimeSnapshots()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        var events = new AcDream.Core.Plugins.WorldEvents();
+        using var surface = new RuntimeAutomationSurface(events);
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        var seen = new List<PluginPortalTransition>();
+        events.PortalTransition += seen.Add;
+        var snapshot = RuntimePortalSnapshot.Idle with { Generation = 3 };
+        var observer = (IRuntimeEventObserver)surface;
+
+        observer.OnPortal(new RuntimePortalDelta(default, snapshot));
+        observer.OnPortal(new RuntimePortalDelta(default, snapshot));
+        observer.OnPortal(new RuntimePortalDelta(
+            default,
+            snapshot with { Materialized = true }));
+
+        Assert.Equal(2, seen.Count);
+        Assert.Equal([1L, 2L], seen.Select(static item => item.Revision));
+    }
+
+    [Fact]
     public void ChatCapture_isOrderedCursorBasedAndDetachesAcrossSessions()
     {
         using var first = GameRuntimeTestFactory.Create();
