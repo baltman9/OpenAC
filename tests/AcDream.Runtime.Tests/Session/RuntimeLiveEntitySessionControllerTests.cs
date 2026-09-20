@@ -930,6 +930,92 @@ public sealed class RuntimeLiveEntitySessionControllerTests
         Assert.Equal(movedCell, unbound.FullCellId);
     }
 
+    /// <summary>
+    /// Mutation pin: remove the step that writes down the server's word about
+    /// where another creature is. The creature then looks newly sighted on
+    /// every update, so a client with no window puts its body where the server
+    /// said instead of letting it walk there, and never knows its speed.
+    /// </summary>
+    [Fact]
+    public void AcceptedRemotePosition_RemembersTheServersWordAndTheCreaturesSpeed()
+    {
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        CommitLandblockCollision(runtime, 0x01010000u);
+        RuntimeFirstEntryDriveController drive = CreateDrive(runtime);
+        using var session = new WorldSession(
+            new IPEndPoint(IPAddress.Loopback, 9000),
+            new FixtureTransport());
+        var controller = new RuntimeLiveEntitySessionController(
+            runtime,
+            session,
+            worldProjection: new FixtureWorldProjection());
+        controller.BindRemoteArming(
+            AcDream.Runtime.Physics.RuntimeRemoteArming.Create(
+                runtime.EntityObjects,
+                runtime.Clock,
+                new UnusedCollisionSource(),
+                new EveryDestination()));
+        LiveEntitySessionSink sink = controller.CreateSink();
+        WorldSession.EntitySpawn spawn =
+            SpawnAt(0x70000060u, incarnation: 1, 0x01010001u);
+
+        sink.Spawned(spawn);
+        DrainFirstEntry(runtime, drive);
+        Assert.True(runtime.EntityObjects.Entities.TryGetActive(
+            spawn.Guid,
+            out RuntimeEntityRecord remote));
+
+        const uint movedCell = 0x01010011u;
+        sink.PositionUpdated(PositionUpdate(
+            spawn.Guid,
+            movedCell,
+            positionX: 40f,
+            positionSequence: 2));
+
+        var body = Assert.IsType<AcDream.Runtime.Physics.RemoteMotion>(
+            remote.RemoteMotion);
+        Assert.True(
+            body.LastServerPosTime > 0d,
+            "The arrival of the server's word was never written down.");
+        Assert.Equal(
+            runtime.EntityObjects.Physics.WireOriginToWorldFrame(
+                movedCell, 40f, 10f, 5f),
+            body.LastServerPos);
+        // A body whose last word was written down is no longer a first
+        // sighting, so the next word near it is something to catch up to.
+        Assert.False(
+            AcDream.Runtime.Physics.RuntimeRemoteSteadyStatePosition.WouldSnap(
+                body,
+                body.Body.Position,
+                willBeDrTicked: true));
+
+        sink.PositionUpdated(PositionUpdate(
+            spawn.Guid,
+            movedCell,
+            positionX: 41f,
+            positionSequence: 3) with
+        {
+            Velocity = new System.Numerics.Vector3(1f, 0f, 0f),
+        });
+
+        Assert.True(body.HasServerVelocity);
+        Assert.Equal(
+            new System.Numerics.Vector3(1f, 0f, 0f),
+            body.ServerVelocity);
+        Assert.Equal(
+            runtime.EntityObjects.Physics.WireOriginToWorldFrame(
+                movedCell, 41f, 10f, 5f),
+            body.LastServerPos);
+    }
+
+    /// <summary>Any landblock is serviceable; the fixture has one.</summary>
+    private sealed class EveryDestination
+        : IRuntimeRemotePlacementServiceWindow
+    {
+        public bool IsWithinServiceWindow(uint landblockId) => true;
+    }
+
     private static WorldSession.EntityPositionUpdate PositionUpdate(
         uint guid,
         uint cellId,

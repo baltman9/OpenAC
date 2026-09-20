@@ -692,16 +692,32 @@ public sealed class RuntimeLiveEntitySessionController
                 disposition,
                 timestamps,
                 PlayerDistanceTo(update.Position));
-        if (!IsCurrent()
-            || RuntimeRemoteSteadyStatePosition.IsAirborneNoOperation(route))
+        if (!IsCurrent())
+            return;
+
+        double nowSeconds = Entities.Physics.UtcNowSeconds;
+        if (RuntimeRemoteSteadyStatePosition.IsAirborneNoOperation(route))
         {
+            RuntimeRemoteServerPosition.StampAirborneLeftover(
+                remote, update.Position.LandblockId, worldPosition, nowSeconds);
             return;
         }
 
         bool isTeleport =
             RuntimeRemoteTeleportPosition.OwnsTeleportPlacement(route);
         if (!update.IsGrounded && !isTeleport)
+        {
+            RuntimeRemoteServerPosition.StampAirborneLeftover(
+                remote, update.Position.LandblockId, worldPosition, nowSeconds);
             return;
+        }
+
+        RuntimeRemoteServerPosition.DeriveVelocity(
+            remote,
+            update.Velocity,
+            worldPosition,
+            nowSeconds,
+            isTeleport);
 
         RuntimeRemoteContactRouting routing =
             arming.ApplyRemoteContactRouting(
@@ -729,6 +745,8 @@ public sealed class RuntimeLiveEntitySessionController
             remote,
             routing,
             update.Position.LandblockId);
+
+        RuntimeRemoteServerPosition.Stamp(remote, worldPosition, nowSeconds);
     }
 
     /// <summary>

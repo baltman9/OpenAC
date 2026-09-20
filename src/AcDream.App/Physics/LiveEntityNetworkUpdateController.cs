@@ -651,18 +651,6 @@ internal sealed class LiveEntityNetworkUpdateController
     }
 
 
-    private static void ApplyWireAirborneLeftoverBookkeeping(
-        RemoteMotion remote,
-        uint wireCellId,
-        System.Numerics.Vector3 worldPos,
-        double nowSec)
-    {
-        ArgumentNullException.ThrowIfNull(remote);
-        remote.CellId = wireCellId;
-        remote.LastServerPos = worldPos;
-        remote.LastServerPosTime = nowSec;
-    }
-
     private RuntimeRemoteContactRouting? RunRemoteArmTail(
         RuntimeEntityRecord canonical,
         LiveEntityRecord positionRecord,
@@ -1291,7 +1279,7 @@ internal sealed class LiveEntityNetworkUpdateController
             if (RuntimeRemoteSteadyStatePosition.IsAirborneNoOperation(
                     earlyRemoteRoute))
             {
-                ApplyWireAirborneLeftoverBookkeeping(
+                RuntimeRemoteServerPosition.StampAirborneLeftover(
                     rmState, p.LandblockId, worldPos, nowSec);
                 return;
             }
@@ -1301,31 +1289,17 @@ internal sealed class LiveEntityNetworkUpdateController
 
             if (!update.IsGrounded && !isTeleportRoute)
             {
-                ApplyWireAirborneLeftoverBookkeeping(
+                RuntimeRemoteServerPosition.StampAirborneLeftover(
                     rmState, p.LandblockId, worldPos, nowSec);
                 return;
             }
 
-            if (!isTeleportRoute)
-            {
-                System.Numerics.Vector3? serverVelocity = update.Velocity;
-                if (serverVelocity is null && rmState.LastServerPosTime > 0.0)
-                {
-                    double elapsed = nowSec - rmState.LastServerPosTime;
-                    if (elapsed > 0.001)
-                        serverVelocity = (worldPos - rmState.LastServerPos) / (float)elapsed;
-                }
-                if (serverVelocity is { } authoritativeVelocity)
-                {
-                    rmState.ServerVelocity = authoritativeVelocity;
-                    rmState.HasServerVelocity = true;
-                }
-                else
-                {
-                    rmState.ServerVelocity = System.Numerics.Vector3.Zero;
-                    rmState.HasServerVelocity = false;
-                }
-            }
+            RuntimeRemoteServerPosition.DeriveVelocity(
+                rmState,
+                update.Velocity,
+                worldPos,
+                nowSec,
+                isTeleportRoute);
 
             // A sticky lease (a creature closing on its melee target) does not
             // gate the position arm: the server correction routes like any
@@ -1366,8 +1340,7 @@ internal sealed class LiveEntityNetworkUpdateController
             RuntimeRemoteArming.TryAdoptWireCellAfterRouting(
                 rmState, routing.Value, p.LandblockId);
 
-            rmState.LastServerPos = worldPos;
-            rmState.LastServerPosTime = nowSec;
+            RuntimeRemoteServerPosition.Stamp(rmState, worldPos, nowSec);
 
             if (!isTeleportRoute
                 && rmState.HasServerVelocity
