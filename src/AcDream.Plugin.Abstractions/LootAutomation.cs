@@ -77,10 +77,20 @@ public readonly record struct PluginLootContainer(
 /// this against the id you passed to Identify to learn when your own
 /// request completed.
 /// </param>
+/// <param name="LastAbandonedObjectId">
+/// The failure signal: the object id of the most recent request that was
+/// given up on rather than answered -- because the server never replied
+/// within the slot's bound, or because the slot was taken over. Poll this
+/// against the id you passed to Identify to learn that your own request
+/// will never complete, so you can count the failure and stop asking about
+/// that object for ever. Like <paramref name="CurrentObjectId"/> it is a
+/// one-shot signal: a fresh request for that same object clears it.
+/// </param>
 public readonly record struct PluginAppraisalState(
     long Revision,
     uint AwaitingObjectId,
-    uint CurrentObjectId);
+    uint CurrentObjectId,
+    uint LastAbandonedObjectId = 0u);
 
 /// <summary>
 /// Looting: finding nearby corpses, opening one, reading what is inside, and

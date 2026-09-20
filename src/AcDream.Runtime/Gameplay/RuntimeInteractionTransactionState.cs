@@ -119,13 +119,32 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
 {
     public const long RetailUseThrottleMs = 200;
 
+    /// <summary>
+    /// The pace descriptions are asked at when something asks for many of
+    /// them: one request every 499 ms, taken in turn over everything still
+    /// waiting for an answer.
+    /// </summary>
+    public const long AppraisalRequestIntervalMs = 499;
+
+    /// <summary>
+    /// How long one description may hold the single asking slot before it is
+    /// given up: ten asking turns. An asker that never waits for an answer
+    /// simply takes its next turn, but this channel admits one question at a
+    /// time, so the wait has to end by itself -- otherwise one object the
+    /// server never answers silences every later question for the session.
+    /// </summary>
+    public const long AppraisalRequestTimeoutMs = 10 * AppraisalRequestIntervalMs;
+
     private readonly InventoryTransactionState _inventory;
+    private readonly Func<long> _nowMs;
     private readonly Queue<RuntimeQueuedInteraction> _outbound = new();
     private long _lastUseMs = long.MinValue / 2;
     private uint _lastUseSourceId;
     private uint _lastUseTargetId;
     private uint _awaitingAppraisalId;
     private AppraisalRequestOrigin _awaitingAppraisalOrigin;
+    private long _awaitingAppraisalMs;
+    private uint _lastAbandonedAppraisalId;
     private uint _currentAppraisalId;
     private uint _lastCompletedAppraisalId;
     private RuntimePendingPickup? _pendingPickup;
@@ -139,15 +158,57 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
     private bool _disposed;
 
     public RuntimeInteractionTransactionState(
-        InventoryTransactionState inventory)
+        InventoryTransactionState inventory,
+        Func<long>? nowMs = null)
     {
         _inventory = inventory
             ?? throw new ArgumentNullException(nameof(inventory));
+        _nowMs = nowMs ?? (() => Environment.TickCount64);
     }
 
     public InventoryTransactionState Inventory => _inventory;
     public uint AwaitingAppraisalId => _awaitingAppraisalId;
     public AppraisalRequestOrigin AwaitingAppraisalOrigin => _awaitingAppraisalOrigin;
+
+    /// <summary>
+    /// Whether the description the slot is waiting for has been waited on
+    /// longer than <see cref="AppraisalRequestTimeoutMs"/>. A pure question:
+    /// the slot is only really let go when somebody asks the next question,
+    /// or when <see cref="TryExpireAwaitingAppraisal"/> is called outright.
+    /// Readers that report the wait -- the busy cursor, the plugin-facing
+    /// appraisal state -- consult this so a wait that has already run out is
+    /// not shown as one still in progress.
+    /// </summary>
+    public bool IsAwaitingAppraisalExpired =>
+        _awaitingAppraisalId != 0u
+        && _nowMs() - _awaitingAppraisalMs >= AppraisalRequestTimeoutMs;
+
+    /// <summary>
+    /// Whether another description may be asked for. One at a time, and a
+    /// wait that has run out is no longer one: an answer that never came
+    /// must not keep the channel for the rest of the session.
+    /// </summary>
+    public bool CanBeginAppraisal =>
+        !_disposed
+        && (_awaitingAppraisalId == 0u || IsAwaitingAppraisalExpired);
+
+    /// <summary>
+    /// The object whose description was given up on last, so an asker that
+    /// polls can learn its question failed, count it, and stop asking the
+    /// same object for ever. Like
+    /// <see cref="LastCompletedAppraisalId"/> it is a one-shot signal for
+    /// the request that produced it: a fresh request for that same object
+    /// clears it.
+    /// </summary>
+    public uint LastAbandonedAppraisalId => _lastAbandonedAppraisalId;
+
+    /// <summary>
+    /// Raised with the object id whenever a description is given up on,
+    /// whether because it was waited on too long or because the slot was
+    /// cleared by hand. The counterpart of
+    /// <see cref="AppraisalReceived"/> for an answer that never came.
+    /// </summary>
+    public event Action<uint>? AppraisalAbandoned;
 
     /// <summary>
     /// The presentation target: the object the examination window shows
@@ -365,6 +426,13 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         if (objectId == 0u)
             return false;
 
+        // First, let go of a question the server never answered. Without
+        // this the very first lost answer keeps the one slot for the rest of
+        // the session and nothing is ever described again -- a looter stops
+        // looting, and whatever it makes wait on a description stops with
+        // it.
+        TryExpireAwaitingAppraisal();
+
         // A background plugin Identify must never bump a deliberate user
         // assess out of the single awaiting slot -- that would make the
         // user's own assess action produce nothing. The awaiting slot below
@@ -391,6 +459,12 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         if (objectId == _lastCompletedAppraisalId)
             _lastCompletedAppraisalId = 0u;
 
+        // Same reason for the give-up signal: an asker polling "was my
+        // question dropped?" must not read the answer to the last round as
+        // the answer to this one.
+        if (objectId == _lastAbandonedAppraisalId)
+            _lastAbandonedAppraisalId = 0u;
+
         // An appraisal takes a reference of its own rather than the shared
         // item-action one. It sends no item action, and counting it as one
         // made every pick-up and container open refuse while a description
@@ -407,8 +481,10 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
 
         uint previousAwaiting = _awaitingAppraisalId;
         AppraisalRequestOrigin previousOrigin = _awaitingAppraisalOrigin;
+        long previousAwaitingMs = _awaitingAppraisalMs;
         _awaitingAppraisalId = objectId;
         _awaitingAppraisalOrigin = origin;
+        _awaitingAppraisalMs = _nowMs();
         IncrementRevision();
         try
         {
@@ -422,6 +498,7 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
             {
                 _awaitingAppraisalId = previousAwaiting;
                 _awaitingAppraisalOrigin = previousOrigin;
+                _awaitingAppraisalMs = previousAwaitingMs;
                 if (acquiredBusy)
                     _inventory.CompleteAppraisal();
                 IncrementRevision();
@@ -509,8 +586,9 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
 
     /// <summary>
     /// Gives up on a description the server never answered, freeing the one
-    /// awaiting slot and the reference it holds. This is the recovery path
-    /// for a lost answer; nothing is sent.
+    /// awaiting slot and the reference it holds, and telling whoever asked
+    /// that their question failed. This is the recovery path for a lost
+    /// answer; nothing is sent.
     /// </summary>
     /// <returns>True when a request was abandoned.</returns>
     public bool AbandonAwaitingAppraisal()
@@ -518,11 +596,29 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_awaitingAppraisalId == 0u)
             return false;
+        uint abandoned = _awaitingAppraisalId;
         _awaitingAppraisalId = 0u;
         _awaitingAppraisalOrigin = default;
+        _awaitingAppraisalMs = 0L;
+        _lastAbandonedAppraisalId = abandoned;
         _inventory.CompleteAppraisal();
         IncrementRevision();
+        try { AppraisalAbandoned?.Invoke(abandoned); }
+        catch { /* observer errors do not interrupt appraisal bookkeeping */ }
         return true;
+    }
+
+    /// <summary>
+    /// Gives up on the awaiting description only once it has been waited on
+    /// longer than <see cref="AppraisalRequestTimeoutMs"/>. This is what
+    /// keeps one object the server never answers from holding the single
+    /// asking slot for the rest of the session.
+    /// </summary>
+    /// <returns>True when a request was given up on.</returns>
+    public bool TryExpireAwaitingAppraisal()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return IsAwaitingAppraisalExpired && AbandonAwaitingAppraisal();
     }
 
     public bool RefreshCurrentAppraisal(Action<uint> sendAppraisal)
@@ -542,10 +638,15 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         if (_awaitingAppraisalId == 0u && _currentAppraisalId == 0u)
             return false;
 
+        // Whoever was waiting on the displaced description has to be told,
+        // or it waits for an answer this takeover has just made impossible.
+        uint abandoned = _awaitingAppraisalId;
         if (_awaitingAppraisalId != 0u)
             _inventory.CompleteAppraisal();
         _awaitingAppraisalId = 0u;
         _awaitingAppraisalOrigin = default;
+        _awaitingAppraisalMs = 0L;
+        _lastAbandonedAppraisalId = abandoned;
         _currentAppraisalId = 0u;
         // Wipe the completion signal along with the rest of the slot --
         // this is a full appraisal-state takeover for the spell-examine
@@ -553,6 +654,11 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         // a plugin later reading a "completion" that predates this cancel.
         _lastCompletedAppraisalId = 0u;
         IncrementRevision();
+        if (abandoned != 0u)
+        {
+            try { AppraisalAbandoned?.Invoke(abandoned); }
+            catch { /* observer errors do not interrupt appraisal bookkeeping */ }
+        }
         sendAppraisal(0u);
         return true;
     }
@@ -877,6 +983,7 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
             _awaitingAppraisalId != 0u
             || _currentAppraisalId != 0u
             || _lastCompletedAppraisalId != 0u
+            || _lastAbandonedAppraisalId != 0u
             || _outbound.Count != 0
             || _pendingPickup is not null
             || _pendingUse is not null
@@ -894,6 +1001,8 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         LastItemUseCompletion = default;
         _awaitingAppraisalId = 0u;
         _awaitingAppraisalOrigin = default;
+        _awaitingAppraisalMs = 0L;
+        _lastAbandonedAppraisalId = 0u;
         _currentAppraisalId = 0u;
         _lastCompletedAppraisalId = 0u;
         _outbound.Clear();

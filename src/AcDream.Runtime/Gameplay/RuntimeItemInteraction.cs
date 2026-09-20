@@ -268,9 +268,20 @@ public sealed class RuntimeItemInteraction : IDisposable
     /// Outstanding appraisal requests, counted apart from
     /// <see cref="BusyCount"/>. A description in flight holds nothing an
     /// item action needs, so it never gates one; the cursor still shows the
-    /// wait, because the character is waiting on the server either way.
+    /// wait, because the character is waiting on the server either way. A
+    /// wait already past its own bound counts for nothing: the answer is not
+    /// coming, and the cursor must not say the character is still waiting.
     /// </summary>
-    public int AppraisalCount => _transactions.AppraisalCount;
+    public int AppraisalCount =>
+        _runtimeTransactions.IsAwaitingAppraisalExpired
+            ? 0
+            : _transactions.AppraisalCount;
+
+    /// <summary>
+    /// Whether another description may be asked for. One at a time, except
+    /// that a wait past its own bound no longer counts as one.
+    /// </summary>
+    public bool CanBeginAppraisal => _runtimeTransactions.CanBeginAppraisal;
     public uint CurrentAppraisalId =>
         _runtimeTransactions.CurrentAppraisalId;
 

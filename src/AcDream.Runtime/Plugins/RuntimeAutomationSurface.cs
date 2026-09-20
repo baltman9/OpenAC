@@ -2160,7 +2160,10 @@ internal sealed class RuntimeAutomationSurface
             return new(PluginItemCommandStatus.InvalidItem);
         // Only another description in flight holds this up. An item action
         // of the caller's own is not one: the two do not share a channel.
-        if (!runtime.InventoryOwner.Transactions.CanBeginAppraisal)
+        // A description waited on past its own bound is not one either --
+        // asked through the owner below, it is given up and this request
+        // takes its place.
+        if (!runtime.ActionOwner.Transactions.CanBeginAppraisal)
             return new(PluginItemCommandStatus.Busy);
         return identify(objectId)
             ? new(PluginItemCommandStatus.Started)
@@ -3006,7 +3009,12 @@ internal sealed class RuntimeAutomationSurface
                     ? default
                     : new PluginAppraisalState(
                         transactions.Revision,
-                        transactions.AwaitingAppraisalId,
+                        // A wait already past its own bound is reported as
+                        // no wait at all: the answer is not coming, and the
+                        // next request is what actually lets it go.
+                        transactions.IsAwaitingAppraisalExpired
+                            ? 0u
+                            : transactions.AwaitingAppraisalId,
                         // The plugin-facing completion signal: the object
                         // id of the last appraisal response that actually
                         // completed, regardless of whether the user's
@@ -3017,7 +3025,13 @@ internal sealed class RuntimeAutomationSurface
                         // the one the window shows, and mapping it here
                         // stalls any plugin polling for its own Identify
                         // to finish (loot scanners, trackers).
-                        transactions.LastCompletedAppraisalId);
+                        transactions.LastCompletedAppraisalId,
+                        // The other half of that poll: a request the client
+                        // gave up on never produces a completion, so an
+                        // asker with no failure signal waits for ever.
+                        transactions.IsAwaitingAppraisalExpired
+                            ? transactions.AwaitingAppraisalId
+                            : transactions.LastAbandonedAppraisalId);
             }
         }
     }
@@ -3249,8 +3263,9 @@ internal sealed class RuntimeAutomationSurface
             return new(PluginItemCommandStatus.InvalidItem);
         }
         // One description at a time; a pick-up or an open of the caller's
-        // own is on another channel and does not hold this up.
-        if (!runtime.InventoryOwner.Transactions.CanBeginAppraisal)
+        // own is on another channel and does not hold this up, and neither
+        // does a description already waited on past its own bound.
+        if (!runtime.ActionOwner.Transactions.CanBeginAppraisal)
             return new(PluginItemCommandStatus.Busy);
         return identify(objectId)
             ? new(PluginItemCommandStatus.Started)
