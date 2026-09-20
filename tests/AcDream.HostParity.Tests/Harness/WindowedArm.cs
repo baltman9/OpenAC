@@ -50,6 +50,7 @@ internal sealed class WindowedArm : ParityArm
     private readonly RuntimeAutomationSurface _automation;
     private readonly List<string> _warnings = [];
     private readonly List<IDisposable> _bindings = [];
+    private readonly AcDream.App.Runtime.CurrentGameRuntimeAdapter _sessionCommands;
     private InputDispatcher? _dispatcher;
 
     internal WindowedArm()
@@ -100,6 +101,15 @@ internal sealed class WindowedArm : ParityArm
             // tell -- the windowless host passes its own absent controller.
             new UnwatchedCombatModeIntent())));
 
+        // The windowed client's own command adapter, which until now could
+        // not be built without a presentation tree and so was never under a
+        // test. The one thing it asks a window for -- something to act on a
+        // selection key with -- is absent here, as it is in a run with no
+        // window, and the adapter answers that as unsupported.
+        _sessionCommands = new AcDream.App.Runtime.CurrentGameRuntimeAdapter(
+            Runtime,
+            Session,
+            _commands);
         _automation = new RuntimeAutomationSurface(_events);
         RuntimeAutomationBindings.Apply(
             _automation,
@@ -108,6 +118,7 @@ internal sealed class WindowedArm : ParityArm
             {
                 Runtime = Runtime,
                 Warn = _warnings.Add,
+                SessionCommands = _sessionCommands,
             }));
         Host = new AppPluginHost(
             new RecordingPluginLogger(),
@@ -300,6 +311,7 @@ internal sealed class WindowedArm : ParityArm
         for (int index = _bindings.Count - 1; index >= 0; index--)
             _bindings[index].Dispose();
         _automation.Dispose();
+        _sessionCommands.Dispose();
         _dispatcher?.Dispose();
     }
 

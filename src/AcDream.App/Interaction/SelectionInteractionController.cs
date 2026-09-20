@@ -9,7 +9,21 @@ using AcDream.UI.Abstractions.Input;
 
 namespace AcDream.App.Interaction;
 
-internal sealed class SelectionInteractionController
+/// <summary>
+/// Acting on a selection key or a selection menu entry. The client's session
+/// commands route a plugin's selection request through this, and a client with
+/// no presentation tree has none, which is why it is a seam of its own rather
+/// than a hard reference to the controller that draws.
+/// </summary>
+internal interface ISelectionInputActions
+{
+    /// <summary>Acts on one selection request.</summary>
+    /// <param name="action">What was asked for.</param>
+    /// <returns>False when nothing here acts on it.</returns>
+    bool HandleInputAction(InputAction action);
+}
+
+internal sealed class SelectionInteractionController : ISelectionInputActions
 {
     /// <summary>
     /// How many consecutive stalled ticks of the local player's active

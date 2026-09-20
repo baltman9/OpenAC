@@ -9,13 +9,13 @@ namespace AcDream.HostParity.Tests;
 /// With no body neither client moved at all, so this is the first time the
 /// two have been compared while the character is under way.
 ///
-/// The plugin's own movement intent is set through the runtime's movement
-/// owner rather than through <see cref="INavigationAutomation.SetMovementIntent"/>:
-/// that seam needs each host's session commands bound, which the harness does
-/// not build yet. What the plugin call answers is recorded anyway, so the day
-/// it starts working the two clients have to agree about it. Below that seam
-/// this is the real thing -- each host's own movement input source reads the
-/// held intent and each host's own frame driver walks the body on it.
+/// The character is moved the way a plugin moves it and no other way: each
+/// arm binds its own client's real command adapter, so a held intent, a turn
+/// and letting go all go in through the plugin seam, down through that
+/// client's own movement commands, and out through its own frame driver.
+/// Until now the windowed client's adapter could not be built at all without
+/// a presentation tree, so these calls were recorded as refused and the two
+/// clients were only compared below the seam.
 ///
 /// Mutation check (2026-09-20), run: dropping the post-network half of the
 /// frame -- the half that sends the character's position -- from the windowed
@@ -38,24 +38,28 @@ public sealed class MovementParityTests
             transcript.Step("standing");
             transcript.Record("body", arm.HasLiveBody);
             RecordWhere(transcript, navigation);
+            double startedAt = navigation.Snapshot.Position.NorthSouth;
             _ = arm.Operations.TakeOutbound();
 
             transcript.Step("hold forward");
             transcript.Record(
                 "plugin.status",
                 navigation.SetMovementIntent(
-                    new PluginMovementIntent(Forward: true)));
-            arm.Deliver(static runtime => runtime.MovementOwner.SetCommandInput(
-                new MovementInput(Forward: true, Run: true)));
+                    new PluginMovementIntent(Forward: true, Run: true)));
             for (int step = 0; step < TicksForTwoHundredMilliseconds; step++)
                 arm.Advance();
             RecordWhere(transcript, navigation);
             transcript.RecordOutbound(arm);
+            // Both clients agreeing that the character never moved would
+            // prove nothing, so insist that the plugin's own call moved it.
+            Assert.NotEqual(
+                startedAt,
+                navigation.Snapshot.Position.NorthSouth,
+                precision: 3);
 
             transcript.Step("let go");
             transcript.Record("plugin.status", navigation.ClearMovementIntent());
-            arm.Deliver(static runtime =>
-                runtime.MovementOwner.ClearCommandInput());
+            transcript.Record("plugin.stop", navigation.StopMoving());
             for (int step = 0; step < TicksForTwoHundredMilliseconds; step++)
                 arm.Advance();
             RecordWhere(transcript, navigation);
@@ -72,9 +76,6 @@ public sealed class MovementParityTests
 
             transcript.Step("turn to face east");
             transcript.Record("plugin.status", navigation.FaceHeading(90f));
-            transcript.Record(
-                "turned",
-                arm.Runtime.MovementOwner.TurnToHeading(90f));
             for (int step = 0; step < TicksForTwoHundredMilliseconds * 4; step++)
                 arm.Advance();
             RecordWhere(transcript, navigation);

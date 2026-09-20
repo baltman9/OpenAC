@@ -27,6 +27,7 @@ internal sealed class WindowlessArm : ParityArm
     private readonly HeadlessGameplayOperations _gameplay;
     private readonly HeadlessPluginHost _host;
     private readonly RecordingPluginLogger _log = new();
+    private DirectGameRuntimeCommandAdapter _commands = null!;
 
     internal WindowlessArm()
         : this(new HeadlessGameplayOperations())
@@ -45,7 +46,15 @@ internal sealed class WindowlessArm : ParityArm
     {
         _gameplay = gameplay;
         _gameplay.Bind(Runtime, catalog: null, accountName: () => "parity");
-        _host = new HeadlessPluginHost(Runtime, _log);
+        // The windowless client's own command adapter, the one its session
+        // host really builds, over this arm's session.
+        _commands = new DirectGameRuntimeCommandAdapter(
+            Runtime,
+            new ParitySessionCommands(Session));
+        _host = new HeadlessPluginHost(
+            Runtime,
+            _log,
+            sessionCommands: _commands);
     }
 
     internal override IPluginHost Host => _host;
@@ -64,8 +73,34 @@ internal sealed class WindowlessArm : ParityArm
         _host.FireTick(TickSeconds);
     }
 
+    /// <summary>
+    /// This client takes hold of a world connection twice over: once for its
+    /// gameplay operations and once for its command adapter, which answers
+    /// nothing until it has been handed the connection.
+    /// </summary>
     protected override ILiveSessionCommandRouting CreateCommandRoute(
-        WorldSession session) => _gameplay.CreateRoute(session);
+        WorldSession session) =>
+        new BothRoutes(
+            _gameplay.CreateRoute(session),
+            _commands.CreateRoute(session));
+
+    private sealed class BothRoutes(
+        ILiveSessionCommandRouting first,
+        ILiveSessionCommandRouting second)
+        : ILiveSessionCommandRouting
+    {
+        public void Activate()
+        {
+            first.Activate();
+            second.Activate();
+        }
+
+        public void Dispose()
+        {
+            second.Dispose();
+            first.Dispose();
+        }
+    }
 
     /// <summary>
     /// The windowless client's own frame host, unchanged: it reads the
