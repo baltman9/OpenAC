@@ -27,5 +27,8 @@
     <ProjectReference Include="..\..\src\AcDream.Headless\AcDream.Headless.csproj" />
     <ProjectReference Include="..\..\src\AcDream.Runtime\AcDream.Runtime.csproj" />
     <ProjectReference Include="..\..\src\AcDream.Plugin.Abstractions\AcDream.Plugin.Abstractions.csproj" />
+    <!-- The launcher writes the session document both clients read, so what
+         it can put in one is part of what a launched session can be told. -->
+    <ProjectReference Include="..\..\src\AcDream.Launcher.Core\AcDream.Launcher.Core.csproj" />
   </ItemGroup>
 </Project>
