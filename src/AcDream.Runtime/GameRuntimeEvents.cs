@@ -48,10 +48,25 @@ public enum RuntimeEntityChange
     Deleted,
 }
 
+/// <summary>
+/// One thing that happened to a live object.
+/// </summary>
+/// <param name="Stamp">When, and in which generation and frame.</param>
+/// <param name="Change">What happened.</param>
+/// <param name="Entity">The object it happened to.</param>
+/// <param name="ReplacedInPlace">
+/// True when a <see cref="RuntimeEntityChange.Deleted"/> is the handover
+/// from one incarnation of this object to the next one under the same id,
+/// rather than the object leaving the world. An observer that lets go of
+/// the object -- a selection, a target, a tracked body -- keeps hold of it
+/// when this is set, because the very next thing it hears is the
+/// replacement being registered.
+/// </param>
 public readonly record struct RuntimeEntityDelta(
     RuntimeEventStamp Stamp,
     RuntimeEntityChange Change,
-    RuntimeEntitySnapshot Entity);
+    RuntimeEntitySnapshot Entity,
+    bool ReplacedInPlace = false);
 
 public readonly record struct RuntimePlacementDelta(
     RuntimeEventStamp Stamp,

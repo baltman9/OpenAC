@@ -43,7 +43,14 @@ public sealed class RuntimeSelectionEntityFollower
         switch (delta.Change)
         {
             // Taken out of the world, or its place in the world given up:
-            // the selection is pointing at nothing.
+            // the selection is pointing at nothing. A handover to a fresh
+            // incarnation of the same object is not that: the server is
+            // re-sending something the player still has picked out, and the
+            // replacement is registered under the same id in the same
+            // breath. Letting go there would drop the selection every time
+            // the server re-describes what the player is looking at.
+            case RuntimeEntityChange.Deleted when delta.ReplacedInPlace:
+                return;
             case RuntimeEntityChange.Deleted:
             case RuntimeEntityChange.Withdrawn:
                 reason = SelectionChangeReason.SelectedObjectRemoved;

@@ -22,12 +22,15 @@ namespace AcDream.HostParity.Tests;
 /// side, neither arm cleared, the two transcripts agreed, and the outright
 /// assertion below is what caught it.
 ///
-/// Mutation check (2026-09-20), both run: taking
+/// Mutation check (2026-09-20), all three run: taking
 /// <c>RuntimeEntityChange.Deleted</c> out of the runtime's selection follower
 /// turned <see cref="RemovingTheSelectedObjectClearsTheSelectionOnBothClients"/>
 /// red; taking <c>Hidden</c> out turned
 /// <see cref="HidingTheSelectedObjectClearsTheSelectionOnBothClients"/> red.
-/// Restoring each turned them green.
+/// Restoring each turned them green. Dropping the replacement case from the
+/// follower turned
+/// <see cref="ReSendingTheSelectedObjectKeepsItSelectedOnBothClients"/> red
+/// and left the other three green.
 /// </summary>
 public sealed class SelectionLifetimeParityTests
 {
@@ -86,6 +89,40 @@ public sealed class SelectionLifetimeParityTests
             arm.Advance();
             RecordSelection(transcript, arm);
             Assert.Equal(ParityWorld.Monster, arm.Host.Selection.SelectedObjectId);
+            transcript.RecordOutbound(arm);
+        });
+
+    /// <summary>
+    /// The server re-sending the selected creature. It arrives as a fresh
+    /// incarnation under the same id, which retires the previous one before
+    /// registering the new one, so the selection hears "gone" and "here" in
+    /// one breath. Letting go on the first half leaves the player with
+    /// nothing selected every time the server re-describes what they are
+    /// looking at, and hands a plugin a zero.
+    /// </summary>
+    [Fact]
+    public void ReSendingTheSelectedObjectKeepsItSelectedOnBothClients() =>
+        ParityScenario.Run(static (arm, transcript) =>
+        {
+            Stage(arm, transcript);
+
+            transcript.Step("the server sends it again");
+            arm.Server.CreateObject(ParityWorld.Spawn(
+                ParityWorld.Monster,
+                ParityWorld.PlayerX + 3f,
+                ParityWorld.PlayerY,
+                ParityPlayerBody.Cell,
+                state: 0,
+                instance: 2));
+            arm.Advance();
+            RecordSelection(transcript, arm);
+            // Said outright: two clients that both dropped it would agree.
+            Assert.Equal(
+                ParityWorld.Monster, arm.Host.Selection.SelectedObjectId);
+            transcript.Record(
+                "known",
+                arm.Runtime.EntityObjects.Entities.TryGetActive(
+                    ParityWorld.Monster, out _));
             transcript.RecordOutbound(arm);
         });
 

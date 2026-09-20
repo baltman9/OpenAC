@@ -49,13 +49,19 @@ internal static class RuntimeEntityTestSpawns
         runtime.InventoryOwner.Objects.AddOrUpdate(item);
     }
 
-    private static WorldSession.EntitySpawn Spawn(
+    /// <summary>
+    /// One create as the server sends it. <paramref name="instance"/> is
+    /// which incarnation of this object it is: a second create carrying a
+    /// later one is the server re-sending the same object.
+    /// </summary>
+    public static WorldSession.EntitySpawn Spawn(
         uint guid,
         uint landblock,
         float x,
         float y,
         PhysicsStateFlags state,
-        float z)
+        float z,
+        ushort instance = 1)
     {
         var position = new CreateObject.ServerPosition(
             landblock,
@@ -75,7 +81,7 @@ internal static class RuntimeEntityTestSpawns
             ServerControlledMove: 1,
             ForcePosition: 0,
             ObjDesc: 1,
-            Instance: 1);
+            Instance: instance);
         var physics = new PhysicsSpawnData(
             RawState: (uint)state,
             Position: position,
@@ -111,7 +117,7 @@ internal static class RuntimeEntityTestSpawns
             null,
             null,
             PhysicsState: physics.RawState,
-            InstanceSequence: 1,
+            InstanceSequence: instance,
             MovementSequence: 1,
             ServerControlSequence: 1,
             PositionSequence: 1,

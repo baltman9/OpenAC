@@ -318,6 +318,11 @@ internal static class ParityWorld
     }
 
 
+    /// <summary>
+    /// One create as the server sends it. <paramref name="instance"/> is
+    /// which incarnation of this object it is: a second create carrying a
+    /// later one is the server re-sending the same object.
+    /// </summary>
     internal static WorldSession.EntitySpawn Spawn(
         uint guid,
         float x,
@@ -325,7 +330,8 @@ internal static class ParityWorld
         uint cell,
         PhysicsStateFlags state,
         uint? useability = null,
-        float? z = null)
+        float? z = null,
+        ushort instance = 1)
     {
         var position = new CreateObject.ServerPosition(
             cell,
@@ -345,7 +351,7 @@ internal static class ParityWorld
             ServerControlledMove: 1,
             ForcePosition: 0,
             ObjDesc: 1,
-            Instance: 1);
+            Instance: instance);
         var physics = new PhysicsSpawnData(
             RawState: (uint)state,
             Position: position,
@@ -382,7 +388,7 @@ internal static class ParityWorld
             null,
             PhysicsState: physics.RawState,
             Useability: useability,
-            InstanceSequence: 1,
+            InstanceSequence: instance,
             MovementSequence: 1,
             ServerControlSequence: 1,
             PositionSequence: 1,
