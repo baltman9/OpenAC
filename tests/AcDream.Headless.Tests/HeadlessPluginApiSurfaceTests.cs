@@ -354,6 +354,8 @@ public sealed class HeadlessPluginApiSurfaceTests
                 (200u, PluginObjectChangeKind.Created),
             },
             seen.Select(static c => (c.ObjectId, c.Kind)));
+        Assert.Equal([1L, 2L, 3L, 4L], seen.Select(static c => c.Revision));
+        Assert.Null(seen[2].Current);
     }
 
     [Fact]
