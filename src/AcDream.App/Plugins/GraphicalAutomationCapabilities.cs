@@ -59,8 +59,6 @@ internal static class GraphicalAutomationCapabilities
             nameof(RuntimeAutomationHostCapabilities.UseWorldObject),
             nameof(RuntimeAutomationHostCapabilities.DismissGhost),
             nameof(RuntimeAutomationHostCapabilities.SelectionAction),
-            nameof(RuntimeAutomationHostCapabilities.ChatInputActive),
-            nameof(RuntimeAutomationHostCapabilities.ChatComposer),
             nameof(RuntimeAutomationHostCapabilities.SpeciesName),
         };
 
@@ -117,6 +115,13 @@ internal static class GraphicalAutomationCapabilities
             Declared = Declared,
             Conditional = Conditional,
             Warn = parts.Warn,
+            // Automation that steers by holding keys has to know when the
+            // keyboard is going into text instead of into the character, and
+            // only a host with a keyboard can say. The chat entry itself is a
+            // runtime owner, so this is the one thing the window lends it.
+            KeyboardGoesToText = input is null
+                ? null
+                : () => input.WantsTextInput,
             Content = parts.Content,
             MagicCatalog = parts.MagicCatalog,
             SubmitChatText = session is null ? null : session.SubmitChatText,
@@ -180,14 +185,6 @@ internal static class GraphicalAutomationCapabilities
                         .NextPlayer => InputAction.SelectionNextPlayer,
                     _ => InputAction.None,
                 }),
-            // Automation that steers by holding keys has to know when the
-            // keyboard is going into the chat entry instead of the character.
-            ChatInputActive = input is null
-                ? null
-                : () => input.WantsTextInput,
-            ChatComposer = retainedUi is null
-                ? null
-                : retainedUi.ComposeChatText,
         };
     }
 

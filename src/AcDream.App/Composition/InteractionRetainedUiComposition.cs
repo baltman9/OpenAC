@@ -629,7 +629,8 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                     chat,
                     () => late.Session.Commands,
                     d.Communication.ChatWindows,
-                    layoutStore),
+                    layoutStore,
+                    d.Communication.ChatEntryOwner),
                 Radar: new RadarRuntimeBindings(
                     late.Radar.Snapshot,
                     d.Actions.Selection,

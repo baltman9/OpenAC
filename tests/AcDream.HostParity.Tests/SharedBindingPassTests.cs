@@ -107,8 +107,6 @@ public sealed class SharedBindingPassTests
             new PluginItemCommandResult(PluginItemCommandStatus.Started),
         DismissGhost = static _ => true,
         SelectionAction = static _ => true,
-        ChatInputActive = static () => false,
-        ChatComposer = static _ => true,
         SpeciesName = static _ => string.Empty,
         ProjectileCollision = physics,
         RemoteBodiesUnsimulated = true,

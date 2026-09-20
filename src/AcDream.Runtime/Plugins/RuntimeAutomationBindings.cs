@@ -66,6 +66,14 @@ internal sealed record RuntimeAutomationHostCapabilities
     /// <summary>Where a binding problem is reported; host-shaped, not a capability.</summary>
     public Action<string>? Warn { get; init; }
 
+    /// <summary>
+    /// Whether the keyboard is going into text rather than into the character.
+    /// Host-shaped, not a capability: the chat entry is a runtime owner, and
+    /// this is the one thing about it only a host with a keyboard can know. A
+    /// host without one leaves it out and the entry decides for itself.
+    /// </summary>
+    public Func<bool>? KeyboardGoesToText { get; init; }
+
     public IDatReaderWriter? Content { get; init; }
     public MagicCatalog? MagicCatalog { get; init; }
     public Func<string, bool>? SubmitChatText { get; init; }
@@ -80,8 +88,6 @@ internal sealed record RuntimeAutomationHostCapabilities
     public Func<uint, PluginItemCommandResult>? UseWorldObject { get; init; }
     public Func<uint, bool>? DismissGhost { get; init; }
     public Func<PluginSelectionAction, bool>? SelectionAction { get; init; }
-    public Func<bool>? ChatInputActive { get; init; }
-    public Func<string, bool>? ChatComposer { get; init; }
     public Func<int, string>? SpeciesName { get; init; }
     public PhysicsEngine? ProjectileCollision { get; init; }
     public bool RemoteBodiesUnsimulated { get; init; }
@@ -92,7 +98,7 @@ internal sealed record RuntimeAutomationHostCapabilities
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(static property => property.Name is not (
                 nameof(HostName) or nameof(Declared) or nameof(Warn)
-                or nameof(Conditional)))
+                or nameof(Conditional) or nameof(KeyboardGoesToText)))
             .OrderBy(static property => property.Name, StringComparer.Ordinal)
             .ToArray();
 
@@ -167,10 +173,8 @@ internal static class RuntimeAutomationBindings
                 nameof(RuntimeAutomationHostCapabilities.DismissGhost),
             ["BindSelectionActions"] =
                 nameof(RuntimeAutomationHostCapabilities.SelectionAction),
-            ["BindChatInputActive"] =
-                nameof(RuntimeAutomationHostCapabilities.ChatInputActive),
-            ["BindChatComposer"] =
-                nameof(RuntimeAutomationHostCapabilities.ChatComposer),
+            ["BindChatInputActive"] = null,
+            ["BindChatComposer"] = null,
             ["BindSpeciesNameResolver"] =
                 nameof(RuntimeAutomationHostCapabilities.SpeciesName),
             ["BindProjectileCollision"] =
@@ -306,16 +310,16 @@ internal static class RuntimeAutomationBindings
             surface.BindSelectionActions(selectionAction);
             bound.Add(nameof(surface.BindSelectionActions));
         }
-        if (capabilities.ChatInputActive is { } chatInputActive)
-        {
-            surface.BindChatInputActive(chatInputActive);
-            bound.Add(nameof(surface.BindChatInputActive));
-        }
-        if (capabilities.ChatComposer is { } chatComposer)
-        {
-            surface.BindChatComposer(chatComposer);
-            bound.Add(nameof(surface.BindChatComposer));
-        }
+        // The chat entry is a runtime owner, so both hosts answer these from
+        // the same place: a console front end and a chat box are two ways of
+        // driving one entry.
+        AcDream.Runtime.Chat.RuntimeChatEntryOwner chatEntry =
+            runtime.CommunicationOwner.ChatEntryOwner;
+        chatEntry.BindInputActiveSource(capabilities.KeyboardGoesToText);
+        surface.BindChatInputActive(() => chatEntry.IsInputActive);
+        bound.Add(nameof(surface.BindChatInputActive));
+        surface.BindChatComposer(chatEntry.Compose);
+        bound.Add(nameof(surface.BindChatComposer));
         if (capabilities.SpeciesName is { } speciesName)
         {
             surface.BindSpeciesNameResolver(speciesName);

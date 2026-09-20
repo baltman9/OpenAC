@@ -75,14 +75,6 @@ internal static class HostParityAllowList
             "Cycling the selection is an input action of the windowed host; "
             + "the cycle itself belongs over the entity directory.",
             ParityStage.MoveTheOperationIntoTheRuntime),
-        new("BindChatInputActive", ParityHost.Windowless,
-            "Whether the keyboard is going into the chat entry needs a chat "
-            + "entry; a console draft owner has to exist first.",
-            ParityStage.MoveTheOperationIntoTheRuntime),
-        new("BindChatComposer", ParityHost.Windowless,
-            "Staging chat text without sending it needs a draft; the "
-            + "windowless host has no draft owner yet.",
-            ParityStage.MoveTheOperationIntoTheRuntime),
         new("BindSpeciesNameResolver", ParityHost.Windowless,
             "The creature display-name table is loaded by windowed layout "
             + "code and has not been moved to the shared content load.",

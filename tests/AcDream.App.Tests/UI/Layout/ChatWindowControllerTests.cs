@@ -135,6 +135,104 @@ public class ChatWindowControllerTests
         Assert.NotNull(ctrl);
     }
 
+    // ── The panel is a view of the shared chat entry ─────────────────────
+
+    /// <summary>
+    /// The chat panel keeps the caret, the selection and the drawing; the
+    /// line itself, where it goes and what was sent before it belong to the
+    /// entry owner every front end shares. Before this, all of that lived in
+    /// the panel and its field, so a client with no panel could only say
+    /// plain things to nobody in particular.
+    /// </summary>
+    private static (ChatWindowController Controller, CaptureBus Bus,
+        RuntimeChatEntryOwner Entry) BindOverSharedEntry()
+    {
+        var (rootInfo, layout, vm) = BuildTestTree();
+        var bus = new CaptureBus();
+        var entry = new RuntimeChatEntryOwner();
+        ChatWindowController? ctrl = ChatWindowController.Bind(
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, entry: entry);
+        Assert.NotNull(ctrl);
+        return (ctrl!, bus, entry);
+    }
+
+    [Fact]
+    public void TypingInThePanelIsTheSharedEntrysDraft()
+    {
+        var (ctrl, _, entry) = BindOverSharedEntry();
+
+        ctrl.Input.SetText("hello");
+
+        Assert.Equal("hello", entry.Draft);
+    }
+
+    [Fact]
+    public void ALineStagedInTheSharedEntryAppearsInThePanelsField()
+    {
+        var (ctrl, _, entry) = BindOverSharedEntry();
+
+        entry.SetDraft("/vt nav");
+
+        Assert.Equal("/vt nav", ctrl.Input.Text);
+    }
+
+    /// <summary>
+    /// A panel that is not mounted has no keyboard to hand over, so staging a
+    /// line in it is refused rather than silently dropped.
+    /// </summary>
+    [Fact]
+    public void ComposingIntoAnUnmountedPanelIsRefused()
+    {
+        var (_, _, entry) = BindOverSharedEntry();
+
+        Assert.False(entry.Compose("/vt nav"));
+    }
+
+    [Fact]
+    public void SendingFromThePanelRoutesThroughTheSharedEntrysChannel()
+    {
+        var (ctrl, bus, entry) = BindOverSharedEntry();
+        entry.SetChannel(ChatChannelKind.Fellowship);
+
+        ctrl.Input.SetText("group up");
+        ctrl.Input.Submit();
+
+        var sent = Assert.IsType<SendChatCmd>(Assert.Single(bus.Published));
+        Assert.Equal(ChatChannelKind.Fellowship, sent.Channel);
+        Assert.Equal("group up", sent.Text);
+        Assert.Equal(string.Empty, ctrl.Input.Text);
+    }
+
+    [Fact]
+    public void ThePanelRecallsTheLinesTheSharedEntryRemembers()
+    {
+        var (ctrl, _, entry) = BindOverSharedEntry();
+        entry.Remember("first");
+        entry.Remember("second");
+
+        ctrl.Input.HistoryPrev();
+        Assert.Equal("second", ctrl.Input.Text);
+
+        ctrl.Input.HistoryPrev();
+        Assert.Equal("first", ctrl.Input.Text);
+
+        ctrl.Input.HistoryNext();
+        Assert.Equal("second", ctrl.Input.Text);
+    }
+
+    [Fact]
+    public void ALineSentFromThePanelIsRememberedOnceByTheSharedEntry()
+    {
+        var (ctrl, _, entry) = BindOverSharedEntry();
+
+        ctrl.Input.SetText("hello");
+        ctrl.Input.Submit();
+
+        Assert.Equal(1, entry.Count);
+        Assert.Equal("hello", entry.RecallPrevious());
+    }
+
     // ── CT-C1: the unseen-text indicator ────────────────────────────────
 
     private static ChatWindowController BindController()

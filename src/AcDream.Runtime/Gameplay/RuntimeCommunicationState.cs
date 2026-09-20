@@ -65,6 +65,7 @@ public sealed class RuntimeCommunicationState : IDisposable
         Squelch = new SquelchState();
         ChatWindows = new ChatWindowState();
         ChatFeed = new RuntimeChatFeed(Chat, ChatWindows);
+        ChatEntryOwner = new RuntimeChatEntryOwner();
         View = new CommunicationView(Chat);
         SocialView = new CommunicationSocialView(
             TurbineChat,
@@ -81,6 +82,13 @@ public sealed class RuntimeCommunicationState : IDisposable
     /// end that shows chat reads its text from here.
     /// </summary>
     public RuntimeChatFeed ChatFeed { get; }
+
+    /// <summary>
+    /// The chat entry: the line being typed, where it goes when it is sent,
+    /// and the lines sent before it. Every front end that can be typed into
+    /// drives this one owner.
+    /// </summary>
+    public RuntimeChatEntryOwner ChatEntryOwner { get; }
 
     public SpewBoxState SpewBox { get; }
 
@@ -204,6 +212,9 @@ public sealed class RuntimeCommunicationState : IDisposable
         Squelch.Clear();
         Chat.ResetSessionIdentity();
         SpewBox.Reset();
+        ChatEntryOwner.Clear();
+        ChatEntryOwner.BindInputActiveSource(null);
+        ChatEntryOwner.BindEntryFocus(null);
         ChatWindows.ResetToDefaults();
     }
 

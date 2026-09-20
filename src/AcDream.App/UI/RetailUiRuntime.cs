@@ -48,7 +48,8 @@ public sealed record ChatRuntimeBindings(
     ChatVM ViewModel,
     Func<ICommandBus> CommandBus,
     ChatWindowState Windows,
-    SettingsStore? Store = null);
+    SettingsStore? Store = null,
+    AcDream.Runtime.Chat.RuntimeChatEntryOwner? Entry = null);
 
 public sealed record RadarRuntimeBindings(
     Func<UiRadarSnapshot> Snapshot,
@@ -983,7 +984,7 @@ public sealed class RetailUiRuntime : IDisposable
 
     /// <summary>Stages text in the chat entry without sending it.</summary>
     public bool ComposeChatText(string text) =>
-        _chatWindowController?.ComposeText(text) == true;
+        _chatWindowController?.Entry.Compose(text) == true;
 
     public void LogOutCharacter() => EndCharacterSessionWithRetailGates();
 
@@ -1546,7 +1547,8 @@ public sealed class RetailUiRuntime : IDisposable
                 .Resolve(0x23000001u, DatStringResolver.ComputeHash(key)),
             resolveFont: _bindings.Assets.ResolveFont,
             stayInChatMode: () => _bindings.Options.CurrentCharacterOption(
-                (uint)CharacterOptionId.StayInChatMode));
+                (uint)CharacterOptionId.StayInChatMode),
+            entry: _bindings.Chat.Entry);
         if (controller is null)
         {
             Console.WriteLine("[UI] chat: required role elements missing in 0x2100006F.");
