@@ -373,6 +373,66 @@ public readonly record struct PluginWorldObject(
 }
 
 /// <summary>
+/// The outcome of a world-object activation (portal, door, NPC, or other
+/// interactable landscape object). This reports how the activation
+/// completed, including failure and interruption states.
+/// </summary>
+/// <param name="Revision">
+/// Counts up by one for every completion, so a plugin can tell a fresh one
+/// from one it has already seen. Zero means nothing has completed yet.
+/// </param>
+/// <param name="ObjectId">The object that was activated.</param>
+/// <param name="Outcome">The activation outcome.</param>
+/// <param name="WeenieError">
+/// The server's error code, when applicable; zero means success.
+/// </param>
+public readonly record struct PluginActivationCompletion(
+    long Revision,
+    uint ObjectId,
+    PluginActivationOutcome Outcome,
+    uint WeenieError)
+{
+    /// <summary>
+    /// True when the activation completed successfully with no error.
+    /// </summary>
+    public bool IsSuccess => Revision != 0 && Outcome == PluginActivationOutcome.Completed && WeenieError == 0u;
+}
+
+/// <summary>How a world-object activation concluded.</summary>
+public enum PluginActivationOutcome
+{
+    /// <summary>No activation has completed yet, or the outcome is unknown.</summary>
+    None = 0,
+
+    /// <summary>The activation completed successfully.</summary>
+    Completed,
+
+    /// <summary>
+    /// The activation was refused by the server; check
+    /// <see cref="PluginActivationCompletion.WeenieError"/>.
+    /// </summary>
+    Refused,
+
+    /// <summary>
+    /// The approach to the target was interrupted (movement cancelled,
+    /// target went out of range, or the player moved).
+    /// </summary>
+    Interrupted,
+
+    /// <summary>
+    /// The target became invalid or was destroyed before the activation
+    /// could complete.
+    /// </summary>
+    TargetLost,
+
+    /// <summary>The host could not reach the target (blocked path).</summary>
+    Blocked,
+
+    /// <summary>The activation timed out waiting for a server response.</summary>
+    TimedOut,
+}
+
+/// <summary>
 /// Reads the objects the client currently knows about -- everything in the
 /// world around the player as well as everything they carry -- and asks the
 /// server to appraise one of them.
@@ -418,6 +478,12 @@ public interface IWorldObjectAutomation
         properties = default;
         return false;
     }
+
+    /// <summary>
+    /// The most recent activation completion. Default until anything
+    /// completes, fails, or is interrupted.
+    /// </summary>
+    PluginActivationCompletion LastActivationCompletion => default;
 
     /// <summary>
     /// Requests an appraisal of any object present in the object table --
