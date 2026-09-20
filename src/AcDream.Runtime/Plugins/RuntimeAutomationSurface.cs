@@ -40,6 +40,8 @@ internal sealed class RuntimeAutomationSurface
     private long _lastNavigationSequence;
     private PluginGoToState _lastNavigationState;
     private RuntimePortalSnapshot? _lastPublishedPortalSnapshot;
+    private long _recallRequestRevision;
+    private PluginRecallRequest _lastRecallRequest;
 
     private GameRuntime? _runtime;
     private AcDream.Runtime.Gameplay.RuntimeTradeAutomation? _tradeAutomation;
@@ -636,6 +638,8 @@ internal sealed class RuntimeAutomationSurface
         _runtimeEventSubscription = null;
         _wasInWorld = false;
         _lastPublishedPortalSnapshot = null;
+        _lastRecallRequest = default;
+        _recallRequestRevision = 0;
         _chatMessages.Clear();
         if (_spellbook is not null)
         {
@@ -1981,6 +1985,11 @@ internal sealed class RuntimeAutomationSurface
 
     bool IRecallAutomation.IsAvailable => IsAvailable;
 
+    PluginRecallRequest IRecallAutomation.LastRequest
+    {
+        get { lock (_gate) return _lastRecallRequest; }
+    }
+
     PluginRecallResult IRecallAutomation.Recall(PluginRecallKind kind)
     {
         GameRuntime? runtime;
@@ -2003,12 +2012,22 @@ internal sealed class RuntimeAutomationSurface
             _ => throw new ArgumentOutOfRangeException(nameof(kind)),
         };
         RuntimeCommandResult result = commands.Portal.Execute(runtime.Generation, command);
-        return result.Status switch
+        PluginRecallStatus status = result.Status switch
         {
-            RuntimeCommandStatus.Accepted => new(PluginRecallStatus.Started),
-            RuntimeCommandStatus.Unsupported => new(PluginRecallStatus.Unsupported),
-            _ => new(PluginRecallStatus.Refused, result.Status.ToString()),
+            RuntimeCommandStatus.Accepted => PluginRecallStatus.Started,
+            RuntimeCommandStatus.Unsupported => PluginRecallStatus.Unsupported,
+            _ => PluginRecallStatus.Refused,
         };
+        lock (_gate)
+        {
+            _lastRecallRequest = new PluginRecallRequest(
+                ++_recallRequestRevision,
+                kind,
+                status);
+        }
+        return new(status, status == PluginRecallStatus.Refused
+            ? result.Status.ToString()
+            : null);
     }
 
     uint IWorldObjectAutomation.OpenContainerObjectId

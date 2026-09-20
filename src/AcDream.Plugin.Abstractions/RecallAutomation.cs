@@ -28,6 +28,12 @@ public enum PluginRecallStatus
     Refused,
 }
 
+/// <summary>The most recent recall request issued by this surface.</summary>
+public readonly record struct PluginRecallRequest(
+    long Revision,
+    PluginRecallKind Kind,
+    PluginRecallStatus Status);
+
 /// <summary>The local result of issuing a recall command.</summary>
 public readonly record struct PluginRecallResult(
     PluginRecallStatus Status,
@@ -45,6 +51,9 @@ public interface IRecallAutomation
 {
     /// <summary>True when a live session can issue recall commands.</summary>
     bool IsAvailable => false;
+
+    /// <summary>The most recent request, or a zero-revision default.</summary>
+    PluginRecallRequest LastRequest => default;
 
     /// <summary>Requests one of the host's supported recall destinations.</summary>
     PluginRecallResult Recall(PluginRecallKind kind) =>
