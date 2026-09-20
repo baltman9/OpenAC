@@ -1,6 +1,6 @@
 using System;
 using System.IO;
-using AcDream.App.UI;
+using AcDream.Runtime.Chat;
 using AcDream.Core.Chat;
 
 namespace AcDream.App.Tests.UI;

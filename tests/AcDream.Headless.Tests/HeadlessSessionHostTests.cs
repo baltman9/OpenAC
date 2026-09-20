@@ -512,10 +512,15 @@ public sealed class HeadlessSessionHostTests
                 .Select(static line =>
                     JsonDocument.Parse(line).RootElement.Clone())
                 .ToArray();
+            // "/version" used to be a second failure here: a client with no
+            // window carried its own shorter list of client commands and threw
+            // on the ones it had never implemented. There is one dispatcher
+            // now, so the only failure left is the one that is a failure in a
+            // chat box too -- "/" is not a command on either.
             Assert.Equal(
                 [
                     "started", "connected", "characterList", "enteredWorld",
-                    "loginCommandFailed", "loginCommandFailed",
+                    "loginCommandFailed",
                 ],
                 events.Select(static item =>
                     item.GetProperty("e").GetString()));
@@ -530,13 +535,6 @@ public sealed class HeadlessSessionHostTests
             Assert.Equal(
                 "Chat command routing returned UnknownCommand.",
                 failures[0].GetProperty("error").GetString());
-            Assert.Equal(1, failures[1].GetProperty("commandIndex").GetInt32());
-            Assert.Equal(
-                "/version",
-                failures[1].GetProperty("command").GetString());
-            Assert.Contains(
-                "not available in the headless host",
-                failures[1].GetProperty("error").GetString());
         }
         finally
         {

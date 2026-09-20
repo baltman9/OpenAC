@@ -2785,7 +2785,7 @@ public sealed class VendorUiControllerTests
         spellbook.SetDesiredComponent(ScarabWcid, 5u);
 
         var messages = new List<string>();
-        ClientCommandController commands = AcDream.App.Tests.UI.ClientCommandControllerTests
+        RuntimeClientCommandDispatcher commands = AcDream.Runtime.Tests.Chat.RuntimeClientCommandDispatcherTests
             .NewController(
                 messages: messages,
                 vendorOpen: true,
@@ -2835,7 +2835,7 @@ public sealed class VendorUiControllerTests
         spellbook.SetDesiredComponent(TaperWcid, 20u);
         spellbook.SetDesiredComponent(ScarabWcid, 5u);
 
-        ClientCommandController commands = AcDream.App.Tests.UI.ClientCommandControllerTests
+        RuntimeClientCommandDispatcher commands = AcDream.Runtime.Tests.Chat.RuntimeClientCommandDispatcherTests
             .NewController(
                 vendorOpen: true,
                 fillComponentBuyList: (category, maximumPrice) =>

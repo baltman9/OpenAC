@@ -1,13 +1,12 @@
 using System.Globalization;
-using AcDream.App.UI;
 using AcDream.Core.Chat;
 using AcDream.Core.Physics;
 using AcDream.Core.Social;
-using AcDream.UI.Abstractions;
+using AcDream.Runtime.Chat;
 
-namespace AcDream.App.Tests.UI;
+namespace AcDream.Runtime.Tests.Chat;
 
-public sealed class ClientCommandControllerTests
+public sealed class RuntimeClientCommandDispatcherTests
 {
     [Fact]
     public void RecallAndQueryCommands_ExecuteTheirExactBindings()
@@ -460,7 +459,7 @@ public sealed class ClientCommandControllerTests
     {
         var messages = new List<string>();
         var calls = new List<string>();
-        ClientCommandController ctrl = NewController(
+        RuntimeClientCommandDispatcher ctrl = NewController(
             calls, messages: messages,
             chatLog: name => new ChatLogResult(true, false, name, null));
 
@@ -478,7 +477,7 @@ public sealed class ClientCommandControllerTests
     public void Log_WhenTheFileCannotBeOpened_SaysSoRatherThanClaimingSuccess()
     {
         var messages = new List<string>();
-        ClientCommandController ctrl = NewController(
+        RuntimeClientCommandDispatcher ctrl = NewController(
             messages: messages,
             chatLog: name => new ChatLogResult(false, false, name, null));
 
@@ -494,7 +493,7 @@ public sealed class ClientCommandControllerTests
     public void Log_WithNoArgument_ClosesTheOpenLogAndSaysBothLines()
     {
         var messages = new List<string>();
-        ClientCommandController ctrl = NewController(
+        RuntimeClientCommandDispatcher ctrl = NewController(
             messages: messages,
             chatLog: _ => new ChatLogResult(false, true, string.Empty, "aclog.txt"));
 
@@ -510,7 +509,7 @@ public sealed class ClientCommandControllerTests
     public void Log_WithNoArgumentAndNothingOpen_AsksForAFileName()
     {
         var messages = new List<string>();
-        ClientCommandController ctrl = NewController(
+        RuntimeClientCommandDispatcher ctrl = NewController(
             messages: messages,
             chatLog: _ => new ChatLogResult(false, false, string.Empty, null));
 
@@ -526,7 +525,7 @@ public sealed class ClientCommandControllerTests
     public void Log_StartingASecondLogAnnouncesThatTheFirstEnded()
     {
         var messages = new List<string>();
-        ClientCommandController ctrl = NewController(
+        RuntimeClientCommandDispatcher ctrl = NewController(
             messages: messages,
             chatLog: name => new ChatLogResult(true, true, name, "old.txt"));
 
@@ -541,7 +540,7 @@ public sealed class ClientCommandControllerTests
     public void Log_TakesTheWholeRemainderSoASpacedNameSurvives()
     {
         var calls = new List<string>();
-        ClientCommandController ctrl = NewController(
+        RuntimeClientCommandDispatcher ctrl = NewController(
             calls,
             chatLog: name => new ChatLogResult(true, false, name, null));
 
@@ -568,7 +567,7 @@ public sealed class ClientCommandControllerTests
         bool persistentDaylight = false;
         var values = new List<bool>();
         var messages = new List<string>();
-        ClientCommandController controller = NewController(
+        RuntimeClientCommandDispatcher controller = NewController(
             messages: messages,
             isPersistentDaylight: () => persistentDaylight,
             setPersistentDaylight: value =>
@@ -600,7 +599,7 @@ public sealed class ClientCommandControllerTests
     {
         var radii = new List<int>();
         var messages = new List<string>();
-        ClientCommandController controller = NewController(
+        RuntimeClientCommandDispatcher controller = NewController(
             messages: messages,
             setLandscapeRadius: radii.Add);
 
@@ -622,7 +621,7 @@ public sealed class ClientCommandControllerTests
     {
         var values = new List<float>();
         var messages = new List<string>();
-        ClientCommandController controller = NewController(
+        RuntimeClientCommandDispatcher controller = NewController(
             messages: messages,
             setFieldOfView: values.Add);
 
@@ -646,7 +645,7 @@ public sealed class ClientCommandControllerTests
     {
         var calls = new List<string>();
         var messages = new List<string>();
-        ClientCommandController controller = NewController(
+        RuntimeClientCommandDispatcher controller = NewController(
             calls,
             messages: messages);
 
@@ -664,7 +663,7 @@ public sealed class ClientCommandControllerTests
     public void Render_UsageAndUnknownOptionMatchRetail()
     {
         var messages = new List<string>();
-        ClientCommandController controller = NewController(messages: messages);
+        RuntimeClientCommandDispatcher controller = NewController(messages: messages);
 
         controller.Execute(new ExecuteClientCommandCmd(
             ClientCommandId.RenderOption,
@@ -686,7 +685,7 @@ public sealed class ClientCommandControllerTests
         var calls = new List<string>();
         var system = new List<string>();
         var clientLocal = new List<string>();
-        ClientCommandController controller = NewController(
+        RuntimeClientCommandDispatcher controller = NewController(
             calls: calls,
             messages: system,
             clientLocalMessages: clientLocal);
@@ -803,7 +802,7 @@ public sealed class ClientCommandControllerTests
     public void HouseAdministration_ExecutesEveryRetailDispatcherBranch()
     {
         var calls = new List<string>();
-        ClientCommandController controller = NewController(calls: calls);
+        RuntimeClientCommandDispatcher controller = NewController(calls: calls);
 
         Execute(ClientCommandId.HouseOpenStatus, "open");
         Execute(ClientCommandId.HouseOpenStatus, "close");
@@ -889,7 +888,7 @@ public sealed class ClientCommandControllerTests
         var calls = new List<string>();
         var system = new List<string>();
         var clientLocal = new List<string>();
-        ClientCommandController controller = NewController(
+        RuntimeClientCommandDispatcher controller = NewController(
             calls: calls,
             messages: system,
             clientLocalMessages: clientLocal);
@@ -901,7 +900,11 @@ public sealed class ClientCommandControllerTests
         Assert.Equal([expected], clientLocal);
     }
 
-    internal static ClientCommandController NewController(
+    /// <summary>
+    /// A dispatcher over a set of recording bindings. Public because the
+    /// vendor panel test drives the fill-components command through it.
+    /// </summary>
+    public static RuntimeClientCommandDispatcher NewController(
         List<string>? calls = null,
         List<uint>? errors = null,
         uint? playerBitfield = 0x02000028u,
@@ -925,7 +928,7 @@ public sealed class ClientCommandControllerTests
         errors ??= [];
         messages ??= [];
         clientLocalMessages ??= messages;
-        return new ClientCommandController(new ClientCommandController.Bindings(
+        return new RuntimeClientCommandDispatcher(new RuntimeClientCommandDispatcher.Bindings(
             () => calls.Add("ls"),
             () => calls.Add("mp"),
             () => calls.Add("pka"),
@@ -1015,7 +1018,7 @@ public sealed class ClientCommandControllerTests
                 "fov:" + value.ToString(CultureInfo.InvariantCulture)))));
     }
 
-    private static ClientCommandController.AdministrationBindings
+    private static RuntimeClientCommandDispatcher.AdministrationBindings
         NewAdministrationBindings(List<string> calls) => new(
             BreakAllegianceBoot: (name, account) =>
                 calls.Add($"allegboot:{name}:{account}"),

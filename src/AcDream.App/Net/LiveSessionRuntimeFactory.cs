@@ -448,164 +448,37 @@ internal sealed class LiveSessionRuntimeFactory
             });
 
         return new(
-        ClientCommands: new ClientCommandController.Bindings(
-            TeleportToLifestone: session.SendTeleportToLifestone,
-            TeleportToMarketplace: session.SendTeleportToMarketplace,
-            TeleportToPkArena: session.SendTeleportToPkArena,
-            TeleportToPkLiteArena: session.SendTeleportToPkLiteArena,
-            TeleportToHouse: session.SendTeleportToHouse,
-            TeleportToMansion: session.SendTeleportToMansion,
-            QueryAge: session.SendQueryAge,
-            QueryBirth: session.SendQueryBirth,
-            ToggleFrameRate: _interaction.Settings.ToggleFrameRate,
-            ToggleUiLock: () =>
+        ClientCommands: RuntimeClientCommandBindings.Build(
+            _domain.Runtime,
+            session,
+            new RuntimeClientCommandHostBindings
             {
-                bool locked = !_domain.Character.Options.GetOptionBit(
-                    CharacterOptionId.LockUI);
-                SendSingleCharacterOption((uint)CharacterOptionId.LockUI, locked);
-                _interaction.Settings.SetUiLocked(locked);
+                ToggleFrameRate = _interaction.Settings.ToggleFrameRate,
+                SetUiLocked = _interaction.Settings.SetUiLocked,
+                ShowConfirmation = (message, completed) =>
+                    _ui.RetailUi?.ShowConfirmation(message, completed),
+                SaveUi = name => _ui.RetailUi?.SaveNamedLayout(name),
+                LoadUi = name => _ui.RetailUi?.RestoreNamedLayout(name),
+                SaveAutoUi = () => _ui.RetailUi?.SaveLayout(),
+                LoadAutoUi = () => _ui.RetailUi?.RestoreLayout(),
+                FillComponentBuyList = (category, maximumPrice) =>
+                    _ui.RetailUi?.FillComponentBuyList(
+                        category ?? VendorComponentFill.AnyCategory,
+                        maximumPrice),
+                SetLandscapeRadius = radius =>
+                    _interaction.Settings.SaveDisplay(
+                        _interaction.Settings.Display with
+                        {
+                            LandscapeDrawDistance = radius,
+                        }),
+                SetFieldOfView = degrees =>
+                    _interaction.Settings.SaveDisplay(
+                        _interaction.Settings.Display with
+                        {
+                            FieldOfView = degrees,
+                        }),
             },
-            ShowSystemMessage:
-                text => _domain.Communication.Chat.OnSystemMessage(text, 0x00u),
-            ShowClientLocalMessage:
-                text => _domain.Communication.AddText(
-                    text, RetailLogTextType.ClientLocal),
-            ShowWeenieError:
-                code =>
-                {
-                    (string? text, RetailLogTextType type) = WeenieErrorMessages.Resolve(code, null);
-                    if (text is not null)
-                        _domain.Communication.AddText(text, type);
-                    else
-                        Console.WriteLine($"[weenie-error] unmapped code=0x{code:X4}");
-                },
-            PlayerPublicWeenieBitfield: () =>
-                _domain.EntityObjects.Objects.Get(_player.Identity.ServerGuid)?
-                    .PublicWeenieBitfield,
-            ClientVersion: () =>
-                typeof(LiveSessionRuntimeFactory).Assembly
-                    .GetName().Version?.ToString(3)
-                ?? "unknown",
-            CurrentPosition: () => _player.Controller.Controller?.CellPosition,
-            LastOutsideCorpsePosition: () =>
-                _domain.Character.LocalPlayer.GetPosition(0x0Eu),
-            ShowConfirmation: (message, completed) =>
-                _ui.RetailUi?.ShowConfirmation(message, completed),
-            Suicide: session.SendSuicide,
-            ClearChat: _ => _domain.Communication.Chat.Clear(),
-            SetChatLogFile: SetChatLogFile,
-            SaveUi: name => _ui.RetailUi?.SaveNamedLayout(name),
-            LoadUi: name => _ui.RetailUi?.RestoreNamedLayout(name),
-            SaveAutoUi: () => _ui.RetailUi?.SaveLayout(),
-            LoadAutoUi: () => _ui.RetailUi?.RestoreLayout(),
-            IsAway: () =>
-                _domain.EntityObjects.Objects.Get(_player.Identity.ServerGuid)?
-                    .Properties.GetBool(0x6Eu) == true,
-            SetAway: session.SendSetAfkMode,
-            SetAwayMessage: session.SendSetAfkMessage,
-            AcceptLootPermits: () =>
-                _domain.Character.Options.GetOptionBit(
-                    CharacterOptionId.AcceptLootPermits),
-            SetAcceptLootPermits: value =>
-                SendSingleCharacterOption(
-                    (uint)CharacterOptionId.AcceptLootPermits, value),
-            DisplayConsent: session.SendDisplayConsent,
-            ClearConsent: session.SendClearConsent,
-            RemoveConsent: session.SendRemoveConsent,
-            SendEmote: session.SendEmote,
-            _domain.Communication.Friends,
-            AddFriend: session.SendAddFriend,
-            RemoveFriend: session.SendRemoveFriend,
-            ClearFriends: session.SendClearFriends,
-            RequestLegacyFriends: session.SendLegacyFriendsListRequest,
-            _domain.Communication.Squelch,
-            ModifyCharacterSquelch: session.SendModifyCharacterSquelch,
-            ModifyAccountSquelch: session.SendModifyAccountSquelch,
-            ModifyGlobalSquelch: session.SendModifyGlobalSquelch,
-            LastTeller: () =>
-                _domain.Communication.CommandTargets.LastIncomingTellSender,
-            ClearDesiredComponents: () =>
-            {
-                session.SendClearDesiredComponents();
-            },
-            HasOpenVendor: () => _domain.Inventory.Vendor.VendorId != 0u,
-            FillComponentBuyList: (category, maximumPrice) =>
-                _ui.RetailUi?.FillComponentBuyList(
-                    category ?? VendorComponentFill.AnyCategory,
-                    maximumPrice),
-            EnterPkLite: session.SendEnterPkLite,
-            IsUsingTurbineChat: () => _domain.Communication.TurbineChat.Enabled,
-            SetChatTitle: _ => { },
-            SetSingleCharacterOption: SendSingleCharacterOption,
-            AddPlayerPermission: session.SendAddPlayerPermission,
-            RemovePlayerPermission: session.SendRemovePlayerPermission,
-            RequestAvailableHouses: session.SendListAvailableHouses,
-            RequestChannelIndex: session.SendIndexChannels,
-            RequestChannelList: session.SendListChannel,
-            JoinGmChannel: session.SendOnChannel,
-            LeaveGmChannel: session.SendOffChannel,
-            RecallAllegianceHometown: session.SendRecallAllegianceHometown,
-            RequestAllegianceInfo: session.SendAllegianceInfoRequest,
-            AbandonHouse: session.SendAbandonHouse,
-            Administration: new ClientCommandController.AdministrationBindings(
-                BreakAllegianceBoot: session.SendBreakAllegianceBoot,
-                AllegianceChatBoot: session.SendAllegianceChatBoot,
-                AllegianceChatGag: session.SendAllegianceChatGag,
-                AllegianceBroadcast: text =>
-                    session.SendChannel(0x02000000u, text),
-                ListAllegianceBans: session.SendListAllegianceBans,
-                AddAllegianceBan: session.SendAddAllegianceBan,
-                RemoveAllegianceBan: session.SendRemoveAllegianceBan,
-                ListAllegianceOfficers: session.SendListAllegianceOfficers,
-                ClearAllegianceOfficers: session.SendClearAllegianceOfficers,
-                SetAllegianceOfficer: session.SendSetAllegianceOfficer,
-                RemoveAllegianceOfficer: session.SendRemoveAllegianceOfficer,
-                ListAllegianceOfficerTitles: session.SendListAllegianceOfficerTitles,
-                ClearAllegianceOfficerTitles: session.SendClearAllegianceOfficerTitles,
-                SetAllegianceOfficerTitle: session.SendSetAllegianceOfficerTitle,
-                QueryAllegianceName: session.SendQueryAllegianceName,
-                SetAllegianceName: session.SendSetAllegianceName,
-                ClearAllegianceName: session.SendClearAllegianceName,
-                AllegianceLockAction: session.SendAllegianceLockAction,
-                SetAllegianceApprovedVassal: session.SendSetAllegianceApprovedVassal,
-                AllegianceHouseAction: session.SendAllegianceHouseAction,
-                QueryMotd: session.SendQueryMotd,
-                SetMotd: session.SendSetMotd,
-                ClearMotd: session.SendClearMotd,
-                SetOpenHouseStatus: session.SendSetOpenHouseStatus,
-                AddPermanentGuest: session.SendAddPermanentGuest,
-                RemovePermanentGuest: session.SendRemovePermanentGuest,
-                RemoveAllPermanentGuests: session.SendRemoveAllPermanentGuests,
-                ChangeStoragePermission: session.SendChangeStoragePermission,
-                AddAllStoragePermission: session.SendAddAllStoragePermission,
-                RemoveAllStoragePermission: session.SendRemoveAllStoragePermission,
-                RequestFullGuestList: session.SendRequestFullGuestList,
-                BootSpecificHouseGuest: session.SendBootSpecificHouseGuest,
-                BootEveryone: session.SendBootEveryone,
-                SetHooksVisibility: session.SendSetHooksVisibility,
-                ModifyAllegianceGuestPermission:
-                    session.SendModifyAllegianceGuestPermission,
-                ModifyAllegianceStoragePermission:
-                    session.SendModifyAllegianceStoragePermission),
-            IsPersistentDaylight: () =>
-                _domain.Character.Options.GetOptionBit(
-                    CharacterOptionId.PersistentAtDay),
-            SetPersistentDaylight: enabled =>
-                SendSingleCharacterOption(
-                    (uint)CharacterOptionId.PersistentAtDay,
-                    enabled),
-            SetLandscapeRadius: radius =>
-                _interaction.Settings.SaveDisplay(
-                    _interaction.Settings.Display with
-                    {
-                        LandscapeDrawDistance = radius,
-                    }),
-            SetFieldOfView: degrees =>
-                _interaction.Settings.SaveDisplay(
-                    _interaction.Settings.Display with
-                    {
-                        FieldOfView = degrees,
-                    })),
+            SetChatLogFile),
         _domain.Communication.Chat,
         _domain.Communication.TurbineChat,
         PlayerGuid: () => _player.Identity.ServerGuid,

@@ -7,7 +7,7 @@ using AcDream.Runtime.Session;
 namespace AcDream.App.Net;
 
 internal sealed record LiveSessionCommandBindings(
-    ClientCommandController.Bindings ClientCommands,
+    RuntimeClientCommandDispatcher.Bindings ClientCommands,
     ChatLog Chat,
     TurbineChatState TurbineChat,
     Func<uint> PlayerGuid,
@@ -133,7 +133,7 @@ internal sealed class LiveSessionCommandRouter : ILiveSessionCommandRouting
     private readonly object _gate = new();
     private LiveCommandBus? _commands;
     private LiveChatCommandRoute? _chatCommands;
-    private ClientCommandController.Bindings? _clientCommands;
+    private RuntimeClientCommandDispatcher.Bindings? _clientCommands;
     private int _state;
 
     public LiveSessionCommandRouter(LiveSessionCommandBindings bindings)
@@ -153,7 +153,7 @@ internal sealed class LiveSessionCommandRouter : ILiveSessionCommandRouting
 
         _clientCommands = bindings.ClientCommands;
         var commands = new LiveCommandBus();
-        var clientCommands = new ClientCommandController(
+        var clientCommands = new RuntimeClientCommandDispatcher(
             BuildGuardedClientCommands(bindings.ClientCommands));
         _chatCommands = new LiveChatCommandRoute(new LiveChatCommandBindings(
             clientCommands.Execute,
@@ -345,8 +345,8 @@ internal sealed class LiveSessionCommandRouter : ILiveSessionCommandRouting
         commands?.Clear();
     }
 
-    private ClientCommandController.Bindings BuildGuardedClientCommands(
-        ClientCommandController.Bindings source) => new(
+    private RuntimeClientCommandDispatcher.Bindings BuildGuardedClientCommands(
+        RuntimeClientCommandDispatcher.Bindings source) => new(
         TeleportToLifestone: () => InvokeClient(static b => b.TeleportToLifestone()),
         TeleportToMarketplace: () => InvokeClient(static b => b.TeleportToMarketplace()),
         TeleportToPkArena: () => InvokeClient(static b => b.TeleportToPkArena()),
@@ -430,7 +430,7 @@ internal sealed class LiveSessionCommandRouter : ILiveSessionCommandRouting
         SetFieldOfView: degrees =>
             InvokeClient(b => b.SetFieldOfView(degrees)));
 
-    private ClientCommandController.AdministrationBindings BuildGuardedAdministration() =>
+    private RuntimeClientCommandDispatcher.AdministrationBindings BuildGuardedAdministration() =>
         new(
             BreakAllegianceBoot: (name, account) =>
                 InvokeClient(b => b.Administration.BreakAllegianceBoot(name, account)),
@@ -505,11 +505,11 @@ internal sealed class LiveSessionCommandRouter : ILiveSessionCommandRouting
             ModifyAllegianceStoragePermission: enabled =>
                 InvokeClient(b => b.Administration.ModifyAllegianceStoragePermission(enabled)));
 
-    private bool InvokeClient(Action<ClientCommandController.Bindings> invoke)
+    private bool InvokeClient(Action<RuntimeClientCommandDispatcher.Bindings> invoke)
     {
         lock (_gate)
         {
-            ClientCommandController.Bindings? bindings = _clientCommands;
+            RuntimeClientCommandDispatcher.Bindings? bindings = _clientCommands;
             if (_state != 1 || bindings is null)
                 return false;
             invoke(bindings);
@@ -518,12 +518,12 @@ internal sealed class LiveSessionCommandRouter : ILiveSessionCommandRouting
     }
 
     private TResult ReadClient<TResult>(
-        Func<ClientCommandController.Bindings, TResult> read,
+        Func<RuntimeClientCommandDispatcher.Bindings, TResult> read,
         TResult fallback)
     {
         lock (_gate)
         {
-            ClientCommandController.Bindings? bindings = _clientCommands;
+            RuntimeClientCommandDispatcher.Bindings? bindings = _clientCommands;
             return _state == 1 && bindings is not null
                 ? read(bindings)
                 : fallback;

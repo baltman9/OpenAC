@@ -1,8 +1,7 @@
 using System;
 using AcDream.Core.Chat;
-using AcDream.UI.Abstractions.Panels.Chat;
 
-namespace AcDream.App.UI;
+namespace AcDream.Runtime.Chat;
 
 public sealed class ChatTranscriptLogWriter
 {
@@ -39,6 +38,6 @@ public sealed class ChatTranscriptLogWriter
 
         _log.Write(
             stamped ? ChatLog.FormatTimestampPrefix(entry.Received) : null,
-            ChatVM.FormatEntry(entry));
+            RuntimeChatFeed.Format(entry));
     }
 }

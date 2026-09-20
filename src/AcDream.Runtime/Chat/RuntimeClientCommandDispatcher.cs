@@ -4,13 +4,17 @@ using AcDream.Core.Items;
 using AcDream.Core.Physics;
 using AcDream.Core.Ui;
 using AcDream.Core.Social;
-using AcDream.Runtime.Chat;
-using AcDream.UI.Abstractions;
-using AcDream.UI.Abstractions.Panels.Chat;
 
-namespace AcDream.App.UI;
+namespace AcDream.Runtime.Chat;
 
-public sealed class ClientCommandController
+/// <summary>
+/// Every client-side slash command, in one place for both front ends. It was
+/// windowed-host code, and a client with no window carried a second, smaller
+/// copy that threw on the twenty-eight commands it had never implemented; a
+/// line typed at a console could therefore do less than the same line typed
+/// in a chat box. The dispatch below is that windowed body, moved unchanged.
+/// </summary>
+public sealed class RuntimeClientCommandDispatcher
 {
     public sealed record AdministrationBindings(
         Action<string, bool> BreakAllegianceBoot,
@@ -121,7 +125,7 @@ public sealed class ClientCommandController
     private readonly Bindings _bindings;
     private readonly RetailAdministrationCommandDispatcher _administration;
 
-    public ClientCommandController(Bindings bindings)
+    public RuntimeClientCommandDispatcher(Bindings bindings)
     {
         _bindings = bindings ?? throw new ArgumentNullException(nameof(bindings));
         AdministrationBindings actions = bindings.Administration;
