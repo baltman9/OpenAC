@@ -674,9 +674,10 @@ runtime source before either client can fill it.
 the character is there, and gives up on a walk that has stopped getting
 anywhere -- all of it one runtime owner, driven once a frame from the
 per-frame local-player step, so all of it happens on a client with no
-window too. `Loot.Open` does not walk on either client: it sends its use
-straight away from wherever the character is standing, which is its own
-mismatch with `Items.Use` on the very same corpse.
+window too. `Loot.Open` on a corpse or a chest out in the world takes that
+same route, so opening a corpse and using it are the same walk and the same
+send on the same object. An openable container the plugin owns is still
+opened where it is, since there is nowhere to walk to.
 
 ### Available, but only with the installed data files
 

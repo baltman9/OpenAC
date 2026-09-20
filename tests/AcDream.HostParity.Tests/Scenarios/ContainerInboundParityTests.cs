@@ -219,12 +219,19 @@ public sealed class ContainerInboundParityTests
     /// A character with a body and a full pack, a corpse on the ground with
     /// two things in it that the client knows about but has not been told
     /// are there, and nothing sent yet.
+    ///
+    /// The corpse lies at arm's length here. These scenarios are about the
+    /// answers that come back off the wire and about the pacing between two
+    /// opens; an open of something out of reach walks to it first, and the
+    /// walk belongs to the scenarios that are about walking.
     /// </summary>
     private static ILootAutomation Stage(ParityArm arm)
     {
         _ = ParityWorld.Stage(arm);
         ParityWorld.StageCarriedItems(arm.Runtime);
-        ParityWorld.StageCorpse(arm.Runtime);
+        ParityWorld.StageCorpse(
+            arm.Runtime,
+            metresOut: ParityWorld.WithinArmsReach);
         ParityWorld.StageCorpseContents(arm.Runtime);
         _ = arm.Operations.TakeOutbound();
         return arm.Host.Automation.Loot;

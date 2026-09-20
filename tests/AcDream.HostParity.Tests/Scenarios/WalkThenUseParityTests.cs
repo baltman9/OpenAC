@@ -135,6 +135,47 @@ public sealed class WalkThenUseParityTests
         });
 
     /// <summary>
+    /// Opening the same corpse through the looting surface rather than the
+    /// item surface. It is the same corpse and the same distance, so it has
+    /// to be the same walk and the same use: an open that sent its use from
+    /// wherever the character happened to be standing left a looter asking a
+    /// corpse three metres off to hand over its contents, and the server
+    /// answering nothing.
+    /// </summary>
+    [Fact]
+    public void OpeningACorpseOutOfReachWalksThereOnBothClients() =>
+        ParityScenario.Run(static (arm, transcript) =>
+        {
+            ILootAutomation loot = Stage(arm);
+
+            transcript.Step("ask to open a corpse three metres off");
+            Record(transcript, "open", loot.Open(ParityWorld.Corpse));
+            RecordWalk(transcript, arm);
+            RecordLoot(transcript, loot);
+            // Said outright: a walk was begun, aimed at the corpse, and
+            // nothing was sent from out of reach.
+            Assert.Equal(MovementType.MoveToObject, Walk(arm).MovementTypeState);
+            Assert.Equal(ParityWorld.Corpse, Walk(arm).SoughtObjectId);
+            AssertNoUseWasSent(arm);
+            transcript.RecordOutbound(arm);
+
+            transcript.Step("the character arrives");
+            Advance(arm, TicksForTheWholeWalk);
+            RecordWalk(transcript, arm);
+            RecordLoot(transcript, loot);
+            transcript.Record("distance", Distance(arm, ParityWorld.Corpse));
+            AssertTheUseWasSent(arm);
+            Assert.Equal(ParityWorld.Corpse, loot.RequestedContainerId);
+            transcript.RecordOutbound(arm);
+
+            transcript.Step("the corpse answers");
+            arm.Server.UseDone();
+            ParityWorld.DeliverCorpseContents(arm.Runtime);
+            arm.Advance();
+            RecordLoot(transcript, loot);
+        });
+
+    /// <summary>
     /// A walk that can never arrive: the corpse is on a ledge four metres up.
     /// The route gives up on it, stops the character walking into the wall
     /// under it, and lets the next request through -- on both clients. Without

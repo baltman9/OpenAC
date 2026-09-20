@@ -3308,10 +3308,12 @@ internal sealed class RuntimeAutomationSurface
     {
         GameRuntime? runtime;
         Func<uint, bool>? use;
+        Func<uint, PluginItemCommandResult>? useWorldObject;
         lock (_gate)
         {
             runtime = _runtime;
             use = _useItem;
+            useWorldObject = _useWorldObject;
         }
         if (runtime is null || use is null || !IsAvailable)
             return new(PluginItemCommandStatus.Unavailable);
@@ -3334,6 +3336,19 @@ internal sealed class RuntimeAutomationSurface
         // next after closing the first.
         if (!runtime.ItemInteractionOwner.IsUseThrottleReadyForAutomation)
             return new(PluginItemCommandStatus.Busy);
+        // A corpse or a chest out in the world is reached the same way here as
+        // it is through Use on the very same object: walk to it if it is out
+        // of reach, and send the open once the character is there. Sending it
+        // from wherever the character was standing asked a corpse metres away
+        // to hand over its contents, and the server answered nothing.
+        if (!IsPlayerOwned(
+                container,
+                runtime.PlayerIdentity.ServerGuid,
+                runtime.InventoryOwner.Objects)
+            && useWorldObject is not null)
+        {
+            return useWorldObject(containerObjectId);
+        }
         return use(containerObjectId)
             ? new(PluginItemCommandStatus.Started)
             : new(PluginItemCommandStatus.Refused);

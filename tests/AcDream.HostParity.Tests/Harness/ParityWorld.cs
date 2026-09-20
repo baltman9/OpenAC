@@ -97,8 +97,14 @@ internal static class ParityWorld
     /// <summary>An item that cannot be used without naming a target.</summary>
     internal const uint TargetedItem = 0x50000044u;
 
-    /// <summary>A corpse lying three metres out, openable.</summary>
+    /// <summary>A corpse lying on the ground, openable.</summary>
     internal const uint Corpse = 0x50000050u;
+
+    /// <summary>
+    /// Close enough to open without going anywhere first, in metres: inside
+    /// the reach an object that never said how close to come is given.
+    /// </summary>
+    internal const float WithinArmsReach = 0.4f;
 
     /// <summary>Inside the corpse: something plain, and something worth a look.</summary>
     internal const uint CorpseCoin = 0x50000051u;
@@ -158,10 +164,16 @@ internal static class ParityWorld
     /// it yet, the way one looks before it has been opened. Its contents
     /// arrive from <see cref="DeliverCorpseContents"/>.
     /// </summary>
-    internal static void StageCorpse(GameRuntime runtime)
+    /// <param name="metresOut">
+    /// How far out to lay it, in metres. Three metres is the ordinary case
+    /// after a fight and is out of reach, so a use of it walks first; a
+    /// scenario about what the server says back rather than about the walk
+    /// lays it at arm's length instead.
+    /// </param>
+    internal static void StageCorpse(GameRuntime runtime, float metresOut = 3f)
     {
         ArgumentNullException.ThrowIfNull(runtime);
-        Add(runtime, Corpse, PlayerX + 3f, new ClientObject
+        Add(runtime, Corpse, PlayerX + metresOut, new ClientObject
         {
             ObjectId = Corpse,
             Type = ItemType.Container,
