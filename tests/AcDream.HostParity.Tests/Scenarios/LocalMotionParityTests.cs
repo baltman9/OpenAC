@@ -1,4 +1,8 @@
+using System.Numerics;
+using AcDream.Core.Physics;
+using AcDream.Core.Physics.Motion;
 using AcDream.Plugin.Abstractions;
+using AcDream.Runtime.Gameplay;
 
 namespace AcDream.HostParity.Tests;
 
@@ -135,6 +139,100 @@ public sealed class LocalMotionParityTests
                 navigation.Snapshot.Position.EastWest,
                 precision: 5);
         });
+
+    /// <summary>
+    /// A movement the character is sent on rather than steered through: face
+    /// this way, then walk to that spot, and tell me when you are there.
+    ///
+    /// This is the other half of a character having cycles of its own. A
+    /// cycle the character is told to play stays outstanding until something
+    /// reports that it finished, and a sent movement refuses to take its next
+    /// step while one is. A client that reported nothing left the character
+    /// standing on the spot for the rest of the session: every walk to a
+    /// thing, every walk to a place, and every turn to a heading, on a client
+    /// that has the content those cycles are built from.
+    ///
+    /// Both arms are given the same movements at the same simulated time and
+    /// must finish them the same way and in the same place.
+    ///
+    /// Mutation check (2026-09-20), run: taking the report of a finished
+    /// cycle back out of either client turned this red on that client, with
+    /// the character standing where it started and the movement still
+    /// running; putting it back turned it green.
+    /// </summary>
+    [Fact]
+    public void ASentMovementFinishesOnBothClients() =>
+        ParityScenario.Run(static (arm, transcript) =>
+        {
+            arm.Runtime.EntityObjects.Physics.BindMotionContentSource(
+                new ParityMotionContent());
+            _ = ParityWorld.Stage(arm);
+            INavigationAutomation navigation = arm.Host.Automation.Navigation;
+            _ = arm.Operations.TakeOutbound();
+
+            // A few steps of ordinary running first: the character's cycles
+            // are built from content and it is given them on the first step
+            // it takes, and taking hold of them clears whatever it was told
+            // to do beforehand.
+            transcript.Step("the session is running");
+            Advance(arm, ticks: 3);
+            transcript.Record("body", arm.HasLiveBody);
+            RecordWhere(transcript, navigation);
+            PlayerMovementController controller = Controller(arm);
+
+            transcript.Step("face east");
+            transcript.Record("accepted", controller.RequestTurnToHeading(90f));
+            Advance(arm, TicksForTwoThirdsOfASecond * 3);
+            RecordWhere(transcript, navigation);
+            transcript.Record("still turning", IsMoving(controller));
+            Assert.False(
+                IsMoving(controller),
+                "The character never finished coming round.");
+            Assert.Equal(90d, Heading(controller), precision: 0);
+
+            transcript.Step("walk four metres north");
+            Vector3 fourMetresNorth = controller.Position + new Vector3(0f, 4f, 0f);
+            transcript.Record("accepted", WalkTo(controller, fourMetresNorth));
+            Advance(arm, TicksForTwoThirdsOfASecond * 6);
+            RecordWhere(transcript, navigation);
+            transcript.Record("still walking", IsMoving(controller));
+            Assert.False(
+                IsMoving(controller),
+                "The character never finished the walk.");
+            Assert.True(
+                MathF.Abs(controller.Position.Y - fourMetresNorth.Y) < 1f,
+                $"The walk ended {controller.Position.Y:0.00} rather than "
+                + $"{fourMetresNorth.Y:0.00} along.");
+        });
+
+    private static PlayerMovementController Controller(ParityArm arm) =>
+        Assert.IsType<PlayerMovementController>(
+            arm.Runtime.MovementOwner.Controller);
+
+    private static bool IsMoving(PlayerMovementController controller) =>
+        controller.Movement.MoveTo?.IsMovingTo() == true;
+
+    private static double Heading(PlayerMovementController controller)
+    {
+        double heading = MoveToMath.HeadingFromYaw(controller.Yaw);
+        return ((heading % 360d) + 360d) % 360d;
+    }
+
+    private static bool WalkTo(
+        PlayerMovementController controller,
+        Vector3 position)
+    {
+        controller.Movement.MakeMoveToManager();
+        return controller.Movement.PerformMovement(new MovementStruct
+        {
+            Type = MovementType.MoveToPosition,
+            Pos = new Position(controller.CellId, position, Quaternion.Identity),
+            // Half a metre of it is close enough, as an arrival always
+            // has some width: a walk asked to land on a point exactly walks
+            // back and forth across it forever.
+            Params = new MovementParameters { DistanceToObject = 0.5f },
+        }) == WeenieError.None;
+    }
 
     private static void Advance(ParityArm arm, int ticks)
     {

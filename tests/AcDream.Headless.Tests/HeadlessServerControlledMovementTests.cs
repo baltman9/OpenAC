@@ -330,10 +330,55 @@ public sealed class HeadlessServerControlledMovementTests
 
         internal int AdvancedBodies { get; private set; }
 
-        internal void Advance(float seconds)
+        /// <summary>
+        /// Runs the session for a few steps, which is how long it takes the
+        /// character to take hold of its own body: its cycles are built from
+        /// content, and it is given them on the first step it takes. Taking
+        /// hold clears whatever the character was told to do before it had a
+        /// body, so a movement asked for earlier than this is dropped -- the
+        /// same on either host, and the reason these tests ask afterwards.
+        /// </summary>
+        internal void TakeHoldOfItsOwnBody() => Advance(ticks: 3);
+
+        /// <summary>
+        /// How many points a cycle has reached are being held, waiting for
+        /// somebody to take them.
+        /// </summary>
+        internal int PendingCyclePoints =>
+            Runtime.EntityObjects.Physics.EntityRemoteAnimation(Player)
+                ?.Sequencer?.PendingHooks.Count ?? 0;
+
+        /// <summary>
+        /// Walks the character to the thing in the world, the way asking to
+        /// act on something out of arm's reach walks it there.
+        /// </summary>
+        internal bool BeginWalkToTarget()
+        {
+            Controller.Movement.MakeMoveToManager();
+            Controller.SetLastMoveWasAutonomous(false);
+            return Controller.Movement.PerformMovement(new MovementStruct
+            {
+                Type = MovementType.MoveToObject,
+                ObjectId = Target,
+                TopLevelId = Target,
+                Pos = new Position(Cell, TargetStart, Quaternion.Identity),
+                Params = new MovementParameters
+                {
+                    DistanceToObject = DistanceToObject,
+                },
+                // The thing has no girth of its own authored here, which
+                // is what the server-driven walk resolves for it too.
+                Radius = 0f,
+                Height = 0f,
+            }) == WeenieError.None;
+        }
+
+        internal void Advance(float seconds) =>
+            Advance(ticks: (int)(seconds * 30f));
+
+        internal void Advance(int ticks)
         {
             const float step = 1f / 30f;
-            int ticks = (int)(seconds / step);
             for (int tick = 0; tick < ticks; tick++)
             {
                 // The same statements the windowless host's own tick makes,
@@ -664,6 +709,357 @@ public sealed class HeadlessServerControlledMovementTests
         {
             public DatReaderWriter.DBObjs.Animation? LoadAnimation(uint id) =>
                 null;
+        }
+    }
+
+    // -- a character that has cycles of its own ----------------------------
+
+    /// <summary>How close the arrival tests insist the character gets.</summary>
+    private const float ArrivalTolerance = 0.5f;
+
+    /// <summary>
+    /// A walk to a thing, on a session that holds the content its character's
+    /// cycles are built from.
+    /// <para>
+    /// This is the whole of the difference. A dispatched cycle stays
+    /// outstanding until something reports it finished, and every walk refuses
+    /// to take a step while one is. A character with no cycles has none
+    /// outstanding and walks; a character that has them, with nothing to
+    /// report them finished, stands on the spot forever.
+    /// </para>
+    /// <para>
+    /// Mutation check: take the windowless loop closure back out -- either the
+    /// place finished cycles are reported to, or the taking of the points a
+    /// step reached -- and all of these go red, the character never having
+    /// left where it stood.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void AWalkToSomethingArrivesWhenTheCharacterHasItsOwnCycles()
+    {
+        using var world = new Fixture(
+            animationContent: new WalkingAndTurningContent(SetupId));
+        world.TakeHoldOfItsOwnBody();
+
+        Assert.True(world.BeginWalkToTarget());
+        float before = world.DistanceToTarget();
+        world.Advance(seconds: 10f);
+        float after = world.DistanceToTarget();
+
+        Assert.True(
+            after < before - 1f,
+            $"the character stood still: {before:0.00} m -> {after:0.00} m");
+        Assert.True(
+            after <= DistanceToObject + ArrivalTolerance,
+            $"the character stopped {after:0.00} m short of arm's reach");
+        Assert.False(world.Controller.Movement.MoveTo!.IsMovingTo());
+    }
+
+    /// <summary>The same walk, ordered by the server and aimed at the thing.</summary>
+    [Fact]
+    public void AServerWalkToSomethingArrivesWhenTheCharacterHasItsOwnCycles()
+    {
+        using var world = new Fixture(
+            animationContent: new WalkingAndTurningContent(SetupId));
+        world.TakeHoldOfItsOwnBody();
+
+        Assert.True(RuntimeServerControlledLocalMovement.TryApply(
+            world.Runtime,
+            MoveToObjectOrder()));
+        float before = world.DistanceToTarget();
+        world.Advance(seconds: 10f);
+        float after = world.DistanceToTarget();
+
+        Assert.True(
+            after < before - 1f,
+            $"the character stood still: {before:0.00} m -> {after:0.00} m");
+        Assert.True(
+            after <= DistanceToObject + ArrivalTolerance,
+            $"the character stopped {after:0.00} m short of arm's reach");
+    }
+
+    /// <summary>
+    /// A server walk that names a place rather than a thing. It goes through
+    /// the same outstanding-cycle gate and stalls in the same way.
+    /// </summary>
+    [Fact]
+    public void AServerWalkToAPlaceArrivesWhenTheCharacterHasItsOwnCycles()
+    {
+        using var world = new Fixture(
+            animationContent: new WalkingAndTurningContent(SetupId));
+        world.TakeHoldOfItsOwnBody();
+
+        Assert.True(RuntimeServerControlledLocalMovement.TryApply(
+            world.Runtime,
+            MoveToPlaceOrder()));
+        Assert.Equal(
+            MovementType.MoveToPosition,
+            world.Controller.Movement.MoveTo!.MovementTypeState);
+
+        world.Advance(seconds: 10f);
+
+        float away = Vector2.Distance(
+            new Vector2(
+                world.Controller.Position.X,
+                world.Controller.Position.Y),
+            new Vector2(TargetStart.X, TargetStart.Y));
+        Assert.True(
+            away <= 1f,
+            $"the character stopped {away:0.00} m from the place it was sent");
+    }
+
+    /// <summary>
+    /// Facing a heading is the smallest movement there is, and it shows the
+    /// stall on its own: it turns on the spot, so a character that never comes
+    /// round has not merely gone the wrong way, it has done nothing at all.
+    /// </summary>
+    [Fact]
+    public void ATurnToAHeadingFinishesWhenTheCharacterHasItsOwnCycles()
+    {
+        using var world = new Fixture(
+            animationContent: new WalkingAndTurningContent(SetupId));
+        world.TakeHoldOfItsOwnBody();
+
+        Assert.True(world.Controller.RequestTurnToHeading(90f));
+        world.Advance(seconds: 8f);
+
+        float heading = MoveToMath.HeadingFromYaw(world.Controller.Yaw);
+        heading = ((heading % 360f) + 360f) % 360f;
+        Assert.True(
+            MathF.Abs(heading - 90f) < 5f,
+            $"the character came round to {heading:0.0} degrees, not 90");
+        Assert.False(world.Controller.Movement.MoveTo!.IsMovingTo());
+    }
+
+    /// <summary>
+    /// The points one step of a cycle reaches are handed out on the step that
+    /// reaches them and not kept. A session that never took them held every
+    /// one it had ever reached for as long as it ran.
+    /// </summary>
+    [Fact]
+    public void ReachedCyclePointsAreTakenEveryStepAndNotPiledUp()
+    {
+        const int Ticks = 10_000;
+        using var world = new Fixture(
+            animationContent: new WalkingAndTurningContent(SetupId));
+
+        int highWater = 0;
+        for (int tick = 0; tick < Ticks; tick++)
+        {
+            // Start and stop turning over and over, so the character crosses
+            // between cycles hundreds of times and reaches the point at the
+            // end of each crossing cycle every time.
+            if (tick % 40 == 0)
+            {
+                world.Runtime.MovementOwner.SetCommandInput(
+                    new MovementInput(
+                        TurnRight: (tick / 40) % 2 == 0,
+                        Run: true));
+            }
+            world.Advance(ticks: 1);
+            highWater = Math.Max(highWater, world.PendingCyclePoints);
+        }
+
+        Assert.True(
+            highWater <= 8,
+            $"{highWater} reached cycle points were held at once over "
+            + $"{Ticks} steps.");
+    }
+
+    private static WorldSession.EntityMotionUpdate MoveToPlaceOrder() =>
+        new(
+            Guid: Player,
+            MotionState: new CreateObject.ServerMotionState(
+                Stance: (ushort)0x3Du,
+                ForwardCommand: null,
+                MovementType: 6,
+                MoveToSpeed: 1f,
+                MoveToRunRate: 1.75f,
+                MoveToPath: new CreateObject.MoveToPathData(
+                    TargetGuid: null,
+                    OriginCellId: Cell,
+                    OriginX: TargetStart.X,
+                    OriginY: TargetStart.Y,
+                    OriginZ: TargetStart.Z,
+                    DistanceToObject: 0f,
+                    MinDistance: 0f,
+                    FailDistance: 50f,
+                    WalkRunThreshold: 15f,
+                    DesiredHeading: 0f,
+                    Bitfield: 0x403u),
+                TurnToPath: null),
+            InstanceSequence: 1,
+            MovementSequence: 2,
+            ServerControlSequence: 3,
+            IsAutonomous: false);
+
+    /// <summary>
+    /// Animation content a character can really walk and turn by: one part
+    /// layout, cycles for standing, running and turning, and a short crossing
+    /// cycle between every pair of them.
+    /// </summary>
+    /// <remarks>
+    /// The crossing cycles are what make this content say anything about
+    /// completion. A cycle that loops forever never reaches its end, so a
+    /// character playing only loops never reaches a point that has to be
+    /// reported; a cycle that is crossed through does, every time, and that
+    /// report is what lets the next step of a walk be taken.
+    /// </remarks>
+    private sealed class WalkingAndTurningContent : IRuntimeMotionContentSource
+    {
+        private const uint MotionTableId = 0x09000001u;
+        private const uint StandingAnimation = 0x03000001u;
+        private const uint RunningAnimation = 0x03000002u;
+        private const uint TurningLeftAnimation = 0x03000003u;
+        private const uint TurningRightAnimation = 0x03000004u;
+        private const uint CrossingAnimation = 0x03000005u;
+        private const uint NonCombat = 0x8000003Du;
+
+        /// <summary>A tenth of a metre a frame, thirty frames a second.</summary>
+        private const float RunMetresPerFrame = 0.1f;
+
+        private static readonly uint[] Substates =
+        [
+            MotionCommand.Ready,
+            MotionCommand.RunForward,
+            MotionCommand.WalkForward,
+            MotionCommand.TurnLeft,
+            MotionCommand.TurnRight,
+        ];
+
+        private readonly uint _setupId;
+        private readonly Loader _loader = new();
+        private readonly DatReaderWriter.DBObjs.MotionTable _table;
+
+        internal WalkingAndTurningContent(uint setupId)
+        {
+            _setupId = setupId;
+            _loader.Add(StandingAnimation, Authored(Vector3.Zero, 0f));
+            _loader.Add(
+                RunningAnimation,
+                Authored(new Vector3(0f, RunMetresPerFrame, 0f), 0f));
+            _loader.Add(
+                TurningLeftAnimation,
+                Authored(Vector3.Zero, AuthoredTurnPerFrame));
+            _loader.Add(
+                TurningRightAnimation,
+                Authored(Vector3.Zero, -AuthoredTurnPerFrame));
+            _loader.Add(CrossingAnimation, Authored(Vector3.Zero, 0f));
+
+            _table = new DatReaderWriter.DBObjs.MotionTable
+            {
+                DefaultStyle =
+                    (DatReaderWriter.Enums.MotionCommand)NonCombat,
+            };
+            _table.StyleDefaults[
+                (DatReaderWriter.Enums.MotionCommand)NonCombat] =
+                (DatReaderWriter.Enums.MotionCommand)MotionCommand.Ready;
+            Cycle(MotionCommand.Ready, StandingAnimation);
+            Cycle(MotionCommand.RunForward, RunningAnimation);
+            Cycle(MotionCommand.WalkForward, RunningAnimation);
+            Cycle(MotionCommand.TurnLeft, TurningLeftAnimation);
+            Cycle(MotionCommand.TurnRight, TurningRightAnimation);
+            foreach (uint from in Substates)
+            {
+                var crossings = new DatReaderWriter.Types.MotionCommandData();
+                foreach (uint to in Substates)
+                {
+                    if (to != from)
+                    {
+                        crossings.MotionData[(int)to] =
+                            Motion(CrossingAnimation);
+                    }
+                }
+                _table.Links[(int)((NonCombat << 16) | (from & 0xFFFFFFu))] =
+                    crossings;
+            }
+        }
+
+        public IAnimationLoader AnimationLoader => _loader;
+
+        public DatReaderWriter.DBObjs.MotionTable? TryGetMotionTable(
+            uint motionTableId) =>
+            motionTableId == MotionTableId ? _table : null;
+
+        public DatReaderWriter.DBObjs.Setup? TryGetSetup(uint id)
+        {
+            if (id != _setupId)
+                return null;
+            var setup = new DatReaderWriter.DBObjs.Setup
+            {
+                DefaultMotionTable =
+                    (DatReaderWriter.Types.QualifiedDataId<
+                        DatReaderWriter.DBObjs.MotionTable>)MotionTableId,
+            };
+            setup.Parts.Add(0x01000000u);
+            setup.DefaultScale.Add(Vector3.One);
+            return setup;
+        }
+
+        private void Cycle(uint command, uint animationId) =>
+            _table.Cycles[(int)((NonCombat << 16) | (command & 0xFFFFFFu))] =
+                Motion(animationId);
+
+        private static DatReaderWriter.Types.MotionData Motion(
+            uint animationId)
+        {
+            var data = new DatReaderWriter.Types.MotionData();
+            data.Anims.Add(new DatReaderWriter.Types.AnimData
+            {
+                AnimId = (DatReaderWriter.Types.QualifiedDataId<
+                    DatReaderWriter.DBObjs.Animation>)animationId,
+                LowFrame = 0,
+                HighFrame = -1,
+                Framerate = 30f,
+            });
+            return data;
+        }
+
+        private static DatReaderWriter.DBObjs.Animation Authored(
+            Vector3 travel,
+            float turn)
+        {
+            var animation = new DatReaderWriter.DBObjs.Animation
+            {
+                Flags = DatReaderWriter.Enums.AnimationFlags.PosFrames,
+            };
+            for (int frame = 0; frame < 4; frame++)
+            {
+                var partFrame = new DatReaderWriter.Types.AnimationFrame(1);
+                partFrame.Frames.Add(new DatReaderWriter.Types.Frame
+                {
+                    Origin = Vector3.Zero,
+                    Orientation = Quaternion.Identity,
+                });
+                animation.PartFrames.Add(partFrame);
+                animation.PosFrames.Add(new DatReaderWriter.Types.Frame
+                {
+                    Origin = travel,
+                    Orientation = turn == 0f
+                        ? Quaternion.Identity
+                        : Quaternion.CreateFromAxisAngle(Vector3.UnitZ, turn),
+                });
+            }
+            return animation;
+        }
+
+        private sealed class Loader : IAnimationLoader
+        {
+            private readonly Dictionary<uint, DatReaderWriter.DBObjs.Animation>
+                _animations = new();
+
+            internal void Add(
+                uint id,
+                DatReaderWriter.DBObjs.Animation animation) =>
+                _animations[id] = animation;
+
+            public DatReaderWriter.DBObjs.Animation? LoadAnimation(
+                uint requested) =>
+                _animations.TryGetValue(
+                    requested,
+                    out DatReaderWriter.DBObjs.Animation? animation)
+                    ? animation
+                    : null;
         }
     }
 

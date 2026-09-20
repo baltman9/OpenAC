@@ -51,11 +51,32 @@ internal sealed class ParityMotionContent : IRuntimeMotionContentSource
     /// <summary>A hundredth of a turn a frame, thirty frames a second.</summary>
     internal const float TurnPerFrame = MathF.Tau / 100f;
 
+    /// <summary>
+    /// The short cycle the character is carried through when it crosses from
+    /// one of the cycles above to another. It is the one cycle here that ends
+    /// rather than looping, which is what makes this content say anything
+    /// about a cycle finishing: a loop never reaches its end, so a character
+    /// playing only loops never reaches a point anybody has to report, and a
+    /// movement that waits on such a report would be waiting on nothing.
+    /// </summary>
+    internal const uint CrossingAnimation = 0x03000005u;
+
+    /// <summary>The cycles the character crosses between.</summary>
+    private static readonly uint[] Substates =
+    [
+        AcDream.Core.Physics.MotionCommand.Ready,
+        AcDream.Core.Physics.MotionCommand.RunForward,
+        AcDream.Core.Physics.MotionCommand.WalkForward,
+        AcDream.Core.Physics.MotionCommand.TurnLeft,
+        AcDream.Core.Physics.MotionCommand.TurnRight,
+    ];
+
     private readonly Loader _loader = new();
     private readonly MotionTable _table;
 
     internal ParityMotionContent()
     {
+        _loader.Add(CrossingAnimation, Authored(Vector3.Zero, 0f));
         _loader.Add(StandingAnimation, Authored(Vector3.Zero, 0f));
         _loader.Add(
             RunningAnimation,
@@ -80,6 +101,17 @@ internal sealed class ParityMotionContent : IRuntimeMotionContentSource
         Cycle(
             AcDream.Core.Physics.MotionCommand.TurnLeft,
             TurningLeftAnimation);
+        foreach (uint from in Substates)
+        {
+            var crossings = new MotionCommandData();
+            foreach (uint to in Substates)
+            {
+                if (to != from)
+                    crossings.MotionData[(int)to] = Motion(CrossingAnimation);
+            }
+            _table.Links[(int)((NonCombat << 16) | (from & 0xFFFFFFu))] =
+                crossings;
+        }
     }
 
     public IAnimationLoader AnimationLoader => _loader;
@@ -100,7 +132,11 @@ internal sealed class ParityMotionContent : IRuntimeMotionContentSource
         return setup;
     }
 
-    private void Cycle(uint command, uint animationId)
+    private void Cycle(uint command, uint animationId) =>
+        _table.Cycles[(int)((NonCombat << 16) | (command & 0xFFFFFFu))] =
+            Motion(animationId);
+
+    private static MotionData Motion(uint animationId)
     {
         var data = new MotionData();
         data.Anims.Add(new AnimData
@@ -110,7 +146,7 @@ internal sealed class ParityMotionContent : IRuntimeMotionContentSource
             HighFrame = -1,
             Framerate = 30f,
         });
-        _table.Cycles[(int)((NonCombat << 16) | (command & 0xFFFFFFu))] = data;
+        return data;
     }
 
     /// <summary>

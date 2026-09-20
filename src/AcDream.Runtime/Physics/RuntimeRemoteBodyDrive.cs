@@ -88,8 +88,8 @@ internal static class RuntimeRemoteBodyDisposition
 /// owner keeps one set of scratch frames for a body with no cycles of its
 /// own, so two bodies advancing at once would overwrite each other's travel.
 /// It also allocates nothing once it is warm: the record list is reused, the
-/// facts are a value, and a client with nothing to present hands over no
-/// callbacks at all.
+/// facts are a value, and the one thing a client with nothing to present
+/// hangs off a step is shared by every body and built once.
 /// </remarks>
 internal sealed class RuntimeRemoteBodyDrive
 {
@@ -98,6 +98,16 @@ internal sealed class RuntimeRemoteBodyDrive
     private readonly Func<uint> _localPlayerGuid;
     private readonly Func<Vector3?> _playerPosition;
     private readonly List<RuntimeEntityRecord> _bodies = [];
+
+    /// <summary>
+    /// The one thing a client with nothing to present still hangs off a step:
+    /// taking the points the step's cycle reached. Nobody else takes them
+    /// here, and a cycle whose end is never reported leaves the body's next
+    /// movement refused forever and the points piling up.
+    /// </summary>
+    private static readonly RuntimeRemoteBodyPresentation TakeReachedPoints =
+        new(CaptureAnimationHooks: static (_, sequencer) =>
+            RuntimeReachedCycleCompletion.TakeReachedPoints(sequencer));
 
     internal RuntimeRemoteBodyDrive(
         RuntimeEntityObjectLifetime entityObjects,
@@ -158,6 +168,14 @@ internal sealed class RuntimeRemoteBodyDrive
             if (EnsureAnimation(physics, record) is not { } animation)
                 continue;
 
+            // A finished cycle has to arrive back at this body's own motion
+            // state, or every movement it is given afterwards is refused. On
+            // a client that presents the body, whatever presents it points
+            // that report where it belongs; here nothing does, so the body
+            // reports to itself.
+            if (animation.Sequencer is { MotionDoneTarget: null } sequencer)
+                sequencer.MotionDoneTarget = remote.Motion.MotionDone;
+
             var facts = new RuntimeRemoteBodyFacts(
                 elapsedSeconds,
                 remote.Body.Position,
@@ -168,7 +186,8 @@ internal sealed class RuntimeRemoteBodyDrive
                 record.ObjectClockEpoch,
                 centerX,
                 centerY);
-            if (_owner.Advance(record, remote, animation, facts, default)
+            if (_owner.Advance(
+                    record, remote, animation, facts, TakeReachedPoints)
                 .Advanced)
             {
                 advanced++;

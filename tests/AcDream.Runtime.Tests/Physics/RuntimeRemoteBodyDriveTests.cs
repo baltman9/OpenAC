@@ -193,6 +193,40 @@ public sealed class RuntimeRemoteBodyDriveTests
             + $"in the {TickSeconds * 1000d:0} ms frame it runs in.");
     }
 
+    /// <summary>
+    /// Every body the drive carries is given somewhere to report a finished
+    /// cycle to, and it is that body's own motion state.
+    /// </summary>
+    /// <remarks>
+    /// A cycle a body has been told to play stays outstanding until something
+    /// reports it finished, and the body's next movement is refused while one
+    /// is. A client that presents the body has whatever presents it report
+    /// that; a client that presents nothing has only the body, so the body
+    /// reports to itself. Without it a creature ordered to walk somewhere
+    /// stands where it is for the rest of the session -- the same fault the
+    /// character itself had.
+    /// </remarks>
+    [Fact]
+    public void EveryCarriedBodyIsGivenSomewhereToReportAFinishedCycle()
+    {
+        using var world = Crowd.Create(bodies: 3, withGround: true);
+        Assert.Null(world.Sequencer(0));
+
+        world.Tick(0.5f);
+
+        for (int index = 0; index < 3; index++)
+        {
+            Assert.NotNull(world.Sequencer(index));
+            Assert.NotNull(world.Sequencer(index)!.MotionDoneTarget);
+            // And it is this body's own motion state, not another body's:
+            // one report landing on the wrong creature would let one walk
+            // through while every other stayed stopped.
+            Assert.Same(
+                world.Body(index).Motion,
+                world.Sequencer(index)!.MotionDoneTarget!.Target);
+        }
+    }
+
     /// <summary>The crowd a bot is expected to stand in.</summary>
     private const int CrowdSize = 150;
 
@@ -267,6 +301,15 @@ public sealed class RuntimeRemoteBodyDriveTests
             _drive.Tick(elapsedSeconds);
 
         internal Vector3 Position(int index) => _bodies[index].Body.Position;
+
+        /// <summary>The body's own motion state, as the drive left it.</summary>
+        internal RemoteMotion Body(int index) => _bodies[index];
+
+        /// <summary>The cycle the body is playing, once it has one.</summary>
+        internal AcDream.Core.Physics.AnimationSequencer? Sequencer(int index)
+            => _lifetime.Physics
+                .EntityRemoteAnimation(FirstCreature + (uint)index)
+                ?.Sequencer;
 
         public void Dispose() => _lifetime.Dispose();
 

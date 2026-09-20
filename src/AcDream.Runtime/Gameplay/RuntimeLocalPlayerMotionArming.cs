@@ -7,9 +7,12 @@ namespace AcDream.Runtime.Gameplay;
 
 /// <summary>
 /// What a host that also draws the character hangs off the character's own
-/// locomotion. Both entries are optional, and a host that draws nothing
-/// supplies neither: its character then travels and turns by exactly the same
-/// amount, with none of the pose work.
+/// locomotion. A host that draws nothing supplies neither entry: its
+/// character then travels and turns by exactly the same amount, with none of
+/// the pose work, and the character is given somewhere of its own to report
+/// its finished cycles to. Supplying either entry says this host is drawing
+/// the character and takes on both halves of that, the finished cycles
+/// included.
 /// </summary>
 /// <param name="AdvanceRootMotion">
 /// Advances the character's cycle AND builds the poses of its parts, writing
@@ -113,6 +116,8 @@ internal sealed class RuntimeLocalPlayerMotionArming
         RuntimeRemoteAnimationState animation,
         AnimationSequencer sequencer)
     {
+        bool presented = _presentation.AdvanceRootMotion is not null
+            || _presentation.CaptureAnimationHooks is not null;
         controller.AttachCycleVelocityAccessor(() => sequencer.CurrentVelocity);
         controller.ObjectScale = animation.Scale;
         controller.AttachAnimationRootMotionSource(
@@ -120,7 +125,10 @@ internal sealed class RuntimeLocalPlayerMotionArming
                 ?? ((deltaSeconds, output) =>
                     AdvanceRootMotionOnly(
                         animation, sequencer, deltaSeconds, output)),
-            _presentation.CaptureAnimationHooks);
+            presented
+                ? _presentation.CaptureAnimationHooks
+                : () => RuntimeReachedCycleCompletion
+                    .TakeReachedPoints(sequencer));
         controller.Motion.RemoveLinkAnimations =
             sequencer.Manager.HandleEnterWorld;
         controller.Motion.InitializeMotionTables =
@@ -128,6 +136,12 @@ internal sealed class RuntimeLocalPlayerMotionArming
         controller.Motion.CheckForCompletedMotions =
             sequencer.Manager.CheckForCompletedMotions;
         controller.Motion.DefaultSink = new MotionTableDispatchSink(sequencer);
+        // A finished cycle has to arrive back at the character's own motion
+        // state, or every movement after it is refused. A host that presents
+        // the character points that report at whatever it is presenting; a
+        // host that presents nothing points it straight back at the character.
+        if (!presented)
+            sequencer.MotionDoneTarget = controller.Motion.MotionDone;
         sequencer.Manager.HandleEnterWorld();
         controller.Motion.HandleExitWorld();
     }

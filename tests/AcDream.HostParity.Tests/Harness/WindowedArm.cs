@@ -402,11 +402,16 @@ internal sealed class WindowedArm : ParityArm
             _sessionSource);
         // What this client hangs off the character's own locomotion: the
         // same one cycle advance, with the poses of its parts built along the
-        // way. Nothing is drawn here, so the pose work ends at the poses that
-        // advance hands back, which is as far as this path goes without a
-        // graphics card.
+        // way, and the taking of the points that advance reached. Nothing is
+        // drawn here, so the pose work ends at the poses that advance hands
+        // back, which is as far as this path goes without a graphics card;
+        // the points, though, are taken exactly where the drawing client
+        // takes them, because what is done with them decides whether the
+        // character's next movement is allowed to begin.
         Runtime.LocalPlayerMotion.BindPresentation(
-            new RuntimeLocalPlayerMotionPresentation(AdvanceRootAndBuildPoses));
+            new RuntimeLocalPlayerMotionPresentation(
+                AdvanceRootAndBuildPoses,
+                TakeReachedPoints));
         return Runtime.CreateLocalPlayerFrameController(frameRuntime, input);
     }
 
@@ -425,12 +430,39 @@ internal sealed class WindowedArm : ParityArm
         {
             return;
         }
+        if (sequencer.MotionDoneTarget is null)
+        {
+            sequencer.MotionDoneTarget =
+                Runtime.MovementOwner.Controller!.Motion.MotionDone;
+        }
         DatReaderWriter.Types.Frame root = animation.RootMotionScratch;
         root.Origin = System.Numerics.Vector3.Zero;
         root.Orientation = System.Numerics.Quaternion.Identity;
         LastPartPoses = sequencer.Advance(deltaSeconds, root);
         output.Origin = root.Origin;
         output.Orientation = root.Orientation;
+    }
+
+    /// <summary>
+    /// The points the step's cycle reached, taken the way the client with a
+    /// window takes them: in the order they were reached, reporting each
+    /// cycle that ended to the character's own motion state.
+    /// </summary>
+    private void TakeReachedPoints()
+    {
+        if (Runtime.EntityObjects.Physics.EntityRemoteAnimation(
+                Runtime.PlayerIdentity.ServerGuid)
+            is not { Sequencer: { } sequencer })
+        {
+            return;
+        }
+        IReadOnlyList<DatReaderWriter.Types.AnimationHook> reached =
+            sequencer.ConsumePendingHooks();
+        for (int i = 0; i < reached.Count; i++)
+        {
+            if (reached[i] is DatReaderWriter.Types.AnimationDoneHook)
+                sequencer.Manager.AnimationDone(success: true);
+        }
     }
 
     /// <summary>
