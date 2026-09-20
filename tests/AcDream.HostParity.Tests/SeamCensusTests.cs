@@ -9,7 +9,8 @@ namespace AcDream.HostParity.Tests;
 
 /// <summary>
 /// The gate: everything a plugin can reach is supplied by both hosts, or it
-/// sits in the allow-list with a reason and the stage that closes it.
+/// sits in the allow-list, either as a debt with the stage that closes it or
+/// as a difference inherent to one client drawing the world and the other not.
 ///
 /// Where it can, the census OBSERVES rather than reads a list: each host's
 /// capability record and dependency record are built here by the host's own
@@ -464,6 +465,30 @@ public sealed class SeamCensusTests
             "plugin surface input",
             missingOnBothIsADifference: true);
 
+    /// <summary>
+    /// Every listed difference names a host that exists and says why in words
+    /// a reader can act on, and the list uses both of its kinds. A list with
+    /// no permanent exceptions has written up every drawn-world difference as
+    /// work someone is going to do, which is how it came to overstate what
+    /// was left.
+    /// </summary>
+    [Fact]
+    public void EveryListedDifferenceNamesAKnownHostAndAReason()
+    {
+        Assert.All(HostParityAllowList.All, entry =>
+        {
+            Assert.Contains(entry.MissingHost, ParityHost.Both);
+            Assert.False(string.IsNullOrWhiteSpace(entry.Member));
+            Assert.False(
+                string.IsNullOrWhiteSpace(entry.Reason),
+                $"The entry for {entry.Member} on {entry.MissingHost} says "
+                + "nothing about why the hosts differ.");
+        });
+
+        Assert.Contains(HostParityAllowList.All, static e => e.IsDebt);
+        Assert.Contains(HostParityAllowList.All, static e => !e.IsDebt);
+    }
+
     private static void AssertConditionsAreDeclared(
         IReadOnlyDictionary<string, string> conditions,
         IReadOnlySet<string> declared,
@@ -577,8 +602,9 @@ public sealed class SeamCensusTests
         Assert.True(
             unlisted.Count == 0,
             $"The hosts disagree about a {what} and nothing says why. Supply "
-            + "it on both hosts, or add an allow-list entry with a reason and "
-            + "the stage that closes it: " + string.Join("; ", unlisted));
+            + "it on both hosts, or add an allow-list entry: a debt with the "
+            + "stage that closes it, or a difference inherent to drawing: "
+            + string.Join("; ", unlisted));
         Assert.True(
             stale.Count == 0,
             $"The allow-list still excuses a {what} that is no longer a "
