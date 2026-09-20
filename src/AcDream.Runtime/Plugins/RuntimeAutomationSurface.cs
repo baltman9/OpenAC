@@ -3972,7 +3972,31 @@ internal sealed class RuntimeAutomationSurface
         attack.PressAttack(Project(height));
         return attack.AttackRequestInProgress
             ? new(PluginCombatCommandStatus.Started)
-            : new(PluginCombatCommandStatus.Refused);
+            : new(
+                PluginCombatCommandStatus.Refused,
+                DescribeAttackRefusal(runtime, targetObjectId));
+    }
+
+    /// <summary>
+    /// Why a swing that was asked for never armed. Without this a caller sees
+    /// only "refused" and has to guess whether the monster is the problem,
+    /// which is how an attackable monster standing next to the character ends
+    /// up written off for a pass.
+    /// </summary>
+    internal static string DescribeAttackRefusal(
+        GameRuntime runtime,
+        uint targetObjectId)
+    {
+        if (runtime.ActionOwner.Selection.SelectedObjectId != targetObjectId)
+            return "Something else took the target before the swing armed.";
+        if (!RuntimeHostileTargetQuery.IsHostile(
+                runtime,
+                targetObjectId,
+                HostileTargetScope.Selectable))
+        {
+            return "The target cannot be attacked: it is out of sight or out of play.";
+        }
+        return "The character is in no position to attack.";
     }
 
     public PluginCombatCommandResult ReleasePhysicalAttack()

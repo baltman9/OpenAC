@@ -267,7 +267,10 @@ public interface ICombatAutomation
     /// <see cref="PluginCombatCommandStatus.WrongMode"/> when the stance
     /// cannot make a targeted attack, and
     /// <see cref="PluginCombatCommandStatus.Busy"/> while an earlier attack
-    /// is still running. Finish it with <see cref="ReleasePhysicalAttack"/>.
+    /// is still running. A <see cref="PluginCombatCommandStatus.Refused"/>
+    /// result carries a short reason in
+    /// <see cref="PluginCombatCommandResult.Notice"/> when the host has one.
+    /// Finish it with <see cref="ReleasePhysicalAttack"/>.
     /// </summary>
     PluginCombatCommandResult BeginPhysicalAttack(
         uint targetObjectId,
