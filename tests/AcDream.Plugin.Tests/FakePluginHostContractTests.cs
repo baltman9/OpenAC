@@ -32,6 +32,17 @@ public sealed class FakePluginHostContractTests
     }
 
     [Fact]
+    public void RecallSurfaceIsInertWhenUnavailable()
+    {
+        var host = new FakePluginHost();
+        Assert.False(host.Automation.Recalls.IsAvailable);
+        Assert.False(host.Automation.Recalls.Recall(PluginRecallKind.House).Accepted);
+        Assert.Equal(
+            PluginRecallStatus.Unavailable,
+            host.Automation.Recalls.Recall(PluginRecallKind.Allegiance).Status);
+    }
+
+    [Fact]
     public void DefaultUiRegistryIsNoOp()
     {
         var host = new FakePluginHost();
