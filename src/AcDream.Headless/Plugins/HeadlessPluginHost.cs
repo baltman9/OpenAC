@@ -83,41 +83,19 @@ internal sealed class HeadlessPluginHost
         RuntimeAutomationBindings.Apply(
             _automation,
             runtime,
-            new RuntimeAutomationHostCapabilities
+            HeadlessAutomationCapabilities.Build(new HeadlessAutomationParts
             {
-                HostName = "windowless",
-                Declared = HeadlessAutomationCapabilities.Declared,
+                Runtime = runtime,
                 Warn = Log.Warn,
                 Content = content,
                 MagicCatalog = magicCatalog,
                 SubmitChatText = submitChatText,
                 SessionCommands = sessionCommands,
                 NavigationWalk = navigationWalk,
-                Items = items is null ? null : new RuntimeAutomationItemCommands(
-                    items.TryUse,
-                    items.TryApply,
-                    items.TryMove,
-                    items.TryMerge,
-                    items.TryDrop,
-                    items.TryGive,
-                    items.TryPickup,
-                    items.TryIdentify),
-                Equipment = items is null
-                    ? null
-                    : new RuntimeAutomationEquipmentCommands(
-                        items.TryEquip,
-                        () => items.EquipmentBusy,
-                        items.TryEquipSecondary),
-                Logout = logout is null
-                    ? null
-                    : new RuntimeAutomationLogoutCommands(
-                        logout.TryRequestLogout,
-                        () => logout.CanRequestLogout),
+                Items = items,
+                Logout = logout,
                 AnswerConfirmation = answerConfirmation,
-                // Nothing here moves a remote entity's body between server
-                // updates, so positions are read from the last snapshot.
-                RemoteBodiesUnsimulated = true,
-            });
+            }));
         _wasInWorld = runtime.Lifecycle.State == RuntimeLifecycleState.InWorld;
         runtime.CommunicationOwner.LocalPlayerDied += OnLocalPlayerDied;
         runtime.InventoryOwner.ExternalContainers.Changed += OnExternalContainerChanged;

@@ -231,18 +231,14 @@ internal sealed class HeadlessSessionHost : IDisposable
         try
         {
             var gameplay = new HeadlessGameplayOperations();
-            var runtime = new GameRuntime(new GameRuntimeDependencies(
-                gameplay,
-                gameplay,
-                gameplay,
-                gameplay,
-                TimeProvider: _timeProvider,
-                Log: message => diagnostics.Message(
-                    descriptor.Id,
-                    message),
-                SessionOperations: sessionOperations,
-                CombatTime: () =>
-                    runtimeRef?.Clock.SimulationTimeSeconds ?? 0d));
+            var runtime = new GameRuntime(
+                AcDream.Headless.Plugins.HeadlessAutomationCapabilities
+                    .BuildRuntimeDependencies(
+                        gameplay,
+                        _timeProvider,
+                        message => diagnostics.Message(descriptor.Id, message),
+                        sessionOperations,
+                        () => runtimeRef?.Clock.SimulationTimeSeconds ?? 0d));
             runtimeRef = runtime;
             if (contentLease is { } content)
             {

@@ -517,14 +517,15 @@ public sealed class GameWindow :
         _applicationPaths = _platformServices.Paths;
         _keyBindings = LoadStartupKeyBindings(
             _applicationPaths.KeyBindingsFile);
-        _runtime = new GameRuntime(new GameRuntimeDependencies(
-            _combatAttackOperations,
-            _combatTargetOperations,
-            _combatModeOperations,
-            _spellCastOperations,
-            Log: Console.WriteLine,
-            TimeSyncDiagnostic:
-                options.DumpSky ? Console.WriteLine : null));
+        _runtime = new GameRuntime(
+            AcDream.App.Plugins.GraphicalAutomationCapabilities
+                .BuildRuntimeDependencies(
+                    _combatAttackOperations,
+                    _combatTargetOperations,
+                    _combatModeOperations,
+                    _spellCastOperations,
+                    timeSyncDiagnostic:
+                        options.DumpSky ? Console.WriteLine : null));
         _runtimeHostLease = _runtime.AcquireHostLease(
             "graphical GameWindow");
         _automation?.Bind(_runtime, _runtime.CharacterOwner, _runtime.ActionOwner.SpellCast);
@@ -1151,112 +1152,33 @@ public sealed class GameWindow :
     /// <summary>
     /// Hands the plugin surface everything this host can lend it, through
     /// the one binding pass the windowless host runs too. Composition has
-    /// published every owner by the time this runs, so the window has no
-    /// binding block of its own: what it can supply is the record below,
-    /// and the runtime fills the rest.
+    /// published every owner by the time this runs, so all the window does
+    /// is name its parts: the capability record is built beside the host's
+    /// declaration of what it can supply, and the runtime fills the rest.
     /// </summary>
     private void ApplyPluginAutomationBindings()
     {
         if (_automation is not { } automation)
             return;
-        AcDream.Runtime.Gameplay.RuntimeItemInteraction? items =
-            _itemInteractionController;
-        AcDream.App.Interaction.SelectionInteractionController? selection =
-            _selectionInteractions;
-        AcDream.UI.Abstractions.Input.InputDispatcher? input = _inputDispatcher;
-        AcDream.App.UI.RetailUiRuntime? retainedUi = _retailUiRuntime;
-        AcDream.App.Runtime.CurrentGameRuntimeAdapter? session =
-            _pluginSessionCommands;
         AcDream.Runtime.Plugins.RuntimeAutomationBindings.Apply(
             automation,
             _runtime,
-            new AcDream.Runtime.Plugins.RuntimeAutomationHostCapabilities
-            {
-                HostName = "windowed",
-                Declared = AcDream.App.Plugins.GraphicalAutomationCapabilities
-                    .Declared,
-                Warn = Console.Error.WriteLine,
-                Content = _dats,
-                MagicCatalog = _magicCatalog,
-                SubmitChatText = session is null
-                    ? null
-                    : session.SubmitChatText,
-                SessionCommands = session,
-                NavigationWalk = _navigationWalk,
-                SpeciesName = _dats is null
-                    ? null
-                    : AcDream.App.UI.Layout.CreatureDisplayNameResolver
-                        .Load(_dats).Resolve,
-                Equipment = items is null
-                    ? null
-                    : new AcDream.Runtime.Plugins
-                        .RuntimeAutomationEquipmentCommands(
-                        (itemId, requestedLocation) => items.TryWieldItem(
-                            itemId,
-                            (AcDream.Core.Items.EquipMask)requestedLocation),
-                        () => items.IsAutoWieldBusy,
-                        items.TryWieldItemSecondary),
-                Items = items is null
-                    ? null
-                    : new AcDream.Runtime.Plugins.RuntimeAutomationItemCommands(
-                        items.TryUseItemForAutomation,
-                        items.TryApplyItem,
-                        items.TryMoveItemForAutomation,
-                        items.TryMergeItemsForAutomation,
-                        items.TryDropItemForAutomation,
-                        items.TryGiveItemForAutomation,
-                        items.PlaceWorldItemInBackpack,
-                        items.TryAppraiseForAutomation),
-                SalvageItems = items is null
-                    ? null
-                    : items.TrySalvageItemsForAutomation,
-                SellItem = items is null
-                    ? null
-                    : (vendorId, itemId, amount) =>
-                        items.TrySell(vendorId, [(amount, itemId)]),
-                Logout = new AcDream.Runtime.Plugins
-                    .RuntimeAutomationLogoutCommands(
-                    () => _localPlayerTeleport?.TryRequestLogout() == true,
-                    () => _localPlayerTeleport is not null
-                        && _runtime.Session.IsInWorld
-                        && !_runtime.TransitOwner.IsLogoutActive
-                        && !_runtime.TransitOwner.IsTeleportActive
-                        && !_runtime.TransitOwner.HasPendingTeleportStart),
-                AnswerConfirmation = retainedUi is null
-                    ? null
-                    : retainedUi.TryAnswerConfirmation,
-                UseWorldObject = selection is null
-                    ? null
-                    : objectId => AcDream.Runtime.Plugins
-                        .RuntimeAutomationSurface.MapWorldObjectUseOutcome(
-                            selection.TryUseForAutomation(objectId)),
-                DismissGhost = _liveEntityDeletion is not { } deletion
-                    ? null
-                    : deletion.DeleteClientGhost,
-                SelectionAction = selection is null
-                    ? null
-                    : action => selection.HandleInputAction(action switch
-                    {
-                        AcDream.Plugin.Abstractions.PluginSelectionAction
-                            .PreviousSelection =>
-                            InputAction.SelectionPreviousSelection,
-                        AcDream.Plugin.Abstractions.PluginSelectionAction
-                            .PreviousPlayer =>
-                            InputAction.SelectionPreviousPlayer,
-                        AcDream.Plugin.Abstractions.PluginSelectionAction
-                            .NextPlayer => InputAction.SelectionNextPlayer,
-                        _ => InputAction.None,
-                    }),
-                // Automation that steers by holding keys has to know when the
-                // keyboard is going into the chat entry instead of the
-                // character.
-                ChatInputActive = input is null
-                    ? null
-                    : () => input.WantsTextInput,
-                ChatComposer = retainedUi is null
-                    ? null
-                    : retainedUi.ComposeChatText,
-            });
+            AcDream.App.Plugins.GraphicalAutomationCapabilities.Build(
+                new AcDream.App.Plugins.GraphicalAutomationParts
+                {
+                    Runtime = _runtime,
+                    Warn = Console.Error.WriteLine,
+                    Content = _dats,
+                    MagicCatalog = _magicCatalog,
+                    SessionCommands = _pluginSessionCommands,
+                    NavigationWalk = _navigationWalk,
+                    Items = _itemInteractionController,
+                    Teleport = _localPlayerTeleport,
+                    RetainedUi = _retailUiRuntime,
+                    Selection = _selectionInteractions,
+                    EntityDeletion = _liveEntityDeletion,
+                    Input = _inputDispatcher,
+                }));
     }
 
     private static void PublishCompositionOwner<T>(

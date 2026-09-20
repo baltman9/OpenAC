@@ -11,21 +11,42 @@ namespace AcDream.HostParity.Tests;
 /// The gate: everything a plugin can reach is supplied by both hosts, or it
 /// sits in the allow-list with a reason and the stage that closes it.
 ///
-/// The census reads each host's standing declaration rather than starting
-/// the host, because one of them cannot exist without a window. The
-/// declarations cannot quietly drift: the shared binding pass refuses a
-/// capability record that supplies anything its host has not declared, so
-/// any run of either host -- including every host test -- proves the
-/// automation declarations against the record the host really builds.
+/// Where it can, the census OBSERVES rather than reads a list: each host's
+/// capability record and dependency record are built here by the host's own
+/// builder, and its declaration has to equal what that builder produced. A
+/// member dropped from a host's real construction therefore turns the census
+/// red instead of leaving a list behind that says otherwise.
 ///
-/// Mutation check (2026-09-20): removing the session-commands capability
-/// from the windowless host's declared set turned
-/// <see cref="EverySurfaceSeamIsSuppliedByBothHostsOrAllowListed"/> red with
-/// "BindSessionCommands is missing on windowless"; restoring it turned the
-/// test green again.
+/// Convention: a seam is a <c>Bind*</c> method on the shared surface, and the
+/// census discovers them by that name. A host can also push INTO the surface
+/// under another verb; those entry points are invisible to the discovery and
+/// are named in <see cref="HostPushedEntryPoints"/> instead.
+///
+/// Mutation checks (2026-09-20):
+/// * removing the session-commands capability from the windowless host's
+///   declared set turned
+///   <see cref="EverySurfaceSeamIsSuppliedByBothHostsOrAllowListed"/> red with
+///   "BindSessionCommands is missing on windowless";
+/// * dropping <c>Log:</c> from the windowed host's real dependency
+///   construction turned
+///   <see cref="EachHostDeclaresExactlyWhatItsDependencyRecordSupplies"/> red
+///   with "windowed declares a runtime dependency its own construction does
+///   not supply: Log";
+/// * dropping <c>AnswerConfirmation</c> from the windowless host's real
+///   capability construction turned
+///   <see cref="EachHostDeclaresExactlyWhatItsCapabilityRecordSupplies"/> red.
+/// Restoring each turned the test green again.
 /// </summary>
 public sealed class SeamCensusTests
 {
+    /// <summary>
+    /// Host-to-surface entry points that are not <c>Bind*</c> seams, so the
+    /// discovery below cannot find them. Each one is a place a host pushes
+    /// something in, and each has to reach plugins on both hosts.
+    /// </summary>
+    private static readonly string[] HostPushedEntryPoints =
+        [nameof(RuntimeAutomationSurface.RaiseConfirmationRequested)];
+
     /// <summary>
     /// Every seam on the shared plugin surface, including the optional
     /// arguments a host can leave out on its own.
@@ -54,6 +75,11 @@ public sealed class SeamCensusTests
         host == ParityHost.Windowed
             ? GraphicalAutomationCapabilities.Declared
             : HeadlessAutomationCapabilities.Declared;
+
+    private static IReadOnlySet<string> DeclaredRuntimeDependencies(string host) =>
+        host == ParityHost.Windowed
+            ? GraphicalAutomationCapabilities.DeclaredRuntimeDependencies
+            : HeadlessAutomationCapabilities.DeclaredRuntimeDependencies;
 
     private static IReadOnlySet<string> SeamsFor(string host)
     {
@@ -116,6 +142,142 @@ public sealed class SeamCensusTests
         }
     }
 
+    /// <summary>
+    /// The declaration has to be what the host's own builder produces, not a
+    /// list beside it. Without this a member deleted from the real record
+    /// leaves the census green and a plugin holding nothing.
+    /// </summary>
+    [Fact]
+    public void EachHostDeclaresExactlyWhatItsCapabilityRecordSupplies()
+    {
+        foreach (string host in ParityHost.Both)
+        {
+            IReadOnlySet<string> supplied =
+                ObservedHostRecords.CapabilitiesFor(host).Supplied();
+            IReadOnlySet<string> declared = DeclaredCapabilities(host);
+            AssertSameMembers(
+                declared,
+                supplied,
+                host,
+                "plugin capability",
+                "the record it builds with every part present");
+        }
+    }
+
+    /// <summary>The same, for the record each host builds its runtime with.</summary>
+    [Fact]
+    public void EachHostDeclaresExactlyWhatItsDependencyRecordSupplies()
+    {
+        foreach (string host in ParityHost.Both)
+        {
+            IReadOnlySet<string> supplied = ObservedHostRecords.SuppliedMembers(
+                ObservedHostRecords.RuntimeDependenciesFor(host));
+            IReadOnlySet<string> declared = DeclaredRuntimeDependencies(host);
+            AssertSameMembers(
+                declared,
+                supplied,
+                host,
+                "runtime dependency",
+                "the record it builds the runtime with");
+        }
+    }
+
+    /// <summary>
+    /// A condition names a capability the host also declares, and says why in
+    /// words a reader can act on.
+    /// </summary>
+    [Fact]
+    public void EveryNamedConditionBelongsToADeclaredMember()
+    {
+        foreach (string host in ParityHost.Both)
+        {
+            AssertConditionsAreDeclared(
+                ObservedHostRecords.ConditionalCapabilities(host),
+                DeclaredCapabilities(host),
+                host,
+                "plugin capability");
+            AssertConditionsAreDeclared(
+                ObservedHostRecords.ConditionalRuntimeDependencies(host),
+                DeclaredRuntimeDependencies(host),
+                host,
+                "runtime dependency");
+        }
+    }
+
+    /// <summary>
+    /// A capability one host supplies always and the other only sometimes is
+    /// a difference a plugin meets in a particular session, so it is listed
+    /// like any other.
+    /// </summary>
+    [Fact]
+    public void AConditionalCapabilityTheOtherHostAlwaysSuppliesIsAllowListed()
+    {
+        var allowed = HostParityAllowList.ConditionalSeams
+            .Select(static entry => (entry.Member, entry.ConditionalHost))
+            .ToHashSet();
+        Assert.All(HostParityAllowList.ConditionalSeams, entry =>
+        {
+            Assert.Contains(entry.ConditionalHost, ParityHost.Both);
+            Assert.False(string.IsNullOrWhiteSpace(entry.Reason));
+        });
+
+        var unlisted = new List<string>();
+        var stale = new List<string>();
+        foreach (string host in ParityHost.Both)
+        {
+            string other = host == ParityHost.Windowed
+                ? ParityHost.Windowless
+                : ParityHost.Windowed;
+            foreach (string member in DeclaredCapabilities(host))
+            {
+                bool conditionalHere = ObservedHostRecords
+                    .ConditionalCapabilities(host).ContainsKey(member);
+                bool alwaysThere = DeclaredCapabilities(other).Contains(member)
+                    && !ObservedHostRecords.ConditionalCapabilities(other)
+                        .ContainsKey(member);
+                bool isADifference = conditionalHere && alwaysThere;
+                bool listed = allowed.Contains((member, host));
+                if (isADifference && !listed)
+                    unlisted.Add($"{member} is conditional only on {host}");
+                else if (!isADifference && listed)
+                    stale.Add($"{member} on {host}");
+            }
+        }
+
+        Assert.True(
+            unlisted.Count == 0,
+            "One host can only sometimes supply what the other always "
+            + "supplies, and nothing says why: " + string.Join("; ", unlisted));
+        Assert.True(
+            stale.Count == 0,
+            "The allow-list still excuses a condition that is no longer a "
+            + "difference. Delete the entry: " + string.Join("; ", stale));
+    }
+
+    /// <summary>
+    /// The seams the census discovers by name are not all of them: a host can
+    /// push into the surface under another verb. Those are named explicitly so
+    /// the convention is visible rather than silently incomplete.
+    /// </summary>
+    [Fact]
+    public void EveryNamedHostPushedEntryPointStillExists()
+    {
+        foreach (string entryPoint in HostPushedEntryPoints)
+        {
+            Assert.True(
+                typeof(RuntimeAutomationSurface).GetMethod(
+                    entryPoint,
+                    BindingFlags.Public | BindingFlags.NonPublic
+                        | BindingFlags.Instance) is not null,
+                $"The census names a host-pushed entry point the surface no "
+                + $"longer has: {entryPoint}");
+            Assert.False(
+                entryPoint.StartsWith("Bind", StringComparison.Ordinal),
+                $"{entryPoint} is an ordinary seam and the census finds it on "
+                + "its own; it does not belong in the host-pushed list.");
+        }
+    }
+
     [Fact]
     public void EverySurfaceSeamIsSuppliedByBothHostsOrAllowListed() =>
         AssertParity(
@@ -129,9 +291,7 @@ public sealed class SeamCensusTests
     public void EveryRuntimeDependencyIsSuppliedByBothHostsOrAllowListed() =>
         AssertParity(
             MembersOf(typeof(GameRuntimeDependencies)),
-            static host => host == ParityHost.Windowed
-                ? GraphicalAutomationCapabilities.DeclaredRuntimeDependencies
-                : HeadlessAutomationCapabilities.DeclaredRuntimeDependencies,
+            DeclaredRuntimeDependencies,
             HostParityAllowList.RuntimeDependencies,
             "runtime dependency",
             // A member neither host fills in is the same default on both,
@@ -162,6 +322,51 @@ public sealed class SeamCensusTests
             HostParityAllowList.CharacterSessionBindings,
             "character-session binding",
             missingOnBothIsADifference: false);
+
+    private static void AssertConditionsAreDeclared(
+        IReadOnlyDictionary<string, string> conditions,
+        IReadOnlySet<string> declared,
+        string host,
+        string what)
+    {
+        foreach ((string member, string condition) in conditions)
+        {
+            Assert.True(
+                declared.Contains(member),
+                $"The {host} host names a condition for a {what} it does not "
+                + $"declare at all: {member}");
+            Assert.False(
+                string.IsNullOrWhiteSpace(condition),
+                $"The {host} host's condition for {member} says nothing.");
+        }
+    }
+
+    private static void AssertSameMembers(
+        IReadOnlySet<string> declared,
+        IReadOnlySet<string> supplied,
+        string host,
+        string what,
+        string sourceDescription)
+    {
+        string[] declaredOnly = declared
+            .Where(name => !supplied.Contains(name))
+            .OrderBy(static name => name, StringComparer.Ordinal)
+            .ToArray();
+        string[] suppliedOnly = supplied
+            .Where(name => !declared.Contains(name))
+            .OrderBy(static name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.True(
+            declaredOnly.Length == 0,
+            $"The {host} host declares a {what} its own construction does not "
+            + $"supply, so the census promises plugins something {sourceDescription} "
+            + $"never produces: {string.Join(", ", declaredOnly)}");
+        Assert.True(
+            suppliedOnly.Length == 0,
+            $"The {host} host supplies a {what} it does not declare, so the "
+            + "census cannot see it: " + string.Join(", ", suppliedOnly));
+    }
 
     private static IReadOnlyList<string> MembersOf(Type record) => record
         .GetProperties(BindingFlags.Public | BindingFlags.Instance)

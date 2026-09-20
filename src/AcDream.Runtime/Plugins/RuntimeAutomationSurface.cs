@@ -407,18 +407,24 @@ internal sealed class RuntimeAutomationSurface
     /// that same runtime. Re-attaching would detach and re-subscribe every
     /// owner, so a host that attached early and a shared binding pass that
     /// attaches late can both ask for it without the second one undoing the
-    /// first.
+    /// first. Says whether the surface ended up bound: a disposed surface
+    /// binds nothing, and a caller reporting which seams it filled must not
+    /// count this one when it did not happen.
     /// </summary>
-    internal void EnsureBound(
+    internal bool EnsureBound(
         GameRuntime runtime, RuntimeCharacterState character, RuntimeSpellCastState cast)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         lock (_gate)
         {
-            if (_disposed || ReferenceEquals(_runtime, runtime))
-                return;
+            if (_disposed)
+                return false;
+            if (ReferenceEquals(_runtime, runtime))
+                return true;
         }
         Bind(runtime, character, cast);
+        lock (_gate)
+            return !_disposed;
     }
 
     /// <summary>Bind the surface to the runtime's gameplay owners.</summary>

@@ -52,6 +52,17 @@ internal sealed record RuntimeAutomationHostCapabilities
     /// <summary>Every capability name this host can ever supply.</summary>
     public required IReadOnlySet<string> Declared { get; init; }
 
+    /// <summary>
+    /// Capabilities this host declares but can only supply when a condition
+    /// holds, keyed by capability name with the condition in plain terms
+    /// (for example "only with installed content"). Every key must also be
+    /// in <see cref="Declared"/>. A capability outside this map is one the
+    /// host claims it always supplies, so a missing one is a defect rather
+    /// than a configuration.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> Conditional { get; init; } =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
     /// <summary>Where a binding problem is reported; host-shaped, not a capability.</summary>
     public Action<string>? Warn { get; init; }
 
@@ -80,7 +91,8 @@ internal sealed record RuntimeAutomationHostCapabilities
         typeof(RuntimeAutomationHostCapabilities)
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(static property => property.Name is not (
-                nameof(HostName) or nameof(Declared) or nameof(Warn)))
+                nameof(HostName) or nameof(Declared) or nameof(Warn)
+                or nameof(Conditional)))
             .OrderBy(static property => property.Name, StringComparer.Ordinal)
             .ToArray();
 
@@ -197,10 +209,28 @@ internal static class RuntimeAutomationBindings
                 + "declared set so the host-parity census can see them.");
         }
 
+        string[] conditionalButUndeclared = capabilities.Conditional.Keys
+            .Where(name => !capabilities.Declared.Contains(name))
+            .OrderBy(static name => name, StringComparer.Ordinal)
+            .ToArray();
+        if (conditionalButUndeclared.Length != 0)
+        {
+            throw new InvalidOperationException(
+                $"The {capabilities.HostName} host names conditions for "
+                + "plugin capabilities it does not declare at all: "
+                + $"{string.Join(", ", conditionalButUndeclared)}.");
+        }
+
         var bound = new HashSet<string>(StringComparer.Ordinal);
 
-        surface.EnsureBound(
-            runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        if (!surface.EnsureBound(
+            runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast))
+        {
+            capabilities.Warn?.Invoke(
+                "plugin automation: the surface is already shut down, so "
+                + "nothing was bound for this session");
+            return bound;
+        }
         bound.Add("Bind");
 
         if (capabilities.Content is { } content)
@@ -302,7 +332,43 @@ internal static class RuntimeAutomationBindings
             bound.Add("BindRemoteBodiesUnsimulated");
         }
 
+        ReportDeclaredButUnfilled(capabilities, bound);
         return bound;
+    }
+
+    /// <summary>
+    /// Says which seams the host's declaration promised and this run did not
+    /// fill. A host guards every capability with a nullable part, so a part
+    /// that came back null quietly leaves a seam empty while the parity
+    /// census -- which reads declarations, not runs -- still swears it is
+    /// filled. A capability whose condition the host named is reported as a
+    /// configuration; anything else is reported as a defect.
+    /// </summary>
+    private static void ReportDeclaredButUnfilled(
+        RuntimeAutomationHostCapabilities capabilities,
+        IReadOnlySet<string> bound)
+    {
+        if (capabilities.Warn is not { } warn)
+            return;
+
+        foreach (string seam in SeamCapabilities
+            .Where(entry => entry.Value is { } capability
+                && capabilities.Declared.Contains(capability)
+                && !bound.Contains(entry.Key))
+            .Select(static entry => entry.Key)
+            .OrderBy(static seam => seam, StringComparer.Ordinal))
+        {
+            string capability = SeamCapabilities[seam]!;
+            warn(capabilities.Conditional.TryGetValue(
+                capability, out string? condition)
+                ? $"plugin automation: {seam} is unfilled on the "
+                    + $"{capabilities.HostName} host because {condition}; "
+                    + "plugins asking for it get nothing this session"
+                : $"plugin automation: {seam} is unfilled on the "
+                    + $"{capabilities.HostName} host although the host "
+                    + "declares it unconditionally; a plugin asking for it "
+                    + "gets nothing");
+        }
     }
 
     /// <summary>

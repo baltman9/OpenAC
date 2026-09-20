@@ -27,8 +27,15 @@ public sealed class RuntimeActionOwnershipTests
             "private readonly GameRuntime _runtime;",
             gameWindow,
             StringComparison.Ordinal);
+        // The window still constructs the one runtime; it now names its
+        // dependencies through the host's own builder, so the census can
+        // read what it really supplies.
         Assert.Contains(
-            "_runtime = new GameRuntime(new GameRuntimeDependencies(",
+            "_runtime = new GameRuntime(",
+            gameWindow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ".BuildRuntimeDependencies(",
             gameWindow,
             StringComparison.Ordinal);
         Assert.Contains(

@@ -37,6 +37,17 @@ internal readonly record struct ParityAllowance(
     string Reason,
     ParityStage Stage);
 
+/// <summary>
+/// A member both hosts can supply, where one of them can only do it when a
+/// condition holds. A plugin sees the same surface on paper and a different
+/// one in a particular session, so this is a difference too -- a quieter one.
+/// </summary>
+internal readonly record struct ParityConditionalAllowance(
+    string Member,
+    string ConditionalHost,
+    string Reason,
+    ParityStage Stage);
+
 internal static class HostParityAllowList
 {
     /// <summary>
@@ -92,6 +103,21 @@ internal static class HostParityAllowList
             ParityStage.AnswerItFromOneSource),
     ];
 
+    /// <summary>
+    /// Seams both hosts declare, where one of them only manages it under a
+    /// condition the other does not have.
+    /// </summary>
+    internal static IReadOnlyList<ParityConditionalAllowance>
+        ConditionalSeams { get; } =
+    [
+        new("NavigationWalk", ParityHost.Windowless,
+            "The windowless host builds its walk controller only when the "
+            + "session holds a lease on the installed data files, so a "
+            + "content-less bot answers navigation calls where a window "
+            + "would act on them.",
+            ParityStage.AnswerItFromOneSource),
+    ];
+
     /// <summary>Runtime dependencies one host fills in and the other does not.</summary>
     internal static IReadOnlyList<ParityAllowance> RuntimeDependencies { get; } =
     [
@@ -100,8 +126,11 @@ internal static class HostParityAllowList
             + "than an injected time provider.",
             ParityStage.AnswerItFromOneSource),
         new("SessionOperations", ParityHost.Windowed,
-            "The windowed host installs its session operations through its own "
-            + "composition instead of the dependency record.",
+            "Neither host installs its own way of opening and ticking a world "
+            + "connection in a plain run: the windowed host never offers one "
+            + "and the windowless host only when a caller hands it in, so "
+            + "both normally fall back to the shared one. The declaration "
+            + "stays until the windowless host stops taking the override.",
             ParityStage.AnswerItFromOneSource),
         new("CombatTime", ParityHost.Windowed,
             "The attack power-up is timed off a wall clock with a window and "
@@ -109,8 +138,9 @@ internal static class HostParityAllowList
             + "time both.",
             ParityStage.AnswerItFromOneSource),
         new("TimeSyncDiagnostic", ParityHost.Windowless,
-            "A launch-option diagnostic of the windowed host; it observes "
-            + "nothing a plugin can see.",
+            "A launch-option diagnostic the windowed host fills in only when "
+            + "the sky dump is on, so in a plain run neither host has one. It "
+            + "observes nothing a plugin can see.",
             ParityStage.AnswerItFromOneSource),
     ];
 
