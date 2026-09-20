@@ -225,6 +225,15 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         _awaitingItemUseCompletion,
         LastItemUseCompletion);
 
+    /// <summary>
+    /// Whether a use may go out this instant, without spending the pacing
+    /// stamp. The throttle is a "not yet" answer rather than a failure, so a
+    /// caller that has to tell the two apart -- anything that counts a failed
+    /// attempt or backs off after one -- asks this before it dispatches.
+    /// </summary>
+    public bool IsUseThrottleReady(long nowMs) =>
+        !_disposed && nowMs - _lastUseMs >= RetailUseThrottleMs;
+
     public bool TryConsumeUseThrottle(long nowMs)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

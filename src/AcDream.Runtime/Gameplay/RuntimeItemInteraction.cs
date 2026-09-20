@@ -1898,6 +1898,15 @@ public sealed class RuntimeItemInteraction : IDisposable
     /// </summary>
     public bool TryConsumeUseThrottleForAutomation() => ConsumeUseThrottle();
 
+    /// <summary>
+    /// Whether that same gate would let a use through right now. Asking does
+    /// not spend the stamp, so an automation entry point can answer "not yet,
+    /// ask again next frame" instead of reporting a refusal its caller would
+    /// count as a failed attempt.
+    /// </summary>
+    public bool IsUseThrottleReadyForAutomation =>
+        _runtimeTransactions.IsUseThrottleReady(_nowMs());
+
     private static bool IsContainer(ClientObject item)
         => item.ContainerTypeHint != 0
         || item.Type.HasFlag(ItemType.Container)

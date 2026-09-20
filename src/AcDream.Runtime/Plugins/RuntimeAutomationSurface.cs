@@ -3181,6 +3181,15 @@ internal sealed class RuntimeAutomationSurface
         }
         if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
             return new(PluginItemCommandStatus.Busy);
+        // The pacing between two uses is the host's own, and it is not a
+        // verdict on this container: an open that arrives inside that window
+        // has not failed, it is early. Saying so keeps the caller from
+        // spending one of the container's attempts -- and arming whatever
+        // back-off it pairs with a failure -- on a fifth of a second's wait,
+        // which is what stood a looter still between one container and the
+        // next after closing the first.
+        if (!runtime.ItemInteractionOwner.IsUseThrottleReadyForAutomation)
+            return new(PluginItemCommandStatus.Busy);
         return use(containerObjectId)
             ? new(PluginItemCommandStatus.Started)
             : new(PluginItemCommandStatus.Refused);
@@ -3204,6 +3213,9 @@ internal sealed class RuntimeAutomationSurface
             return new(PluginItemCommandStatus.InvalidTarget);
         }
         if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
+            return new(PluginItemCommandStatus.Busy);
+        // Early rather than failed, the same way an open is.
+        if (!runtime.ItemInteractionOwner.IsUseThrottleReadyForAutomation)
             return new(PluginItemCommandStatus.Busy);
         return runtime.ItemInteractionOwner.TryUseItemForAutomation(
             containerObjectId)
