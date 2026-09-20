@@ -162,7 +162,20 @@ internal static class ParityWorld
             Useability = ItemUseability.Remote,
             PublicWeenieBitfield =
                 (uint)(PublicWeenieFlags.Corpse | PublicWeenieFlags.Openable),
-        });
+        },
+        useability: ItemUseability.Remote);
+    }
+
+    /// <summary>
+    /// Puts the two things inside the corpse into what the client knows,
+    /// without saying they have been listed. A scenario that lets the server
+    /// send the listing itself stages them with this and lets the inbound
+    /// message do the rest.
+    /// </summary>
+    internal static void StageCorpseContents(GameRuntime runtime)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        AddCorpseContents(runtime.InventoryOwner.Objects);
     }
 
     /// <summary>
@@ -173,6 +186,14 @@ internal static class ParityWorld
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ClientObjectTable objects = runtime.InventoryOwner.Objects;
+        AddCorpseContents(objects);
+        // The listing the server sends with the contents, in its order.
+        objects.ReplaceContents(Corpse, [CorpseCoin, CorpseGem]);
+        _ = runtime.InventoryOwner.ExternalContainers.ApplyViewContents(Corpse);
+    }
+
+    private static void AddCorpseContents(ClientObjectTable objects)
+    {
         objects.AddOrUpdate(new ClientObject
         {
             ObjectId = CorpseCoin,
@@ -194,9 +215,6 @@ internal static class ParityWorld
             StackSize = 1,
             Useability = ItemUseability.Contained,
         });
-        // The listing the server sends with the contents, in its order.
-        objects.ReplaceContents(Corpse, [CorpseCoin, CorpseGem]);
-        _ = runtime.InventoryOwner.ExternalContainers.ApplyViewContents(Corpse);
     }
 
     private static ClientObject Carried(
@@ -211,15 +229,32 @@ internal static class ParityWorld
         Useability = useability,
     };
 
+    /// <summary>
+    /// Puts one thing in the world a metre or more out.
+    /// </summary>
+    /// <param name="useability">
+    /// What the server says can be done with it. This is what a client reads
+    /// before it sends a use, and it is NOT the same field as the one on the
+    /// thing in the character's own record of its packs: a thing on the
+    /// ground with nothing said here is refused before the use is ever
+    /// composed, on every client.
+    /// </param>
     internal static void Add(
         GameRuntime runtime,
         uint guid,
         float x,
         ClientObject item,
-        PhysicsStateFlags state = 0)
+        PhysicsStateFlags state = 0,
+        uint? useability = null)
     {
         RuntimeEntityRecord record = runtime.EntityObjects
-            .RegisterEntity(Spawn(guid, x, PlayerY, ParityPlayerBody.Cell, state))
+            .RegisterEntity(Spawn(
+                guid,
+                x,
+                PlayerY,
+                ParityPlayerBody.Cell,
+                state,
+                useability))
             .Canonical!;
         runtime.EntityObjects.ApplyAcceptedSpawn(
             record,
@@ -235,7 +270,8 @@ internal static class ParityWorld
         float x,
         float y,
         uint cell,
-        PhysicsStateFlags state)
+        PhysicsStateFlags state,
+        uint? useability = null)
     {
         var position = new CreateObject.ServerPosition(
             cell, x, y, ParityPlayerBody.GroundHeight, 1f, 0f, 0f, 0f);
@@ -284,6 +320,7 @@ internal static class ParityWorld
             null,
             null,
             PhysicsState: physics.RawState,
+            Useability: useability,
             InstanceSequence: 1,
             MovementSequence: 1,
             ServerControlSequence: 1,

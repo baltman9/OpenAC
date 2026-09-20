@@ -40,6 +40,23 @@ internal sealed class ParityServer(WorldSession session, Func<uint> playerGuid)
 
     private uint _gameEventSequence;
 
+    /// <summary>
+    /// The last step of letting a character in: the connection is in the
+    /// world from here on.
+    /// </summary>
+    /// <remarks>
+    /// Without this the connection stays where a connection with no wire
+    /// under it stays, and every client path that asks "am I in the world"
+    /// before it sends -- which is every use, every pickup and every
+    /// description -- answers no on BOTH clients. Two clients that both
+    /// refuse agree line for line, so a scenario over them proves nothing.
+    /// This is the same state change the real entry makes as its last act,
+    /// so what watches for it is told in the ordinary way.
+    /// </remarks>
+    internal void LetTheCharacterIn() => Invoke(
+        "Transition",
+        Enum.Parse(typeof(WorldSession.State), nameof(WorldSession.State.InWorld)));
+
     /// <summary>An object arrives.</summary>
     internal void CreateObject(WorldSession.EntitySpawn spawn) =>
         Raise(nameof(WorldSession.EntitySpawned), spawn);
@@ -246,6 +263,17 @@ internal sealed class ParityServer(WorldSession session, Func<uint> playerGuid)
     /// decoder raises these events and nothing else does, so a client's route
     /// cannot tell this apart from a packet off the wire.
     /// </summary>
+    /// <summary>Runs one of the connection's own state changes.</summary>
+    private void Invoke(string methodName, params object?[] arguments)
+    {
+        MethodInfo method = typeof(WorldSession).GetMethod(
+            methodName,
+            BindingFlags.NonPublic | BindingFlags.Instance)
+            ?? throw new InvalidOperationException(
+                $"The world connection has no {methodName}.");
+        _ = method.Invoke(session, arguments);
+    }
+
     private void Raise<T>(string eventName, T message)
     {
         FieldInfo field = typeof(WorldSession).GetField(

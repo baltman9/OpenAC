@@ -82,6 +82,11 @@ internal abstract class ParityArm : IDisposable
     internal void EnterWorld()
     {
         _ = Session.Start(Runtime.Generation);
+        // The character is in the world from here, as it is in a real
+        // session once the server has said so: everything a client checks
+        // that against -- every use, pickup and description it sends -- is
+        // refused outright until then, on both clients alike.
+        Server.LetTheCharacterIn();
         Runtime.SyncLifecycleEmission();
     }
 
