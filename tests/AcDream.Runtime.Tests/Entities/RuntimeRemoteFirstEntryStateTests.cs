@@ -72,6 +72,36 @@ public sealed class RuntimeRemoteFirstEntryStateTests
             fixture.Advance(out _));
     }
 
+    /// <summary>
+    /// A server-driven creature arrives carrying its movement, so the
+    /// description step deliberately leaves the placement frame alone. The
+    /// placement that follows is what gives the body its cell, and without a
+    /// cell nothing that measures distance can use the body at all.
+    /// Mutation: drop the cell seed from the placement commit and the body
+    /// keeps a zero cell for the rest of its life.
+    /// </summary>
+    [Fact]
+    public void MovementCarryingRemoteStillEndsUpInACellAfterPlacement()
+    {
+        using var fixture = new Fixture(
+            residentWorld: true,
+            movement: new PhysicsMovementData(
+                RawData: new byte[] { 0x01 },
+                MotionState: null,
+                IsAutonomous: true));
+
+        RuntimeRemoteFirstEntryStatus status = fixture.Advance(
+            out _,
+            out RuntimeRemoteBodyConstructionReceipt construction);
+
+        Assert.Equal(RuntimeRemoteFirstEntryStatus.Completed, status);
+        Assert.True(construction.MovementBranch);
+        Assert.False(construction.PlacementFrameStaged);
+        PhysicsBody body = Assert.IsType<PhysicsBody>(fixture.Record.PhysicsBody);
+        Assert.True(body.InWorld);
+        Assert.Equal(Cell, body.CellPosition.ObjCellId);
+    }
+
     [Fact]
     public void ProjectileFlavorFullSequenceCompletesWithMissileState()
     {
@@ -824,7 +854,8 @@ public sealed class RuntimeRemoteFirstEntryStateTests
             uint setupTableId = 0u,
             uint rawState = (uint)(PhysicsStateFlags.Gravity
                 | PhysicsStateFlags.ReportCollisions),
-            bool isLocalPlayer = false)
+            bool isLocalPlayer = false,
+            PhysicsMovementData? movement = null)
         {
             if (residentWorld)
             {
@@ -856,7 +887,8 @@ public sealed class RuntimeRemoteFirstEntryStateTests
                     0x70090002u,
                     incarnation: 1,
                     setupTableId: setupTableId,
-                    rawState: rawState),
+                    rawState: rawState,
+                    movement: movement),
                 isLocalPlayer).Canonical!;
             Assert.True(Lifetime.TryGetInitialCreateResidence(
                 Record, out RuntimeInitialCreateResidenceLease lease));
