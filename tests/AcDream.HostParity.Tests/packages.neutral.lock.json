@@ -442,6 +442,12 @@
           "AcDream.Core": "[0.1.11, )"
         }
       },
+      "acdream.launcher.core": {
+        "type": "Project",
+        "dependencies": {
+          "AcDream.Platform": "[0.1.11, )"
+        }
+      },
       "acdream.platform": {
         "type": "Project"
       },
