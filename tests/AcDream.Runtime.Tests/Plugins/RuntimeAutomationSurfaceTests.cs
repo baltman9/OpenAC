@@ -167,6 +167,19 @@ public sealed class RuntimeAutomationSurfaceTests
     }
 
     [Fact]
+    public void AllegianceSnapshotIsUnavailableBeforeAuthoritativeProfile()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+
+        PluginAllegianceSnapshot snapshot = surface.Allegiance.Snapshot;
+        Assert.False(snapshot.IsKnown);
+        Assert.Equal(0L, snapshot.Revision);
+        Assert.False(snapshot.HasMonarch);
+    }
+
+    [Fact]
     public void PortalTransitionCoalescesDuplicateRuntimeSnapshots()
     {
         using var runtime = GameRuntimeTestFactory.Create();
