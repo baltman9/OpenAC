@@ -197,6 +197,31 @@ startup error too, never a quiet run with no settings — a plugin that decides
 what to do on login from a setting would otherwise behave differently under a
 window than it does without one.
 
+### The same document on the graphical client
+
+The graphical client reads the same session-config document:
+
+```bash
+dotnet run --project src/AcDream.App/AcDream.App.csproj -c Release -- --session-config bot.json
+```
+
+It requires exactly one session in the document, and it honours every
+per-session field that decides what a plugin sees: `character`, `plugins`,
+`pluginTags`, `pluginSettings`, `loginCommands`, `loginCommandDelayMs` and
+`statusFile`. Two fields only the windowless client acts on are accepted and
+ignored here rather than refused, so one document still starts either client:
+`characterOptions` (the windowless client applies the declared options on
+login; the graphical client leaves the character's own saved options alone)
+and `policy` (which bot policy drives a windowless session; a graphical
+session is driven by the player). The one field the graphical client refuses
+is `"mode": "probe"`, because a probe never selects a character and there is
+no windowed session to show.
+
+Where a document and a startup option say the same thing, the document wins:
+its `pluginTags` outranks `ACDREAM_PLUGIN_TAGS`, and its `pluginSettings`
+outranks `ACDREAM_PLUGIN_SETTINGS_FILE`, which is left unread. A field the
+document leaves out still falls back to the startup option.
+
 For a single local session, `run` also accepts `--user` and `--password`. Add
 more session entries for a multi-session process. Built-in policies:
 `idle`, `lifecycle-smoke`, `observer-movement`, `portal-route-smoke`.

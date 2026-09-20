@@ -126,16 +126,20 @@ else
     runtimeOptions = RuntimeOptions.FromEnvironment(datDir);
 }
 
-// The startup settings each plugin was given. A named file that cannot be
-// read is a startup fault and says so: a plugin whose settings silently came
-// out empty would behave differently here than it does on the client with no
-// window, which is the one thing this option exists to prevent.
+// The startup settings each plugin was given. A session-config document that
+// names them is the more specific instruction and outranks the launch option
+// pointing at a file. A named file that cannot be read is a startup fault and
+// says so: a plugin whose settings silently came out empty would behave
+// differently here than it does on the client with no window, which is the
+// one thing these settings exist to prevent.
 AcDream.Runtime.Plugins.PluginSessionSettings pluginSessionSettings;
 try
 {
-    pluginSessionSettings = runtimeOptions.PluginSettingsFile is { } settingsPath
-        ? AcDream.Runtime.Plugins.PluginSessionSettings.ReadFile(settingsPath)
-        : AcDream.Runtime.Plugins.PluginSessionSettings.Empty;
+    pluginSessionSettings =
+        runtimeOptions.SessionPluginSettings
+        ?? (runtimeOptions.PluginSettingsFile is { } settingsPath
+            ? AcDream.Runtime.Plugins.PluginSessionSettings.ReadFile(settingsPath)
+            : AcDream.Runtime.Plugins.PluginSessionSettings.Empty);
 }
 catch (AcDream.Runtime.Plugins.PluginSessionSettingsException error)
 {

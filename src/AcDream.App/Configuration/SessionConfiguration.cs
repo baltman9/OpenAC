@@ -62,13 +62,31 @@ internal sealed record SessionDescriptor
     [JsonRequired]
     public SessionCredentialDescriptor Credential { get; init; } = new();
 
-    /// <summary>Accepted-but-ignored by App; Headless's own loader owns the
-    /// allow-list semantics for this field (OP7 D8).</summary>
+    /// <summary>Accepted-but-ignored by the windowed client; the windowless
+    /// client's own reader owns the allow-list semantics for this field.
+    /// Accepting it here keeps one document startable on either client.</summary>
     public Dictionary<string, bool>? CharacterOptions { get; init; }
 
-    /// <summary>LA1/LA5: plugin ids to load. Absent = load all; explicit
+    /// <summary>Plugin ids to load. Absent = load all; explicit
     /// empty = load none.</summary>
     public List<string>? Plugins { get; init; }
+
+    /// <summary>
+    /// The words this session wants to be found by. Plugins on the clients
+    /// running on this machine can see one another's tags and filter on them,
+    /// so a bot that should look like part of a group carries the group's
+    /// word here. When the document leaves this out, the client falls back to
+    /// the word list its own launch options name.
+    /// </summary>
+    public List<string>? PluginTags { get; init; }
+
+    /// <summary>
+    /// The startup settings each plugin was given, keyed by plugin id and
+    /// then by setting name. Both clients hand the same map to the same
+    /// per-plugin settings reader, so a plugin reads the same settings
+    /// whichever client started from this document.
+    /// </summary>
+    public Dictionary<string, Dictionary<string, string>>? PluginSettings { get; init; }
 
     public List<string>? LoginCommands { get; init; }
 
@@ -93,9 +111,10 @@ internal sealed class SessionCharacterSelectorDescriptor
     public string? Name { get; init; }
 }
 
-/// <summary>Loose by design: App never inspects the policy's shape beyond
-/// "does this document parse" — <c>Id</c>/<c>Role</c> stay untyped strings so
-/// this DTO never has to track Headless's own policy-id/role vocabulary.</summary>
+/// <summary>Loose by design: the windowed client never inspects the policy's
+/// shape beyond "does this document parse" — <c>Id</c>/<c>Role</c> stay
+/// untyped strings so this DTO never has to track the windowless client's own
+/// policy-id/role vocabulary.</summary>
 internal sealed class SessionPolicyDescriptor
 {
     public string? Id { get; init; }

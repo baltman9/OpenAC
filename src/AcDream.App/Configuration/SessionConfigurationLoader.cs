@@ -143,6 +143,20 @@ internal static class SessionConfigurationLoader
             }
         }
 
+        if (session.PluginTags is { } pluginTags)
+        {
+            foreach (string? tag in pluginTags)
+            {
+                if (string.IsNullOrWhiteSpace(tag))
+                {
+                    throw new SessionConfigurationException(
+                        $"Session '{session.Id}' pluginTags entries must be non-empty strings.");
+                }
+            }
+        }
+
+        ValidatePluginSettings(session);
+
         if (session.LoginCommandDelayMs < 0)
         {
             throw new SessionConfigurationException(
@@ -157,6 +171,19 @@ internal static class SessionConfigurationLoader
         }
 
         ValidateMode(session);
+    }
+
+    // The same check both clients make of the same map, in the same words:
+    // a session file naming a plugin with nothing behind it and a launch
+    // option naming one are the same mistake, so they read the same.
+    private static void ValidatePluginSettings(SessionDescriptor session)
+    {
+        if (AcDream.Runtime.Plugins.PluginSessionSettings.DescribeFault(
+                session.PluginSettings) is { } fault)
+        {
+            throw new SessionConfigurationException(
+                $"Session '{session.Id}' {fault}");
+        }
     }
 
     private static void ValidateMode(SessionDescriptor session)

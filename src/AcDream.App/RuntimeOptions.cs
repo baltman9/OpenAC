@@ -76,6 +76,18 @@ public sealed record RuntimeOptions(
     public string? PluginSettingsFile { get; init; }
 
     /// <summary>
+    /// The per-plugin startup settings the session configuration itself
+    /// named, or null when it named none. A session configuration is the
+    /// more specific instruction, so when it carries these the client uses
+    /// them and leaves <see cref="PluginSettingsFile"/> unread.
+    /// </summary>
+    public AcDream.Runtime.Plugins.PluginSessionSettings? SessionPluginSettings
+    {
+        get;
+        init;
+    }
+
+    /// <summary>
     /// Build options from the process environment. Used by
     /// <c>Program.cs</c> at startup.
     /// </summary>
@@ -197,6 +209,16 @@ public sealed record RuntimeOptions(
             Plugins = session.Plugins,
             LoginCommands = (IReadOnlyList<string>?)session.LoginCommands ?? [],
             LoginCommandDelayMs = session.LoginCommandDelayMs,
+            // A session configuration is the more specific instruction, so
+            // what it names outranks the launch options for the same thing;
+            // what it leaves out still falls back to them.
+            PluginTags = session.PluginTags is { } tags
+                ? tags
+                : baseOptions.PluginTags,
+            SessionPluginSettings = session.PluginSettings is { } declared
+                ? AcDream.Runtime.Plugins.PluginSessionSettings.FromDeclared(
+                    declared)
+                : null,
         };
     }
 

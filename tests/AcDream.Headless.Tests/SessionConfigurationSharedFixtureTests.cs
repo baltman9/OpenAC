@@ -126,6 +126,17 @@ public sealed class SessionConfigurationSharedFixtureTests
             session.LoginCommands);
         Assert.Equal(750, session.LoginCommandDelayMs);
         Assert.Equal("shared-fixture-status.jsonl", session.StatusFile);
+        Assert.Equal(
+            ["shared-fixture-group", "second-word"],
+            session.PluginTags);
+        Assert.True(session.CharacterOptions!["UseChargeAttack"]);
+        Assert.False(session.CharacterOptions!["AutoRepeatAttack"]);
+        Assert.Equal(
+            "escort",
+            session.PluginSettings!["ExamplePlugin"]["mode"]);
+        Assert.Equal(
+            "other",
+            session.PluginSettings!["AnotherPlugin"]["profile"]);
     }
 
     [Fact]
