@@ -51,6 +51,13 @@ internal sealed record HeadlessSessionHostParts
     public required Action NoteConnected { get; init; }
 
     public LoginCommandSequence? LoginCommands { get; init; }
+
+    /// <summary>
+    /// Where a binding problem is reported. Host-shaped, not a binding: it
+    /// lends the shared check somewhere to put a line about a declared
+    /// binding that arrived empty.
+    /// </summary>
+    public Action<string>? Warn { get; init; }
 }
 
 /// <summary>
@@ -90,6 +97,9 @@ internal sealed record HeadlessCharacterSessionParts
 
     /// <summary>Takes note that the server has seeded the character options.</summary>
     public required Action NoteOptionsSeeded { get; init; }
+
+    /// <summary>Where a binding problem is reported, as above.</summary>
+    public Action<string>? Warn { get; init; }
 }
 
 internal static partial class HeadlessAutomationCapabilities
@@ -104,7 +114,7 @@ internal static partial class HeadlessAutomationCapabilities
         ArgumentNullException.ThrowIfNull(parts);
         SessionStatusWriter status = parts.StatusWriter;
         string sessionId = parts.SessionId;
-        return new LiveSessionHostBindings(
+        var bindings = new LiveSessionHostBindings(
             Routing: new(parts.CreateEvents, parts.CreateCommands),
             Reset: parts.Reset,
             Selection: new(
@@ -149,6 +159,14 @@ internal static partial class HeadlessAutomationCapabilities
                 rejection.RawCode,
                 rejection.Reason,
                 rejection.AttemptedName));
+        LiveSessionBindingDeclarations.ReportDeclaredButUnfilled(
+            "windowless",
+            "live-session host binding",
+            bindings,
+            DeclaredSessionHostBindings,
+            ConditionalSessionHostBindings,
+            parts.Warn);
+        return bindings;
     }
 
     /// <summary>
@@ -161,7 +179,7 @@ internal static partial class HeadlessAutomationCapabilities
         HeadlessCharacterSessionParts parts)
     {
         ArgumentNullException.ThrowIfNull(parts);
-        return new LiveCharacterSessionBindings(
+        var bindings = new LiveCharacterSessionBindings(
             parts.Combat,
             parts.Character,
             ResolveSkillFormulaBonus: parts.ResolveSkillFormulaBonus is
@@ -178,5 +196,13 @@ internal static partial class HeadlessAutomationCapabilities
             OnMovementStatsUpdated: () =>
                 parts.MovementStats.Apply("stats"),
             OnCharacterOptionsChanged: (_, _) => parts.NoteOptionsSeeded());
+        LiveSessionBindingDeclarations.ReportDeclaredButUnfilled(
+            "windowless",
+            "character-session binding",
+            bindings,
+            DeclaredCharacterSessionBindings,
+            ConditionalCharacterSessionBindings,
+            parts.Warn);
+        return bindings;
     }
 }

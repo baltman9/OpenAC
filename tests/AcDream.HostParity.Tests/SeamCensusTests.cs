@@ -76,6 +76,44 @@ public sealed class SeamCensusTests
         return seams;
     }
 
+    /// <summary>
+    /// Every family of standing declaration the census compares, with what
+    /// each host says it fills in and which of those it can only fill in
+    /// under a condition. A family left out of this table is one where a
+    /// condition can be named and nothing checks it.
+    /// </summary>
+    private static readonly (
+        string What,
+        Func<string, IReadOnlySet<string>> Declared,
+        Func<string, IReadOnlyDictionary<string, string>> Conditional)[]
+        DeclarationFamilies =
+        [
+            ("plugin capability",
+                DeclaredCapabilities,
+                ObservedHostRecords.ConditionalCapabilities),
+            ("runtime dependency",
+                DeclaredRuntimeDependencies,
+                ObservedHostRecords.ConditionalRuntimeDependencies),
+            ("live-session host binding",
+                DeclaredSessionHostBindings,
+                ObservedHostRecords.ConditionalSessionHostBindings),
+            ("character-session binding",
+                DeclaredCharacterSessionBindings,
+                ObservedHostRecords.ConditionalCharacterSessionBindings),
+        ];
+
+    private static IReadOnlySet<string> DeclaredSessionHostBindings(
+        string host) =>
+        host == ParityHost.Windowed
+            ? GraphicalAutomationCapabilities.DeclaredSessionHostBindings
+            : HeadlessAutomationCapabilities.DeclaredSessionHostBindings;
+
+    private static IReadOnlySet<string> DeclaredCharacterSessionBindings(
+        string host) =>
+        host == ParityHost.Windowed
+            ? GraphicalAutomationCapabilities.DeclaredCharacterSessionBindings
+            : HeadlessAutomationCapabilities.DeclaredCharacterSessionBindings;
+
     private static IReadOnlySet<string> DeclaredCapabilities(string host) =>
         host == ParityHost.Windowed
             ? GraphicalAutomationCapabilities.Declared
@@ -231,34 +269,39 @@ public sealed class SeamCensusTests
     }
 
     /// <summary>
-    /// A condition names a capability the host also declares, and says why in
-    /// words a reader can act on.
+    /// A condition names something the host also declares, and says why in
+    /// words a reader can act on. Every family of declaration is checked:
+    /// capabilities, runtime dependencies and both halves of the
+    /// live-session bindings.
     /// </summary>
     [Fact]
     public void EveryNamedConditionBelongsToADeclaredMember()
     {
         foreach (string host in ParityHost.Both)
         {
-            AssertConditionsAreDeclared(
-                ObservedHostRecords.ConditionalCapabilities(host),
-                DeclaredCapabilities(host),
-                host,
-                "plugin capability");
-            AssertConditionsAreDeclared(
-                ObservedHostRecords.ConditionalRuntimeDependencies(host),
-                DeclaredRuntimeDependencies(host),
-                host,
-                "runtime dependency");
+            foreach ((string what,
+                    Func<string, IReadOnlySet<string>> declared,
+                    Func<string, IReadOnlyDictionary<string, string>>
+                        conditional) in DeclarationFamilies)
+            {
+                AssertConditionsAreDeclared(
+                    conditional(host),
+                    declared(host),
+                    host,
+                    what);
+            }
         }
     }
 
     /// <summary>
-    /// A capability one host supplies always and the other only sometimes is
-    /// a difference a plugin meets in a particular session, so it is listed
-    /// like any other.
+    /// Something one host supplies always and the other only sometimes is a
+    /// difference a plugin meets in a particular session, so it is listed
+    /// like any other. Again over every family: a binding that arrives only
+    /// with installed content is as real a difference as a capability that
+    /// does.
     /// </summary>
     [Fact]
-    public void AConditionalCapabilityTheOtherHostAlwaysSuppliesIsAllowListed()
+    public void AConditionalMemberTheOtherHostAlwaysSuppliesIsAllowListed()
     {
         var allowed = HostParityAllowList.ConditionalSeams
             .Select(static entry => (entry.Member, entry.ConditionalHost))
@@ -270,34 +313,45 @@ public sealed class SeamCensusTests
         });
 
         var unlisted = new List<string>();
-        var stale = new List<string>();
+        var listedAndReal = new HashSet<(string, string)>();
         foreach (string host in ParityHost.Both)
         {
             string other = host == ParityHost.Windowed
                 ? ParityHost.Windowless
                 : ParityHost.Windowed;
-            foreach (string member in DeclaredCapabilities(host))
+            foreach ((string what,
+                    Func<string, IReadOnlySet<string>> declared,
+                    Func<string, IReadOnlyDictionary<string, string>>
+                        conditional) in DeclarationFamilies)
             {
-                bool conditionalHere = ObservedHostRecords
-                    .ConditionalCapabilities(host).ContainsKey(member);
-                bool alwaysThere = DeclaredCapabilities(other).Contains(member)
-                    && !ObservedHostRecords.ConditionalCapabilities(other)
-                        .ContainsKey(member);
-                bool isADifference = conditionalHere && alwaysThere;
-                bool listed = allowed.Contains((member, host));
-                if (isADifference && !listed)
-                    unlisted.Add($"{member} is conditional only on {host}");
-                else if (!isADifference && listed)
-                    stale.Add($"{member} on {host}");
+                foreach (string member in declared(host))
+                {
+                    bool conditionalHere =
+                        conditional(host).ContainsKey(member);
+                    bool alwaysThere = declared(other).Contains(member)
+                        && !conditional(other).ContainsKey(member);
+                    if (!conditionalHere || !alwaysThere)
+                        continue;
+                    if (allowed.Contains((member, host)))
+                        listedAndReal.Add((member, host));
+                    else
+                        unlisted.Add($"{what} {member} is conditional only on {host}");
+                }
             }
         }
+
+        string[] stale = allowed
+            .Where(entry => !listedAndReal.Contains(entry))
+            .Select(static entry => $"{entry.Item1} on {entry.Item2}")
+            .OrderBy(static line => line, StringComparer.Ordinal)
+            .ToArray();
 
         Assert.True(
             unlisted.Count == 0,
             "One host can only sometimes supply what the other always "
             + "supplies, and nothing says why: " + string.Join("; ", unlisted));
         Assert.True(
-            stale.Count == 0,
+            stale.Length == 0,
             "The allow-list still excuses a condition that is no longer a "
             + "difference. Delete the entry: " + string.Join("; ", stale));
     }

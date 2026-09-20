@@ -309,6 +309,20 @@ internal static class ObservedHostRecords
             ? GraphicalAutomationCapabilities.ConditionalRuntimeDependencies
             : HeadlessAutomationCapabilities.ConditionalRuntimeDependencies;
 
+    internal static IReadOnlyDictionary<string, string>
+        ConditionalSessionHostBindings(string host) =>
+        host == ParityHost.Windowed
+            ? GraphicalAutomationCapabilities.ConditionalSessionHostBindings
+            : HeadlessAutomationCapabilities.ConditionalSessionHostBindings;
+
+    internal static IReadOnlyDictionary<string, string>
+        ConditionalCharacterSessionBindings(string host) =>
+        host == ParityHost.Windowed
+            ? GraphicalAutomationCapabilities
+                .ConditionalCharacterSessionBindings
+            : HeadlessAutomationCapabilities
+                .ConditionalCharacterSessionBindings;
+
     /// <summary>
     /// What a capability record really carries, with a capability that is
     /// there and does nothing counted as absent.

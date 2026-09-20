@@ -391,6 +391,10 @@ internal sealed class HeadlessSessionHost : IDisposable
                             SessionId = descriptor.Id,
                             NoteConnected = () => _hasConnected = true,
                             LoginCommands = loginCommands,
+                            Warn = message => diagnostics.Message(
+                                descriptor.Id,
+                                message,
+                                runtime.Generation.Value),
                         }),
                 runtime: runtime);
 
@@ -948,6 +952,10 @@ internal sealed class HeadlessSessionHost : IDisposable
                     MovementStats = Runtime.MovementStats,
                     NoteOptionsSeeded = () =>
                         _optionsSeeder?.NoteOptionsSeeded(),
+                    Warn = message => _diagnostics.Message(
+                        SessionId,
+                        message,
+                        Runtime.Generation.Value),
                 });
 
     private ILiveSessionEventRouting CreateEventRoute(

@@ -200,6 +200,7 @@ internal sealed class LiveSessionRuntimeFactory
                         Paperdoll = _ui.Paperdoll,
                         WorldAudio = _world.WorldAudio,
                         LoginCommands = loginCommands,
+                        Warn = _log,
                     }),
             connectOptions with { PollConnectionDuringTicks = true },
             _domain.Runtime);
@@ -370,6 +371,7 @@ internal sealed class LiveSessionRuntimeFactory
                     ResolveSkillFormulaBonus = skillCreditResolver.Resolve,
                     ClientTime = ClientTimerNow,
                     RetainedUi = _ui.RetailUi,
+                    Warn = _log,
                 });
     }
 

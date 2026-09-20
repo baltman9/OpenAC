@@ -64,6 +64,13 @@ internal sealed record GraphicalSessionHostParts
     public WorldAudioSessionGate? WorldAudio { get; init; }
 
     public LoginCommandSequence? LoginCommands { get; init; }
+
+    /// <summary>
+    /// Where a binding problem is reported. Host-shaped, not a binding: it
+    /// lends the shared check somewhere to put a line about a declared
+    /// binding that arrived empty.
+    /// </summary>
+    public Action<string>? Warn { get; init; }
 }
 
 /// <summary>
@@ -92,6 +99,9 @@ internal sealed record GraphicalCharacterSessionParts
     public required Func<double> ClientTime { get; init; }
 
     public RetailUiRuntime? RetainedUi { get; init; }
+
+    /// <summary>Where a binding problem is reported, as above.</summary>
+    public Action<string>? Warn { get; init; }
 }
 
 internal static partial class GraphicalAutomationCapabilities
@@ -113,7 +123,7 @@ internal static partial class GraphicalAutomationCapabilities
         string sessionId = parts.SessionId;
         LocalPlayerIdentityState identity = parts.Identity;
         RuntimeCommunicationState communication = parts.Communication;
-        return new LiveSessionHostBindings(
+        var bindings = new LiveSessionHostBindings(
             Routing: new(parts.CreateEvents, parts.CreateCommands),
             Reset: parts.Reset,
             Selection: new(
@@ -169,6 +179,14 @@ internal static partial class GraphicalAutomationCapabilities
                 rejection.RawCode,
                 rejection.Reason,
                 rejection.AttemptedName));
+        LiveSessionBindingDeclarations.ReportDeclaredButUnfilled(
+            "windowed",
+            "live-session host binding",
+            bindings,
+            DeclaredSessionHostBindings,
+            ConditionalSessionHostBindings,
+            parts.Warn);
+        return bindings;
     }
 
     /// <summary>
@@ -183,7 +201,7 @@ internal static partial class GraphicalAutomationCapabilities
         RuntimeCharacterState character = parts.Character;
         AcDream.Runtime.Gameplay.RuntimeMovementStatsApplier movementStats =
             parts.MovementStats;
-        return new LiveCharacterSessionBindings(
+        var bindings = new LiveCharacterSessionBindings(
             parts.Combat,
             character,
             ResolveSkillFormulaBonus: (skill, raw, credits) =>
@@ -205,5 +223,13 @@ internal static partial class GraphicalAutomationCapabilities
                 // seed, which happens on login and again on a reconnect.
                 settings.NotifyServerOptionsSeeded();
             });
+        LiveSessionBindingDeclarations.ReportDeclaredButUnfilled(
+            "windowed",
+            "character-session binding",
+            bindings,
+            DeclaredCharacterSessionBindings,
+            ConditionalCharacterSessionBindings,
+            parts.Warn);
+        return bindings;
     }
 }

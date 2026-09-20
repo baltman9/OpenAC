@@ -179,6 +179,15 @@ internal static partial class HeadlessAutomationCapabilities
             nameof(LiveSessionEnteredWorldBindings.SetActiveCharacter),
         };
 
+    /// <summary>
+    /// Live-session host bindings this host fills in only under a condition,
+    /// for the same reason as <see cref="Conditional"/>. Empty means every
+    /// declared one is unconditional, so one arriving empty is a defect.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string>
+        ConditionalSessionHostBindings { get; } =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
     /// <summary>Which character-session bindings this host fills in.</summary>
     internal static IReadOnlySet<string> DeclaredCharacterSessionBindings { get; } =
         new HashSet<string>(StringComparer.Ordinal)
@@ -192,5 +201,17 @@ internal static partial class HeadlessAutomationCapabilities
             nameof(LiveCharacterSessionBindings.OnConfirmationDone),
             nameof(LiveCharacterSessionBindings.ClientTime),
             nameof(LiveCharacterSessionBindings.OnCharacterOptionsChanged),
+        };
+
+    /// <summary>
+    /// Character-session bindings this host fills in only under a condition.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string>
+        ConditionalCharacterSessionBindings { get; } =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [nameof(LiveCharacterSessionBindings.ResolveSkillFormulaBonus)] =
+                "the skill formulas are read from the installed data files, "
+                + "and this session holds no lease on them",
         };
 }

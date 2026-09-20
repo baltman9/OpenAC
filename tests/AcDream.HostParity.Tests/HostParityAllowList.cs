@@ -67,8 +67,9 @@ internal static class HostParityAllowList
     ];
 
     /// <summary>
-    /// Seams both hosts declare, where one of them only manages it under a
-    /// condition the other does not have.
+    /// Anything both hosts declare -- a surface seam, a runtime dependency or
+    /// either half of the live-session bindings -- where one of them only
+    /// manages it under a condition the other does not have.
     /// </summary>
     internal static IReadOnlyList<ParityConditionalAllowance>
         ConditionalSeams { get; } =
@@ -78,6 +79,13 @@ internal static class HostParityAllowList
             + "session holds a lease on the installed data files, so a "
             + "content-less bot answers navigation calls where a window "
             + "would act on them.",
+            ParityStage.AnswerItFromOneSource),
+        new("ResolveSkillFormulaBonus", ParityHost.Windowless,
+            "The windowless host reads the skill formulas out of the "
+            + "installed data files, so a session with no lease on them "
+            + "credits every skill without its attribute-derived term and a "
+            + "plugin reads the character's skills far below what the server "
+            + "allows it. The windowed host always has them.",
             ParityStage.AnswerItFromOneSource),
     ];
 
