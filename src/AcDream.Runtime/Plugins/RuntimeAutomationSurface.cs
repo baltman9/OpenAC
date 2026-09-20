@@ -393,6 +393,8 @@ internal sealed class RuntimeAutomationSurface
                 _externalContainerChanged;
             runtime.ActionOwner.Transactions.AppraisalReceived +=
                 OnAppraisalReceived;
+            runtime.ActionOwner.Transactions.UseCompleted +=
+                OnUseCompleted;
             _character = character;
             _cast = cast;
             _spellbook = spellbook;
@@ -620,6 +622,8 @@ internal sealed class RuntimeAutomationSurface
             }
             runtime.ActionOwner.Transactions.AppraisalReceived -=
                 OnAppraisalReceived;
+            runtime.ActionOwner.Transactions.UseCompleted -=
+                OnUseCompleted;
         }
         if (_communication is not null)
             _communication.LocalPlayerDied -= OnLocalPlayerDied;
@@ -1319,6 +1323,22 @@ internal sealed class RuntimeAutomationSurface
                     events.FireContainerClosed(transition.PreviousContainerId);
                 break;
         }
+    }
+
+    private void OnUseCompleted(uint _)
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        if (runtime is null)
+            return;
+        RuntimeItemUseCompletion completion =
+            runtime.ActionOwner.Transactions.LastItemUseCompletion;
+        _pluginEvents?.FireItemUseCompleted(new PluginItemUseCompletion(
+            completion.Revision,
+            completion.SourceObjectId,
+            completion.TargetObjectId,
+            completion.WeenieError));
     }
 
     private void OnAppraisalReceived(uint objectId) =>

@@ -75,6 +75,13 @@ public interface IEvents
         remove { }
     }
 
+    /// <summary>Raised when a plugin-issued item use receives its server completion.</summary>
+    event Action<PluginItemUseCompletion> ItemUseCompleted
+    {
+        add { }
+        remove { }
+    }
+
     /// <summary>
     /// Raised when the host's current navigation walk report changes. Reports
     /// are delivered on the same thread as <see cref="Tick"/> and are emitted

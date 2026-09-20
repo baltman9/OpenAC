@@ -16,6 +16,7 @@ public sealed class WorldEvents : IEvents
     private long _objectChangeRevision;
     private Action<PluginPortalTransition>? _portalTransition;
     private long _portalTransitionRevision;
+    private Action<PluginItemUseCompletion>? _itemUseCompleted;
     private Action<PluginGoToReport>? _navigationChanged;
     private Action<uint>? _containerOpened;
     private Action<uint>? _containerClosed;
@@ -179,6 +180,23 @@ public sealed class WorldEvents : IEvents
         }
     }
 
+    public event Action<PluginItemUseCompletion> ItemUseCompleted
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_lock)
+                _itemUseCompleted += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_lock)
+                _itemUseCompleted -= value;
+        }
+    }
+
     public event Action<PluginGoToReport> NavigationChanged
     {
         add
@@ -308,6 +326,20 @@ public sealed class WorldEvents : IEvents
         foreach (Delegate handler in handlers.GetInvocationList())
         {
             try { ((Action<PluginPortalTransition>)handler)(transition); }
+            catch { /* plugin errors do not propagate out of event dispatch */ }
+        }
+    }
+
+    public void FireItemUseCompleted(PluginItemUseCompletion completion)
+    {
+        Action<PluginItemUseCompletion>? handlers;
+        lock (_lock)
+            handlers = _itemUseCompleted;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginItemUseCompletion>)handler)(completion); }
             catch { /* plugin errors do not propagate out of event dispatch */ }
         }
     }

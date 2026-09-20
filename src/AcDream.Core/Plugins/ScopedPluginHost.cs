@@ -724,6 +724,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         private readonly List<Action<string>> _localPlayerDiedRegistrations = [];
         private readonly List<Action<PluginObjectChange>> _objectChangedRegistrations = [];
         private readonly List<Action<PluginPortalTransition>> _portalTransitionRegistrations = [];
+        private readonly List<Action<PluginItemUseCompletion>> _itemUseCompletedRegistrations = [];
         private readonly List<Action<PluginGoToReport>> _navigationChangedRegistrations = [];
         private readonly List<Action<uint>> _containerOpenedRegistrations = [];
         private readonly List<Action<uint>> _containerClosedRegistrations = [];
@@ -993,6 +994,33 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             }
         }
 
+        public event Action<PluginItemUseCompletion> ItemUseCompleted
+        {
+            add
+            {
+                ArgumentNullException.ThrowIfNull(value);
+                inner.ItemUseCompleted += value;
+                lock (_gate)
+                {
+                    if (!_disposed)
+                    {
+                        _itemUseCompletedRegistrations.Add(value);
+                        return;
+                    }
+                }
+                inner.ItemUseCompleted -= value;
+                throw new ObjectDisposedException(nameof(ScopedEvents));
+            }
+            remove
+            {
+                if (value is null)
+                    return;
+                inner.ItemUseCompleted -= value;
+                lock (_gate)
+                    _itemUseCompletedRegistrations.Remove(value);
+            }
+        }
+
         public event Action<PluginGoToReport> NavigationChanged
         {
             add
@@ -1154,6 +1182,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             Action<string>[] localPlayerDiedRegistrations;
             Action<PluginObjectChange>[] objectChangedRegistrations;
             Action<PluginPortalTransition>[] portalTransitionRegistrations;
+            Action<PluginItemUseCompletion>[] itemUseCompletedRegistrations;
             Action<PluginGoToReport>[] navigationChangedRegistrations;
             Action<uint>[] containerOpenedRegistrations;
             Action<uint>[] containerClosedRegistrations;
@@ -1177,6 +1206,8 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
                 _objectChangedRegistrations.Clear();
                 portalTransitionRegistrations = _portalTransitionRegistrations.ToArray();
                 _portalTransitionRegistrations.Clear();
+                itemUseCompletedRegistrations = _itemUseCompletedRegistrations.ToArray();
+                _itemUseCompletedRegistrations.Clear();
                 navigationChangedRegistrations = _navigationChangedRegistrations.ToArray();
                 _navigationChangedRegistrations.Clear();
                 containerOpenedRegistrations = _containerOpenedRegistrations.ToArray();
@@ -1227,6 +1258,12 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             for (int index = portalTransitionRegistrations.Length - 1; index >= 0; index--)
             {
                 try { inner.PortalTransition -= portalTransitionRegistrations[index]; }
+                catch { }
+            }
+
+            for (int index = itemUseCompletedRegistrations.Length - 1; index >= 0; index--)
+            {
+                try { inner.ItemUseCompleted -= itemUseCompletedRegistrations[index]; }
                 catch { }
             }
 
