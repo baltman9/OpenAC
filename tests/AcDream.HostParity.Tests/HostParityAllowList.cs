@@ -63,10 +63,6 @@ internal static class HostParityAllowList
             "Cycling the selection is an input action of the windowed host; "
             + "the cycle itself belongs over the entity directory.",
             ParityStage.MoveTheOperationIntoTheRuntime),
-        new("BindSpeciesNameResolver", ParityHost.Windowless,
-            "The creature display-name table is loaded by windowed layout "
-            + "code and has not been moved to the shared content load.",
-            ParityStage.AnswerItFromOneSource),
         new("BindRemoteBodiesUnsimulated", ParityHost.Windowed,
             "The windowed host moves a remote body between server updates, so "
             + "it must not read positions off the last snapshot; one host "

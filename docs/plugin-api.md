@@ -656,7 +656,7 @@ except what this section names.**
 
 ### Not available without a window
 
-Four seams, each because the operation behind it still lives in windowed-host
+Two seams, each because the operation behind it still lives in windowed-host
 code rather than in the runtime:
 
 | Seam | What a plugin loses |
@@ -668,7 +668,6 @@ The selection also lets go of its object on both clients: when the server
 takes the selected object out of the world, or stops showing it, `Selection`
 clears rather than keeping a guid nothing will answer to. That used to happen
 only where there was something drawing the object.
-| `BindSpeciesNameResolver` | Creature display names by species; the table is still loaded by windowed layout code. |
 
 One more seam is empty on **both** clients, so it is not a windowless
 difference but it is worth knowing: `BindProjectileCollision`. A plugin that

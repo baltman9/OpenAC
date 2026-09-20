@@ -92,7 +92,6 @@ public sealed class SharedBindingPassTests
         AnswerConfirmation = static (_, _) => true,
         DismissGhost = static _ => true,
         SelectionAction = static _ => true,
-        SpeciesName = static _ => string.Empty,
         ProjectileCollision = physics,
         RemoteBodiesUnsimulated = true,
     };

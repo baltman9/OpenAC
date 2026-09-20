@@ -86,7 +86,6 @@ internal sealed record RuntimeAutomationHostCapabilities
     public Func<uint, bool, bool>? AnswerConfirmation { get; init; }
     public Func<uint, bool>? DismissGhost { get; init; }
     public Func<PluginSelectionAction, bool>? SelectionAction { get; init; }
-    public Func<int, string>? SpeciesName { get; init; }
     public PhysicsEngine? ProjectileCollision { get; init; }
     public bool RemoteBodiesUnsimulated { get; init; }
 
@@ -179,7 +178,7 @@ internal static class RuntimeAutomationBindings
             ["BindChatInputActive"] = null,
             ["BindChatComposer"] = null,
             ["BindSpeciesNameResolver"] =
-                nameof(RuntimeAutomationHostCapabilities.SpeciesName),
+                nameof(RuntimeAutomationHostCapabilities.Content),
             ["BindProjectileCollision"] =
                 nameof(RuntimeAutomationHostCapabilities.ProjectileCollision),
             ["BindRemoteBodiesUnsimulated"] =
@@ -352,11 +351,6 @@ internal static class RuntimeAutomationBindings
         bound.Add(nameof(surface.BindChatInputActive));
         surface.BindChatComposer(chatEntry.Compose);
         bound.Add(nameof(surface.BindChatComposer));
-        if (capabilities.SpeciesName is { } speciesName)
-        {
-            surface.BindSpeciesNameResolver(speciesName);
-            bound.Add(nameof(surface.BindSpeciesNameResolver));
-        }
         if (capabilities.ProjectileCollision is { } projectilePhysics)
         {
             surface.BindProjectileCollision(projectilePhysics);
@@ -430,6 +424,19 @@ internal static class RuntimeAutomationBindings
         surface.BindPaletteColorResolver(
             new AcDream.Content.CharGen.ChargenAppearanceCatalog(content));
         bound.Add(nameof(surface.BindPaletteColorResolver));
+
+        // What kind of creature a plugin is looking at. The table is read the
+        // first time something asks rather than while the surface is being
+        // wired, so a session that never asks never pays for it.
+        var creatureNames = new Lazy<CreatureDisplayNameResolver>(
+            () =>
+            {
+                lock (ContentReadLock)
+                    return CreatureDisplayNameResolver.Load(content);
+            });
+        surface.BindSpeciesNameResolver(
+            species => creatureNames.Value.Resolve(species));
+        bound.Add(nameof(surface.BindSpeciesNameResolver));
 
         if (!content.TryGet<DatReaderWriter.DBObjs.SkillTable>(
                 SkillTableId, out var skillTable)

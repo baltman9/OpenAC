@@ -62,7 +62,6 @@ internal static class GraphicalAutomationCapabilities
             nameof(RuntimeAutomationHostCapabilities.AnswerConfirmation),
             nameof(RuntimeAutomationHostCapabilities.DismissGhost),
             nameof(RuntimeAutomationHostCapabilities.SelectionAction),
-            nameof(RuntimeAutomationHostCapabilities.SpeciesName),
         };
 
     /// <summary>
@@ -75,8 +74,6 @@ internal static class GraphicalAutomationCapabilities
         {
             [nameof(RuntimeAutomationHostCapabilities.Content)] =
                 "the installed data files were not opened",
-            [nameof(RuntimeAutomationHostCapabilities.SpeciesName)] =
-                "the creature name table comes from the installed data files",
             [nameof(RuntimeAutomationHostCapabilities.MagicCatalog)] =
                 "the spell catalog comes from the installed data files",
         };
@@ -99,18 +96,6 @@ internal static class GraphicalAutomationCapabilities
             parts.Teleport;
         InputDispatcher? input = parts.Input;
         GameRuntime runtime = parts.Runtime;
-        // Read the creature name table the first time a plugin asks for a
-        // species, not while the surface is being wired: nothing here should
-        // pay for a table a session may never use.
-        Func<int, string>? speciesName = null;
-        if (parts.Content is { } speciesContent)
-        {
-            var speciesTable = new Lazy<
-                AcDream.App.UI.Layout.CreatureDisplayNameResolver>(
-                () => AcDream.App.UI.Layout.CreatureDisplayNameResolver
-                    .Load(speciesContent));
-            speciesName = species => speciesTable.Value.Resolve(species);
-        }
         return new RuntimeAutomationHostCapabilities
         {
             HostName = "windowed",
@@ -132,7 +117,6 @@ internal static class GraphicalAutomationCapabilities
             SubmitChatText = session is null ? null : session.SubmitChatText,
             SessionCommands = session,
             NavigationWalk = parts.NavigationWalk,
-            SpeciesName = speciesName,
             Logout = new RuntimeAutomationLogoutCommands(
                 () => teleport?.TryRequestLogout() == true,
                 () => teleport is not null
