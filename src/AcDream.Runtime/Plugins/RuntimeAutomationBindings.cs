@@ -2,26 +2,10 @@ using System.Reflection;
 using AcDream.Content;
 using AcDream.Core.Physics;
 using AcDream.Plugin.Abstractions;
+using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Navigation;
 
 namespace AcDream.Runtime.Plugins;
-
-/// <summary>The eight item commands every host can answer.</summary>
-internal sealed record RuntimeAutomationItemCommands(
-    Func<uint, bool> Use,
-    Func<uint, uint, bool> Apply,
-    Func<uint, uint, uint, int, bool> Move,
-    Func<uint, uint, uint, bool> Merge,
-    Func<uint, uint, bool> Drop,
-    Func<uint, uint, uint, bool> Give,
-    Func<uint, bool, bool> Pickup,
-    Func<uint, bool> Identify);
-
-/// <summary>Wielding, and whether a wield is already in flight.</summary>
-internal sealed record RuntimeAutomationEquipmentCommands(
-    Func<uint, uint, bool> Equip,
-    Func<bool> IsBusy,
-    Func<uint, bool> EquipSecondary);
 
 /// <summary>Leaving the world, and whether that is allowed right now.</summary>
 internal sealed record RuntimeAutomationLogoutCommands(
@@ -79,10 +63,6 @@ internal sealed record RuntimeAutomationHostCapabilities
     public Func<string, bool>? SubmitChatText { get; init; }
     public IGameRuntimeCommands? SessionCommands { get; init; }
     public NavigationWalkController? NavigationWalk { get; init; }
-    public RuntimeAutomationEquipmentCommands? Equipment { get; init; }
-    public RuntimeAutomationItemCommands? Items { get; init; }
-    public Func<uint, IReadOnlyList<uint>, bool>? SalvageItems { get; init; }
-    public Func<uint, uint, int, bool>? SellItem { get; init; }
     public RuntimeAutomationLogoutCommands? Logout { get; init; }
     public Func<uint, bool, bool>? AnswerConfirmation { get; init; }
     public Func<uint, PluginItemCommandResult>? UseWorldObject { get; init; }
@@ -161,15 +141,11 @@ internal static class RuntimeAutomationBindings
                 nameof(RuntimeAutomationHostCapabilities.SessionCommands),
             ["BindNavigationWalk"] =
                 nameof(RuntimeAutomationHostCapabilities.NavigationWalk),
-            ["BindEquipment"] =
-                nameof(RuntimeAutomationHostCapabilities.Equipment),
-            ["BindEquipment.equipSecondary"] =
-                nameof(RuntimeAutomationHostCapabilities.Equipment),
-            ["BindItems"] = nameof(RuntimeAutomationHostCapabilities.Items),
-            ["BindItems.salvageItems"] =
-                nameof(RuntimeAutomationHostCapabilities.SalvageItems),
-            ["BindItems.sellItem"] =
-                nameof(RuntimeAutomationHostCapabilities.SellItem),
+            ["BindEquipment"] = null,
+            ["BindEquipment.equipSecondary"] = null,
+            ["BindItems"] = null,
+            ["BindItems.salvageItems"] = null,
+            ["BindItems.sellItem"] = null,
             ["BindLogout"] = nameof(RuntimeAutomationHostCapabilities.Logout),
             ["BindDialogs"] =
                 nameof(RuntimeAutomationHostCapabilities.AnswerConfirmation),
@@ -249,6 +225,14 @@ internal static class RuntimeAutomationBindings
         {
             surface.BindMagicCatalog(magicCatalog);
             bound.Add(nameof(surface.BindMagicCatalog));
+            // Which weenie classes are spell-component packs is named by the
+            // spell catalogue, which is read from the installed data files
+            // rather than from the wire. A host that draws an inventory also
+            // tells the owner during its own composition, before any plugin
+            // exists; telling it here as well costs nothing and is the only
+            // time a host without one ever hears it.
+            runtime.ItemInteractionOwner.BindComponentPackResolver(
+                magicCatalog.IsComponentPack);
         }
         if (capabilities.SubmitChatText is { } submitChatText)
         {
@@ -265,32 +249,35 @@ internal static class RuntimeAutomationBindings
             surface.BindNavigationWalk(navigationWalk);
             bound.Add(nameof(surface.BindNavigationWalk));
         }
-        if (capabilities.Equipment is { } equipment)
-        {
-            surface.BindEquipment(
-                equipment.Equip, equipment.IsBusy, equipment.EquipSecondary);
-            bound.Add(nameof(surface.BindEquipment));
-            bound.Add("BindEquipment.equipSecondary");
-        }
-        if (capabilities.Items is { } items)
-        {
-            surface.BindItems(
-                items.Use,
-                items.Apply,
-                items.Move,
-                items.Merge,
-                items.Drop,
-                items.Give,
-                items.Pickup,
-                items.Identify,
-                capabilities.SalvageItems,
-                capabilities.SellItem);
-            bound.Add(nameof(surface.BindItems));
-            if (capabilities.SalvageItems is not null)
-                bound.Add("BindItems.salvageItems");
-            if (capabilities.SellItem is not null)
-                bound.Add("BindItems.sellItem");
-        }
+        // Every item command a plugin can issue is answered by the runtime's
+        // own item-interaction owner. Who owns an item, which container is
+        // open, which vendor is trading, whether a request is already in
+        // flight and how recently the last use went out are all runtime
+        // state, so nothing here depends on a host drawing anything, and a
+        // client without a window gives the same answer as a client with one.
+        RuntimeItemInteraction itemOwner = runtime.ItemInteractionOwner;
+        surface.BindEquipment(
+            (itemId, requestedLocation) => itemOwner.TryWieldItem(
+                itemId, (AcDream.Core.Items.EquipMask)requestedLocation),
+            () => itemOwner.IsAutoWieldBusy,
+            itemOwner.TryWieldItemSecondary);
+        bound.Add(nameof(surface.BindEquipment));
+        bound.Add("BindEquipment.equipSecondary");
+        surface.BindItems(
+            itemOwner.TryUseItemForAutomation,
+            itemOwner.TryApplyItem,
+            itemOwner.TryMoveItemForAutomation,
+            itemOwner.TryMergeItemsForAutomation,
+            itemOwner.TryDropItemForAutomation,
+            itemOwner.TryGiveItemForAutomation,
+            itemOwner.PlaceWorldItemInBackpack,
+            itemOwner.TryAppraiseForAutomation,
+            itemOwner.TrySalvageItemsForAutomation,
+            (vendorId, itemId, amount) =>
+                itemOwner.TrySell(vendorId, [(amount, itemId)]));
+        bound.Add(nameof(surface.BindItems));
+        bound.Add("BindItems.salvageItems");
+        bound.Add("BindItems.sellItem");
         if (capabilities.Logout is { } logout)
         {
             surface.BindLogout(logout.Request, logout.CanRequest);

@@ -43,7 +43,6 @@ internal sealed class HeadlessGameplayOperations
     private SpellComponentRequirementService? _componentRequirements;
     private WorldSession? _session;
     private SessionRoute? _route;
-    private AutoWieldController? _autoWield;
 
     internal void Bind(
         GameRuntime runtime,
@@ -65,10 +64,7 @@ internal sealed class HeadlessGameplayOperations
             accountName);
     }
 
-    internal void BindAutoWield(AutoWieldController autoWield)
-    {
-        _autoWield = autoWield ?? throw new ArgumentNullException(nameof(autoWield));
-    }
+
 
     internal ILiveSessionCommandRouting CreateRoute(
         WorldSession session)
@@ -142,9 +138,12 @@ internal sealed class HeadlessGameplayOperations
             runtime.PlayerIdentity.ServerGuid);
     }
 
+    // A stance the player asked for stands down whatever equipment switch
+    // the item owner has in flight. There is one such owner per client, the
+    // runtime's, so this tells that one.
     public void NotifyExplicitCombatModeRequest()
     {
-        _autoWield?.NotifyExplicitCombatModeRequest();
+        _runtime?.ItemInteractionOwner.NotifyExplicitCombatModeRequest();
     }
 
     public void SendChangeCombatMode(CombatMode mode)

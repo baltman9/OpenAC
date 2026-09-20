@@ -87,19 +87,6 @@ public sealed class SharedBindingPassTests
         SubmitChatText = static _ => true,
         SessionCommands = new DirectGameRuntimeCommandAdapter(
             runtime, new UnusedSessionCommands()),
-        Equipment = new RuntimeAutomationEquipmentCommands(
-            static (_, _) => true, static () => false, static _ => true),
-        Items = new RuntimeAutomationItemCommands(
-            static _ => true,
-            static (_, _) => true,
-            static (_, _, _, _) => true,
-            static (_, _, _) => true,
-            static (_, _) => true,
-            static (_, _, _) => true,
-            static (_, _) => true,
-            static _ => true),
-        SalvageItems = static (_, _) => true,
-        SellItem = static (_, _, _) => true,
         Logout = new RuntimeAutomationLogoutCommands(
             static () => true, static () => true),
         AnswerConfirmation = static (_, _) => true,

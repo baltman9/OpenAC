@@ -60,7 +60,6 @@ internal sealed class HeadlessPluginHost
         IPluginStorage? vtankProfiles = null,
         IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
         Func<string, bool>? submitChatText = null,
-        HeadlessItemAutomation? items = null,
         MagicCatalog? magicCatalog = null,
         HeadlessLogoutAutomation? logout = null,
         Func<uint, bool, bool>? answerConfirmation = null,
@@ -92,7 +91,6 @@ internal sealed class HeadlessPluginHost
                 SubmitChatText = submitChatText,
                 SessionCommands = sessionCommands,
                 NavigationWalk = navigationWalk,
-                Items = items,
                 Logout = logout,
                 AnswerConfirmation = answerConfirmation,
             }));

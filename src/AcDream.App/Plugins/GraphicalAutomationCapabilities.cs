@@ -25,7 +25,6 @@ internal sealed record GraphicalAutomationParts
     public MagicCatalog? MagicCatalog { get; init; }
     public AcDream.App.Runtime.CurrentGameRuntimeAdapter? SessionCommands { get; init; }
     public AcDream.Runtime.Navigation.NavigationWalkController? NavigationWalk { get; init; }
-    public AcDream.Runtime.Gameplay.RuntimeItemInteraction? Items { get; init; }
     public AcDream.App.Streaming.LocalPlayerTeleportController? Teleport { get; init; }
     public AcDream.App.UI.RetailUiRuntime? RetainedUi { get; init; }
     public AcDream.App.Interaction.SelectionInteractionController? Selection { get; init; }
@@ -50,10 +49,6 @@ internal static class GraphicalAutomationCapabilities
             nameof(RuntimeAutomationHostCapabilities.SubmitChatText),
             nameof(RuntimeAutomationHostCapabilities.SessionCommands),
             nameof(RuntimeAutomationHostCapabilities.NavigationWalk),
-            nameof(RuntimeAutomationHostCapabilities.Equipment),
-            nameof(RuntimeAutomationHostCapabilities.Items),
-            nameof(RuntimeAutomationHostCapabilities.SalvageItems),
-            nameof(RuntimeAutomationHostCapabilities.SellItem),
             nameof(RuntimeAutomationHostCapabilities.Logout),
             nameof(RuntimeAutomationHostCapabilities.AnswerConfirmation),
             nameof(RuntimeAutomationHostCapabilities.UseWorldObject),
@@ -87,7 +82,6 @@ internal static class GraphicalAutomationCapabilities
         GraphicalAutomationParts parts)
     {
         ArgumentNullException.ThrowIfNull(parts);
-        AcDream.Runtime.Gameplay.RuntimeItemInteraction? items = parts.Items;
         AcDream.App.Interaction.SelectionInteractionController? selection =
             parts.Selection;
         AcDream.App.UI.RetailUiRuntime? retainedUi = parts.RetainedUi;
@@ -128,32 +122,6 @@ internal static class GraphicalAutomationCapabilities
             SessionCommands = session,
             NavigationWalk = parts.NavigationWalk,
             SpeciesName = speciesName,
-            Equipment = items is null
-                ? null
-                : new RuntimeAutomationEquipmentCommands(
-                    (itemId, requestedLocation) => items.TryWieldItem(
-                        itemId,
-                        (AcDream.Core.Items.EquipMask)requestedLocation),
-                    () => items.IsAutoWieldBusy,
-                    items.TryWieldItemSecondary),
-            Items = items is null
-                ? null
-                : new RuntimeAutomationItemCommands(
-                    items.TryUseItemForAutomation,
-                    items.TryApplyItem,
-                    items.TryMoveItemForAutomation,
-                    items.TryMergeItemsForAutomation,
-                    items.TryDropItemForAutomation,
-                    items.TryGiveItemForAutomation,
-                    items.PlaceWorldItemInBackpack,
-                    items.TryAppraiseForAutomation),
-            SalvageItems = items is null
-                ? null
-                : items.TrySalvageItemsForAutomation,
-            SellItem = items is null
-                ? null
-                : (vendorId, itemId, amount) =>
-                    items.TrySell(vendorId, [(amount, itemId)]),
             Logout = new RuntimeAutomationLogoutCommands(
                 () => teleport?.TryRequestLogout() == true,
                 () => teleport is not null

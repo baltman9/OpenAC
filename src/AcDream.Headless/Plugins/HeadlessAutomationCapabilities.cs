@@ -27,7 +27,6 @@ internal sealed record HeadlessAutomationParts
     public Func<string, bool>? SubmitChatText { get; init; }
     public IGameRuntimeCommands? SessionCommands { get; init; }
     public NavigationWalkController? NavigationWalk { get; init; }
-    public HeadlessItemAutomation? Items { get; init; }
     public HeadlessLogoutAutomation? Logout { get; init; }
     public Func<uint, bool, bool>? AnswerConfirmation { get; init; }
 }
@@ -49,8 +48,6 @@ internal static class HeadlessAutomationCapabilities
             nameof(RuntimeAutomationHostCapabilities.SubmitChatText),
             nameof(RuntimeAutomationHostCapabilities.SessionCommands),
             nameof(RuntimeAutomationHostCapabilities.NavigationWalk),
-            nameof(RuntimeAutomationHostCapabilities.Equipment),
-            nameof(RuntimeAutomationHostCapabilities.Items),
             nameof(RuntimeAutomationHostCapabilities.Logout),
             nameof(RuntimeAutomationHostCapabilities.AnswerConfirmation),
             nameof(RuntimeAutomationHostCapabilities.RemoteBodiesUnsimulated),
@@ -82,7 +79,6 @@ internal static class HeadlessAutomationCapabilities
         HeadlessAutomationParts parts)
     {
         ArgumentNullException.ThrowIfNull(parts);
-        HeadlessItemAutomation? items = parts.Items;
         HeadlessLogoutAutomation? logout = parts.Logout;
         return new RuntimeAutomationHostCapabilities
         {
@@ -95,21 +91,6 @@ internal static class HeadlessAutomationCapabilities
             SubmitChatText = parts.SubmitChatText,
             SessionCommands = parts.SessionCommands,
             NavigationWalk = parts.NavigationWalk,
-            Items = items is null ? null : new RuntimeAutomationItemCommands(
-                items.TryUse,
-                items.TryApply,
-                items.TryMove,
-                items.TryMerge,
-                items.TryDrop,
-                items.TryGive,
-                items.TryPickup,
-                items.TryIdentify),
-            Equipment = items is null
-                ? null
-                : new RuntimeAutomationEquipmentCommands(
-                    items.TryEquip,
-                    () => items.EquipmentBusy,
-                    items.TryEquipSecondary),
             Logout = logout is null
                 ? null
                 : new RuntimeAutomationLogoutCommands(

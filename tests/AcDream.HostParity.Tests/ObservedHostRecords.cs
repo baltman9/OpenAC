@@ -38,7 +38,6 @@ internal static class ObservedHostRecords
             MagicCatalog = Part<AcDream.Content.MagicCatalog>(),
             SessionCommands = Part<AcDream.App.Runtime.CurrentGameRuntimeAdapter>(),
             NavigationWalk = Part<AcDream.Runtime.Navigation.NavigationWalkController>(),
-            Items = Part<AcDream.Runtime.Gameplay.RuntimeItemInteraction>(),
             Teleport = Part<AcDream.App.Streaming.LocalPlayerTeleportController>(),
             RetainedUi = Part<AcDream.App.UI.RetailUiRuntime>(),
             Selection = Part<AcDream.App.Interaction.SelectionInteractionController>(),
@@ -60,7 +59,6 @@ internal static class ObservedHostRecords
             SubmitChatText = static _ => true,
             SessionCommands = Part<AcDream.App.Runtime.CurrentGameRuntimeAdapter>(),
             NavigationWalk = Part<AcDream.Runtime.Navigation.NavigationWalkController>(),
-            Items = Part<AcDream.Headless.Plugins.HeadlessItemAutomation>(),
             Logout = Part<AcDream.Headless.Hosting.HeadlessLogoutAutomation>(),
             AnswerConfirmation = static (_, _) => true,
         });

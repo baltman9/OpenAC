@@ -55,14 +55,7 @@ internal static class HostParityAllowList
     /// </summary>
     internal static IReadOnlyList<ParityAllowance> Seams { get; } =
     [
-        new("BindItems.salvageItems", ParityHost.Windowless,
-            "Salvaging runs through the windowed item-interaction owner; the "
-            + "windowless host has its own item automation and no salvage path.",
-            ParityStage.MoveTheOperationIntoTheRuntime),
-        new("BindItems.sellItem", ParityHost.Windowless,
-            "Selling runs through the windowed item-interaction owner; the "
-            + "windowless host has no vendor sell path.",
-            ParityStage.MoveTheOperationIntoTheRuntime),
+
         new("BindWorldObjectUse", ParityHost.Windowless,
             "Using an object the player does not own walks to it first, and "
             + "that walk-then-use route is still windowed-host code.",

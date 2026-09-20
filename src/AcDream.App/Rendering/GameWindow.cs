@@ -1172,7 +1172,6 @@ public sealed class GameWindow :
                     MagicCatalog = _magicCatalog,
                     SessionCommands = _pluginSessionCommands,
                     NavigationWalk = _navigationWalk,
-                    Items = _itemInteractionController,
                     Teleport = _localPlayerTeleport,
                     RetainedUi = _retailUiRuntime,
                     Selection = _selectionInteractions,
