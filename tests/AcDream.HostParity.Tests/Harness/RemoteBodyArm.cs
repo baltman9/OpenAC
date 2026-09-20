@@ -87,6 +87,15 @@ internal abstract class RemoteBodyArm : IDisposable
 
     protected RuntimeEntityObjectLifetime Lifetime => _lifetime;
 
+    /// <summary>
+    /// The one clock this client times a body by: how often a watched
+    /// creature reports where it is, how long a body has been walking, how
+    /// stale what it knows about its target is. Held here and advanced with
+    /// the frame, because a clock that never moves makes every throttle a
+    /// permanent refusal and a scenario that never notices.
+    /// </summary>
+    internal AcDream.Runtime.GameRuntimeClock Clock { get; } = new();
+
     /// <summary>Where this client has the character. Both arms are told the same.</summary>
     internal Vector3 PlayerPosition { get; set; }
 
@@ -104,8 +113,32 @@ internal abstract class RemoteBodyArm : IDisposable
     /// <summary>The one arming, with this client's own facts hung off it.</summary>
     internal abstract RuntimeRemoteArming Arming { get; }
 
-    /// <summary>One frame of this client's own drive.</summary>
-    internal abstract void Tick(float elapsedSeconds);
+    /// <summary>
+    /// One frame of this client: the clock moves and then this client's own
+    /// drive runs, in that order, as a client takes a frame.
+    /// </summary>
+    internal void Tick(float elapsedSeconds)
+    {
+        _ = Clock.Advance(elapsedSeconds);
+        TickBodies(elapsedSeconds);
+    }
+
+    /// <summary>This client's own drive, for one frame.</summary>
+    protected abstract void TickBodies(float elapsedSeconds);
+
+    /// <summary>
+    /// Something watching where the creature is, which is how one creature
+    /// follows another. The creature reports to it no more often than the
+    /// throttle allows, measured on this client's clock.
+    /// </summary>
+    internal void SomethingWatchesTheCreature(
+        AcDream.Core.Physics.Motion.IPhysicsObjHost watcher,
+        float radius = 0f,
+        double quantum = 0d) =>
+        (Body.Host
+            ?? throw new InvalidOperationException(
+                "The creature has no body to watch on this client."))
+            .AddVoyeur(watcher, radius, quantum);
 
     /// <summary>Brings the creature into the world as the server described it.</summary>
     internal abstract void CreatureArrives();

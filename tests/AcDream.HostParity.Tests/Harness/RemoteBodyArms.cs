@@ -53,7 +53,7 @@ internal sealed class WindowedBodyArm : RemoteBodyArm
             _origin);
         _arming = RuntimeRemoteArming.Create(
             Lifetime,
-            new AcDream.Runtime.GameRuntimeClock(),
+            Clock,
             new OneAuthoredShape(),
             new AnyDestination(),
             _motion.HostFacts);
@@ -143,7 +143,7 @@ internal sealed class WindowedBodyArm : RemoteBodyArm
     protected override void OnBodyGiven(RemoteMotion remote) =>
         _live.SetRemoteMotionRuntime(Creature, remote);
 
-    internal override void Tick(float elapsedSeconds)
+    protected override void TickBodies(float elapsedSeconds)
     {
         if (_scheduler is null || _entity is null)
             return;
@@ -185,7 +185,7 @@ internal sealed class WindowlessBodyArm : RemoteBodyArm
     {
         _arming = RuntimeRemoteArming.Create(
             Lifetime,
-            new AcDream.Runtime.GameRuntimeClock(),
+            Clock,
             new OneAuthoredShape(),
             new AnyDestination());
         _drive = new RuntimeRemoteBodyDrive(
@@ -223,6 +223,6 @@ internal sealed class WindowlessBodyArm : RemoteBodyArm
         _record = canonical;
     }
 
-    internal override void Tick(float elapsedSeconds) =>
+    protected override void TickBodies(float elapsedSeconds) =>
         _drive.Tick(elapsedSeconds);
 }

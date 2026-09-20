@@ -35,3 +35,24 @@ scenario belongs to in its own doc comment, and mutation-check it against
 the client it is meant to speak for -- a scenario in the first list that
 stays green when one client's half is taken away is in the second list
 without knowing it.
+
+## What the remote-body arms do not cover
+
+The two arms that carry another creature's body run each client's own drive
+over the same shared owners, which is the point of them. Two limits are worth
+knowing before reading a green run over those scenarios:
+
+- **Neither arm runs the client-with-a-window's inbound sink.** That sink
+  cannot be built without a drawn world, so both arms deliver an accepted
+  position the way the windowless sink does. The two production sinks are
+  held to the same shape by a source pin instead, which compares the shared
+  steps each runs, their order around the contact routing and the wire-cell
+  adoption, and refuses an inlined copy of the bookkeeping.
+- **Each arm now moves its own clock with the frame**, as both clients do,
+  so a throttle measured against it can lapse rather than refusing forever.
+  No scenario here yet turns on that clock: the two things that read it --
+  the body's own physics host and the placement drive's arrival stamp -- are
+  not reached by the way these arms stage a creature, so a scenario written
+  against either of them proves nothing today. Reaching them is the next
+  piece of work on this harness, and until it lands the clock is correct
+  rather than demonstrated.
