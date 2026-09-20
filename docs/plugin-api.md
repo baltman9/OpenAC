@@ -647,67 +647,95 @@ headless session from the inside.
 
 ## Headless
 
-A headless host implements this same contract, with a few members left as
-placeholders rather than wired to real state:
+A windowless client binds this same surface through the same binding pass the
+windowed one runs, from the same `GameRuntime`. That is not a claim in prose:
+a seam census compares what the two clients can supply, member by member, and
+fails on any difference that is not listed below with a reason. **So the rule
+is the short one: everything on `IAutomationSurface` is real without a window
+except what this section names.**
 
-- `Character` is real for identity: `Name`, `WorldName`, `AccountName`,
-  `ObjectId`, `CharacterIndex`, `IsInWorld`, and `ServerPopulation` all come
-  from the live runtime, exactly like the graphical host. Everything else on
-  `Character` -- vitals (`CurrentHealth`/`MaxHealth`/etc.), `Skills`,
-  `Attributes`, `ActiveEnchantments`, `Level`, `MainPackFreeSlots`, and
-  `SummoningMastery` -- is still the interface's inert default; no headless
-  macro reads them yet.
-- `Spells` and `Magic` are entirely no-op: `Spells.All` / `TryFindByName`
-  are always empty / always miss, and `Magic` never reports casting or
-  accepts a cast request.
-- `Objects.TryGet` and `Objects.CaptureObjects` are real, sourced from the
-  same object table and entity directory the graphical host uses, through
-  the same shared projection (name, weenie class id, item type,
-  container/wielder ids, classification, ownership, position, appraisal
-  data, capacities, stack size, door-open state, icon id all populate
-  identically on both hosts). `Objects.TryCaptureProperties`,
-  `Objects.Identify`, and `Objects.OpenContainerObjectId` remain the
-  interface's inert defaults (`false`/`Unavailable`/`0`) -- they need
-  appraisal-wire and external-container machinery no headless macro
-  exercises yet. The one field the projection cannot populate identically
-  on headless is `ActiveSpellIds` for the local player -- the graphical
-  host tracks a live active-enchantment list this one doesn't, so it is
-  always empty here.
-- `Storage` is real: a headless plugin's settings persist to
-  `<config>/plugins/<pluginId>/...`, the identical on-disk layout and root
-  the graphical host uses, so hand-editing a settings file affects
-  whichever host next loads that plugin. It is process-wide, not
-  session-scoped -- every session hosted by one headless process shares
-  the same `Storage` instance, so two bot sessions running the same
-  plugin in one process share that plugin's one settings file (exactly as
-  two plugin instances loaded into one graphical process would).
-- `CaptureMessages` is unimplemented; use `Received` instead, which does
-  work.
-- `ContainerOpened`/`ContainerClosed`, `ConfirmationRequested`, and
-  `Login.RequestLogout` (and its `Logout` alias) are real and wired to the
-  same runtime state and session-command routes the graphical host uses;
-  see the logout note above for how a headless session ends.
-- `Dialogs.Answer` is real when the headless session was configured with a
-  confirmation route; otherwise it returns `false` like any host with
-  nothing bound.
-- `Equipment.CaptureOwnedEquipment()` reports each item's `ObjectClass`
-  (or `Unknown` if classification is unavailable) and actual `StackSize`,
-  including an explicitly empty stack. `EquippedLocation` is the current
-  slot; `ValidLocations` describes allowed slots.
-- `Trade` and `Vendor` are real on both hosts: the same shared adapter binds
-  over the same `GameRuntime`, so a headless bot sees identical state and
-  sends the identical wire commands a graphical plugin would.
-- `Hotkeys` is the inert no-op registry — there is no keyboard to bind to
-  without a window. `Register` always returns a handle with `IsBound`
-  `false` and the handler never fires.
-- `Window.Minimize`/`Restore`/`IsMinimized` stay at the interface's inert
-  defaults -- there is no OS window on a headless host.
-  `Window.RequestClose` is real: it ends only this session, the same way
-  a bot policy already ends its own session when it decides it is done;
-  a second session hosted by the same process is untouched. Only the
-  console's own `/quit` and a SIGINT/SIGTERM end every session in the
-  process at once.
-- Everything else on `IAutomationSurface` not named above --
-  `Combat`/`Items`/`Loot`/`Fellowship`/`Enchantments`/
-  `Navigation`/`WorldTime`/`Network`/`Recovery`/`Projectile`/`Selection`
-  automation -- is still the interface's inert `NoOp` default on headless.
+### Not available without a window
+
+Four seams, each because the operation behind it still lives in windowed-host
+code rather than in the runtime:
+
+| Seam | What a plugin loses |
+|---|---|
+| `BindWorldObjectUse` | Using an object the character does not own -- a vendor, a corpse, a chest, an NPC -- walks to it first, and that walk-then-use route is still windowed code. `Items.Use` on something you own works on both. |
+| `BindGhostDeletion` | Letting go of a target the client still believes in. |
+| `BindSelectionActions` | Cycling the selection (previous selection, previous player, next player). `Selection` itself -- what is selected, and selecting by id -- is real on both. |
+| `BindSpeciesNameResolver` | Creature display names by species; the table is still loaded by windowed layout code. |
+
+One more seam is empty on **both** clients, so it is not a windowless
+difference but it is worth knowing: `BindProjectileCollision`. A plugin that
+asks about projectile collision gets nothing anywhere, and it needs a runtime
+source before either client can fill it.
+
+### Available, but only with the installed data files
+
+`Navigation`'s walks -- `GoTo`, `StandOn`, `Follow` -- need the collision data
+the installed data files carry, and a windowless session only holds a lease on
+those files when it was configured with content. A content-less bot answers
+navigation calls where a client with a window acts on them. Everything else on
+`Navigation` -- the snapshot, the move channels, `FaceHeading`, `Jump`,
+`TryFindObject` -- is real either way.
+
+### Answered in plain words rather than missing
+
+Two of the client's own chat verbs draw something, and a client with nothing to
+draw on says so instead of not knowing the verb:
+
+```
+/nav grid    -> Navigation: this client has nothing to draw the grid on
+/nav route X -> Navigation: this client has nothing to draw a route on
+```
+
+Everything else `/nav` and `/motor` do is identical on both, because both are
+registered once, by the shared binding pass, on the one command registry each
+client hands plugins. A verb a plugin registers is reachable from a chat box
+and from the headless console alike.
+
+### Host services rather than automation
+
+These are on `IPluginHost`, not on the automation surface, and they are the
+places a windowless client genuinely has nothing behind the interface:
+
+- `Ui` is the inert no-op registry. A gameplay panel registered through
+  `IUiRegistry.AddMarkupPanel` loads without error and is never drawn.
+- `Hotkeys` is the inert no-op registry -- there is no keyboard to bind to.
+  `Register` returns a handle whose `IsBound` is `false`, and the handler never
+  fires.
+- `Clipboard` is the inert no-op clipboard.
+- `Window.Minimize`, `Window.Restore` and `Window.IsMinimized` stay at the
+  interface's inert defaults. `Window.RequestClose` is real: it ends this
+  plugin's own session, not the whole process, the same way a bot policy ends
+  its own session when it decides it is done. A second session hosted by the
+  same process is untouched; only the console's `/quit` and a SIGINT/SIGTERM
+  end every session at once.
+- `Storage` and `VtankProfiles` are real, in the same on-disk layout the
+  windowed client uses. They are process-wide rather than session-scoped, so
+  two sessions in one process share one plugin settings file -- exactly as two
+  plugin instances in one windowed process would.
+- `LootClassifiers` is real, and a classifier published by one plugin can be
+  asked for verdicts by another.
+- `Log` writes into the headless diagnostic stream rather than to a window.
+
+### One field a projection cannot fill
+
+`Objects.TryGet` and `Objects.CaptureObjects` populate identically on both
+clients -- name, weenie class id, item type, container and wielder ids,
+classification, ownership, position, appraisal data, capacities, stack size,
+door-open state, icon id. The exception is `ActiveSpellIds` for the local
+player: the windowed client tracks a live active-enchantment list this one does
+not, so it is empty here.
+
+### Chat, and the console
+
+`Chat` is real on both: `PostMessage`, `Submit`, `Compose`, `CaptureMessages`,
+`Received`, `IsInputActive` and the suppression filters all sit on the shared
+surface. `Compose` stages a line in the one chat entry both front ends type
+into, so on a windowless client it appears at the console and the next Enter
+sends it.
+
+The headless console is that second front end, and `docs/building-and-running.md`
+describes what can be typed at it.

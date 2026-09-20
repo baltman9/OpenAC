@@ -162,9 +162,9 @@ more session entries for a multi-session process. Built-in policies:
 
 ### The headless console
 
-`run --console` turns a single-session process into an interactive client: it
-prints the chat box and reads typed lines. Chat appears with the same wording
-the graphical client's chat window uses, behind a short tag standing in for the
+`run --console` turns a headless process into an interactive client: it prints
+the chat box and reads typed lines. Chat appears with the same wording the
+graphical client's chat window uses, behind a short tag standing in for the
 colour that window would draw the line in, and honouring that window's
 message-type filters:
 
@@ -184,6 +184,87 @@ itself, which the graphical client shows in its status overlay.
 The console is on by default when standard input is a terminal.
 `ACDREAM_HEADLESS_CONSOLE=1` forces it on for a redirected stdin, and `=0`
 turns it off; `--console` overrides both.
+
+#### Typing
+
+A typed line goes into the same chat entry the graphical client's chat box
+types into, so it does exactly what that line does there:
+
+```
+hello                     say it out loud
+/f group up               say it on the fellowship channel
+@tell Bob, meet me        tell Bob
+/r on my way              reply to whoever told you last
+hello *wave*              say it and play the wave
+/loc                      a client command
+@who                      anything the client does not claim goes to the server
+/vt start                 a verb a plugin registered
+```
+
+The entry remembers the last 100 lines, and it remembers where plain text is
+aimed. Aim it with a channel verb or a tell and the next plain line follows:
+after `@tell Bob, meet me` a bare `hello` is a tell to Bob, exactly as it is in
+the chat box. A plugin that stages a line with `Chat.Compose` shows it as
+`-- draft: ...`, and pressing Enter on an empty console line sends it.
+
+#### Client commands that need a window
+
+The client's own verbs work on either client. Two of them draw something, and
+a client without a window answers in plain words rather than not knowing the
+verb:
+
+```
+/nav grid                 Navigation: this client has nothing to draw the grid on
+/nav route Bob            Navigation: this client has nothing to draw a route on
+```
+
+Everything else `/nav` and `/motor` do is identical with or without a window,
+and so is `/status`, which answers the session's generation, where it is in its
+life, and where the character stands:
+
+```
+/status
+generation=3 state=InWorld position=cell=0xC6A9002B local=(84.31,112.07,42.00)
+```
+
+`/status` is a verb of the client's, not of the console's, so the graphical
+chat box answers it with the same line. The verbs the client reserves on the
+command registry -- `nav`, `motor` and `status` -- are not available to a
+plugin.
+
+#### The console's own verbs
+
+Three verbs belong to the console rather than to the client. Each is offered
+to the session's command registry first, so a plugin that registers the same
+verb keeps it:
+
+| Verb | What it does |
+|---|---|
+| `/quit` | Ends every session in the process, gracefully. `@quit` still goes to the server. |
+| `/session <id>` | Chooses which session an unaddressed line goes to. With no id it says which one that is. |
+| `/sessions` | Lists the sessions this process is running and marks the one being talked to. |
+
+#### More than one session
+
+A process running several sessions gives them one console between them. Every
+printed line names the session it came from, and a line can be addressed to
+one session without changing which one the next line goes to:
+
+```
+-- [alpha] entered world
+-- [beta] entered world
+[alpha] [say] Bob says, "hi there"
+@beta /loc                       one line to beta
+/session beta                    every following line to beta
+-- [alpha] now talking to beta
+/sessions
+-- [alpha] session alpha
+-- [beta] session beta (talking to this one)
+```
+
+An at sign is only read as an address when it names a session this process is
+really running, so the server verbs that start with one -- `@tell`, `@who` --
+are left alone.
 
 **Two streams.** The machine-readable JSON diagnostic lines keep
 standard output, unchanged, so a script can parse them while a person watches
