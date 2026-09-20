@@ -1,4 +1,5 @@
 using AcDream.Content;
+using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 using DatReaderWriter;
@@ -26,6 +27,13 @@ internal interface IRuntimeMotionContentSource
     /// zero or the content is not to hand.
     /// </summary>
     MotionTable? TryGetMotionTable(uint motionTableId);
+
+    /// <summary>
+    /// The part layout stored under this id, or null when the id is zero or
+    /// the content is not to hand. A body's cycles are played against its
+    /// parts, so the layout is as much animation content as the table is.
+    /// </summary>
+    Setup? TryGetSetup(uint setupId);
 }
 
 /// <summary>
@@ -49,6 +57,9 @@ internal sealed class RuntimeDatMotionContentSource : IRuntimeMotionContentSourc
 
     public MotionTable? TryGetMotionTable(uint motionTableId) =>
         motionTableId == 0u ? null : _dats.Get<MotionTable>(motionTableId);
+
+    public Setup? TryGetSetup(uint setupId) =>
+        setupId == 0u ? null : _dats.Get<Setup>(setupId);
 }
 
 /// <summary>
@@ -117,6 +128,49 @@ internal sealed class RuntimeMotionStateBuilder
                 new MotionTable(),
                 _content.AnimationLoader),
         };
+    }
+
+    /// <summary>
+    /// A body's motion state built from nothing but the creation description
+    /// the server sent: its part layout, the table its cycles come from, the
+    /// stance and command it arrived in, and the scale it wears.
+    /// </summary>
+    /// <remarks>
+    /// This is the whole of what a client needs to build a body, so a client
+    /// with no richer maker of its own has one here. The order of the three
+    /// ways a body comes by its cycles is the order a client with a window
+    /// tries them in: its own table first, then the one animation its part
+    /// layout names, then nothing at all. A description that names no part
+    /// layout, or one this client's content has no layout for, yields a body
+    /// that plays nothing and still carries its scale.
+    /// </remarks>
+    public RuntimeRemoteAnimationState CreateFromSpawn(
+        WorldSession.EntitySpawn spawn,
+        float scale)
+    {
+        uint setupId = spawn.Physics?.SetupTableId ?? spawn.SetupTableId ?? 0u;
+        if (_content.TryGetSetup(setupId) is not { } setup)
+            return CreateWithoutSequencer(scale);
+
+        uint motionTableId = spawn.Physics?.MotionTableId
+            ?? spawn.MotionTableId
+            ?? (uint)setup.DefaultMotionTable;
+        RuntimeRemoteAnimationState fromTable = CreateFromMotionTable(
+            setup,
+            motionTableId,
+            scale,
+            spawn.MotionState);
+        if (fromTable.Sequencer is not null)
+            return fromTable;
+
+        if ((uint)setup.DefaultAnimation == 0u)
+            return fromTable;
+
+        RuntimeRemoteAnimationState fromDefault =
+            CreateFromDefaultAnimation(setup, scale);
+        return fromDefault.Sequencer?.HasCurrentNode == true
+            ? fromDefault
+            : fromTable;
     }
 
     /// <summary>

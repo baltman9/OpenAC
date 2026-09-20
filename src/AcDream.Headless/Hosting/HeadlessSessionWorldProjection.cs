@@ -541,8 +541,17 @@ internal sealed class HeadlessSessionWorldProjection
     /// published. Without a window that is the whole of the question; a client
     /// with one also asks whether the landblock is drawn.
     /// </summary>
+    /// <remarks>
+    /// Made once and kept: it is read while the session is being built, and a
+    /// fresh one per read would be a new object on a path that is asked the
+    /// same question over and over.
+    /// </remarks>
     internal IRuntimeRemotePlacementServiceWindow RemotePlacementServiceWindow =>
-        new PublishedCollisionServiceWindow(_collision);
+        _remotePlacementServiceWindow ??=
+            new PublishedCollisionServiceWindow(_collision);
+
+    private IRuntimeRemotePlacementServiceWindow?
+        _remotePlacementServiceWindow;
 
     private sealed class PublishedCollisionServiceWindow(
         IHeadlessCollisionNeighborhood collision)

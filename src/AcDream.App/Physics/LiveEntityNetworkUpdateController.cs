@@ -590,16 +590,32 @@ internal sealed class LiveEntityNetworkUpdateController
         return result;
     }
 
+    /// <summary>
+    /// Whether this body is going to be carried forward, which is what
+    /// decides whether an accepted position is queued for it to catch up to
+    /// or written straight onto it.
+    /// </summary>
+    /// <remarks>
+    /// The test itself is the shared one, so both clients answer it the same
+    /// way for the same body. What is added here is this client's own two
+    /// questions about what it is DRAWING -- is this still the body under
+    /// this projection, and is that projection still the current one -- and
+    /// its own answer to whether the body's clock is running, which follows
+    /// from the same projection.
+    /// </remarks>
     private bool WillAdvanceRemoteMotion(uint serverGuid, RemoteMotion remote)
     {
         return _liveEntities is { } runtime
             && runtime.TryGetRecord(serverGuid, out LiveEntityRecord record)
             && ReferenceEquals(record.RemoteMotionRuntime, remote)
-            && (record.FinalPhysicsState
-                & AcDream.Core.Physics.PhysicsStateFlags.Static) == 0
-            && runtime.GetRootObjectClockDisposition(serverGuid)
-                is AcDream.Core.Physics.RetailObjectClockDisposition.Advance
-            && runtime.IsCurrentSpatialRemoteMotion(record, remote);
+            && runtime.IsCurrentSpatialRemoteMotion(record, remote)
+            && AcDream.Runtime.Physics.RuntimeRemoteBodyDisposition.WillAdvance(
+                runtime.Physics,
+                record.Canonical,
+                remote,
+                runtime.GetRootObjectClockDisposition(serverGuid)
+                    is AcDream.Core.Physics.RetailObjectClockDisposition
+                        .Advance);
     }
 
     private RuntimeAuthoritativePositionRoute? ClassifyRemoteAcceptedPosition(

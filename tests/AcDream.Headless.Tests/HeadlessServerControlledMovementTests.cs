@@ -12,6 +12,7 @@ using AcDream.Headless.Hosting;
 using AcDream.Runtime;
 using AcDream.Runtime.Entities;
 using AcDream.Runtime.Gameplay;
+using AcDream.Runtime.Physics;
 using AcDream.Runtime.Session;
 
 namespace AcDream.Headless.Tests;
@@ -90,8 +91,15 @@ public sealed class HeadlessServerControlledMovementTests
 
         // The walk is steered by what the thing being followed reports about
         // itself, and it reports nothing unless it is given its own pass over
-        // the characters watching it. Without that pass the character walks to
-        // where the thing used to be and stops there, eight metres out.
+        // the characters watching it. That pass is the last stage of carrying
+        // that thing's own body forward -- the one driver, and the same one on
+        // a client with a window -- so the walk only follows if the body
+        // really was carried. Without it the character walks to where the
+        // thing used to be and stops there, eight metres out.
+        Assert.True(
+            world.AdvancedBodies > 0,
+            "The creature's own body was never carried forward, so this "
+            + "proves nothing about what re-aims the walk.");
         float after = world.DistanceToTarget();
         Assert.True(
             after <= DistanceToObject + 0.5f,
@@ -203,6 +211,8 @@ public sealed class HeadlessServerControlledMovementTests
         private readonly RuntimeLocalPlayerFrameController _frame;
         private readonly RuntimeEntityRecord _target;
         private readonly OneAuthoredShape? _shapes;
+        private readonly RemoteMotion _targetMotion;
+        private readonly RuntimeRemoteBodyDrive _remoteBodies;
         private ushort _targetPositionSequence = 1;
 
         internal Fixture(float targetGirth = 0f)
@@ -240,17 +250,75 @@ public sealed class HeadlessServerControlledMovementTests
                 Runtime.MovementOwner.Controller);
 
             _target = Register(Spawn(Target, TargetStart), isLocalPlayer: false);
+            _targetMotion = ArmTargetBody();
 
             _inertSession = HeadlessSessionHostTests
                 .CreateInertLiveSessionHost();
             _frame = Runtime.CreateLocalPlayerFrameController(
                 new HeadlessLocalPlayerFrameHost(Runtime, _inertSession),
                 new HeadlessMovementInputSource(Runtime.MovementOwner));
+            _remoteBodies = new RuntimeRemoteBodyDrive(
+                Runtime.EntityObjects,
+                () => Runtime.PlayerIdentity.ServerGuid,
+                () => Runtime.MovementOwner.Controller?.Position);
+        }
+
+        /// <summary>
+        /// Gives the thing being walked at a body and the bindings that let it
+        /// move itself, the way the shared arming gives it them off an accepted
+        /// movement. Without them there is nothing for the walk to follow and
+        /// nothing to run the step that reports where it has got to.
+        /// </summary>
+        private RemoteMotion ArmTargetBody()
+        {
+            // No installed content here, so the animation content is a part
+            // layout with no cycles: enough for a body to be carried and
+            // swept, with nothing to play.
+            Runtime.EntityObjects.Physics.BindMotionContentSource(
+                new PartLayoutOnlyContent(SetupId));
+
+            var body = new PhysicsBody
+            {
+                State = PhysicsStateFlags.ReportCollisions
+                    | PhysicsStateFlags.EdgeSlide,
+                InWorld = true,
+                Orientation = Quaternion.Identity,
+            };
+            body.SnapToCell(Cell, TargetStart, TargetStart);
+            Runtime.EntityObjects.Entities.SetPhysicsBody(_target, body);
+            Runtime.EntityObjects.Physics.AcknowledgeSpatialProjection(
+                _target,
+                spatial: true);
+            RemoteMotion remote =
+                Runtime.EntityObjects.Physics.GetOrCreateRemoteMotion(_target);
+            remote.CellId = Cell;
+            remote.LastServerPos = TargetStart;
+            remote.LastServerPosTime = 1.0;
+            Runtime.EntityObjects.Physics.AcknowledgeSpatialProjection(
+                _target,
+                spatial: true);
+
+            RuntimeRemoteArming arming = RuntimeRemoteArming.Create(
+                Runtime.EntityObjects,
+                Runtime.Clock,
+                new OneAuthoredShape(SetupId, 0.5f),
+                new AnyDestination());
+            _ = arming.EnsureRemoteMotionBindings(remote, null, Target);
+            return remote;
+        }
+
+        /// <summary>Any destination is serviceable in this fixture.</summary>
+        private sealed class AnyDestination
+            : IRuntimeRemotePlacementServiceWindow
+        {
+            public bool IsWithinServiceWindow(uint landblockId) => true;
         }
 
         internal GameRuntime Runtime { get; }
 
         internal PlayerMovementController Controller { get; }
+
+        internal int AdvancedBodies { get; private set; }
 
         internal void Advance(float seconds)
         {
@@ -258,10 +326,13 @@ public sealed class HeadlessServerControlledMovementTests
             int ticks = (int)(seconds / step);
             for (int tick = 0; tick < ticks; tick++)
             {
-                // The same two statements the windowless host's own tick
-                // makes, in the same order.
+                // The same statements the windowless host's own tick makes,
+                // in the same order: the character's own step, then every
+                // other creature's body, then the close of the frame.
                 _ = Runtime.Clock.Advance(step);
                 _frame.AdvanceBeforeNetwork(step);
+                _remoteBodies.Tick(step);
+                AdvancedBodies += _remoteBodies.LastAdvancedCount;
                 _frame.RunPostNetworkCommandPhase();
             }
         }
@@ -277,6 +348,12 @@ public sealed class HeadlessServerControlledMovementTests
         internal void MoveTarget(Vector3 position)
         {
             _targetPositionSequence++;
+            // The server moved the creature, and this client's body for it is
+            // put where the server says. What the routing of an accepted
+            // position does to a body has its own tests; what matters here is
+            // that the body really is somewhere else.
+            _targetMotion.Body.SnapToCell(Cell, position, position);
+            _targetMotion.LastServerPos = position;
             Assert.True(Runtime.EntityObjects.TryApplyPosition(
                 new WorldSession.EntityPositionUpdate(
                     Guid: Target,
@@ -388,6 +465,36 @@ public sealed class HeadlessServerControlledMovementTests
 
         public void Dispose()
         {
+        }
+    }
+
+    /// <summary>
+    /// A client with no installed content still knows a part layout: enough
+    /// for a body to be carried and swept, with no cycles to play.
+    /// </summary>
+    private sealed class PartLayoutOnlyContent(uint setupId)
+        : IRuntimeMotionContentSource
+    {
+        public IAnimationLoader AnimationLoader { get; } =
+            new NoAnimations();
+
+        public DatReaderWriter.DBObjs.MotionTable? TryGetMotionTable(
+            uint motionTableId) => null;
+
+        public DatReaderWriter.DBObjs.Setup? TryGetSetup(uint id)
+        {
+            if (id != setupId)
+                return null;
+            var setup = new DatReaderWriter.DBObjs.Setup();
+            setup.Parts.Add(0x01000000u);
+            setup.DefaultScale.Add(Vector3.One);
+            return setup;
+        }
+
+        private sealed class NoAnimations : IAnimationLoader
+        {
+            public DatReaderWriter.DBObjs.Animation? LoadAnimation(uint id) =>
+                null;
         }
     }
 

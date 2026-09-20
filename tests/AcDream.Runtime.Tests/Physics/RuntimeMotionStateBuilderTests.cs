@@ -17,6 +17,7 @@ namespace AcDream.Runtime.Tests.Physics;
 public sealed class RuntimeMotionStateBuilderTests
 {
     private const uint TableId = 0x09000001u;
+    private const uint SetupId = 0x02000001u;
     private const uint NonCombat = 0x8000003Du;
     private const uint Ready = 0x41000003u;
     private const uint Walk = 0x45000005u;
@@ -170,6 +171,92 @@ public sealed class RuntimeMotionStateBuilderTests
         Assert.Null(builder.TryResolvePlan(0x09009999u, wire));
     }
 
+    /// <summary>
+    /// The whole of what a client with nothing to present has to go on: the
+    /// creation description. It has to reach the same body a client with a
+    /// window builds from the same description.
+    /// </summary>
+    [Fact]
+    public void ABodyBuiltFromNothingButTheCreationDescriptionMatchesATableBuild()
+    {
+        (Setup setup, MotionTable table, Loader loader) = Content();
+        var builder = new RuntimeMotionStateBuilder(
+            new FixedContent(table, loader, setup));
+        var wire = new CreateObject.ServerMotionState(
+            Stance: 0x003D,
+            ForwardCommand: 0x0005);
+
+        RuntimeRemoteAnimationState state = builder.CreateFromSpawn(
+            Spawn(SetupId, TableId, wire),
+            scale: 2.5f);
+
+        RuntimeRemoteAnimationState expected = builder.CreateFromMotionTable(
+            setup, TableId, scale: 2.5f, wire);
+        Assert.NotNull(state.Sequencer);
+        Assert.Equal(
+            expected.Sequencer!.CurrentStyle, state.Sequencer!.CurrentStyle);
+        Assert.Equal(
+            expected.Sequencer.CurrentMotion, state.Sequencer.CurrentMotion);
+        Assert.Equal(2.5f, state.Scale);
+    }
+
+    /// <summary>
+    /// The description names the table; the part layout's own default is the
+    /// fallback, exactly as a client with a window falls back.
+    /// </summary>
+    [Fact]
+    public void ADescriptionWithNoTableOfItsOwnFallsBackToThePartLayoutsDefault()
+    {
+        (Setup setup, MotionTable table, Loader loader) = Content();
+        setup.DefaultAnimation = (DatReaderWriter.Types.QualifiedDataId<Animation>)0x300u;
+        var builder = new RuntimeMotionStateBuilder(
+            new FixedContent(table, loader, setup));
+
+        RuntimeRemoteAnimationState state = builder.CreateFromSpawn(
+            Spawn(SetupId, motionTableId: 0u, wireState: null),
+            scale: 1f);
+
+        Assert.NotNull(state.Sequencer);
+        Assert.Equal(0u, state.Sequencer!.CurrentStyle);
+    }
+
+    /// <summary>
+    /// No part layout to hand means a body that plays nothing and still wears
+    /// its scale: that is what a client with no content for an object has.
+    /// </summary>
+    [Fact]
+    public void ALayoutThisClientHasNoContentForGivesABodyThatPlaysNothing()
+    {
+        (Setup setup, MotionTable table, Loader loader) = Content();
+        var builder = new RuntimeMotionStateBuilder(
+            new FixedContent(table, loader, setup));
+
+        RuntimeRemoteAnimationState state = builder.CreateFromSpawn(
+            Spawn(setupId: 0x02009999u, TableId, wireState: null),
+            scale: 0.5f);
+
+        Assert.Null(state.Sequencer);
+        Assert.Equal(0.5f, state.Scale);
+    }
+
+    private static AcDream.Core.Net.WorldSession.EntitySpawn Spawn(
+        uint setupId,
+        uint motionTableId,
+        CreateObject.ServerMotionState? wireState) =>
+        new(
+            0x70000001u,
+            null,
+            setupId,
+            Array.Empty<CreateObject.AnimPartChange>(),
+            Array.Empty<CreateObject.TextureChange>(),
+            Array.Empty<CreateObject.SubPaletteSwap>(),
+            null,
+            null,
+            "motion state builder fixture",
+            null,
+            wireState,
+            motionTableId == 0u ? null : motionTableId);
+
     // -- content -------------------------------------------------------------
 
     private static (Setup Setup, MotionTable Table, Loader Loader) Content()
@@ -227,12 +314,16 @@ public sealed class RuntimeMotionStateBuilderTests
 
     private sealed class FixedContent(
         MotionTable table,
-        IAnimationLoader loader) : IRuntimeMotionContentSource
+        IAnimationLoader loader,
+        Setup? setup = null) : IRuntimeMotionContentSource
     {
         public IAnimationLoader AnimationLoader => loader;
 
         public MotionTable? TryGetMotionTable(uint motionTableId) =>
             motionTableId == TableId ? table : null;
+
+        public Setup? TryGetSetup(uint setupId) =>
+            setupId == SetupId ? setup : null;
     }
 
     private sealed class Loader : IAnimationLoader

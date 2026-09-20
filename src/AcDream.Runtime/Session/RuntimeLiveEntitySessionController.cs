@@ -638,10 +638,43 @@ public sealed class RuntimeLiveEntitySessionController
             || !Entities.Entities.TryGetActive(
                 update.Guid,
                 out RuntimeEntityRecord record)
-            || record.RemoteMotion is not RemoteMotion remote
+            || (record.FinalPhysicsState & PhysicsStateFlags.Static) != 0
+            || record.PhysicsBody is null
             || IsMissilePacket(record, update.Guid))
         {
             return;
+        }
+
+        Vector3 worldPosition = Entities.Physics.WireOriginToWorldFrame(
+            update.Position.LandblockId,
+            update.Position.PositionX,
+            update.Position.PositionY,
+            update.Position.PositionZ);
+        var wireRotation = new Quaternion(
+            update.Position.RotationX,
+            update.Position.RotationY,
+            update.Position.RotationZ,
+            update.Position.RotationW);
+
+        // The server's first word about where another creature is is also
+        // when that creature gets a body to move: a creature that arrives
+        // after this client entered the world is never armed by anything
+        // else, and one with no body cannot catch up to anything.
+        RemoteMotion remote = Entities.Physics.GetOrCreateRemoteMotion(record);
+        if (!Entities.Entities.IsCurrent(record)
+            || !ReferenceEquals(record.RemoteMotion, remote))
+        {
+            return;
+        }
+        if (!remote.Body.InContact)
+        {
+            remote.Body.Position = worldPosition;
+            remote.Body.Orientation = wireRotation;
+            arming.SeatBodyIfUnseated(
+                record,
+                remote,
+                worldPosition,
+                update.Position.LandblockId);
         }
 
         ulong positionAuthority = record.PositionAuthorityVersion;
@@ -675,17 +708,16 @@ public sealed class RuntimeLiveEntitySessionController
                 record,
                 remote,
                 route,
-                Entities.Physics.WireOriginToWorldFrame(
-                    update.Position.LandblockId,
-                    update.Position.PositionX,
-                    update.Position.PositionY,
-                    update.Position.PositionZ),
-                new Quaternion(
-                    update.Position.RotationX,
-                    update.Position.RotationY,
-                    update.Position.RotationZ,
-                    update.Position.RotationW),
-                willBeAdvanced: false,
+                worldPosition,
+                wireRotation,
+                // The same shared test the client with a window makes: a body
+                // that is going to be carried forward catches up to the
+                // server's word on its own, and one that is not takes it
+                // outright.
+                willBeAdvanced: RuntimeRemoteBodyDisposition.WillAdvance(
+                    Entities.Physics,
+                    record,
+                    remote),
                 runTeleportHook: IsCurrent);
         if (!IsCurrent())
             return;

@@ -432,6 +432,10 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
 
         public MotionTable? TryGetMotionTable(uint motionTableId) =>
             motionTableId == FixtureMotionTableId ? table : null;
+
+        // This fixture hands the builder a layout itself, so it has no
+        // layouts of its own to look up.
+        public DatReaderWriter.DBObjs.Setup? TryGetSetup(uint setupId) => null;
     }
 
     private sealed class Loader : IAnimationLoader

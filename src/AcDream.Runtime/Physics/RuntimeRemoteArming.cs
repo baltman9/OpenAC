@@ -135,6 +135,16 @@ internal sealed class RuntimeRemoteArming
     private readonly RemoteInboundMotionDispatcher _inboundMotion;
 
     /// <summary>
+    /// The one clock a body is timed by. Everything a body does -- how often
+    /// it tells its watchers where it has got to, how long it has been
+    /// walking -- is measured against the runtime's own clock rather than
+    /// against the wall, because the wall runs at a different rate on a
+    /// client that is drawing and one that is not, and a throttle read off
+    /// two different clocks is two different throttles.
+    /// </summary>
+    private readonly IGameRuntimeClock _clock;
+
+    /// <summary>
     /// Builds the arming and, with it, the drive that carries out an accepted
     /// re-placement of a remote body. The drive is built here rather than at a
     /// host because a body re-placed by the server has to land in the same
@@ -148,6 +158,7 @@ internal sealed class RuntimeRemoteArming
         RuntimeRemoteArmingHostFacts? hostFacts = null)
     {
         ArgumentNullException.ThrowIfNull(entityObjects);
+        ArgumentNullException.ThrowIfNull(clock);
         return new RuntimeRemoteArming(
             entityObjects,
             new RuntimeRemotePlacementDriveController(
@@ -155,6 +166,7 @@ internal sealed class RuntimeRemoteArming
                 clock,
                 collisionSource,
                 serviceWindow),
+            clock,
             hostFacts
                 ?? RuntimeRemoteArmingHostFacts.FromRecords(entityObjects));
     }
@@ -162,12 +174,14 @@ internal sealed class RuntimeRemoteArming
     internal RuntimeRemoteArming(
         RuntimeEntityObjectLifetime entityObjects,
         RuntimeRemotePlacementDriveController placementDrive,
+        IGameRuntimeClock clock,
         RuntimeRemoteArmingHostFacts facts)
     {
         _entityObjects = entityObjects
             ?? throw new ArgumentNullException(nameof(entityObjects));
         _placementDrive = placementDrive
             ?? throw new ArgumentNullException(nameof(placementDrive));
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         ArgumentNullException.ThrowIfNull(facts.DrawnBody);
         ArgumentNullException.ThrowIfNull(facts.WireOriginToWorld);
         ArgumentNullException.ThrowIfNull(facts.InteractionTargetPosition);
@@ -290,6 +304,73 @@ internal sealed class RuntimeRemoteArming
         remote.Motion.UnstickFromObject = host.PositionManager.UnStick;
         return remote.Sink;
     }
+
+    /// <summary>
+    /// Settles a body that has nothing under it yet onto the ground beneath
+    /// the place the server named, so that its first step is taken from the
+    /// floor rather than from mid-air.
+    /// </summary>
+    /// <remarks>
+    /// A body arrives knowing where it is and nothing about what it is
+    /// standing on. Until it has been settled once, everything downstream
+    /// reads it as airborne: its own travel is thrown away, its accepted
+    /// positions are written straight onto it instead of being caught up to,
+    /// and it never plays a walk. So the first word the server says about a
+    /// body's place is also when it is put on the ground. A body already in
+    /// contact is left exactly as it is; the settle is a one-off, not a
+    /// correction.
+    /// </remarks>
+    internal void SeatBodyIfUnseated(
+        RuntimeEntityRecord record,
+        RemoteMotion remote,
+        Vector3 worldPosition,
+        uint cellId)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        ArgumentNullException.ThrowIfNull(remote);
+        if (remote.Body.InContact)
+            return;
+
+        (float radius, float height) = BodyShape(record.ServerGuid);
+        if (radius < MinimumSettleRadius)
+        {
+            radius = FallbackSettleRadius;
+            height = FallbackSettleHeight;
+        }
+
+        ObjectInfoState moverFlags = IsPlayerGuid(record.ServerGuid)
+            ? ObjectInfoState.IsPlayer | ObjectInfoState.EdgeSlide
+            : ObjectInfoState.EdgeSlide;
+        if (!SpawnPlacementSettler.TrySettle(
+                Physics.Engine,
+                remote.Body,
+                worldPosition,
+                cellId,
+                radius,
+                height,
+                moverFlags,
+                record.LocalEntityId ?? 0u,
+                remote.Movement.HitGround,
+                remote.Motion.LeaveGround))
+        {
+            return;
+        }
+        remote.Airborne = !remote.Body.OnWalkable;
+    }
+
+    /// <summary>
+    /// Below this the authored shape is not to hand at all, and a body
+    /// settled as a point would fall through anything it should stand on.
+    /// </summary>
+    private const float MinimumSettleRadius = 0.05f;
+
+    /// <summary>The girth and height of an ordinary person on two legs.</summary>
+    private const float FallbackSettleRadius = 0.48f;
+
+    private const float FallbackSettleHeight = 1.835f;
+
+    private static bool IsPlayerGuid(uint guid) =>
+        (guid & 0xFF000000u) == 0x50000000u;
 
     /// <summary>
     /// Sticks a body to the thing the server named, at that thing's own girth
@@ -563,6 +644,5 @@ internal sealed class RuntimeRemoteArming
     private (float Radius, float Height) BodyShape(uint serverGuid) =>
         Physics.EntityBodyShape(serverGuid) ?? (0f, 0f);
 
-    private static double NowSeconds() =>
-        (DateTime.UtcNow - DateTime.UnixEpoch).TotalSeconds;
+    private double NowSeconds() => _clock.SimulationTimeSeconds;
 }

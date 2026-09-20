@@ -168,6 +168,14 @@ internal sealed class HeadlessSessionHost : IDisposable
     private RuntimeFirstEntryDriveController? _firstEntryDrive;
     private RuntimeAcceptedPositionDriveController? _acceptedPositionDrive;
     private AcDream.Runtime.Physics.RuntimeRemoteArming? _remoteArming;
+
+    /// <summary>
+    /// What carries every other creature's body forward between the server's
+    /// updates. Absent when this session holds no lease on the installed data
+    /// files: with no animation content there is nothing to carry a body by,
+    /// and its bodies stand where the server put them.
+    /// </summary>
+    private AcDream.Runtime.Physics.RuntimeRemoteBodyDrive? _remoteBodies;
     private AcDream.Core.Net.WorldSession? _currentSession;
     private HeadlessSessionWorldProjection? _worldProjection;
     private RuntimeLiveEntitySessionController? _entities;
@@ -539,6 +547,11 @@ internal sealed class HeadlessSessionHost : IDisposable
         _navigationWalk?.Tick(deltaSeconds);
         _localPlayerFrame.AdvanceBeforeNetwork(
             checked((float)deltaSeconds));
+        // The same place in the frame a client with a window carries them:
+        // after the character's own step and before anything the server has
+        // said this frame is read, so every body spends the same elapsed time
+        // on both clients.
+        _remoteBodies?.Tick(checked((float)deltaSeconds));
         _liveSession.Tick();
         _worldProjection?.PumpFirstEntry();
         _entities?.PumpPortalCompletion();
@@ -1010,6 +1023,14 @@ internal sealed class HeadlessSessionHost : IDisposable
                 Runtime.Clock,
                 content.PreparedCollision,
                 projection.RemotePlacementServiceWindow);
+            // Carrying those bodies forward is the runtime's too. This client
+            // says when, and hands over the two things only a client knows:
+            // which body is the character's, and where the character is.
+            _remoteBodies ??= new AcDream.Runtime.Physics
+                .RuntimeRemoteBodyDrive(
+                    Runtime.EntityObjects,
+                    () => Runtime.PlayerIdentity.ServerGuid,
+                    () => Runtime.MovementOwner.Controller?.Position);
         }
         var entities = new RuntimeLiveEntitySessionController(
             Runtime,

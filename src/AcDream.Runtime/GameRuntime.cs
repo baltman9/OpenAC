@@ -737,6 +737,19 @@ public sealed class GameRuntime
             controller.CaptureMovementResult(mouseLookEvent: false));
     }
 
+    /// <summary>
+    /// Tells everything watching the character where it has got to. A walk
+    /// somebody else is running at this character is re-aimed from here, once
+    /// per frame.
+    /// </summary>
+    /// <remarks>
+    /// The character's own body only. A creature this character is walking at
+    /// tells its own watchers where IT has got to as the last stage of its own
+    /// step, so a client that carries other creatures' bodies forward already
+    /// re-aims the walk -- and doing it from here as well would re-aim it
+    /// twice a frame on one client and once on another, which is the
+    /// difference rather than the fix.
+    /// </remarks>
     public void HandleLocalPlayerTargeting()
     {
         ObjectDisposedException.ThrowIf(_disposeRequested || _disposed, this);
@@ -749,16 +762,6 @@ public sealed class GameRuntime
         }
 
         localBody.HandleTargetting();
-
-        uint sought =
-            MovementOwner.Controller?.Movement.MoveTo?.TopLevelObjectId ?? 0u;
-        if (sought == 0u || sought == player)
-            return;
-        if (EntityObjects.Physics.ResolveObjectTableHost(sought)
-            is EntityPhysicsHost soughtBody)
-        {
-            soughtBody.HandleTargetting();
-        }
     }
 
     public RuntimeLocalPlayerFrameController CreateLocalPlayerFrameController(

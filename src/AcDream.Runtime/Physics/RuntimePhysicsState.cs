@@ -517,6 +517,37 @@ public sealed class RuntimePhysicsState : IDisposable
 
     internal uint WorldFrameCenterLandblockId => _worldFrameCenterLandblockId;
 
+    /// <summary>
+    /// The landblock this client measures every world position from, as the
+    /// pair of landblock coordinates those offsets are worked out against. A
+    /// client that has not seen the character's own place yet measures from
+    /// the corner of the world.
+    /// </summary>
+    internal (int X, int Y) WorldFrameCenter
+    {
+        get
+        {
+            EnsureNotDisposed();
+            uint center = _worldFrameCenterLandblockId;
+            return ((int)((center >> 24) & 0xFFu), (int)((center >> 16) & 0xFFu));
+        }
+    }
+
+    /// <summary>
+    /// The uniform scale the server gave this particular thing, read from the
+    /// one place every measurement of it reads: its creation description. A
+    /// thing with none declared wears its authored size.
+    /// </summary>
+    internal float EntityObjectScale(RuntimeEntityRecord record)
+    {
+        EnsureNotDisposed();
+        ArgumentNullException.ThrowIfNull(record);
+        float declared = record.Snapshot.Physics?.Scale
+            ?? record.Snapshot.ObjScale
+            ?? 1f;
+        return declared > 0f ? declared : 1f;
+    }
+
     internal void ObserveLocalPlayerCreate(uint fullCellId)
     {
         EnsureNotDisposed();
