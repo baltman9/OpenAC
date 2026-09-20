@@ -8,6 +8,7 @@ using AcDream.Core.Properties;
 using AcDream.Core.Spells;
 using AcDream.Runtime.Entities;
 using AcDream.Runtime.Gameplay;
+using AcDream.Runtime.Physics;
 
 namespace AcDream.Runtime.Tests.Gameplay;
 
@@ -316,6 +317,151 @@ public sealed class RuntimeHostileTargetQueryTests
         target = Assert.Single(RuntimeHostileTargetQuery.Capture(runtime, maximumDistance: 50f, HostileTargetScope.Classified));
         Assert.Equal(6f, target.Distance, 3);
         Assert.Equal(6f, target.HeightDifference, 3);
+    }
+
+    /// <summary>
+    /// The one owner of "where is this entity now": the simulated body once
+    /// it has a cell, otherwise the last position the server sent.
+    /// Mutation: answer from the server's position first and the advanced
+    /// body is never heard from.
+    /// </summary>
+    [Fact]
+    public void AbsoluteWorldPosition_PrefersTheAdvancedBodyOverTheWirePosition()
+    {
+        using GameRuntime runtime = Create();
+        runtime.PlayerIdentity.ServerGuid = Player;
+        Add(runtime, 0x50000010u, 0x01010001u, 10f, 30f, Hostile(0x50000010u));
+        Assert.True(runtime.EntityObjects.Entities.TryGetActive(
+            0x50000010u, out RuntimeEntityRecord record));
+
+        // No body yet: the server's word is all there is.
+        Assert.True(RuntimePhysicsState.TryGetAbsoluteWorldPosition(
+            record, out Vector3 wire));
+        Assert.Equal(new Vector3(10f + 192f, 30f + 192f, 5f), wire);
+
+        // A body that has not been placed yet has no cell, so it is not an
+        // answer either.
+        var body = new PhysicsBody();
+        record.SetPhysicsBody(body);
+        Assert.True(RuntimePhysicsState.TryGetAbsoluteWorldPosition(
+            record, out Vector3 cellless));
+        Assert.Equal(wire, cellless);
+
+        // Placed, then advanced ten metres by the frame loop.
+        body.SnapToCell(
+            0x01010001u,
+            new Vector3(10f, 30f, 5f),
+            new Vector3(10f, 30f, 5f));
+        body.Position = new Vector3(10f, 20f, 5f);
+        Assert.True(RuntimePhysicsState.TryGetAbsoluteWorldPosition(
+            record, out Vector3 advanced));
+        Assert.Equal(new Vector3(10f + 192f, 20f + 192f, 5f), advanced);
+    }
+
+    /// <summary>
+    /// A creature the server placed twenty metres off walks ten metres into
+    /// an eight-metre watch window. One scan has to see it there, because
+    /// that is where it is swinging from.
+    /// Mutation: measure the creature from its server position and it stays
+    /// invisible to the scan until the next server update.
+    /// </summary>
+    [Fact]
+    public void Capture_SeesACreatureThatWalkedIntoTheWindowWithinOneScan()
+    {
+        using GameRuntime runtime = Create();
+        runtime.PlayerIdentity.ServerGuid = Player;
+        Add(runtime, Player, 0x01010001u, 10f, 10f, PlayerObject(Player));
+        Add(runtime, 0x50000010u, 0x01010001u, 10f, 30f, Hostile(0x50000010u));
+        Assert.True(runtime.EntityObjects.Entities.TryGetActive(
+            0x50000010u, out RuntimeEntityRecord record));
+        var body = new PhysicsBody();
+        body.SnapToCell(
+            0x01010001u,
+            new Vector3(10f, 30f, 5f),
+            new Vector3(10f, 30f, 5f));
+        record.SetPhysicsBody(body);
+
+        Assert.Empty(RuntimeHostileTargetQuery.Capture(
+            runtime, 8f, HostileTargetScope.Classified));
+
+        body.Position = new Vector3(10f, 12f, 5f);
+
+        RuntimeHostileTargetSnapshot target = Assert.Single(
+            RuntimeHostileTargetQuery.Capture(
+                runtime, 8f, HostileTargetScope.Classified));
+        Assert.Equal(2f, target.Distance, 3);
+        Assert.Equal(
+            0x50000010u,
+            RuntimeHostileTargetQuery.FindClosest(
+                runtime, HostileTargetScope.Classified));
+    }
+
+    /// <summary>
+    /// The reader a looting client asks how far a corpse is and the reader a
+    /// fighting client asks how far a creature is have to answer the same
+    /// for the same entity, or the client walks away from a fight it is
+    /// still in.
+    /// Mutation: let either reader fall back to the server's position on its
+    /// own and the two answers part company the moment anything moves.
+    /// </summary>
+    [Fact]
+    public void ObjectDistanceReaderAgreesWithTheHostileScan()
+    {
+        using GameRuntime runtime = Create();
+        runtime.PlayerIdentity.ServerGuid = Player;
+        Add(runtime, Player, 0x01010001u, 10f, 10f, PlayerObject(Player));
+        Add(runtime, 0x50000010u, 0x01010001u, 10f, 30f, Hostile(0x50000010u));
+        Assert.True(runtime.EntityObjects.Entities.TryGetActive(
+            0x50000010u, out RuntimeEntityRecord record));
+        var body = new PhysicsBody();
+        body.SnapToCell(
+            0x01010001u,
+            new Vector3(10f, 30f, 5f),
+            new Vector3(10f, 30f, 5f));
+        record.SetPhysicsBody(body);
+        body.Position = new Vector3(10f, 13f, 5f);
+
+        RuntimeHostileTargetSnapshot target = Assert.Single(
+            RuntimeHostileTargetQuery.Capture(
+                runtime, 50f, HostileTargetScope.Classified));
+        Assert.True(RuntimeFriendlyTargetQuery.TryGetDistance(
+            runtime, 0x50000010u, out float objectDistance));
+
+        Assert.Equal(3f, target.Distance, 3);
+        Assert.Equal(target.Distance, objectDistance, 3);
+    }
+
+    /// <summary>
+    /// The local character is measured from its own simulated body too, so a
+    /// character that has run away from where the server last placed it does
+    /// not drag every distance in the client along with it.
+    /// Mutation: read the player's server position and every distance is off
+    /// by how far the character has run since.
+    /// </summary>
+    [Fact]
+    public void DistancesFollowTheLocalCharactersOwnBody()
+    {
+        using GameRuntime runtime = Create();
+        runtime.PlayerIdentity.ServerGuid = Player;
+        Add(runtime, Player, 0x01010001u, 10f, 10f, PlayerObject(Player));
+        Add(runtime, 0x50000010u, 0x01010001u, 10f, 30f, Hostile(0x50000010u));
+        Assert.True(runtime.EntityObjects.Entities.TryGetActive(
+            Player, out RuntimeEntityRecord playerRecord));
+        var playerBody = new PhysicsBody();
+        playerBody.SnapToCell(
+            0x01010001u,
+            new Vector3(10f, 10f, 5f),
+            new Vector3(10f, 10f, 5f));
+        playerRecord.SetPhysicsBody(playerBody);
+        playerBody.Position = new Vector3(10f, 26f, 5f);
+
+        RuntimeHostileTargetSnapshot target = Assert.Single(
+            RuntimeHostileTargetQuery.Capture(
+                runtime, 50f, HostileTargetScope.Classified));
+        Assert.Equal(4f, target.Distance, 3);
+        Assert.True(RuntimeFriendlyTargetQuery.TryGetDistance(
+            runtime, 0x50000010u, out float objectDistance));
+        Assert.Equal(4f, objectDistance, 3);
     }
 
     [Fact]

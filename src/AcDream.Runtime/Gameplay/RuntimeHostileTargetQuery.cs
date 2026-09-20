@@ -6,6 +6,7 @@ using AcDream.Core.Physics;
 using AcDream.Core.Physics.Motion;
 using AcDream.Core.Properties;
 using AcDream.Runtime.Entities;
+using AcDream.Runtime.Physics;
 
 namespace AcDream.Runtime.Gameplay;
 
@@ -264,19 +265,21 @@ public static class RuntimeHostileTargetQuery
         RuntimeMovementSnapshot movement = runtime.Movement.Snapshot;
         if (movement.HasController && movement.Position.ObjCellId != 0u)
         {
-            world = AbsolutePosition(movement.Position);
             headingDegrees = MoveToMath.GetHeading(movement.Position.Frame.Orientation);
-            return true;
+            return RuntimePhysicsState.TryGetAbsoluteWorldPosition(
+                playerRecord,
+                out world);
         }
         if (playerRecord.Snapshot.Position is { } position)
         {
-            world = AbsolutePosition(position);
             headingDegrees = MoveToMath.GetHeading(new Quaternion(
                 position.RotationX,
                 position.RotationY,
                 position.RotationZ,
                 position.RotationW));
-            return true;
+            return RuntimePhysicsState.TryGetAbsoluteWorldPosition(
+                playerRecord,
+                out world);
         }
         world = default;
         headingDegrees = 0f;
@@ -290,45 +293,8 @@ public static class RuntimeHostileTargetQuery
     /// was; the body is what the player sees and swings at, so distance
     /// and bearing come from the same place.
     /// </summary>
-    private static bool TryGetWorld(RuntimeEntityRecord record, out Vector3 world)
-    {
-        if (record.PhysicsBody?.CellPosition is { ObjCellId: not 0u } body)
-        {
-            world = AbsolutePosition(body);
-            return true;
-        }
-        if (record.Snapshot.Position is { } position)
-        {
-            world = AbsolutePosition(position);
-            return true;
-        }
-        world = default;
-        return false;
-    }
-
-    private static Vector3 AbsolutePosition(Position position)
-    {
-        int landblockX = (int)((position.ObjCellId >> 24) & 0xFFu);
-        int landblockY = (int)((position.ObjCellId >> 16) & 0xFFu);
-        Vector3 local = position.Frame.Origin;
-        return new Vector3(
-            local.X + landblockX * 192f,
-            local.Y + landblockY * 192f,
-            local.Z);
-    }
-
-    private static Vector3 AbsolutePosition(
-        CreateObject.ServerPosition position)
-    {
-        int landblockX =
-            (int)((position.LandblockId >> 24) & 0xFFu);
-        int landblockY =
-            (int)((position.LandblockId >> 16) & 0xFFu);
-        return new Vector3(
-            position.PositionX + landblockX * 192f,
-            position.PositionY + landblockY * 192f,
-            position.PositionZ);
-    }
+    private static bool TryGetWorld(RuntimeEntityRecord record, out Vector3 world) =>
+        RuntimePhysicsState.TryGetAbsoluteWorldPosition(record, out world);
 
     private static float NormalizeSignedDegrees(float degrees)
     {

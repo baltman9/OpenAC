@@ -536,6 +536,56 @@ public sealed class RuntimePhysicsState : IDisposable
             + "A local-player CreateObject must carry a non-zero landblock.");
     }
 
+    /// <summary>
+    /// Where an entity is right now, in absolute world metres measured from
+    /// the corner of the world rather than from any one landblock: the
+    /// simulated body once that body has a cell, otherwise the last position
+    /// the server sent. This is the one answer to "how far away is that" --
+    /// a creature walking at the character, the corpse behind it and the
+    /// vendor beside it are all measured the same way, so two readers can
+    /// never disagree about the same entity.
+    /// </summary>
+    public static bool TryGetAbsoluteWorldPosition(
+        RuntimeEntityRecord record,
+        out System.Numerics.Vector3 world)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        if (record.PhysicsBody?.CellPosition is { ObjCellId: not 0u } placed)
+        {
+            world = AbsoluteWorldPosition(
+                placed.ObjCellId,
+                placed.Frame.Origin);
+            return true;
+        }
+
+        if (record.Snapshot.Position is { } wire)
+        {
+            world = AbsoluteWorldPosition(
+                wire.LandblockId,
+                new System.Numerics.Vector3(
+                    wire.PositionX,
+                    wire.PositionY,
+                    wire.PositionZ));
+            return true;
+        }
+
+        world = default;
+        return false;
+    }
+
+    /// <summary>
+    /// Adds the landblock's corner to a position measured inside that
+    /// landblock. A landblock is 192 metres on a side and its x/y index sits
+    /// in the top two bytes of the cell id.
+    /// </summary>
+    private static System.Numerics.Vector3 AbsoluteWorldPosition(
+        uint cellId,
+        System.Numerics.Vector3 blockLocal) =>
+        new(
+            blockLocal.X + (int)((cellId >> 24) & 0xFFu) * 192f,
+            blockLocal.Y + (int)((cellId >> 16) & 0xFFu) * 192f,
+            blockLocal.Z);
+
     internal bool TryGetWorldFrameOffset(
         uint fullCellId,
         out float worldOffsetX,
