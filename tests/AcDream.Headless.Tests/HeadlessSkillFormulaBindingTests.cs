@@ -72,7 +72,8 @@ public sealed class HeadlessSkillFormulaBindingTests
                 new ChatLog(),
                 new TurbineChatState(),
                 null,
-                null));
+                null),
+            fixture.Host.Runtime.ActionOwner);
         router.Attach();
 
         session.GameEvents.Dispatch(

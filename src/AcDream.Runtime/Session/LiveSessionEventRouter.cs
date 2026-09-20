@@ -78,11 +78,17 @@ public sealed class LiveSessionEventRouter : ILiveSessionEventRouting
     private readonly LiveInventorySessionBindings _inventory;
     private readonly LiveCharacterSessionBindings _character;
     private readonly LiveSocialSessionBindings _social;
-    private readonly RuntimeActionState? _actions;
+    private readonly RuntimeActionState _actions;
     private int _constructionStep;
     private int _accepting;
     private int _lifecycleState;
 
+    /// <summary>
+    /// The action state is required rather than optional. Both hosts have
+    /// always supplied it, and an optional parameter let a host route a
+    /// session without the combat and death signals plugins observe without
+    /// anything saying so. The compiler now refuses that shape.
+    /// </summary>
     public LiveSessionEventRouter(
         WorldSession session,
         LiveEntitySessionSink entities,
@@ -90,10 +96,11 @@ public sealed class LiveSessionEventRouter : ILiveSessionEventRouting
         LiveInventorySessionBindings inventory,
         LiveCharacterSessionBindings character,
         LiveSocialSessionBindings social,
-        Action<int>? constructionCheckpoint = null,
-        RuntimeActionState? actions = null)
+        RuntimeActionState actions,
+        Action<int>? constructionCheckpoint = null)
     {
         ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(actions);
         Validate(entities, environment, inventory, character, social);
         _session = session;
         _entities = entities;
@@ -160,29 +167,23 @@ public sealed class LiveSessionEventRouter : ILiveSessionEventRouting
             // entity sink sees the packet, so a host that draws nothing knows
             // a creature has died at the same moment a host that draws it
             // does.
-            RuntimeCreatureDeathState? creatureDeath =
-                _actions?.CreatureDeath;
-            Action<WorldSession.EntitySpawn> spawned = creatureDeath is null
-                ? entities.Spawned
-                : spawn =>
-                {
-                    creatureDeath.ObserveSpawn(spawn);
-                    entities.Spawned(spawn);
-                };
-            Action<WorldSession.EntityMotionUpdate> motionUpdated =
-                creatureDeath is null
-                    ? entities.MotionUpdated
-                    : update =>
-                    {
-                        creatureDeath.ObserveMotion(update);
-                        entities.MotionUpdated(update);
-                    };
+            RuntimeCreatureDeathState creatureDeath = _actions.CreatureDeath;
+            Action<WorldSession.EntitySpawn> spawned = spawn =>
+            {
+                creatureDeath.ObserveSpawn(spawn);
+                entities.Spawned(spawn);
+            };
+            Action<WorldSession.EntityMotionUpdate> motionUpdated = update =>
+            {
+                creatureDeath.ObserveMotion(update);
+                entities.MotionUpdated(update);
+            };
             Subscribe(h => session.EntitySpawned += h, h => session.EntitySpawned -= h, spawned);
             Subscribe(h => session.EntityDeleted += h, h => session.EntityDeleted -= h, entities.Deleted);
             Subscribe(h => session.EntityPickedUp += h, h => session.EntityPickedUp -= h, entities.PickedUp);
             Subscribe(h => session.MotionUpdated += h, h => session.MotionUpdated -= h, motionUpdated);
-            if (_actions is { } actions)
             {
+                RuntimeActionState actions = _actions;
                 // Streaming the selected creature's health is a question the
                 // client asks the server, not a thing a window draws, so it
                 // is asked here for every host rather than by the one host

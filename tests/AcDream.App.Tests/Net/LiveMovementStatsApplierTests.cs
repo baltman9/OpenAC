@@ -6,6 +6,7 @@ using AcDream.Core.Items;
 using AcDream.Core.Net;
 using AcDream.Core.Physics;
 using AcDream.Core.Social;
+using AcDream.Runtime;
 using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Session;
 
@@ -24,6 +25,10 @@ public sealed class LiveMovementStatsApplierTests
         public RuntimeLocalPlayerMovementState Movement { get; } = new();
         public LiveMovementStatsApplier Applier { get; }
         public List<string> Log { get; } = [];
+
+        // The router requires an action state; a runtime supplies the one
+        // the graphical host would hand it.
+        public GameRuntime Runtime { get; } = GameRuntimeTestFactory.Create();
 
         public Harness()
         {
@@ -59,7 +64,8 @@ public sealed class LiveMovementStatsApplierTests
                     new ChatLog(),
                     new TurbineChatState(),
                     new FriendsState(),
-                    new SquelchState()));
+                    new SquelchState()),
+                Runtime.ActionOwner);
             Router.Attach();
         }
 
@@ -81,6 +87,7 @@ public sealed class LiveMovementStatsApplierTests
             Session.Dispose();
             Movement.Dispose();
             Character.Dispose();
+            Runtime.Dispose();
         }
     }
 
