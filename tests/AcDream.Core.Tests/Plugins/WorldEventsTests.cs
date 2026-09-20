@@ -28,12 +28,26 @@ public class WorldEventsTests
         var events = new WorldEvents();
         var seen = new List<PluginObjectChange>();
         events.ObjectChanged += seen.Add;
+        var current = new PluginWorldObject(
+            1u, 100u, "Portal", PluginObjectClass.Portal, 0u, 0u, 0u)
+        {
+            Capabilities = PluginObjectCapabilities.Interactable
+                | PluginObjectCapabilities.Portal,
+        };
 
-        events.FireObjectChanged(new PluginObjectChange(1, PluginObjectChangeKind.Created));
-        events.FireObjectChanged(new PluginObjectChange(1, PluginObjectChangeKind.Updated));
+        events.FireObjectChanged(new PluginObjectChange(1, PluginObjectChangeKind.Created)
+        {
+            Current = current,
+        });
+        events.FireObjectChanged(new PluginObjectChange(1, PluginObjectChangeKind.Updated)
+        {
+            Current = current with { Name = "Updated portal" },
+        });
         events.FireObjectChanged(new PluginObjectChange(1, PluginObjectChangeKind.Released));
 
         Assert.Equal([1L, 2L, 3L], seen.Select(static change => change.Revision));
+        Assert.Equal("Updated portal", seen[1].Current?.Name);
+        Assert.Null(seen[2].Current);
         Assert.All(seen, static change => Assert.Equal(1u, change.ObjectId));
     }
 
