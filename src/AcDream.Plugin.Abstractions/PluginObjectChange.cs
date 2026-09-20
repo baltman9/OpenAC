@@ -66,6 +66,13 @@ public readonly record struct PluginObjectChange(
         };
 
     /// <summary>
+    /// Returns true when this notification has a non-zero revision that is
+    /// older than a revision the plugin has already handled.
+    /// </summary>
+    public bool IsStaleComparedTo(long handledRevision) =>
+        Revision != 0 && handledRevision > 0 && Revision <= handledRevision;
+
+    /// <summary>
     /// The normalized object snapshot at the time of the change, when the
     /// object is still known. This is absent for a release after the host has
     /// discarded the object.

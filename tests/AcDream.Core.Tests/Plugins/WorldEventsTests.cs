@@ -9,6 +9,21 @@ public class WorldEventsTests
     private static WorldEntitySnapshot S(uint id) => new(id, SourceId: 0x01000000u, Position: Vector3.Zero, Rotation: Quaternion.Identity);
 
     [Fact]
+    public void ObjectChangeRevisionCanRejectStaleNotifications()
+    {
+        var change = new PluginObjectChange(1u, PluginObjectChangeKind.Updated)
+        {
+            Revision = 4,
+        };
+
+        Assert.False(change.IsStaleComparedTo(3));
+        Assert.True(change.IsStaleComparedTo(4));
+        Assert.True(change.IsStaleComparedTo(5));
+        Assert.False(new PluginObjectChange(1u, PluginObjectChangeKind.Updated)
+            .IsStaleComparedTo(5));
+    }
+
+    [Fact]
     public void PortalTransition_AssignsMonotonicRevisions()
     {
         var events = new WorldEvents();
