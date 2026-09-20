@@ -84,19 +84,29 @@ public sealed class ServerMoveToParityTests
             Assert.False(MoveTo(arm).IsMovingTo());
         });
 
-    // A difference found here and NOT closed in this slice, written down so
-    // it is not lost: when the server says a creature the walk is aimed at
-    // has moved, a client with no window re-aims the walk at where it went
-    // and a client with a window keeps walking to where the creature was.
-    // Measured at the shared step: the aim reads 108 m against 103 m from
-    // the fourth tenth of a second on, the character ends 1.2 m from the
-    // creature against 6.4 m, and the two tell the server a different number
-    // of positions on the way. The re-aim comes off whoever carries a remote
-    // creature between the server's updates, which one client does from its
-    // drawn world and neither does without one, so closing it belongs with
-    // the work that moves that carrying into the runtime. No scenario
-    // asserts it until then: a comparison either client can pass by standing
-    // still is worth nothing.
+    // A difference found here and NOT closed, written down so it is not lost:
+    // when the server says a creature the walk is aimed at has moved, a
+    // client with no window re-aims the walk at where it went and a client
+    // with a window keeps walking to where the creature was. Measured at the
+    // shared step: the aim reads 108 m against 103 m from the fourth tenth of
+    // a second on, the character ends 1.2 m from the creature against 6.4 m,
+    // and the two tell the server a different number of positions on the way.
+    //
+    // Traced (2026-09-20). A walk aimed at a thing is re-aimed by that
+    // THING's own per-frame step -- its target manager tells everyone
+    // watching it where it has got to, and the walker takes that as its new
+    // aim. Each client runs that step from somewhere else:
+    // * with a window, from the per-frame advance of the creature's own body,
+    //   beside its animation; that advance is part of carrying a remote body
+    //   between the server's updates, and it is absent here because nothing
+    //   is drawn and no remote body is being carried;
+    // * with no window, from the character's own frame, which asks the
+    //   runtime to run the step for whatever its walk is aimed at -- exactly
+    //   because nothing else there would.
+    // So it is one retail step with two drivers, not a step one client is
+    // missing, and closing it means the runtime carrying remote bodies for
+    // both clients. No scenario asserts it until then: a comparison either
+    // client can pass by standing still is worth nothing.
 
     /// <summary>
     /// A plugin holding a movement key while the server's walk is running.
