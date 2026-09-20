@@ -32,6 +32,14 @@ public readonly record struct RuntimeHostileTargetSnapshot(
 
     /// <summary>How far above (positive) or below the player the target stands, in metres.</summary>
     public float HeightDifference { get; init; }
+
+    /// <summary>
+    /// True once the client has been told this creature died. This does not
+    /// depend on the creature being selected or on its health ever having
+    /// been asked for, so it reads the same on a host that draws the world
+    /// and on one that does not.
+    /// </summary>
+    public bool IsDead { get; init; }
 }
 
 /// <summary>
@@ -92,6 +100,12 @@ public static class RuntimeHostileTargetQuery
     {
         if ((record.FinalPhysicsState
             & (PhysicsStateFlags.Hidden | PhysicsStateFlags.NoDraw)) != 0)
+        {
+            return false;
+        }
+        if (runtime.ActionOwner.CreatureDeath.IsDead(
+                record.ServerGuid,
+                record.Incarnation))
         {
             return false;
         }
@@ -213,6 +227,9 @@ public static class RuntimeHostileTargetQuery
                 HealthRevision = healthRevision,
                 SecondsSinceHealthUpdate = healthAge,
                 HeightDifference = delta.Z,
+                IsDead = runtime.ActionOwner.CreatureDeath.IsDead(
+                    record.ServerGuid,
+                    record.Incarnation),
             });
         }
 

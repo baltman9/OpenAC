@@ -99,6 +99,14 @@ public readonly record struct PluginCombatTarget(
     /// </summary>
     public double SecondsSinceHealthUpdate { get; init; } =
         double.PositiveInfinity;
+
+    /// <summary>
+    /// True once the client has been told this creature died. Unlike a health
+    /// reading of zero this does not need the creature to be selected or its
+    /// health ever to have been asked for, so it is the dependable answer to
+    /// "is this thing still worth attacking".
+    /// </summary>
+    public bool IsDead { get; init; }
 }
 
 /// <summary>

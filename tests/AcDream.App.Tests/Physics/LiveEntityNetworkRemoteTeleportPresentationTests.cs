@@ -470,7 +470,6 @@ public sealed class LiveEntityNetworkRemoteTeleportPresentationTests
                 engine,
                 new NoopDatReaderWriter(),
                 new NoopAnimationLoader(),
-                combatTargetController: null,
                 origin,
                 new NoopTeleportSink(),
                 _nullClassification

@@ -713,7 +713,6 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                     d.Actions.Combat.HasHealth,
                     guid =>
                         (uint)(d.Inventory.Objects.Get(guid)?.StackSize ?? 0),
-                    guid => late.Session.CurrentSession?.SendQueryHealth(guid),
                     guid => late.Session.CurrentSession?.SendQueryItemMana(guid),
                     () => d.PlayerIdentity.ServerGuid,
                     (item, container, placement) =>

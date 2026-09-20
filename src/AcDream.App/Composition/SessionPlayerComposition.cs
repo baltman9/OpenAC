@@ -672,7 +672,6 @@ internal sealed class SessionPlayerCompositionPhase
             d.PhysicsEngine,
             content.Dats,
             content.AnimationLoader,
-            d.Actions.CombatTarget,
             d.WorldOrigin,
             d.TeleportSink,
             d.PlayerController,

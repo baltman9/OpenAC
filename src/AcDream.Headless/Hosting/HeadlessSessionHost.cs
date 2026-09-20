@@ -1348,7 +1348,8 @@ internal sealed class HeadlessSessionHost : IDisposable
                 Contracts: Runtime.ContractsOwner,
                 PlayerGuid: () => Runtime.PlayerIdentity.ServerGuid,
                 OnLocalPlayerDeath:
-                    Runtime.CommunicationOwner.ReportLocalPlayerDeath));
+                    Runtime.CommunicationOwner.ReportLocalPlayerDeath),
+            actions: Runtime.ActionOwner);
         var eventRoute = new HeadlessSessionEventRoute(
             route,
             Runtime,

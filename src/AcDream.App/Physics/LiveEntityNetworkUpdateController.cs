@@ -43,7 +43,7 @@ internal sealed class LiveEntityNetworkUpdateController
     private readonly PhysicsEngine _physicsEngine;
     private readonly IDatReaderWriter _dats;
     private readonly IAnimationLoader _animLoader;
-    private readonly RuntimeCombatTargetState? _combatTargetController;
+
     private readonly LiveWorldOriginState _origin;
     private readonly AcDream.App.Streaming.ILocalPlayerTeleportNetworkSink
         _localPlayerTeleport;
@@ -114,7 +114,6 @@ internal sealed class LiveEntityNetworkUpdateController
         PhysicsEngine physicsEngine,
         IDatReaderWriter dats,
         IAnimationLoader animLoader,
-        RuntimeCombatTargetState? combatTargetController,
         LiveWorldOriginState origin,
         AcDream.App.Streaming.ILocalPlayerTeleportNetworkSink localPlayerTeleport,
         IRuntimeLocalPlayerControllerSource playerControllerSource,
@@ -145,7 +144,7 @@ internal sealed class LiveEntityNetworkUpdateController
         _physicsEngine = physicsEngine ?? throw new ArgumentNullException(nameof(physicsEngine));
         _dats = dats ?? throw new ArgumentNullException(nameof(dats));
         _animLoader = animLoader ?? throw new ArgumentNullException(nameof(animLoader));
-        _combatTargetController = combatTargetController;
+
         _origin = origin ?? throw new ArgumentNullException(nameof(origin));
         _localPlayerTeleport = localPlayerTeleport
             ?? throw new ArgumentNullException(nameof(localPlayerTeleport));
@@ -440,8 +439,6 @@ internal sealed class LiveEntityNetworkUpdateController
                 fullMotion = dispatch.CurrentForwardCommand;
             }
 
-            _combatTargetController?.OnMotionApplied(
-                update.Guid, ae.Sequencer.CurrentMotion);
             if (!_liveEntities.IsCurrentMovementAuthority(
                     acceptedMotionRecord,
                     acceptedMovementAuthorityVersion)
@@ -589,14 +586,6 @@ internal sealed class LiveEntityNetworkUpdateController
             remote.PrevServerPosTime = 0.0;
         }
 
-        if (result.AppliedInterpretedState && ae is null)
-        {
-            _combatTargetController?.OnMotionApplied(
-                update.Guid,
-                result.CurrentForwardCommand);
-            if (!IsCurrentOwner(remote))
-                return result with { Superseded = true };
-        }
         return result;
     }
 

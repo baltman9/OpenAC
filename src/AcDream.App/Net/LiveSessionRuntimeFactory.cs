@@ -353,7 +353,8 @@ internal sealed class LiveSessionRuntimeFactory
                 Contracts: _domain.Runtime.ContractsOwner,
                 PlayerGuid: () => _player.Identity.ServerGuid,
                 OnLocalPlayerDeath:
-                    _domain.Communication.ReportLocalPlayerDeath));
+                    _domain.Communication.ReportLocalPlayerDeath),
+            actions: _domain.Runtime.ActionOwner);
         return new GraphicalSessionEventRoute(
             route,
             _domain.Runtime,

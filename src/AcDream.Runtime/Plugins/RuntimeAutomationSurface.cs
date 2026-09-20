@@ -3875,6 +3875,7 @@ internal sealed class RuntimeAutomationSurface
                 Incarnation = target.Incarnation,
                 HealthRevision = target.HealthRevision,
                 SecondsSinceHealthUpdate = target.SecondsSinceHealthUpdate,
+                IsDead = target.IsDead,
             };
         }
         return projected;

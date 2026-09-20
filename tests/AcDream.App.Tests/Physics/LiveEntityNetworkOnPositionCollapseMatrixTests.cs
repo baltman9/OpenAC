@@ -1149,7 +1149,6 @@ public sealed class LiveEntityNetworkOnPositionCollapseMatrixTests
                 engine,
                 new NoopDatReaderWriter(),
                 new NoopAnimationLoader(),
-                combatTargetController: null,
                 origin,
                 new NoopTeleportSink(),
                 _nullClassification

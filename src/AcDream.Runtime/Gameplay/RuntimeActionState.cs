@@ -1,5 +1,6 @@
 using AcDream.Core.Combat;
 using AcDream.Core.Items;
+using AcDream.Core.Physics;
 using AcDream.Core.Selection;
 using AcDream.Core.Spells;
 using System.Diagnostics;
@@ -117,6 +118,7 @@ public sealed class RuntimeActionState : IDisposable
             Combat,
             Selection,
             combatTargetOperations);
+        CreatureDeath = new RuntimeCreatureDeathState();
         CombatMode = new RuntimeCombatModeState(
             Combat,
             combatModeOperations);
@@ -126,6 +128,10 @@ public sealed class RuntimeActionState : IDisposable
             spellCastOperations);
         View = new ActionView(this);
 
+        // The death the server announces is answered in one place: the
+        // selection lets a creature go the moment the client learns it died,
+        // whether or not a window is drawing that creature.
+        CreatureDeath.Died += OnCreatureDied;
         Selection.Changed += OnSelectionChanged;
         Combat.CombatModeChanged += OnCombatModeChanged;
         Combat.HealthChanged += OnHealthChanged;
@@ -141,6 +147,9 @@ public sealed class RuntimeActionState : IDisposable
     public RuntimeInteractionTransactionState Transactions { get; }
     public RuntimeCombatAttackState CombatAttack { get; }
     public RuntimeCombatTargetState CombatTarget { get; }
+
+    /// <summary>Which creatures the client has been told are dead.</summary>
+    public RuntimeCreatureDeathState CreatureDeath { get; }
     public RuntimeCombatModeState CombatMode { get; }
     public RuntimeSpellCastState SpellCast { get; }
     public IRuntimeActionView View { get; }
@@ -194,6 +203,7 @@ public sealed class RuntimeActionState : IDisposable
         Try(CombatAttack.ResetSession, ref failures);
         Try(() => Selection.Reset(), ref failures);
         Try(Combat.Clear, ref failures);
+        Try(CreatureDeath.Clear, ref failures);
         ClearHealthActivity();
         if (failures is not null)
         {
@@ -218,10 +228,12 @@ public sealed class RuntimeActionState : IDisposable
             Try(CombatAttack.ResetSession, ref failures);
             Try(() => Selection.Reset(), ref failures);
             Try(Combat.Clear, ref failures);
+            Try(CreatureDeath.Clear, ref failures);
             ClearHealthActivity();
         }
         finally
         {
+            CreatureDeath.Died -= OnCreatureDied;
             Selection.Changed -= OnSelectionChanged;
             Combat.CombatModeChanged -= OnCombatModeChanged;
             Combat.HealthChanged -= OnHealthChanged;
@@ -241,6 +253,9 @@ public sealed class RuntimeActionState : IDisposable
                 failures);
         }
     }
+
+    private void OnCreatureDied(uint objectId) =>
+        CombatTarget.OnMotionApplied(objectId, MotionCommand.Dead);
 
     private void OnSelectionChanged(SelectionTransition _) =>
         Interlocked.Increment(ref _selectionRevision);
