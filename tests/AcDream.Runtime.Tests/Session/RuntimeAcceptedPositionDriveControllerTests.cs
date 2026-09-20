@@ -5,6 +5,7 @@ using AcDream.Core.Items;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
+using AcDream.Core.Physics.Motion;
 using AcDream.Core.Spells;
 using AcDream.Runtime.Entities;
 using AcDream.Runtime.Gameplay;
@@ -1458,6 +1459,89 @@ public sealed class RuntimeAcceptedPositionDriveControllerTests
                 break;
             }
         }
+    }
+
+    /// <summary>
+    /// Mutation pin: drop the guard, or drop the re-aim. Without the re-aim a
+    /// walk run at a creature whose body nothing carries keeps running at
+    /// where that creature was last heard from; without the guard a creature
+    /// whose body IS carried is re-aimed twice in a frame.
+    /// </summary>
+    [Fact]
+    public void FinishRemoteBodyPass_ReAimsAWalkAtACreatureThePassDidNotCarry()
+    {
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        (_, PlayerMovementController controller) = EnterLocalPlayer(runtime);
+
+        const uint creature = 0x70000090u;
+        RuntimeEntityRecord beast = Assert.IsType<RuntimeEntityRecord>(
+            runtime.EntityObjects.RegisterEntity(Spawn(creature)).Canonical);
+        Assert.True(runtime.EntityObjects.ApplyAcceptedSpawn(
+            beast,
+            beast.CreateIntegrationVersion,
+            beast.Snapshot,
+            replaceGeneration: false));
+        var beastBody = new PhysicsBody
+        {
+            Position = new Vector3(10f, 40f, SpawnHeight),
+            Orientation = Quaternion.Identity,
+            State = beast.FinalPhysicsState,
+            TransientState = TransientStateFlags.Active,
+        };
+        beastBody.SnapToCell(
+            SpawnLandblock | 0x0001u, beastBody.Position, beastBody.Position);
+        runtime.EntityObjects.Entities.SetPhysicsBody(beast, beastBody);
+
+        MoveToManager walk = controller.Movement.MoveTo
+            ?? throw new InvalidOperationException("The character cannot walk.");
+        walk.MoveToObject(
+            creature,
+            creature,
+            radius: 0.5f,
+            height: 1.8f,
+            new MovementParameters());
+        Assert.Equal(creature, walk.TopLevelObjectId);
+        Assert.True(walk.Initialized);
+
+        // The creature walks off; nothing on this client is carrying its body.
+        MoveCreature(beastBody, new Vector3(10f, 60f, SpawnHeight));
+        _ = runtime.Clock.Advance(1.0);
+
+        runtime.FinishRemoteBodyPass();
+
+        Assert.Equal(
+            60f,
+            walk.CurrentTargetPosition.Frame.Origin.Y,
+            3);
+
+        // A creature whose body the pass DID carry has already told its
+        // watchers where it got to, and is left alone here.
+        MoveCreature(beastBody, new Vector3(10f, 80f, SpawnHeight));
+        _ = runtime.Clock.Advance(1.0);
+        runtime.EntityObjects.Physics.NoteRemoteBodyCarried(creature);
+
+        runtime.FinishRemoteBodyPass();
+
+        Assert.Equal(
+            60f,
+            walk.CurrentTargetPosition.Frame.Origin.Y,
+            3);
+
+        // And the record of what the pass carried does not leak into the next
+        // frame.
+        _ = runtime.Clock.Advance(1.0);
+        runtime.FinishRemoteBodyPass();
+        Assert.Equal(
+            80f,
+            walk.CurrentTargetPosition.Frame.Origin.Y,
+            3);
+    }
+
+    private static void MoveCreature(PhysicsBody body, Vector3 position)
+    {
+        body.Position = position;
+        body.SnapToCell(body.CellPosition.ObjCellId, position, position);
     }
 
     private static WorldSession.EntitySpawn Spawn(uint guid)

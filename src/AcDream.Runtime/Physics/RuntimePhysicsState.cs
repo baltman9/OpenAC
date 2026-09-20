@@ -492,6 +492,28 @@ public sealed class RuntimePhysicsState : IDisposable
     public int SpatialRootCount => _spatialRoots.Count;
     public int SpatialRemoteCount => _spatialRemotes.Count;
     public int SpatialProjectileCount => _spatialProjectiles.Count;
+    private readonly HashSet<uint> _remoteBodiesCarriedThisPass = [];
+
+    /// <summary>
+    /// Notes that this creature's body was carried forward in the pass that
+    /// is running now. A body that was carried tells its own watchers where
+    /// it has got to as the last stage of that; one that was not has to be
+    /// asked separately, once the pass is over.
+    /// </summary>
+    internal void NoteRemoteBodyCarried(uint serverGuid) =>
+        _remoteBodiesCarriedThisPass.Add(serverGuid);
+
+    /// <summary>
+    /// Whether this creature's body was carried forward in the pass that is
+    /// running now.
+    /// </summary>
+    internal bool DidCarryRemoteBody(uint serverGuid) =>
+        _remoteBodiesCarriedThisPass.Contains(serverGuid);
+
+    /// <summary>Forgets which bodies this frame's pass carried.</summary>
+    internal void ForgetRemoteBodiesCarried() =>
+        _remoteBodiesCarriedThisPass.Clear();
+
     internal double UtcNowSeconds =>
         (_timeProvider.GetUtcNow() - DateTimeOffset.UnixEpoch)
             .TotalSeconds;

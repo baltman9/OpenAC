@@ -896,7 +896,8 @@ internal sealed class SessionPlayerCompositionPhase
             live.EquippedChildren,
             liveEffectFrame,
             live.RenderSceneShadow?.LiveProjections,
-            live.RenderSceneShadow?.StaticProjections);
+            live.RenderSceneShadow?.StaticProjections,
+            new RuntimeRemoteBodyPass(d.Runtime));
         Fault(SessionPlayerCompositionPoint.UpdateLeavesCreated);
 
         var playerMode = new PlayerModeController(

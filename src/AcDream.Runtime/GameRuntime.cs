@@ -746,6 +746,50 @@ public sealed class GameRuntime
         localBody.HandleTargetting();
     }
 
+    /// <summary>
+    /// Closes this frame's pass over other creatures' bodies, and re-aims a
+    /// walk this character is running at a creature the pass did not carry.
+    /// </summary>
+    /// <remarks>
+    /// A creature tells everything watching it where it has got to as the last
+    /// stage of its own step, so a walk aimed at a creature whose body is
+    /// being carried forward is re-aimed by that. A creature whose body is not
+    /// being carried -- one this client has no animation content for, one too
+    /// far away to be worth carrying, one that never moves, one carrying
+    /// something in flight -- would otherwise never say so, and the walk would
+    /// keep running at where that creature was when it was last heard from.
+    /// This covers exactly those, once a frame, on every client.
+    /// </remarks>
+    public void FinishRemoteBodyPass()
+    {
+        ObjectDisposedException.ThrowIf(_disposeRequested || _disposed, this);
+        AcDream.Runtime.Physics.RuntimePhysicsState physics =
+            EntityObjects.Physics;
+        try
+        {
+            uint player = PlayerIdentity.ServerGuid;
+            uint sought =
+                MovementOwner.Controller?.Movement.MoveTo?.TopLevelObjectId
+                ?? 0u;
+            if (sought == 0u
+                || sought == player
+                || physics.DidCarryRemoteBody(sought))
+            {
+                return;
+            }
+
+            if (physics.ResolveObjectTableHost(sought)
+                is AcDream.Runtime.Physics.EntityPhysicsHost soughtBody)
+            {
+                soughtBody.HandleTargetting();
+            }
+        }
+        finally
+        {
+            physics.ForgetRemoteBodiesCarried();
+        }
+    }
+
     public RuntimeLocalPlayerFrameController CreateLocalPlayerFrameController(
         IRuntimeLocalPlayerFrameHost host,
         IRuntimeMovementInputSource input)

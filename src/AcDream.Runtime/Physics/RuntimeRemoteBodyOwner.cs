@@ -247,6 +247,7 @@ internal sealed class RuntimeRemoteBodyOwner
                 return default;
         }
 
+        _physics.NoteRemoteBodyCarried(record.ServerGuid);
         return new RuntimeRemoteBodyAdvance(
             true,
             batch.Count,

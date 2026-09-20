@@ -556,6 +556,7 @@ internal sealed class HeadlessSessionHost : IDisposable
         // said this frame is read, so every body spends the same elapsed time
         // on both clients.
         _remoteBodies?.Tick(checked((float)deltaSeconds));
+        Runtime.FinishRemoteBodyPass();
         _liveSession.Tick();
         _worldProjection?.PumpFirstEntry();
         _entities?.PumpPortalCompletion();
