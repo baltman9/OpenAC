@@ -187,7 +187,7 @@ public sealed class GameWindow :
             _runtimeEntityObjects.Objects,
             serverGuid);
 
-    private readonly AcDream.App.Physics.RemotePhysicsUpdater _remotePhysicsUpdater;
+    private readonly AcDream.Runtime.Physics.RuntimeRemoteBodyOwner _remoteBodies;
     private readonly AcDream.Runtime.Physics.RemoteInboundMotionDispatcher
         _remoteInboundMotion;
     private readonly AcDream.App.World.RetailInboundEventDispatcher
@@ -584,11 +584,8 @@ public sealed class GameWindow :
         _renderPackRegistry = renderPackRegistry;
         _animatedEntities = new LiveEntityAnimationRuntimeView<LiveEntityAnimationState>(
             _liveEntityRuntimeSlot);
-        _remotePhysicsUpdater = new AcDream.App.Physics.RemotePhysicsUpdater(
+        _remoteBodies = new AcDream.Runtime.Physics.RuntimeRemoteBodyOwner(
             _runtimeEntityObjects.Physics,
-            _liveEntityMotionBindings.GetSetupCylinder,
-            _liveEntityMotionBindings.GetSetupMoverShape,
-            AcDream.Runtime.Physics.RemoteServerControlledVelocityCycle.Apply,
             GetMoverPvpState);
         _remoteInboundMotion = new AcDream.Runtime.Physics.RemoteInboundMotionDispatcher(
             (movement, cellId, update) =>
@@ -1405,7 +1402,7 @@ public sealed class GameWindow :
                     _liveEntityMotionBindings,
                     _entityEffectAdvance,
                     _effectPoses,
-                    _remotePhysicsUpdater,
+                    _remoteBodies,
                     _localPlayerShadow,
                     _animatedEntities,
                     _animationDiagnostics,
@@ -1465,7 +1462,7 @@ public sealed class GameWindow :
                     _liveEntityRuntimeSlot,
                     _animatedEntities,
                     _remoteMovementObservations,
-                    _remotePhysicsUpdater,
+                    _remoteBodies,
                     _remoteInboundMotion,
                     _inboundEntityEvents,
                     _liveEntityMotionBindings,

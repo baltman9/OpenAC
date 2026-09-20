@@ -633,11 +633,7 @@ public sealed class LiveEntityAnimationSchedulerTests
         ProjectileController? projectiles = null)
     {
         physics ??= live.Physics.Engine;
-        var remotePhysics = new RemotePhysicsUpdater(
-            live.Physics,
-            (_, _) => (0.48f, 1.835f),
-            (_, _) => (System.Collections.Immutable.ImmutableArray<FlatCollisionSphere>.Empty, 1f, 0.4f, 0.4f),
-            (_, _, _, _) => { });
+        var remotePhysics = new RuntimeRemoteBodyOwner(live.Physics);
         var ordinaryPhysics = new LiveEntityOrdinaryPhysicsUpdater(
             live.Physics,
             (_, _) => (0.48f, 1.835f),

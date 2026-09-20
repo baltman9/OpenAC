@@ -1129,14 +1129,7 @@ public sealed class LiveEntityNetworkOnPositionCollapseMatrixTests
                 new ProjectileController(Runtime),
                 animatedEntities,
                 new RemoteMovementObservationTracker(),
-                new RemotePhysicsUpdater(
-                    Lifetime.Physics,
-                    static (_, _) => (0.48f, 1.835f),
-                    static (_, _) => (
-                        System.Collections.Immutable
-                            .ImmutableArray<FlatCollisionSphere>.Empty,
-                        1f, 0.4f, 0.4f),
-                    static (_, _, _, _) => { }),
+                new RuntimeRemoteBodyOwner(Lifetime.Physics),
                 new RemoteInboundMotionDispatcher(
                     static (_, _, _) => false,
                     static (_, _) => { }),

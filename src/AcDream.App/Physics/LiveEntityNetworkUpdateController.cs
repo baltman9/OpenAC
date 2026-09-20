@@ -37,7 +37,7 @@ internal sealed class LiveEntityNetworkUpdateController
     private readonly ProjectileController _projectileController;
     private readonly LiveEntityAnimationRuntimeView<LiveEntityAnimationState> _animatedEntities;
     private readonly RemoteMovementObservationTracker _remoteMovementObservations;
-    private readonly RemotePhysicsUpdater _remotePhysicsUpdater;
+    private readonly AcDream.Runtime.Physics.RuntimeRemoteBodyOwner _remoteBodies;
     private readonly RemoteInboundMotionDispatcher _remoteInboundMotion;
     private readonly LiveEntityMotionRuntimeController _motionRuntime;
     private readonly PhysicsEngine _physicsEngine;
@@ -108,7 +108,7 @@ internal sealed class LiveEntityNetworkUpdateController
         ProjectileController projectileController,
         LiveEntityAnimationRuntimeView<LiveEntityAnimationState> animatedEntities,
         RemoteMovementObservationTracker remoteMovementObservations,
-        RemotePhysicsUpdater remotePhysicsUpdater,
+        AcDream.Runtime.Physics.RuntimeRemoteBodyOwner remoteBodies,
         RemoteInboundMotionDispatcher remoteInboundMotion,
         LiveEntityMotionRuntimeController motionRuntime,
         PhysicsEngine physicsEngine,
@@ -138,7 +138,7 @@ internal sealed class LiveEntityNetworkUpdateController
         _projectileController = projectileController ?? throw new ArgumentNullException(nameof(projectileController));
         _animatedEntities = animatedEntities ?? throw new ArgumentNullException(nameof(animatedEntities));
         _remoteMovementObservations = remoteMovementObservations ?? throw new ArgumentNullException(nameof(remoteMovementObservations));
-        _remotePhysicsUpdater = remotePhysicsUpdater ?? throw new ArgumentNullException(nameof(remotePhysicsUpdater));
+        _remoteBodies = remoteBodies ?? throw new ArgumentNullException(nameof(remoteBodies));
         _remoteInboundMotion = remoteInboundMotion ?? throw new ArgumentNullException(nameof(remoteInboundMotion));
         _motionRuntime = motionRuntime ?? throw new ArgumentNullException(nameof(motionRuntime));
         _physicsEngine = physicsEngine ?? throw new ArgumentNullException(nameof(physicsEngine));
@@ -1515,7 +1515,7 @@ internal sealed class LiveEntityNetworkUpdateController
                 entity,
                 rmState,
                 acceptedPositionAuthorityVersion,
-                () => _remotePhysicsUpdater.SyncRemoteShadowToBody(
+                () => _remoteBodies.SyncRemoteShadowToBody(
                     entity.Id,
                     rmState,
                     _origin.CenterX,

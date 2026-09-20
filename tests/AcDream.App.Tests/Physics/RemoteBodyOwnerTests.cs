@@ -14,7 +14,7 @@ using DatReaderWriter.DBObjs;
 
 namespace AcDream.App.Tests.Physics;
 
-public sealed class RemotePhysicsUpdaterTests
+public sealed class RemoteBodyOwnerTests
 {
     [Fact]
     public void ShadowPoseGate_TracksTranslationAndSignInvariantOrientation()
@@ -23,27 +23,27 @@ public sealed class RemotePhysicsUpdaterTests
             Vector3.UnitZ,
             MathF.PI / 2f);
 
-        Assert.False(RemotePhysicsUpdater.ShouldSynchronizeShadowPose(
+        Assert.False(RuntimeRemotePhysicsUpdater.ShouldSynchronizeShadowPose(
             Vector3.Zero,
             Quaternion.Identity,
             Vector3.Zero,
             Quaternion.Identity));
-        Assert.False(RemotePhysicsUpdater.ShouldSynchronizeShadowPose(
+        Assert.False(RuntimeRemotePhysicsUpdater.ShouldSynchronizeShadowPose(
             Vector3.Zero,
             turn,
             Vector3.Zero,
             new Quaternion(-turn.X, -turn.Y, -turn.Z, -turn.W)));
-        Assert.True(RemotePhysicsUpdater.ShouldSynchronizeShadowPose(
+        Assert.True(RuntimeRemotePhysicsUpdater.ShouldSynchronizeShadowPose(
             new Vector3(0.02f, 0f, 0f),
             Quaternion.Identity,
             Vector3.Zero,
             Quaternion.Identity));
-        Assert.True(RemotePhysicsUpdater.ShouldSynchronizeShadowPose(
+        Assert.True(RuntimeRemotePhysicsUpdater.ShouldSynchronizeShadowPose(
             Vector3.Zero,
             turn,
             Vector3.Zero,
             Quaternion.Identity));
-        Assert.True(RemotePhysicsUpdater.ShouldSynchronizeShadow(
+        Assert.True(RuntimeRemotePhysicsUpdater.ShouldSynchronizeShadow(
             cellChanged: true,
             Vector3.Zero,
             Quaternion.Identity,
@@ -96,19 +96,14 @@ public sealed class RemotePhysicsUpdaterTests
             worldOffsetY: 0f,
             landblockId: 0x01010000u,
             seedCellId: cellId);
-        binding.Updater.Tick(
-            motion,
+        TickBody(
+            binding,
             entity,
-            objectScale: 1f,
-            sequencer: null,
-            animationForVelocityCycle: null,
+            motion,
             dt: 0.1f,
             new MotionDeltaFrame { Orientation = turn },
             liveCenterX: 1,
-            liveCenterY: 1,
-            ownerRuntime: binding.Live,
-            ownerRecord: binding.Record,
-            ownerClockEpoch: binding.Record.ObjectClockEpoch);
+            liveCenterY: 1);
 
         ShadowEntry entry = Assert.Single(
             binding.Engine.ShadowObjects.AllEntriesForDebug(),
@@ -163,16 +158,12 @@ public sealed class RemotePhysicsUpdaterTests
                 MathF.PI / 2f),
         };
         RemoteBinding binding = BindRemote(entity, motion);
-        binding.Updater.Tick(
-            motion,
+        TickAnimatedBody(
+            binding,
             animated,
+            motion,
             dt: 0.1f,
-            sequenceFrame,
-            liveCenterX: 0,
-            liveCenterY: 0,
-            ownerRuntime: binding.Live,
-            ownerRecord: binding.Record,
-            ownerClockEpoch: binding.Record.ObjectClockEpoch);
+            sequenceFrame);
 
         Assert.Equal(10.1f, motion.Body.Position.X, 3);
         Assert.Equal(20f, motion.Body.Position.Y, 3);
@@ -224,16 +215,12 @@ public sealed class RemotePhysicsUpdaterTests
             Orientation = rootTurn,
         };
         RemoteBinding binding = BindRemote(entity, motion);
-        binding.Updater.Tick(
-            motion,
+        TickAnimatedBody(
+            binding,
             animated,
+            motion,
             0.1f,
-            root,
-            0,
-            0,
-            ownerRuntime: binding.Live,
-            ownerRecord: binding.Record,
-            ownerClockEpoch: binding.Record.ObjectClockEpoch);
+            root);
 
         Assert.Equal(new Vector3(10f, 20f, 30f), motion.Body.Position);
         Quaternion expected = Quaternion.Normalize(initial * rootTurn);
@@ -285,16 +272,12 @@ public sealed class RemotePhysicsUpdaterTests
             Orientation = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, 0.7f),
         };
         RemoteBinding binding = BindRemote(entity, motion);
-        binding.Updater.Tick(
-            motion,
+        TickAnimatedBody(
+            binding,
             animated,
+            motion,
             0.1f,
-            root,
-            0,
-            0,
-            ownerRuntime: binding.Live,
-            ownerRecord: binding.Record,
-            ownerClockEpoch: binding.Record.ObjectClockEpoch);
+            root);
 
         Assert.InRange(motion.Body.Position.X, 10.19f, 10.21f);
         Assert.InRange(
@@ -336,13 +319,11 @@ public sealed class RemotePhysicsUpdaterTests
             motion.CellId);
         var poses = new EntityEffectPoseRegistry();
         poses.Publish(entity, Array.Empty<Matrix4x4>());
-        binding.Updater.TickHidden(
-            motion,
+        TickHiddenBody(
+            binding,
             entity,
-            0.1f,
-            ownerRuntime: binding.Live,
-            ownerRecord: binding.Record,
-            ownerClockEpoch: binding.Record.ObjectClockEpoch);
+            motion,
+            0.1f);
         Assert.True(poses.UpdateRoot(entity));
 
         Assert.InRange(motion.Body.Position.X, 0.01f, 1f);
@@ -372,14 +353,12 @@ public sealed class RemotePhysicsUpdaterTests
         AnimationSequencer sequencer = CreateSequencer();
         sequencer.Manager.AddToQueue(MotionTableManager.ReadySentinel, 0);
 
-        binding.Updater.TickHidden(
-            motion,
+        TickHiddenBody(
+            binding,
             entity,
+            motion,
             0.1f,
-            sequencer.Manager,
-            ownerRuntime: binding.Live,
-            ownerRecord: binding.Record,
-            ownerClockEpoch: binding.Record.ObjectClockEpoch);
+            sequencer: sequencer);
 
         Assert.Empty(sequencer.Manager.PendingAnimations);
     }
@@ -403,21 +382,18 @@ public sealed class RemotePhysicsUpdaterTests
         sequencer.Manager.AddToQueue(MotionTableManager.ReadySentinel, 0);
         var order = new List<string>();
 
-        binding.Updater.TickHidden(
-            motion,
+        TickHiddenBody(
+            binding,
             entity,
+            motion,
             0.1f,
-            partArrayHandleMovement: sequencer.Manager,
             processAnimationHooks: (_, observed) =>
             {
                 Assert.Same(sequencer, observed);
                 Assert.NotEmpty(sequencer.Manager.PendingAnimations);
                 order.Add("hooks");
             },
-            sequencer,
-            binding.Live,
-            binding.Record,
-            binding.Record.ObjectClockEpoch);
+            sequencer: sequencer);
 
         Assert.Equal(["hooks"], order);
         Assert.Empty(sequencer.Manager.PendingAnimations);
@@ -455,13 +431,11 @@ public sealed class RemotePhysicsUpdaterTests
         ulong spatialAuthority = binding.Record.Canonical
             .SpatialAuthorityVersion;
 
-        binding.Updater.TickHidden(
-            motion,
+        TickHiddenBody(
+            binding,
             entity,
-            2f,
-            ownerRuntime: binding.Live,
-            ownerRecord: binding.Record,
-            ownerClockEpoch: binding.Record.ObjectClockEpoch);
+            motion,
+            2f);
 
         Assert.Equal(0xAAB40001u, binding.Record.FullCellId);
         Assert.Equal(binding.Record.FullCellId, entity.ParentCellId);
@@ -502,13 +476,11 @@ public sealed class RemotePhysicsUpdaterTests
             motion.CellId);
         PopulateBoundaryEngine(binding.Engine);
 
-        binding.Updater.TickHidden(
-            motion,
+        TickHiddenBody(
+            binding,
             entity,
-            0.1f,
-            ownerRuntime: binding.Live,
-            ownerRecord: binding.Record,
-            ownerClockEpoch: binding.Record.ObjectClockEpoch);
+            motion,
+            0.1f);
 
         Assert.False(motion.Body.InContact);
         Assert.False(motion.Body.OnWalkable);
@@ -523,19 +495,15 @@ public sealed class RemotePhysicsUpdaterTests
         Vector3 sourceShadowPosition = fixture.Remote.LastShadowSyncPos;
         ulong clockEpoch = fixture.Record.ObjectClockEpoch;
 
-        bool current = fixture.Updater.Tick(
-            fixture.Remote,
+        bool current = TickBody(
+            fixture.Owner,
+            fixture.Live,
+            fixture.Record,
             fixture.Entity,
-            objectScale: 1f,
-            sequencer: null,
-            animationForVelocityCycle: null,
+            fixture.Remote,
             dt: 2f,
-            rootMotionLocalFrame: new MotionDeltaFrame(),
-            liveCenterX: 0,
-            liveCenterY: 0,
-            ownerRuntime: fixture.Live,
-            ownerRecord: fixture.Record,
-            ownerClockEpoch: clockEpoch);
+            rootMotion: new MotionDeltaFrame(),
+            clockEpoch: clockEpoch);
 
         Assert.False(current);
         Assert.Equal(BoundaryRemoteFixture.DestinationCell, fixture.Record.FullCellId);
@@ -662,19 +630,15 @@ public sealed class RemotePhysicsUpdaterTests
             Assert.NotSame(oldRecord, replacementRecord);
         };
 
-        bool current = fixture.Updater.Tick(
-            oldRemote,
+        bool current = TickBody(
+            fixture.Owner,
+            fixture.Live,
+            oldRecord,
             oldEntity,
-            objectScale: 1f,
-            sequencer: null,
-            animationForVelocityCycle: null,
+            oldRemote,
             dt: 2f,
-            rootMotionLocalFrame: new MotionDeltaFrame(),
-            liveCenterX: 0,
-            liveCenterY: 0,
-            ownerRuntime: fixture.Live,
-            ownerRecord: oldRecord,
-            ownerClockEpoch: clockEpoch);
+            rootMotion: new MotionDeltaFrame(),
+            clockEpoch: clockEpoch);
 
         Assert.False(current);
         Assert.NotNull(replacementEntity);
@@ -696,50 +660,182 @@ public sealed class RemotePhysicsUpdaterTests
             entry => entry.EntityId == oldEntity.Id);
     }
 
-    [Fact]
-    public void TickHiddenEntities_DeletionCallbackCannotAdvanceStaleSnapshotOwner()
+    /// <summary>
+    /// One step of a body the window can see, asked for the way the windowed
+    /// scheduler asks for it.
+    /// </summary>
+    private static bool TickBody(
+        RemoteBinding binding,
+        WorldEntity entity,
+        RemoteMotion motion,
+        float dt,
+        MotionDeltaFrame rootMotion,
+        float objectScale = 1f,
+        AnimationSequencer? sequencer = null,
+        RuntimeRemoteAnimationState? animation = null,
+        int liveCenterX = 0,
+        int liveCenterY = 0,
+        Action<uint, AnimationSequencer>? processAnimationHooks = null,
+        ulong? clockEpoch = null) =>
+        TickBody(
+            binding.Owner,
+            binding.Live,
+            binding.Record,
+            entity,
+            motion,
+            dt,
+            rootMotion,
+            objectScale,
+            sequencer,
+            animation,
+            liveCenterX,
+            liveCenterY,
+            processAnimationHooks,
+            clockEpoch);
+
+    /// <summary>
+    /// The same step for a body that has an animation owner: the scale, the
+    /// cycle and the simulation state all come off that one owner, exactly as
+    /// the windowed scheduler reads them.
+    /// </summary>
+    private static bool TickAnimatedBody(
+        RemoteBinding binding,
+        LiveEntityAnimationState animated,
+        RemoteMotion motion,
+        float dt,
+        MotionDeltaFrame rootMotion,
+        int liveCenterX = 0,
+        int liveCenterY = 0,
+        Action<uint, AnimationSequencer>? processAnimationHooks = null,
+        ulong? clockEpoch = null) =>
+        TickBody(
+            binding,
+            animated.Entity,
+            motion,
+            dt,
+            rootMotion,
+            animated.Scale,
+            animated.Sequencer,
+            animated.Simulation,
+            liveCenterX,
+            liveCenterY,
+            processAnimationHooks,
+            clockEpoch);
+
+    private static bool TickBody(
+        RuntimeRemoteBodyOwner owner,
+        LiveEntityRuntime live,
+        LiveEntityRecord record,
+        WorldEntity entity,
+        RemoteMotion motion,
+        float dt,
+        MotionDeltaFrame rootMotion,
+        float objectScale = 1f,
+        AnimationSequencer? sequencer = null,
+        RuntimeRemoteAnimationState? animation = null,
+        int liveCenterX = 0,
+        int liveCenterY = 0,
+        Action<uint, AnimationSequencer>? processAnimationHooks = null,
+        ulong? clockEpoch = null)
     {
-        const uint firstGuid = 0x70000011u;
-        const uint secondGuid = 0x70000012u;
-        var spatial = new GpuWorldState();
-        spatial.AddLandblock(new LoadedLandblock(
-            0x0101FFFFu,
-            new LandBlock(),
-            Array.Empty<WorldEntity>()));
-        var live = LiveEntityRuntimeFixture.Create(
-            spatial,
-            new DelegateLiveEntityResourceLifecycle(_ => { }, _ => { }));
-        BindHiddenRemote(live, firstGuid);
-        BindHiddenRemote(live, secondGuid);
-        Assert.Equal(2, live.SpatialRemoteMotionRuntimeCount);
+        ulong epoch = clockEpoch ?? record.ObjectClockEpoch;
+        return owner.TickBody(
+            record.Canonical,
+            motion,
+            animation,
+            sequencer,
+            dt,
+            rootMotion,
+            Facts(entity, dt, objectScale, epoch, liveCenterX, liveCenterY),
+            WindowPresentation(
+                live,
+                record,
+                entity,
+                motion,
+                epoch,
+                processAnimationHooks));
+    }
 
-        var updater = new RemotePhysicsUpdater(
-            live.Physics,
-            (_, _) => (0.48f, 1.835f),
-            (_, _) => (System.Collections.Immutable.ImmutableArray<FlatCollisionSphere>.Empty, 1f, 0.4f, 0.4f),
-            (_, _, _, _) => { });
-        var published = new List<uint>();
-        var partPoseDirty = new List<uint>();
-        updater.TickHiddenEntities(
-            live,
-            localPlayerServerGuid: 0x50000001u,
-            dt: 0.1f,
-            entity =>
+    /// <summary>One step of a body nothing can see.</summary>
+    private static bool TickHiddenBody(
+        RemoteBinding binding,
+        WorldEntity entity,
+        RemoteMotion motion,
+        float dt,
+        AnimationSequencer? sequencer = null,
+        Action<uint, AnimationSequencer>? processAnimationHooks = null,
+        ulong? clockEpoch = null)
+    {
+        ulong epoch = clockEpoch ?? binding.Record.ObjectClockEpoch;
+        return binding.Owner.TickHiddenBody(
+            binding.Record.Canonical,
+            motion,
+            sequencer,
+            dt,
+            Facts(entity, dt, objectScale: 1f, epoch, liveCenterX: 0, liveCenterY: 0),
+            WindowPresentation(
+                binding.Live,
+                binding.Record,
+                entity,
+                motion,
+                epoch,
+                processAnimationHooks));
+    }
+
+    private static RuntimeRemoteBodyFacts Facts(
+        WorldEntity entity,
+        float dt,
+        float objectScale,
+        ulong epoch,
+        int liveCenterX,
+        int liveCenterY) =>
+        new(
+            dt,
+            entity.Position,
+            entity.Position,
+            RootClockAdvances: true,
+            objectScale,
+            epoch,
+            liveCenterX,
+            liveCenterY);
+
+    /// <summary>
+    /// What the window hangs off one step: whether this is still the body the
+    /// record carries, and the write of the settled pose onto the drawn body.
+    /// These are the windowed scheduler's own, said the same way here so that
+    /// what these tests exercise is what the window exercises.
+    /// </summary>
+    private static RuntimeRemoteBodyPresentation WindowPresentation(
+        LiveEntityRuntime live,
+        LiveEntityRecord record,
+        WorldEntity entity,
+        RemoteMotion motion,
+        ulong epoch,
+        Action<uint, AnimationSequencer>? processAnimationHooks)
+    {
+        bool StillOwned() =>
+            record.ObjectClockEpoch == epoch
+            && live.IsCurrentSpatialRemoteMotion(record, motion)
+            && ReferenceEquals(record.WorldEntity, entity);
+
+        return new RuntimeRemoteBodyPresentation(
+            StillOwned,
+            StillOwned,
+            snapshot =>
             {
-                published.Add(entity.ServerGuid);
-                uint other = entity.ServerGuid == firstGuid ? secondGuid : firstGuid;
-                Assert.True(live.UnregisterLiveEntity(
-                    new DeleteObject.Parsed(other, InstanceSequence: 1),
-                    isLocalPlayer: false));
+                if (!StillOwned())
+                    return false;
+                entity.SetPosition(snapshot.Position);
+                entity.ParentCellId = snapshot.FullCellId;
+                entity.Rotation = snapshot.Orientation;
+                return StillOwned();
             },
-            markPartPoseDirty: partPoseDirty.Add);
-
-        Assert.Single(published);
-        Assert.Equal(published, partPoseDirty);
-        Assert.Equal(1, live.SpatialRemoteMotionRuntimeCount);
+            BuildPartPoses: null,
+            processAnimationHooks);
     }
 
     private static void PopulateBoundaryEngine(PhysicsEngine engine)
+
     {
         static TerrainSurface FlatTerrain()
         {
@@ -796,11 +892,7 @@ public sealed class RemotePhysicsUpdaterTests
             live,
             record,
             live.Physics.Engine,
-            new RemotePhysicsUpdater(
-                live.Physics,
-                (_, _) => (0.48f, 1.835f),
-                (_, _) => (System.Collections.Immutable.ImmutableArray<FlatCollisionSphere>.Empty, 1f, 0.4f, 0.4f),
-                (_, _, _, _) => { }));
+            new RuntimeRemoteBodyOwner(live.Physics));
     }
 
     private static WorldSession.EntitySpawn SpawnRemote(
@@ -875,80 +967,8 @@ public sealed class RemotePhysicsUpdaterTests
         LiveEntityRuntime Live,
         LiveEntityRecord Record,
         PhysicsEngine Engine,
-        RemotePhysicsUpdater Updater);
+        RuntimeRemoteBodyOwner Owner);
 
-    private static void BindHiddenRemote(LiveEntityRuntime live, uint guid)
-    {
-        const uint cellId = 0x01010001u;
-        PhysicsStateFlags state = PhysicsStateFlags.Hidden
-            | PhysicsStateFlags.IgnoreCollisions;
-        var position = new CreateObject.ServerPosition(
-            cellId, 10f, 10f, 5f, 1f, 0f, 0f, 0f);
-        var timestamps = new PhysicsTimestamps(1, 1, 1, 1, 0, 1, 0, 1, 1);
-        var physics = new PhysicsSpawnData(
-            RawState: (uint)state,
-            Position: position,
-            Movement: null,
-            AnimationFrame: null,
-            SetupTableId: 0x02000001u,
-            MotionTableId: 0x09000001u,
-            SoundTableId: null,
-            PhysicsScriptTableId: null,
-            Parent: null,
-            Children: null,
-            Scale: null,
-            Friction: null,
-            Elasticity: null,
-            Translucency: null,
-            Velocity: null,
-            Acceleration: null,
-            AngularVelocity: null,
-            DefaultScriptType: null,
-            DefaultScriptIntensity: null,
-            Timestamps: timestamps);
-        live.RegisterLiveEntity(new WorldSession.EntitySpawn(
-            guid,
-            position,
-            0x02000001u,
-            Array.Empty<CreateObject.AnimPartChange>(),
-            Array.Empty<CreateObject.TextureChange>(),
-            Array.Empty<CreateObject.SubPaletteSwap>(),
-            null,
-            null,
-            "hidden fixture",
-            null,
-            null,
-            0x09000001u,
-            PhysicsState: (uint)state,
-            InstanceSequence: 1,
-            MovementSequence: 1,
-            ServerControlSequence: 1,
-            PositionSequence: 1,
-            Physics: physics));
-        WorldEntity entity = live.MaterializeLiveEntity(
-            guid,
-            cellId,
-            id => new WorldEntity
-            {
-                Id = id,
-                ServerGuid = guid,
-                SourceGfxObjOrSetupId = 0x02000001u,
-                Position = new Vector3(10f, 10f, 5f),
-                Rotation = Quaternion.Identity,
-                MeshRefs = Array.Empty<MeshRef>(),
-                ParentCellId = cellId,
-            })!;
-        var remote = new AcDream.Runtime.Physics.RemoteMotion();
-        remote.Body.Position = entity.Position;
-        remote.Body.Orientation = entity.Rotation;
-        remote.CellId = cellId;
-        remote.Interp.Enqueue(
-            entity.Position + Vector3.UnitX,
-            heading: 0f,
-            isMovingTo: false,
-            currentBodyPosition: entity.Position);
-        live.SetRemoteMotionRuntime(guid, remote);
-    }
 
     private sealed class BoundaryRemoteFixture : IDisposable
     {
@@ -988,17 +1008,13 @@ public sealed class RemotePhysicsUpdaterTests
                 liveCenter: () => (0, 0));
             RegisterShadow(Entity, Remote);
             Assert.True(_presentation.OnLiveEntityReady(Guid));
-            Updater = new RemotePhysicsUpdater(
-                Live.Physics,
-                (_, _) => (0.48f, 1.835f),
-                (_, _) => (System.Collections.Immutable.ImmutableArray<FlatCollisionSphere>.Empty, 1f, 0.4f, 0.4f),
-                (_, _, _, _) => { });
+            Owner = new RuntimeRemoteBodyOwner(Live.Physics);
         }
 
         public PhysicsEngine Engine { get; }
         public GpuWorldState Spatial { get; } = new();
         public LiveEntityRuntime Live { get; }
-        public RemotePhysicsUpdater Updater { get; }
+        public RuntimeRemoteBodyOwner Owner { get; }
         public LiveEntityRecord Record { get; }
         public WorldEntity Entity { get; }
         public AcDream.Runtime.Physics.RemoteMotion Remote { get; }

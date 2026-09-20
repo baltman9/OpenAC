@@ -53,7 +53,7 @@ internal sealed record LivePresentationDependencies(
     DeferredLiveEntityMotionRuntimeBindings MotionBindings,
     DeferredEntityEffectAdvanceSource EffectAdvance,
     EntityEffectPoseRegistry EffectPoses,
-    RemotePhysicsUpdater RemotePhysicsUpdater,
+    AcDream.Runtime.Physics.RuntimeRemoteBodyOwner RemoteBodies,
     LocalPlayerShadowState LocalPlayerShadow,
     LiveEntityAnimationRuntimeView<LiveEntityAnimationState> AnimatedEntities,
     AnimationPresentationDiagnostics AnimationDiagnostics,
@@ -553,7 +553,7 @@ internal sealed class LivePresentationCompositionPhase
             var animationScheduler = new LiveEntityAnimationScheduler(
                 liveEntities,
                 d.PlayerIdentity,
-                d.RemotePhysicsUpdater,
+                d.RemoteBodies,
                 ordinaryPhysicsUpdater,
                 projectileController,
                 new EntityRootPosePublisher(d.EffectPoses),
