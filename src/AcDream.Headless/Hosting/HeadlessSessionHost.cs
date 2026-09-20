@@ -547,7 +547,9 @@ internal sealed class HeadlessSessionHost : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_reconnectPending)
             return;
-        _ = Runtime.Clock.Advance(deltaSeconds);
+        // The one frame step both clients take: the world's clock stands
+        // still while there is no world to simulate.
+        _ = Runtime.AdvanceFrameClock(deltaSeconds);
         _navigationWalk?.Tick(deltaSeconds);
         _localPlayerFrame.AdvanceBeforeNetwork(
             checked((float)deltaSeconds));

@@ -828,7 +828,7 @@ public sealed class CurrentGameRuntimeAdapterTests
                 MovementInput,
                 mouseLook: null,
                 new NoopCombatInput());
-            Clock = new UpdateFrameClock(_gameRuntime.Clock);
+            Clock = new UpdateFrameClock(_gameRuntime);
             WorldReveal = new WorldRevealCoordinator(
                 WorldTransit,
                 static () => new StreamingRevealWindow(1, 1),

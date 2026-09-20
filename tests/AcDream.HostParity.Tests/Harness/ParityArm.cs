@@ -189,7 +189,8 @@ internal abstract class ParityArm : IDisposable
     /// </summary>
     internal virtual void Advance()
     {
-        _ = Runtime.Clock.Advance(TickSeconds);
+        // The frame step both clients take, rule and all.
+        _ = Runtime.AdvanceFrameClock(TickSeconds);
         _body?.Drive();
         _frame?.AdvanceBeforeNetwork((float)TickSeconds);
         Runtime.Session.Tick();

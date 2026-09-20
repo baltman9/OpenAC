@@ -527,6 +527,26 @@ public sealed class GameRuntime
     private readonly RuntimeSelectionEntityFollower? _selectionFollowsEntities;
 
     public GameRuntimeClock Clock { get; }
+
+    /// <summary>
+    /// Takes one host frame off the clock, for whichever client is running.
+    /// The frame number counts host frames and always moves. Simulation time
+    /// is the world's own clock, and it only moves while there is a world to
+    /// simulate: between giving up the world the character was standing in
+    /// and standing up the next one -- through a portal, or arriving at
+    /// login -- elapsed time means nothing, and time that ran through the gap
+    /// would be handed in one lump to whatever moves on the first frame
+    /// after it.
+    /// </summary>
+    /// <param name="hostDeltaSeconds">
+    /// How long the host frame took. Anything that is not a finite, positive
+    /// number of seconds counts as no time at all.
+    /// </param>
+    public RuntimeFrameTime AdvanceFrameClock(double hostDeltaSeconds) =>
+        Clock.Advance(
+            hostDeltaSeconds,
+            TransitOwner.IsWorldSimulationAvailable);
+
     public LiveSessionController Session { get; }
     public RuntimeLocalPlayerIdentityState PlayerIdentity { get; }
     public RuntimeEntityObjectLifetime EntityObjects { get; }

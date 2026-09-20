@@ -530,7 +530,7 @@ public sealed class GameWindow :
         _localPlayerIdentity = new AcDream.App.Input.LocalPlayerIdentityState(
             _runtime.PlayerIdentity);
         _updateFrameClock = new AcDream.App.Update.UpdateFrameClock(
-            _runtime.Clock);
+            _runtime);
         _worldEnvironment = new AcDream.App.World.WorldEnvironmentController(
             _runtime.EnvironmentOwner,
             options.ForcedDayGroupIndex,

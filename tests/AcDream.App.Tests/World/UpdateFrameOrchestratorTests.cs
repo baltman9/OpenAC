@@ -142,7 +142,11 @@ public sealed class UpdateFrameOrchestratorTests
     {
         var calls = new List<string>();
         var observed = new FrameObservations();
-        var transit = new RuntimeWorldTransitState();
+        // The client's world gate and its frame clock read the one runtime:
+        // a scenario that gave them separate transit state would prove
+        // nothing about the client.
+        using GameRuntime runtime = GameRuntimeTestFactory.Create();
+        RuntimeWorldTransitState transit = runtime.TransitOwner;
         var availability = new WorldGenerationAvailabilityState(transit);
         long generation =
             RuntimeWorldTransitTestDriver.BeginPortal(
@@ -151,7 +155,8 @@ public sealed class UpdateFrameOrchestratorTests
         UpdateFrameOrchestrator frame = Create(
             calls,
             observed: observed,
-            availability: availability);
+            availability: availability,
+            runtime: runtime);
 
         frame.Tick(new UpdateFrameInput(0.25));
         frame.Tick(new UpdateFrameInput(0.25));
@@ -908,14 +913,15 @@ public sealed class UpdateFrameOrchestratorTests
         FrameObservations? observed = null,
         bool teleportPlace = false,
         bool inboundCreatedPlayer = false,
-        IWorldGenerationAvailability? availability = null)
+        IWorldGenerationAvailability? availability = null,
+        GameRuntime? runtime = null)
     {
         teardown ??= new RecordingTeardown(calls);
         failureSink ??= new RecordingFailureSink();
         return new UpdateFrameOrchestrator(
             teardown,
             failureSink,
-            new UpdateFrameClock(),
+            new UpdateFrameClock(runtime ?? GameRuntimeTestFactory.Create()),
             new RecordingClockPublisher(calls, observed),
             new RecordingStreaming(calls),
             new RecordingInput(calls, observed),
