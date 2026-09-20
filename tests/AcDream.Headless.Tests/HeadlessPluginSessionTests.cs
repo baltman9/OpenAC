@@ -418,11 +418,16 @@ public sealed class HeadlessPluginSessionTests
         session.Plugins.Host.Events.Tick += first;
         session.Plugins.Host.Events.Tick += second;
 
-        session.Tick(0.25d);
-        session.Tick(0.10d);
+        // The plugin tick is paced by the runtime's clock rather than by the
+        // length of a session turn, so a turn is worth however many whole
+        // steps have gone by and each one carries exactly the step.
+        session.Tick(0.010d);
+        session.Tick(0.010d);
+        session.Tick(0.010d);
 
-        Assert.Equal([0.25d, 0.10d], firstElapsed);
-        Assert.Equal([0.25d, 0.10d], secondElapsed);
+        double step = AcDream.Runtime.Plugins.RuntimePluginTickClock.StepSeconds;
+        Assert.Equal([step, step], firstElapsed);
+        Assert.Equal([step, step], secondElapsed);
     }
 
     [Fact]
@@ -444,9 +449,11 @@ public sealed class HeadlessPluginSessionTests
         session.Plugins.Host.Events.Tick += throwing;
         session.Plugins.Host.Events.Tick += later;
 
-        session.Tick(0.25d);
+        session.Tick(AcDream.Runtime.Plugins.RuntimePluginTickClock.StepSeconds);
 
-        Assert.Equal([0.25d], laterElapsed);
+        Assert.Equal(
+            [AcDream.Runtime.Plugins.RuntimePluginTickClock.StepSeconds],
+            laterElapsed);
         Assert.Contains(
             "plugin-warn:",
             diagnosticsOutput.ToString(),

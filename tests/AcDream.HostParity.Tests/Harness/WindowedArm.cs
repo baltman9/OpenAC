@@ -48,6 +48,12 @@ internal sealed class WindowedArm : ParityArm
     private readonly LiveSessionAppSource _sessionSource;
     private readonly WorldGameState _state = new();
     private readonly WorldEvents _events = new();
+
+    /// <summary>
+    /// The runtime clock this client paces its plugin tick from, built the
+    /// way the window builds it.
+    /// </summary>
+    private readonly AcDream.Runtime.Plugins.RuntimePluginTickClock _pluginTick;
     private readonly RuntimeWorldEntityProjection _worldEntities;
     private readonly RuntimeAutomationSurface _automation;
     private readonly List<string> _warnings = [];
@@ -93,6 +99,9 @@ internal sealed class WindowedArm : ParityArm
         // the runtime's own answer, words and all.
         _state.ContractsSource = Runtime.ContractsOwner.ProjectForPlugins;
         _events.BindWorldEntities(_worldEntities);
+        _pluginTick = new AcDream.Runtime.Plugins.RuntimePluginTickClock(
+            _events.FireTick,
+            () => Runtime.Generation.Value);
         _sessionSource = new LiveSessionAppSource(Runtime.Session, _commands);
         _bindings.Add(_feedback.BindOwned(text =>
             Runtime.CommunicationOwner.AddText(
@@ -320,12 +329,13 @@ internal sealed class WindowedArm : ParityArm
     /// The window drives the surface's own bookkeeping off the plugin event
     /// tick rather than off the session tick, so the arm does the same.
     /// </summary>
-    protected override void OnAdvanced()
+    protected override void OnAdvanced(double hostDeltaSeconds)
     {
-        // The window ticks the attack owner from its gameplay input frame and
-        // the surface from the plugin event tick; both happen once a frame.
+        // The window ticks the attack owner from its gameplay input frame
+        // once a frame; the plugin tick is paced by the runtime's clock off
+        // however long the frame took, which is what the window does.
         Runtime.ActionOwner.CombatAttack.Tick();
-        _events.FireTick(TickSeconds);
+        _pluginTick.Feed(hostDeltaSeconds);
     }
 
     internal override AcDream.Runtime.Chat.IPluginCommandBus Commands =>

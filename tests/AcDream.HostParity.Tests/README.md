@@ -14,6 +14,10 @@ says something:
   fast the character runs;
 - the plugin events each client raises, and the surfaces a plugin reaches
   for -- hotkeys, storage, world lines, the clipboard, the host window;
+- how often a plugin is ticked and how much elapsed time each tick carries.
+  This is the one scenario that drives the two arms differently on purpose --
+  short drawn frames against scheduler turns -- because that difference is
+  exactly what it is there to rule out;
 - each client's own outbound command route and its own per-frame driver:
   movement, attacks, chat sends, what actually goes out on the wire;
 - what each client passes the shared plugin surface and the shared runtime,

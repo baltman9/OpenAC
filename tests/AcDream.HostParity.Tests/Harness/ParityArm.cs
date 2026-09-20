@@ -215,15 +215,23 @@ internal abstract class ParityArm : IDisposable
     /// object side of the inbound-network barrier, the session runs, then the
     /// post-network command phase closes the frame.
     /// </summary>
-    internal virtual void Advance()
+    internal void Advance() => Advance(TickSeconds);
+
+    /// <summary>
+    /// The same step, over however long this arm's client says its frame or
+    /// turn really took. A client with a window draws at whatever rate it
+    /// manages and a client without one takes a turn on a schedule, so an
+    /// arm standing in for either has to be able to say so.
+    /// </summary>
+    internal virtual void Advance(double hostDeltaSeconds)
     {
         // The frame step both clients take, rule and all.
-        _ = Runtime.AdvanceFrameClock(TickSeconds);
+        _ = Runtime.AdvanceFrameClock(hostDeltaSeconds);
         _body?.Drive();
-        _frame?.AdvanceBeforeNetwork((float)TickSeconds);
+        _frame?.AdvanceBeforeNetwork((float)hostDeltaSeconds);
         Runtime.Session.Tick();
         _frame?.RunPostNetworkCommandPhase();
-        OnAdvanced();
+        OnAdvanced(hostDeltaSeconds);
     }
 
     /// <summary>
@@ -233,7 +241,8 @@ internal abstract class ParityArm : IDisposable
     protected abstract RuntimeLocalPlayerFrameController CreateFrameController();
 
     /// <summary>Whatever this host does once per step beyond ticking.</summary>
-    protected virtual void OnAdvanced()
+    /// <param name="hostDeltaSeconds">How long this frame or turn took.</param>
+    protected virtual void OnAdvanced(double hostDeltaSeconds)
     {
     }
 

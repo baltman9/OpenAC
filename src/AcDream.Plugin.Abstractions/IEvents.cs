@@ -15,9 +15,15 @@ public interface IEvents
     event Action<WorldEntitySnapshot> EntitySpawned;
 
     /// <summary>
-    /// Raised once per client update, carrying the seconds elapsed since
-    /// the previous one. This is the thread every other event here is
-    /// raised on, and the thread a plugin should touch its own state on.
+    /// Raised at a fixed 15 ms -- about 66.7 times a second -- carrying
+    /// exactly 0.015 seconds every time, on every client. It is not the
+    /// client's own frame: a client that draws runs far faster than this and
+    /// one that does not takes its own turns, and neither rate reaches a
+    /// plugin, so the same plugin is paced the same way wherever it runs.
+    /// A client that has fallen behind raises several in a row, and a stall
+    /// longer than about a fifth of a second is dropped rather than replayed.
+    /// This is the thread every other event here is raised on, and the thread
+    /// a plugin should touch its own state on.
     /// </summary>
     event Action<double> Tick;
 

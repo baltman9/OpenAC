@@ -79,6 +79,12 @@ public sealed class GameWindow :
     private readonly string _datDir;
     private readonly WorldGameState _worldGameState;
     private readonly WorldEvents _worldEvents;
+    /// <summary>
+    /// Paces the plugin tick, which every client raises at a fixed rate
+    /// rather than at whatever rate this one happens to draw.
+    /// </summary>
+    private readonly AcDream.Runtime.Plugins.RuntimePluginTickClock
+        _pluginTick;
     private readonly AcDream.Runtime.Plugins.RuntimeWorldEntityProjection
         _pluginWorldEntities;
     private readonly HostQuiescenceGate _hostQuiescence = new();
@@ -563,6 +569,9 @@ public sealed class GameWindow :
         _datDir = options.DatDir;
         _worldGameState = worldGameState;
         _worldEvents = worldEvents;
+        _pluginTick = new AcDream.Runtime.Plugins.RuntimePluginTickClock(
+            _worldEvents.FireTick,
+            () => _runtime.Generation.Value);
         // What a plugin sees in the world comes from the runtime's object
         // directory, not from what happens to be drawn: the same producer the
         // windowless client uses, so both answer the same population, ids
@@ -1589,7 +1598,7 @@ public sealed class GameWindow :
                 _runtime.CharacterSelection.Snapshot.Lifecycle
                     == RuntimeCharacterSelectionLifecycle.InWorld);
         }
-        _worldEvents.FireTick(dt);
+        _pluginTick.Feed(dt);
         _renderLoopArmed = false;
     }
 

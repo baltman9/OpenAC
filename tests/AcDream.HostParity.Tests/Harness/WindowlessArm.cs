@@ -27,6 +27,12 @@ internal sealed class WindowlessArm : ParityArm
 {
     private readonly HeadlessGameplayOperations _gameplay;
     private readonly HeadlessPluginHost _host;
+
+    /// <summary>
+    /// The runtime clock this client paces its plugin tick from, built the
+    /// way its session host builds it.
+    /// </summary>
+    private readonly AcDream.Runtime.Plugins.RuntimePluginTickClock _pluginTick;
     private readonly RecordingPluginLogger _log = new();
     private readonly AcDream.Runtime.Session.SessionStatusWriter _status =
         new(path: null);
@@ -74,6 +80,9 @@ internal sealed class WindowlessArm : ParityArm
             dataDirectory: DataDirectory,
             pluginTags: ConfiguredPluginTags,
             sessionSettings: ConfiguredPluginSettings);
+        _pluginTick = new AcDream.Runtime.Plugins.RuntimePluginTickClock(
+            _host.FireTick,
+            () => Runtime.Generation.Value);
     }
 
     internal override IPluginHost Host => _host;
@@ -145,12 +154,13 @@ internal sealed class WindowlessArm : ParityArm
     /// The windowless host drives the surface's bookkeeping and its plugin
     /// ticks from the session tick.
     /// </summary>
-    protected override void OnAdvanced()
+    protected override void OnAdvanced(double hostDeltaSeconds)
     {
-        // The windowless session host ticks the attack owner and the plugin
-        // host once per session tick.
+        // The windowless session host ticks the attack owner once per
+        // session tick; the plugin tick is paced by the runtime's clock off
+        // however long the turn took, which is what that host does.
         Runtime.ActionOwner.CombatAttack.Tick();
-        _host.FireTick(TickSeconds);
+        _pluginTick.Feed(hostDeltaSeconds);
     }
 
     /// <summary>

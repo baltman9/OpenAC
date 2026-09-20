@@ -5,6 +5,40 @@ implementation, so a plugin written against an older build still compiles and
 a host that cannot provide something returns an inert value rather than
 throwing. `docs/plugin-ui-markup.md` covers the panel markup separately.
 
+## The tick
+
+```csharp
+host.Events.Tick += elapsedSeconds => { /* elapsedSeconds is always 0.015 */ };
+```
+
+`Tick` runs at a fixed 15 ms -- about 66.7 times a second -- and every tick
+carries exactly `0.015` seconds, on every client. It is not the client's
+frame: a client with a window draws far faster than this and a client
+without one takes its own turns, and neither rate reaches a plugin. Between
+them the client holds the time it has taken and spends it a whole step at a
+time, so over any stretch of real time a plugin gets the same number of
+ticks with the same total elapsed time whichever client it is loaded into.
+
+What a plugin may rely on:
+
+- the elapsed value is always the step, so counting ticks and adding up
+  elapsed time give the same answer;
+- one feed can raise several ticks in a row when the client has fallen
+  behind, so the wall clock can jump between two ticks even though the
+  elapsed value does not;
+- a stall longer than about 0.2 s is dropped rather than replayed: the
+  client does not owe a plugin the ticks it missed while it was away;
+- the tick keeps running while there is no world -- at login, and while the
+  character is between worlds going through a portal -- even though the
+  world's own clock is standing still, so a plugin waiting for the world to
+  come back keeps being asked;
+- there is no guarantee of a tick per drawn frame, and never was one worth
+  relying on. A plugin that wants to do something every frame cannot; it
+  wants the fixed step instead.
+
+Everything else here that says "on the same thread as `Tick`" means this
+one.
+
 ## Chat
 
 ### Reading lines

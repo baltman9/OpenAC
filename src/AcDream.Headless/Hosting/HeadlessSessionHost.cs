@@ -154,6 +154,11 @@ internal sealed class HeadlessSessionHost : IDisposable
     private readonly IHeadlessBotPolicy _policy;
     private readonly IDisposable _policySubscription;
     private readonly HeadlessPluginSession _pluginSession;
+    /// <summary>
+    /// Paces the plugin tick, which every client raises at a fixed rate
+    /// rather than once per turn of this one's own schedule.
+    /// </summary>
+    private readonly AcDream.Runtime.Plugins.RuntimePluginTickClock _pluginTick;
     private readonly HeadlessLogoutAutomation _logout;
     private readonly LiveChatCommandSurface _chatCommandSurface;
     private readonly LiveSessionHost _liveSession;
@@ -436,6 +441,9 @@ internal sealed class HeadlessSessionHost : IDisposable
             _policy = policy;
             _policySubscription = policySubscription;
             _pluginSession = pluginSession;
+            _pluginTick = new AcDream.Runtime.Plugins.RuntimePluginTickClock(
+                pluginSession.Host.FireTick,
+                () => runtime.Generation.Value);
             _logout = logout;
         }
         catch
@@ -567,7 +575,7 @@ internal sealed class HeadlessSessionHost : IDisposable
         _localPlayerFrame.RunPostNetworkCommandPhase();
         Runtime.ActionOwner.CombatAttack.Tick();
         _policy.Tick(Runtime, Commands);
-        _pluginSession.Host.FireTick(deltaSeconds);
+        _pluginTick.Feed(deltaSeconds);
         ConsolePump?.Invoke();
         switch (_logout.Tick())
         {
