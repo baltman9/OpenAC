@@ -245,6 +245,25 @@ public static class PluginObjectClassifier
             result = PluginObjectClass.CombatPet;
         return result;
     }
+
+    /// <summary>Maps a normalized object class to semantic interaction capabilities.</summary>
+    public static PluginObjectCapabilities Capabilities(PluginObjectClass objectClass) =>
+        objectClass switch
+        {
+            PluginObjectClass.Portal => PluginObjectCapabilities.Interactable
+                | PluginObjectCapabilities.Portal,
+            PluginObjectClass.Door => PluginObjectCapabilities.Interactable
+                | PluginObjectCapabilities.Door,
+            PluginObjectClass.Vendor => PluginObjectCapabilities.Interactable
+                | PluginObjectCapabilities.Vendor,
+            PluginObjectClass.Container => PluginObjectCapabilities.Interactable
+                | PluginObjectCapabilities.Container,
+            PluginObjectClass.Player => PluginObjectCapabilities.Interactable
+                | PluginObjectCapabilities.Player,
+            PluginObjectClass.Npc => PluginObjectCapabilities.Interactable
+                | PluginObjectCapabilities.Npc,
+            _ => PluginObjectCapabilities.None,
+        };
 }
 
 /// <summary>

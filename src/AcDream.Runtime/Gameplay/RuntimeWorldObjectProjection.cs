@@ -57,7 +57,7 @@ public static class RuntimeWorldObjectProjection
             item?.ContainerId ?? 0u,
             item?.WielderId ?? 0u)
         {
-            Capabilities = CapabilitiesFor(objectClass),
+            Capabilities = PluginObjectClassifier.Capabilities(objectClass),
             IsOwned = owned,
             IsLandscape = source is not null
                 && !owned
@@ -85,24 +85,6 @@ public static class RuntimeWorldObjectProjection
             IconId = item?.IconId ?? 0u,
         };
     }
-
-    private static PluginObjectCapabilities CapabilitiesFor(PluginObjectClass objectClass) =>
-        objectClass switch
-        {
-            PluginObjectClass.Portal => PluginObjectCapabilities.Interactable
-                | PluginObjectCapabilities.Portal,
-            PluginObjectClass.Door => PluginObjectCapabilities.Interactable
-                | PluginObjectCapabilities.Door,
-            PluginObjectClass.Vendor => PluginObjectCapabilities.Interactable
-                | PluginObjectCapabilities.Vendor,
-            PluginObjectClass.Container => PluginObjectCapabilities.Interactable
-                | PluginObjectCapabilities.Container,
-            PluginObjectClass.Player => PluginObjectCapabilities.Interactable
-                | PluginObjectCapabilities.Player,
-            PluginObjectClass.Npc => PluginObjectCapabilities.Interactable
-                | PluginObjectCapabilities.Npc,
-            _ => PluginObjectCapabilities.None,
-        };
 
     public static bool IsPlayerOwned(
         ClientObject item,

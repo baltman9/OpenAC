@@ -86,6 +86,19 @@ public sealed class RuntimeAutomationSurfaceTests
     }
 
     [Theory]
+    [InlineData(PluginObjectClass.Portal, PluginObjectCapabilities.Interactable | PluginObjectCapabilities.Portal)]
+    [InlineData(PluginObjectClass.Door, PluginObjectCapabilities.Interactable | PluginObjectCapabilities.Door)]
+    [InlineData(PluginObjectClass.Vendor, PluginObjectCapabilities.Interactable | PluginObjectCapabilities.Vendor)]
+    [InlineData(PluginObjectClass.Npc, PluginObjectCapabilities.Interactable | PluginObjectCapabilities.Npc)]
+    [InlineData(PluginObjectClass.MeleeWeapon, PluginObjectCapabilities.None)]
+    public void ObjectCapabilitiesAreStableSemanticFlags(
+        PluginObjectClass objectClass,
+        PluginObjectCapabilities expected)
+    {
+        Assert.Equal(expected, PluginObjectClassifier.Capabilities(objectClass));
+    }
+
+    [Theory]
     [InlineData((uint)ItemType.MeleeWeapon, 0u)]
     [InlineData((uint)ItemType.Armor, 0u)]
     [InlineData((uint)ItemType.Creature, 0x10u)]
