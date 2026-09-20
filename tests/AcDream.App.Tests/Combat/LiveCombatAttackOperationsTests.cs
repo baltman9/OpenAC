@@ -1,3 +1,4 @@
+using AcDream.Runtime;
 using AcDream.App.Combat;
 using AcDream.App.Input;
 using AcDream.App.Net;
@@ -115,17 +116,17 @@ public sealed class LiveCombatAttackOperationsTests
         var combat = new CombatState();
         var targets = new FakeTargets();
         var settings = new FakeSettings();
-        var player = new RuntimeLocalPlayerMovementState();
         var live = new FakeLiveSource { IsInWorld = inWorld };
         var feedback = new FakeFeedback();
-        var outbound = new LocalPlayerOutboundController(
-            static (_, _, _, _, _, _) => { });
+        // The body's own answers -- ready to swing, holding two weapons,
+        // stopping for a request -- come off the runtime's movement owner
+        // now, the same owner a client with no window reads.
+        GameRuntime runtime = GameRuntimeTestFactory.Create();
         var owner = new LiveCombatAttackOperations(
             combat,
             targets,
             settings,
-            player,
-            outbound,
+            runtime,
             live,
             live,
             feedback);

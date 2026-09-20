@@ -73,9 +73,7 @@ internal sealed class WindowedArm : ParityArm
             Runtime.ActionOwner.Combat,
             new CombatAttackTargetSource(Runtime),
             new CharacterOptionCombatSettingsSource(Runtime.CharacterOwner.Options),
-            Runtime.MovementOwner,
-            new LocalPlayerOutboundController(
-                static (_, _, _, _, _, _) => { }),
+            Runtime,
             _sessionSource,
             _sessionSource,
             _feedback)));

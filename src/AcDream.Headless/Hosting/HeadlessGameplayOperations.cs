@@ -89,10 +89,8 @@ internal sealed class HeadlessGameplayOperations
         return GetSelectedOrClosestTarget(runtime, allowAutoTarget) is not null;
     }
 
-    public void PrepareAttackRequest()
-    {
-        _ = RequireRuntime().MovementOwner.PrepareForAttackRequest();
-    }
+    public void PrepareAttackRequest() =>
+        RequireRuntime().PrepareLocalPlayerForAttackRequest();
 
     public bool SendAttack(AttackHeight height, float power, bool allowAutoTarget)
     {
@@ -198,10 +196,8 @@ internal sealed class HeadlessGameplayOperations
         return result.Allowed;
     }
 
-    public void StopCompletely()
-    {
-        _ = RequireRuntime().MovementOwner.PrepareForAttackRequest();
-    }
+    public void StopCompletely() =>
+        RequireRuntime().PrepareLocalPlayerForAttackRequest();
 
     public void SendUntargeted(uint spellId)
     {

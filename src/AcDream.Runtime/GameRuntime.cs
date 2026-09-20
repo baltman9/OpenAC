@@ -464,6 +464,14 @@ public sealed class GameRuntime
             options.TryFlush(SendBlob);
     }
 
+    /// <summary>
+    /// The stop a swing asks for, on its way out. It carries no movement
+    /// diagnostic: what it sends is one packet at one moment, not a stream
+    /// worth watching.
+    /// </summary>
+    private readonly LocalPlayerOutboundController _attackRequestOutbound =
+        new(static (_, _, _, _, _, _) => { });
+
     public GameRuntimeClock Clock { get; }
     public LiveSessionController Session { get; }
     public RuntimeLocalPlayerIdentityState PlayerIdentity { get; }
@@ -610,6 +618,28 @@ public sealed class GameRuntime
     /// window-less host actually needs.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Stops the character for a swing and tells the server it stopped.
+    /// A character asked to swing while it is running has to stand still
+    /// first, and the server has to hear about that at once or it works the
+    /// swing out from where it still believed the character was. One
+    /// implementation, so a swing costs the same wherever it was asked for.
+    /// </summary>
+    public void PrepareLocalPlayerForAttackRequest()
+    {
+        ObjectDisposedException.ThrowIf(_disposeRequested || _disposed, this);
+        if (!MovementOwner.PrepareForAttackRequest()
+            || MovementOwner.Controller is not { } controller)
+        {
+            return;
+        }
+
+        _ = _attackRequestOutbound.TrySendMovement(
+            Session.CurrentSession,
+            controller,
+            controller.CaptureMovementResult(mouseLookEvent: false));
+    }
+
     public void HandleLocalPlayerTargeting()
     {
         ObjectDisposedException.ThrowIf(_disposeRequested || _disposed, this);

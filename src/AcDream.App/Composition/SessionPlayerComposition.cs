@@ -724,8 +724,7 @@ internal sealed class SessionPlayerCompositionPhase
                     d.Actions.Combat,
                     new CombatAttackTargetSource(d.Runtime),
                     new CharacterOptionCombatSettingsSource(d.Character.Options),
-                    d.PlayerController,
-                    d.PlayerOutbound,
+                    d.Runtime,
                     liveSessionSource,
                     liveSessionSource,
                     d.CombatFeedback)));

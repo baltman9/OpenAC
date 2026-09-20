@@ -2,6 +2,7 @@ using AcDream.App.Input;
 using AcDream.App.Net;
 using AcDream.Core.Combat;
 using AcDream.Core.Net.Messages;
+using AcDream.Runtime;
 using AcDream.Runtime.Gameplay;
 
 namespace AcDream.App.Combat;
@@ -150,8 +151,7 @@ internal sealed class LiveCombatAttackOperations
     private readonly CombatState _combat;
     private readonly ICombatAttackTargetSource _targets;
     private readonly ICombatGameplaySettingsSource _settings;
-    private readonly IRuntimeLocalPlayerControllerSource _player;
-    private readonly LocalPlayerOutboundController _outbound;
+    private readonly GameRuntime _runtime;
     private readonly ILiveInWorldSource _inWorld;
     private readonly ILiveWorldSessionSource _session;
     private readonly ICombatFeedbackSink _feedback;
@@ -160,8 +160,7 @@ internal sealed class LiveCombatAttackOperations
         CombatState combat,
         ICombatAttackTargetSource targets,
         ICombatGameplaySettingsSource settings,
-        IRuntimeLocalPlayerControllerSource player,
-        LocalPlayerOutboundController outbound,
+        GameRuntime runtime,
         ILiveInWorldSource inWorld,
         ILiveWorldSessionSource session,
         ICombatFeedbackSink feedback)
@@ -169,30 +168,20 @@ internal sealed class LiveCombatAttackOperations
         _combat = combat ?? throw new ArgumentNullException(nameof(combat));
         _targets = targets ?? throw new ArgumentNullException(nameof(targets));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
-        _player = player ?? throw new ArgumentNullException(nameof(player));
-        _outbound = outbound ?? throw new ArgumentNullException(nameof(outbound));
+        _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _inWorld = inWorld ?? throw new ArgumentNullException(nameof(inWorld));
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _feedback = feedback ?? throw new ArgumentNullException(nameof(feedback));
     }
 
-    public bool IsDualWield =>
-        _player.Controller?.Motion.InterpretedState.CurrentStyle
-        == CombatInputPlanner.DualWieldCombatStyle;
+    // Whether the character is holding two weapons, and whether it is
+    // standing in a position it can swing from, are facts about the body --
+    // the movement owner answers them, for this client and for one with no
+    // window alike.
+    public bool IsDualWield => _runtime.MovementOwner.IsDualWield;
 
-    public bool PlayerReadyForAttack
-    {
-        get
-        {
-            if (_player.Controller is not { } controller)
-                return false;
-            var motion = controller.Motion.InterpretedState;
-            return CombatInputPlanner.PlayerInReadyPositionForAttack(
-                _combat.CurrentMode,
-                motion.CurrentStyle,
-                motion.ForwardCommand);
-        }
-    }
+    public bool PlayerReadyForAttack =>
+        _runtime.MovementOwner.IsReadyForAttack(_combat.CurrentMode);
 
     public bool AutoRepeatAttack => _settings.AutoRepeatAttack;
 
@@ -256,17 +245,6 @@ internal sealed class LiveCombatAttackOperations
     public void SendCancelAttack() =>
         _session.CurrentSession?.SendCancelAttack();
 
-    public void PrepareAttackRequest()
-    {
-        if (_player.Controller is not { } controller
-            || !controller.PrepareForAttackRequest())
-        {
-            return;
-        }
-
-        _outbound.TrySendMovement(
-            _session.CurrentSession,
-            controller,
-            controller.CaptureMovementResult(mouseLookEvent: false));
-    }
+    public void PrepareAttackRequest() =>
+        _runtime.PrepareLocalPlayerForAttackRequest();
 }
