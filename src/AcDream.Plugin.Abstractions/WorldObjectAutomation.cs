@@ -262,6 +262,8 @@ public static class PluginObjectClassifier
                 | PluginObjectCapabilities.Player,
             PluginObjectClass.Npc => PluginObjectCapabilities.Interactable
                 | PluginObjectCapabilities.Npc,
+            PluginObjectClass.Lifestone or PluginObjectClass.Services =>
+                PluginObjectCapabilities.Interactable,
             _ => PluginObjectCapabilities.None,
         };
 }

@@ -90,6 +90,8 @@ public sealed class RuntimeAutomationSurfaceTests
     [InlineData(PluginObjectClass.Door, PluginObjectCapabilities.Interactable | PluginObjectCapabilities.Door)]
     [InlineData(PluginObjectClass.Vendor, PluginObjectCapabilities.Interactable | PluginObjectCapabilities.Vendor)]
     [InlineData(PluginObjectClass.Npc, PluginObjectCapabilities.Interactable | PluginObjectCapabilities.Npc)]
+    [InlineData(PluginObjectClass.Lifestone, PluginObjectCapabilities.Interactable)]
+    [InlineData(PluginObjectClass.Services, PluginObjectCapabilities.Interactable)]
     [InlineData(PluginObjectClass.MeleeWeapon, PluginObjectCapabilities.None)]
     public void ObjectCapabilitiesAreStableSemanticFlags(
         PluginObjectClass objectClass,
