@@ -24,6 +24,7 @@ internal sealed class HeadlessConsoleRenderer : IRuntimeEventObserver, IDisposab
     private readonly bool _useColor;
     private readonly RuntimeChatFeed? _chat;
     private readonly int _windowId;
+    private readonly string _sessionPrefix;
     private bool _disposed;
 
     /// <param name="chat">
@@ -34,16 +35,25 @@ internal sealed class HeadlessConsoleRenderer : IRuntimeEventObserver, IDisposab
     /// Which chat window's filters decide what is shown. The console stands in
     /// for the main window.
     /// </param>
+    /// <param name="sessionId">
+    /// Which session these lines came from, printed in front of every one of
+    /// them. Left out where the process runs a single session and there is
+    /// nothing to tell apart.
+    /// </param>
     internal HeadlessConsoleRenderer(
         TextWriter output,
         bool useColor,
         RuntimeChatFeed? chat = null,
-        int windowId = ChatWindowState.MainWindowId)
+        int windowId = ChatWindowState.MainWindowId,
+        string? sessionId = null)
     {
         _output = output ?? throw new ArgumentNullException(nameof(output));
         _useColor = useColor;
         _chat = chat;
         _windowId = windowId;
+        _sessionPrefix = string.IsNullOrEmpty(sessionId)
+            ? string.Empty
+            : "[" + sessionId + "] ";
         if (_chat is not null)
             _chat.LineAppended += WriteChatLine;
     }
@@ -71,8 +81,10 @@ internal sealed class HeadlessConsoleRenderer : IRuntimeEventObserver, IDisposab
     }
 
     /// <summary>
-    /// Chat reaches the console through the chat feed, which carries the
-    /// finished text; this stream carries the same entries unworded.
+    /// Not a second way for chat to reach the console. The chat feed carries
+    /// the finished text and is the one source of truth for what is shown;
+    /// this stream carries the same entries unworded, for diagnostics and for
+    /// plugins that want the event rather than the line.
     /// </summary>
     public void OnChat(in RuntimeChatDelta delta)
     {
@@ -134,7 +146,9 @@ internal sealed class HeadlessConsoleRenderer : IRuntimeEventObserver, IDisposab
 
     private void WriteLine(string text, bool dim)
     {
-        string line = dim ? NoticePrefix + text : text;
+        string line = dim
+            ? NoticePrefix + _sessionPrefix + text
+            : _sessionPrefix + text;
         _output.WriteLine(_useColor && dim ? Dim + line + Reset : line);
         _output.Flush();
     }

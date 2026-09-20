@@ -17,8 +17,8 @@ internal sealed class HeadlessProcessHost : IDisposable
     private readonly HeadlessProcessResourceSampler _resources;
     private readonly CancellationTokenSource _consoleQuitRequested = new();
     private readonly HeadlessConsoleController? _console;
-    private readonly HeadlessConsoleRenderer? _consoleRenderer;
-    private readonly IDisposable? _consoleRendererSubscription;
+    private readonly HeadlessConsoleRenderer[] _consoleRenderers = [];
+    private readonly IDisposable[] _consoleRendererSubscriptions = [];
     private int _disposeIndex;
     private bool _disposed;
 
@@ -70,8 +70,8 @@ internal sealed class HeadlessProcessHost : IDisposable
         HeadlessProcessContentOwner? content = null;
         HeadlessProcessResourceSampler? resources = null;
         HeadlessConsoleController? console = null;
-        HeadlessConsoleRenderer? consoleRenderer = null;
-        IDisposable? consoleRendererSubscription = null;
+        var consoleRenderers = new List<HeadlessConsoleRenderer>();
+        var consoleRendererSubscriptions = new List<IDisposable>();
         // The diagnostic lines keep the writer they were given; the console's
         // human-readable stream is a separate one unless the caller has none.
         TextWriter consoleWriter = consoleOutput ?? diagnostics;
@@ -146,67 +146,74 @@ internal sealed class HeadlessProcessHost : IDisposable
             _content = content;
             _disposeIndex = _sessions.Length - 1;
 
-            if (consoleEnabled && _sessions.Length == 1)
+            if (consoleEnabled)
             {
-                HeadlessSessionHost session = _sessions[0];
-                var renderer = new HeadlessConsoleRenderer(
-                    consoleWriter,
-                    useColor: standardOutputIsTerminal,
-                    chat: session.Runtime.CommunicationOwner.ChatFeed);
-                consoleRenderer = renderer;
-                consoleRendererSubscription =
-                    session.Runtime.Subscribe(renderer);
+                // Every session gets its own reader of the chat feed; with
+                // more than one, each line says which session it came from so
+                // two worlds cannot be read as one.
+                bool several = _sessions.Length > 1;
+                var bindings = new List<HeadlessConsoleSession>(_sessions.Length);
+                foreach (HeadlessSessionHost session in _sessions)
+                {
+                    HeadlessSessionHost captured = session;
+                    var renderer = new HeadlessConsoleRenderer(
+                        consoleWriter,
+                        useColor: standardOutputIsTerminal,
+                        chat: captured.Runtime.CommunicationOwner.ChatFeed,
+                        sessionId: several ? captured.SessionId : null);
+                    consoleRenderers.Add(renderer);
+                    consoleRendererSubscriptions.Add(
+                        captured.Runtime.Subscribe(renderer));
+                    bindings.Add(new HeadlessConsoleSession(
+                        captured.SessionId,
+                        captured.ChatEntry,
+                        captured.SubmitConsoleLine,
+                        captured.ClaimsPluginVerb));
+                }
+
                 HeadlessConsoleController controller = new(
                     standardInput,
                     consoleWriter,
-                    session.SubmitConsoleLine,
-                    () => BuildStatusText(session),
+                    bindings,
                     _consoleQuitRequested);
-                var spewPump = new HeadlessConsoleSpewBoxPump(
-                    session.Runtime.CommunicationOwner.SpewBox,
-                    () => session.Runtime.Clock.SimulationTimeSeconds,
-                    renderer.WriteInterfaceText);
-                session.ConsolePump = () =>
+                for (int index = 0; index < _sessions.Length; index++)
                 {
-                    controller.DrainDue();
-                    spewPump.Pump();
-                };
+                    HeadlessSessionHost captured = _sessions[index];
+                    HeadlessConsoleRenderer renderer = consoleRenderers[index];
+                    var spewPump = new HeadlessConsoleSpewBoxPump(
+                        captured.Runtime.CommunicationOwner.SpewBox,
+                        () => captured.Runtime.Clock.SimulationTimeSeconds,
+                        renderer.WriteInterfaceText);
+                    // One reader serves the whole process, so only the first
+                    // session drains it; every session still pumps its own
+                    // client-local text.
+                    bool drainsInput = index == 0;
+                    captured.ConsolePump = () =>
+                    {
+                        if (drainsInput)
+                            controller.DrainDue();
+                        spewPump.Pump();
+                    };
+                }
                 console = controller;
             }
-            else if (consoleEnabled)
-            {
-                _diagnostics.Message("console", "single-session only");
-            }
             _console = console;
-            _consoleRenderer = consoleRenderer;
-            _consoleRendererSubscription = consoleRendererSubscription;
+            _consoleRenderers = consoleRenderers.ToArray();
+            _consoleRendererSubscriptions = consoleRendererSubscriptions.ToArray();
         }
         catch
         {
             console?.Dispose();
-            consoleRendererSubscription?.Dispose();
-            consoleRenderer?.Dispose();
+            foreach (IDisposable subscription in consoleRendererSubscriptions)
+                subscription.Dispose();
+            foreach (HeadlessConsoleRenderer renderer in consoleRenderers)
+                renderer.Dispose();
             resources?.Dispose();
             for (int index = sessions.Count - 1; index >= 0; index--)
                 sessions[index].Dispose();
             content?.Dispose();
             throw;
         }
-    }
-
-    private static string BuildStatusText(HeadlessSessionHost session)
-    {
-        RuntimeMovementSnapshot movement =
-            session.Runtime.MovementOwner.Snapshot;
-        string position = movement.HasController
-            ? $"cell=0x{movement.Position.ObjCellId:X8} "
-                + $"local=({movement.Position.Frame.Origin.X:F2},"
-                + $"{movement.Position.Frame.Origin.Y:F2},"
-                + $"{movement.Position.Frame.Origin.Z:F2})"
-            : "unknown";
-        return $"generation={session.Runtime.Generation.Value} "
-            + $"position={position} "
-            + $"plugins={session.Plugins.LoadedCount} loaded";
     }
 
     internal HeadlessSessionHost Session => _sessions.Length == 1
@@ -321,8 +328,10 @@ internal sealed class HeadlessProcessHost : IDisposable
         if (_disposed)
             return;
         _console?.Dispose();
-        _consoleRendererSubscription?.Dispose();
-        _consoleRenderer?.Dispose();
+        foreach (IDisposable subscription in _consoleRendererSubscriptions)
+            subscription.Dispose();
+        foreach (HeadlessConsoleRenderer renderer in _consoleRenderers)
+            renderer.Dispose();
         _consoleQuitRequested.Dispose();
         while (_disposeIndex >= 0)
         {

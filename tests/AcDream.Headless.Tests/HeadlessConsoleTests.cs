@@ -97,23 +97,64 @@ public sealed class HeadlessConsoleTests
         Assert.Equal(["one", "two", "three"], drained);
     }
 
+    // ── HeadlessConsoleController: the chat entry's second front end ─────
+    //
+    // Before this the controller answered /quit and /status itself, before
+    // the router saw either, and printed its own "not handled (Dropped)"
+    // line for an outcome the shared feedback had already explained. It is
+    // now a line pump: a typed line goes into the one chat entry, and what
+    // the line did is said by the chat feed.
+
+    /// <summary>
+    /// A console session with a real chat entry behind it and a recording
+    /// submit, so a test can see exactly what reached the entry.
+    /// </summary>
+    private sealed class ConsoleSessionFixture
+    {
+        internal ConsoleSessionFixture(
+            string id, Func<string, bool>? claimsVerb = null)
+        {
+            Id = id;
+            Binding = new HeadlessConsoleSession(
+                id,
+                Entry,
+                line =>
+                {
+                    Submitted.Add(line);
+                    if (Throw is { } failure)
+                        throw failure;
+                    return Outcome;
+                },
+                claimsVerb ?? (static _ => false));
+        }
+
+        internal string Id { get; }
+        internal RuntimeChatEntryOwner Entry { get; } = new();
+        internal HeadlessConsoleSession Binding { get; }
+        internal List<string?> Submitted { get; } = [];
+        internal SubmitOutcome Outcome { get; set; } = SubmitOutcome.Sent;
+        internal Exception? Throw { get; set; }
+    }
+
     [Fact]
     public void SubmitRunsOnTheDrainCallersThreadNeverTheReaderThread()
     {
         using var fixture = new ThreadIdRecordingTextReader(
             new System.IO.StringReader("hello" + Environment.NewLine));
         int? observedSubmitThreadId = null;
-        using var quit = new CancellationTokenSource();
-        using var controller = new HeadlessConsoleController(
-            fixture,
-            TextWriter.Null,
-            line =>
+        var session = new ConsoleSessionFixture("alpha");
+        var binding = new HeadlessConsoleSession(
+            session.Id,
+            session.Entry,
+            _ =>
             {
                 observedSubmitThreadId = Environment.CurrentManagedThreadId;
                 return SubmitOutcome.Sent;
             },
-            () => string.Empty,
-            quit);
+            static _ => false);
+        using var quit = new CancellationTokenSource();
+        using var controller = new HeadlessConsoleController(
+            fixture, TextWriter.Null, [binding], quit);
 
         Assert.True(WaitForEndOfInput(controller));
         int drainCallerThreadId = Environment.CurrentManagedThreadId;
@@ -125,8 +166,6 @@ public sealed class HeadlessConsoleTests
         Assert.Equal(drainCallerThreadId, observedSubmitThreadId);
     }
 
-    // ── HeadlessConsoleController: /quit, /status, dispatch ordering ─────
-
     [Fact]
     public void ControllerDrainsEveryLineQueuedSinceTheLastTickInOrderOnOneCall()
     {
@@ -134,31 +173,23 @@ public sealed class HeadlessConsoleTests
             "alpha" + Environment.NewLine
             + "beta" + Environment.NewLine
             + "gamma" + Environment.NewLine);
-        var handled = new List<string>();
+        var session = new ConsoleSessionFixture("one");
         using var quit = new CancellationTokenSource();
         using var controller = new HeadlessConsoleController(
-            input,
-            TextWriter.Null,
-            line =>
-            {
-                handled.Add(line);
-                return SubmitOutcome.Sent;
-            },
-            () => string.Empty,
-            quit);
+            input, TextWriter.Null, [session.Binding], quit);
 
         Assert.True(
             WaitForEndOfInput(controller),
             "the reader thread never reached EOF");
         controller.DrainDue();
 
-        Assert.Equal(["alpha", "beta", "gamma"], handled);
+        Assert.Equal(["alpha", "beta", "gamma"], session.Submitted);
         Assert.Equal(3, controller.LastDrainCount);
 
         // A second drain with nothing queued does nothing — proves DrainDue
         // does not re-process already-handled lines.
         controller.DrainDue();
-        Assert.Equal(["alpha", "beta", "gamma"], handled);
+        Assert.Equal(["alpha", "beta", "gamma"], session.Submitted);
         Assert.Equal(0, controller.LastDrainCount);
     }
 
@@ -166,95 +197,265 @@ public sealed class HeadlessConsoleTests
     public void QuitRequestsCancellationAndNeverReachesSubmit()
     {
         using var input = new System.IO.StringReader("/quit" + Environment.NewLine);
-        var submitted = new List<string>();
+        var session = new ConsoleSessionFixture("one");
         var output = new StringWriter();
         using var quit = new CancellationTokenSource();
         using var controller = new HeadlessConsoleController(
-            input,
-            output,
-            line =>
-            {
-                submitted.Add(line);
-                return SubmitOutcome.Sent;
-            },
-            () => string.Empty,
-            quit);
+            input, output, [session.Binding], quit);
 
         Assert.True(WaitForEndOfInput(controller));
         controller.DrainDue();
 
         Assert.True(quit.IsCancellationRequested);
-        Assert.Empty(submitted);
+        Assert.Empty(session.Submitted);
         Assert.Contains("quitting", output.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// The console's own verbs are offered to the session's one command
+    /// registry first, so a plugin that registered the same verb keeps it and
+    /// the line goes to the router as any other line would.
+    /// </summary>
     [Fact]
-    public void StatusPrintsTheProvidedStatusTextAndNeverReachesSubmit()
+    public void AVerbAPluginAlreadyOwnsIsNeverShadowedByTheConsolesOwn()
     {
-        using var input = new System.IO.StringReader("/status" + Environment.NewLine);
-        var submitted = new List<string>();
-        var output = new StringWriter();
+        using var input = new System.IO.StringReader("/quit" + Environment.NewLine);
+        var session = new ConsoleSessionFixture(
+            "one",
+            claimsVerb: verb => verb == HeadlessConsoleController.QuitVerb);
         using var quit = new CancellationTokenSource();
         using var controller = new HeadlessConsoleController(
-            input,
-            output,
-            line =>
-            {
-                submitted.Add(line);
-                return SubmitOutcome.Sent;
-            },
-            () => "generation=1 position=unknown plugins=0 loaded",
-            quit);
+            input, TextWriter.Null, [session.Binding], quit);
 
         Assert.True(WaitForEndOfInput(controller));
         controller.DrainDue();
 
-        Assert.Empty(submitted);
-        Assert.Contains(
-            "generation=1 position=unknown plugins=0 loaded",
-            output.ToString());
+        Assert.False(quit.IsCancellationRequested);
+        Assert.Equal(["/quit"], session.Submitted);
     }
 
+    /// <summary>
+    /// /status is a verb of the client's now, answered by the one registry,
+    /// so the console hands it to the router like anything else and the chat
+    /// box gets the same answer.
+    /// </summary>
+    [Fact]
+    public void StatusGoesToTheRouterRatherThanBeingAnsweredByTheConsole()
+    {
+        using var input = new System.IO.StringReader("/status" + Environment.NewLine);
+        var session = new ConsoleSessionFixture("one")
+        {
+            Outcome = SubmitOutcome.ClientHandled,
+        };
+        var output = new StringWriter();
+        using var quit = new CancellationTokenSource();
+        using var controller = new HeadlessConsoleController(
+            input, output, [session.Binding], quit);
+
+        Assert.True(WaitForEndOfInput(controller));
+        controller.DrainDue();
+
+        Assert.Equal(["/status"], session.Submitted);
+        Assert.Equal(string.Empty, output.ToString());
+    }
+
+    /// <summary>
+    /// An outcome is not a message. The router already told the player what
+    /// happened through the shared feedback, which reaches the console as a
+    /// line of the chat feed, so a second sentence here would be a divergence
+    /// from the chat box rather than a courtesy.
+    /// </summary>
     [Theory]
     [InlineData(SubmitOutcome.UnknownCommand)]
     [InlineData(SubmitOutcome.Dropped)]
-    public void UnknownOrDroppedOutcomePrintsAVisibleLine(SubmitOutcome outcome)
+    [InlineData(SubmitOutcome.Sent)]
+    public void NothingIsPrintedAboutWhatTheLineDid(SubmitOutcome outcome)
     {
         using var input = new System.IO.StringReader("garbage" + Environment.NewLine);
+        var session = new ConsoleSessionFixture("one") { Outcome = outcome };
         var output = new StringWriter();
         using var quit = new CancellationTokenSource();
         using var controller = new HeadlessConsoleController(
-            input,
-            output,
-            _ => outcome,
-            () => string.Empty,
-            quit);
+            input, output, [session.Binding], quit);
 
         Assert.True(WaitForEndOfInput(controller));
         controller.DrainDue();
 
-        Assert.Contains("garbage", output.ToString());
-        Assert.Contains(outcome.ToString(), output.ToString());
+        Assert.Equal(string.Empty, output.ToString());
     }
 
     [Fact]
     public void SubmitFailurePrintsALineAndNeverEscapesDrainDue()
     {
         using var input = new System.IO.StringReader("boom" + Environment.NewLine);
+        var session = new ConsoleSessionFixture("one")
+        {
+            Throw = new InvalidOperationException("fixture failure"),
+        };
         var output = new StringWriter();
         using var quit = new CancellationTokenSource();
         using var controller = new HeadlessConsoleController(
-            input,
-            output,
-            _ => throw new InvalidOperationException("fixture failure"),
-            () => string.Empty,
-            quit);
+            input, output, [session.Binding], quit);
 
         Assert.True(WaitForEndOfInput(controller));
         controller.DrainDue();
 
         Assert.Contains("fixture failure", output.ToString());
     }
+
+    /// <summary>
+    /// Enter on an empty console line is Enter on an empty chat entry: it
+    /// sends whatever is staged, which is how a line a plugin composed goes
+    /// out. The staged line is shown first so the person can see it.
+    /// </summary>
+    [Fact]
+    public void AStagedDraftIsShownAndTheNextEnterSendsIt()
+    {
+        using var input = new System.IO.StringReader(Environment.NewLine);
+        var session = new ConsoleSessionFixture("one");
+        var output = new StringWriter();
+        using var quit = new CancellationTokenSource();
+        using var controller = new HeadlessConsoleController(
+            input, output, [session.Binding], quit);
+
+        Assert.True(session.Entry.Compose("/vt start"));
+        Assert.Contains("draft: /vt start", output.ToString());
+
+        Assert.True(WaitForEndOfInput(controller));
+        controller.DrainDue();
+
+        // Null means "the draft as it stands", which is what pressing Enter
+        // in a chat box sends.
+        Assert.Equal([null], session.Submitted);
+    }
+
+    // ── Several sessions on one console ──────────────────────────────────
+
+    [Fact]
+    public void AnAddressedLineGoesToThatSessionAndLeavesTheDefaultAlone()
+    {
+        using var input = new System.IO.StringReader(
+            "@beta hello beta" + Environment.NewLine
+            + "hello alpha" + Environment.NewLine);
+        var alpha = new ConsoleSessionFixture("alpha");
+        var beta = new ConsoleSessionFixture("beta");
+        using var quit = new CancellationTokenSource();
+        using var controller = new HeadlessConsoleController(
+            input, TextWriter.Null, [alpha.Binding, beta.Binding], quit);
+
+        Assert.True(WaitForEndOfInput(controller));
+        controller.DrainDue();
+
+        Assert.Equal(["hello beta"], beta.Submitted);
+        Assert.Equal(["hello alpha"], alpha.Submitted);
+        Assert.Equal("alpha", controller.DefaultSessionId);
+    }
+
+    /// <summary>
+    /// An at sign in front of something that is not a session goes to the
+    /// router untouched, so the server verbs that start with one still work.
+    /// </summary>
+    [Fact]
+    public void AnAtSignThatNamesNoSessionIsLeftForTheRouter()
+    {
+        using var input = new System.IO.StringReader(
+            "@tell Bob, hi" + Environment.NewLine);
+        var alpha = new ConsoleSessionFixture("alpha");
+        var beta = new ConsoleSessionFixture("beta");
+        using var quit = new CancellationTokenSource();
+        using var controller = new HeadlessConsoleController(
+            input, TextWriter.Null, [alpha.Binding, beta.Binding], quit);
+
+        Assert.True(WaitForEndOfInput(controller));
+        controller.DrainDue();
+
+        Assert.Equal(["@tell Bob, hi"], alpha.Submitted);
+        Assert.Empty(beta.Submitted);
+    }
+
+    [Fact]
+    public void SessionSwitchesWhichSessionAnUnaddressedLineGoesTo()
+    {
+        using var input = new System.IO.StringReader(
+            "/session beta" + Environment.NewLine
+            + "hello" + Environment.NewLine
+            + "/session nowhere" + Environment.NewLine);
+        var alpha = new ConsoleSessionFixture("alpha");
+        var beta = new ConsoleSessionFixture("beta");
+        var output = new StringWriter();
+        using var quit = new CancellationTokenSource();
+        using var controller = new HeadlessConsoleController(
+            input, output, [alpha.Binding, beta.Binding], quit);
+
+        Assert.True(WaitForEndOfInput(controller));
+        controller.DrainDue();
+
+        Assert.Equal("beta", controller.DefaultSessionId);
+        Assert.Equal(["hello"], beta.Submitted);
+        Assert.Empty(alpha.Submitted);
+        Assert.Contains("no session is called nowhere", output.ToString());
+    }
+
+    [Fact]
+    public void SessionsListsEverySessionAndMarksTheOneBeingTalkedTo()
+    {
+        using var input = new System.IO.StringReader(
+            "/sessions" + Environment.NewLine);
+        var alpha = new ConsoleSessionFixture("alpha");
+        var beta = new ConsoleSessionFixture("beta");
+        var output = new StringWriter();
+        using var quit = new CancellationTokenSource();
+        using var controller = new HeadlessConsoleController(
+            input, output, [alpha.Binding, beta.Binding], quit);
+
+        Assert.True(WaitForEndOfInput(controller));
+        controller.DrainDue();
+
+        string text = output.ToString();
+        Assert.Contains("session alpha (talking to this one)", text);
+        Assert.Contains("session beta", text);
+        Assert.Empty(alpha.Submitted);
+    }
+
+    /// <summary>
+    /// With more than one session every line the console prints says which
+    /// session it belongs to, so two worlds cannot be read as one.
+    /// </summary>
+    [Fact]
+    public void EveryPrintedLineNamesItsSessionWhenThereAreSeveral()
+    {
+        using var input = new System.IO.StringReader(
+            "/session nowhere" + Environment.NewLine);
+        var alpha = new ConsoleSessionFixture("alpha");
+        var beta = new ConsoleSessionFixture("beta");
+        var output = new StringWriter();
+        using var quit = new CancellationTokenSource();
+        using var controller = new HeadlessConsoleController(
+            input, output, [alpha.Binding, beta.Binding], quit);
+
+        Assert.True(WaitForEndOfInput(controller));
+        controller.DrainDue();
+
+        Assert.Contains("[alpha] ", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OneSessionPrintsNoSessionName()
+    {
+        using var input = new System.IO.StringReader(
+            "/quit" + Environment.NewLine);
+        var alpha = new ConsoleSessionFixture("alpha");
+        var output = new StringWriter();
+        using var quit = new CancellationTokenSource();
+        using var controller = new HeadlessConsoleController(
+            input, output, [alpha.Binding], quit);
+
+        Assert.True(WaitForEndOfInput(controller));
+        controller.DrainDue();
+
+        Assert.DoesNotContain("[alpha]", output.ToString(), StringComparison.Ordinal);
+    }
+
 
 
     // The console's own wording is gone: it prints the chat feed's lines.
@@ -426,6 +627,117 @@ public sealed class HeadlessConsoleTests
         SpewBoxState spewBox = host.Runtime.CommunicationOwner.SpewBox;
         spewBox.Tick(host.Runtime.Clock.SimulationTimeSeconds);
         Assert.Empty(spewBox.Snapshot());
+    }
+
+    /// <summary>
+    /// The console types into the one chat entry, so where a plain line goes
+    /// is decided the same way it is in a chat box: by the channel the entry
+    /// is aimed at. Before this the console always said Say.
+    /// </summary>
+    [Fact]
+    public void APlainLineGoesToTheChannelTheChatEntryIsAimedAt()
+    {
+        var captured = new List<byte[]>();
+        var operations = new FixtureSessionOperations
+        {
+            GameActionCapture = body => captured.Add(body),
+        };
+        using var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        Assert.Equal(RuntimeSessionStartStatus.Connected, host.Start().Status);
+
+        host.ChatEntry.SetChannel(ChatChannelKind.General);
+        SubmitOutcome outcome = host.SubmitConsoleLine("hello");
+
+        Assert.Equal(SubmitOutcome.Sent, outcome);
+        Assert.DoesNotContain(
+            captured, body => ActionOpcode(body) == ChatRequests.TalkOpcode);
+    }
+
+    /// <summary>
+    /// A console user can reply to a tell exactly as a chat box user does:
+    /// the entry is aimed at a listener and a plain line is a tell to them.
+    /// </summary>
+    [Fact]
+    public void APlainLineGoesToTheListenerTheChatEntryIsAimedAt()
+    {
+        var captured = new List<byte[]>();
+        var operations = new FixtureSessionOperations
+        {
+            GameActionCapture = body => captured.Add(body),
+        };
+        using var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        Assert.Equal(RuntimeSessionStartStatus.Connected, host.Start().Status);
+
+        host.ChatEntry.SetTellTarget("Bob", 0u);
+        SubmitOutcome outcome = host.SubmitConsoleLine("meet me");
+
+        Assert.Equal(SubmitOutcome.Sent, outcome);
+        byte[] body = Assert.Single(captured);
+        Assert.Equal(ChatRequests.TellOpcode, ActionOpcode(body));
+    }
+
+    /// <summary>
+    /// A line typed at the console is remembered by the same history a chat
+    /// box recalls from, so the two front ends share one list.
+    /// </summary>
+    [Fact]
+    public void ALineTypedAtTheConsoleIsRememberedForRecall()
+    {
+        var operations = new FixtureSessionOperations
+        {
+            GameActionCapture = static _ => { },
+        };
+        using var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        Assert.Equal(RuntimeSessionStartStatus.Connected, host.Start().Status);
+
+        _ = host.SubmitConsoleLine("hello");
+
+        Assert.Equal("hello", host.ChatEntry.RecallPrevious());
+    }
+
+    /// <summary>
+    /// A null line sends the draft as it stands, which is what Enter on an
+    /// empty console line -- and on an empty chat entry -- does.
+    /// </summary>
+    [Fact]
+    public void ANullLineSendsTheDraftAPluginStaged()
+    {
+        var captured = new List<byte[]>();
+        var operations = new FixtureSessionOperations
+        {
+            GameActionCapture = body => captured.Add(body),
+        };
+        using var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        Assert.Equal(RuntimeSessionStartStatus.Connected, host.Start().Status);
+
+        Assert.True(host.ChatEntry.Compose("hello"));
+        SubmitOutcome outcome = host.SubmitConsoleLine(null);
+
+        Assert.Equal(SubmitOutcome.Sent, outcome);
+        byte[] body = Assert.Single(captured);
+        Assert.Equal(ChatRequests.TalkOpcode, ActionOpcode(body));
+        Assert.Equal("hello", TalkText(body));
+        Assert.Equal(string.Empty, host.ChatEntry.Draft);
     }
 
     // ── HeadlessConsoleSpewBoxPump: server/plugin-driven interface text ──
@@ -636,8 +948,14 @@ public sealed class HeadlessConsoleTests
         Assert.Equal(expectDimmed, text.Contains("[2m"));
     }
 
+    /// <summary>
+    /// The console used to refuse to run beside more than one session and
+    /// said "single-session only". It now serves every session in the
+    /// process: each one gets its own reader of its own chat feed, and each
+    /// can be typed at.
+    /// </summary>
     [Fact]
-    public void TwoSessionsWithConsoleFlagReportsSingleSessionOnly()
+    public void EverySessionInTheProcessGetsTheConsole()
     {
         HeadlessSessionDescriptor StandardInputDescriptor(string id) =>
             Descriptor() with
@@ -673,7 +991,9 @@ public sealed class HeadlessConsoleTests
             directCredentials: null,
             consoleEnabled: true);
 
-        Assert.Contains("single-session only", diagnostics.ToString());
+        Assert.DoesNotContain("single-session only", diagnostics.ToString());
+        Assert.Equal(2, host.Sessions.Count);
+        Assert.All(host.Sessions, session => Assert.NotNull(session.ConsolePump));
     }
 
     private static bool WaitForEndOfInput(HeadlessConsoleController controller) =>

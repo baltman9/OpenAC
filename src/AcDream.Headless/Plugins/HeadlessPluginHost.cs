@@ -155,6 +155,13 @@ internal sealed class HeadlessPluginHost
     internal bool TryHandlePluginCommand(string commandLine) =>
         _automation.TryHandlePluginCommand(commandLine);
 
+    /// <summary>
+    /// Whether a verb is already spoken for on that one registry. A front end
+    /// with a verb of its own asks before answering it.
+    /// </summary>
+    internal bool ClaimsPluginVerb(string verb) =>
+        _automation.ClaimsPluginVerb(verb);
+
     public IUiRegistry Ui => NoOpUiRegistry.Instance;
 
     public IHostWindow Window { get; }

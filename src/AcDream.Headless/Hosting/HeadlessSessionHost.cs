@@ -516,12 +516,28 @@ internal sealed class HeadlessSessionHost : IDisposable
         }
     }
 
-    internal SubmitOutcome SubmitConsoleLine(string line) =>
-        ChatCommandRouter.Submit(
+    /// <summary>The chat entry every front end of this session types into.</summary>
+    internal RuntimeChatEntryOwner ChatEntry =>
+        Runtime.CommunicationOwner.ChatEntryOwner;
+
+    /// <summary>
+    /// Whether this session's one command registry already answers a verb, so
+    /// a front end with a verb of its own never shadows a plugin's.
+    /// </summary>
+    internal bool ClaimsPluginVerb(string verb) =>
+        _pluginSession.Host.ClaimsPluginVerb(verb);
+
+    /// <summary>
+    /// Sends a line the way the chat box sends it: through the one chat entry,
+    /// so the active channel, the reply target, the line history and the
+    /// staged draft are the same whichever front end typed it. A null line
+    /// sends the draft as it stands.
+    /// </summary>
+    internal SubmitOutcome SubmitConsoleLine(string? line) =>
+        ChatEntry.Submit(
             line,
             new RuntimeChatCommandFeedback(Runtime.CommunicationOwner),
-            _chatCommandSurface,
-            ChatChannelKind.Say);
+            _chatCommandSurface);
 
     internal RuntimeSessionStartResult Start()
     {
