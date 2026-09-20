@@ -1,9 +1,9 @@
-using AcDream.App.Rendering;
+using AcDream.Runtime.Physics;
 using AcDream.Core.Net.Messages;
 using DatReaderWriter.DBObjs;
 using DRWMotionCommand = DatReaderWriter.Enums.MotionCommand;
 
-namespace AcDream.App.Tests.Rendering;
+namespace AcDream.Runtime.Tests.Physics;
 
 public sealed class SpawnMotionInitializerTests
 {

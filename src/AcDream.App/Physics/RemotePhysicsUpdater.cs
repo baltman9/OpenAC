@@ -18,7 +18,7 @@ internal sealed class RemotePhysicsUpdater
             (ImmutableArray<FlatCollisionSphere> Spheres, float Scale, float StepUpHeight, float StepDownHeight)>
         _getSetupMoverShape;
     private readonly Func<uint, ObjectInfoState> _getMoverPvpState;
-    private readonly Action<uint, LiveEntityAnimationState, RemoteMotion, Vector3>
+    private readonly Action<uint, AcDream.Core.Physics.AnimationSequencer?, RemoteMotion, Vector3>
         _applyServerControlledVelocityCycle;
     private readonly List<LiveEntityRecord> _spatialRemoteSnapshot = new();
 
@@ -28,7 +28,7 @@ internal sealed class RemotePhysicsUpdater
         Func<uint, WorldEntity,
                 (ImmutableArray<FlatCollisionSphere> Spheres, float Scale, float StepUpHeight, float StepDownHeight)>
             getSetupMoverShape,
-        Action<uint, LiveEntityAnimationState, RemoteMotion, Vector3>
+        Action<uint, AcDream.Core.Physics.AnimationSequencer?, RemoteMotion, Vector3>
             applyServerControlledVelocityCycle,
         Func<uint, ObjectInfoState>? getMoverPvpState = null)
     {
@@ -197,12 +197,14 @@ internal sealed class RemotePhysicsUpdater
         var (radius, height) =
             _getSetupCylinder(ownerRecord.ServerGuid, entity);
         var shape = _getSetupMoverShape(ownerRecord.ServerGuid, entity);
+        AcDream.Core.Physics.AnimationSequencer? velocityCycleSequencer =
+            animationForVelocityCycle?.Sequencer;
         Action<Vector3>? staleCycle =
             animationForVelocityCycle is null
                 ? null
                 : velocity => _applyServerControlledVelocityCycle(
                     ownerRecord.ServerGuid,
-                    animationForVelocityCycle,
+                    velocityCycleSequencer,
                     remote,
                     velocity);
 

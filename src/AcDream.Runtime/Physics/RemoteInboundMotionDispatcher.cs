@@ -2,7 +2,7 @@ using AcDream.Core.Net;
 using AcDream.Core.Physics;
 using AcDream.Core.Physics.Motion;
 
-namespace AcDream.App.Physics;
+namespace AcDream.Runtime.Physics;
 
 internal sealed class RemoteInboundMotionDispatcher
 {

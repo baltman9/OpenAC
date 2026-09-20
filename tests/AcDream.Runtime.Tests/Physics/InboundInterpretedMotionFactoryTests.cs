@@ -1,7 +1,7 @@
-using AcDream.App.Physics;
+using AcDream.Runtime.Physics;
 using AcDream.Core.Net.Messages;
 
-namespace AcDream.App.Tests.Physics;
+namespace AcDream.Runtime.Tests.Physics;
 
 public sealed class InboundInterpretedMotionFactoryTests
 {

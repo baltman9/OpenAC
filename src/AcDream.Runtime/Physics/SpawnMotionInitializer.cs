@@ -2,7 +2,7 @@ using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 using DatReaderWriter.DBObjs;
 
-namespace AcDream.App.Rendering;
+namespace AcDream.Runtime.Physics;
 
 internal static class SpawnMotionInitializer
 {

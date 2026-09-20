@@ -1,7 +1,7 @@
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 
-namespace AcDream.App.Physics;
+namespace AcDream.Runtime.Physics;
 
 internal static class InboundInterpretedMotionFactory
 {

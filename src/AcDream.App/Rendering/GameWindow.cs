@@ -188,7 +188,7 @@ public sealed class GameWindow :
             serverGuid);
 
     private readonly AcDream.App.Physics.RemotePhysicsUpdater _remotePhysicsUpdater;
-    private readonly AcDream.App.Physics.RemoteInboundMotionDispatcher
+    private readonly AcDream.Runtime.Physics.RemoteInboundMotionDispatcher
         _remoteInboundMotion;
     private readonly AcDream.App.World.RetailInboundEventDispatcher
         _inboundEntityEvents = new();
@@ -588,9 +588,9 @@ public sealed class GameWindow :
             _runtimeEntityObjects.Physics,
             _liveEntityMotionBindings.GetSetupCylinder,
             _liveEntityMotionBindings.GetSetupMoverShape,
-            AcDream.App.Physics.RemoteServerControlledVelocityCycle.Apply,
+            AcDream.Runtime.Physics.RemoteServerControlledVelocityCycle.Apply,
             GetMoverPvpState);
-        _remoteInboundMotion = new AcDream.App.Physics.RemoteInboundMotionDispatcher(
+        _remoteInboundMotion = new AcDream.Runtime.Physics.RemoteInboundMotionDispatcher(
             (movement, cellId, update) =>
                 _liveEntityMotionBindings.RouteServerMoveTo(
                     movement, cellId, update),

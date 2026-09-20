@@ -1,10 +1,10 @@
-using AcDream.App.Physics;
+using AcDream.Runtime.Physics;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 using AcDream.Core.Physics.Motion;
 
-namespace AcDream.App.Tests.Physics;
+namespace AcDream.Runtime.Tests.Physics;
 
 public sealed class RemoteInboundMotionDispatcherTests
 {

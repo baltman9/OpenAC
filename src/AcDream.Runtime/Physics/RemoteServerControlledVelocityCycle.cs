@@ -1,19 +1,20 @@
-using AcDream.App.Rendering;
-
-namespace AcDream.App.Physics;
+namespace AcDream.Runtime.Physics;
 
 internal static class RemoteServerControlledVelocityCycle
 {
     private static bool IsPlayerGuid(uint guid) =>
         (guid & 0xFF000000u) == 0x50000000u;
+    // Takes the sequence itself rather than a host's animation record: the
+    // only thing this ever needed was the cycle the body is playing, and
+    // asking for no more than that lets either host call it.
     public static void Apply(
         uint serverGuid,
-        LiveEntityAnimationState ae,
+        AcDream.Core.Physics.AnimationSequencer? sequencer,
         RemoteMotion rm,
         System.Numerics.Vector3 velocity)
     {
         if (rm.Airborne) return;
-        if (ae.Sequencer is null) return;
+        if (sequencer is null) return;
         if (rm.MoveTo is { MovementTypeState: not AcDream.Core.Physics.MovementType.Invalid }) return;
 
         if (IsPlayerGuid(serverGuid))
@@ -21,7 +22,7 @@ internal static class RemoteServerControlledVelocityCycle
             return;
         }
 
-        uint currentMotion = ae.Sequencer.CurrentMotion;
+        uint currentMotion = sequencer.CurrentMotion;
         if (!AcDream.Core.Physics.ServerControlledLocomotion
             .CanApplyVelocityCycle(currentMotion))
             return;
@@ -29,8 +30,8 @@ internal static class RemoteServerControlledVelocityCycle
         var plan = AcDream.Core.Physics.ServerControlledLocomotion
             .PlanFromVelocity(velocity);
 
-        uint style = ae.Sequencer.CurrentStyle != 0
-            ? ae.Sequencer.CurrentStyle
+        uint style = sequencer.CurrentStyle != 0
+            ? sequencer.CurrentStyle
             : 0x8000003Du;
 
         if (System.Environment.GetEnvironmentVariable("ACDREAM_REMOTE_VEL_DIAG") == "1")
@@ -43,7 +44,7 @@ internal static class RemoteServerControlledVelocityCycle
                 + $"prev=0x{currentMotion:X8} "
                 + $"airborne={rm.Airborne} moveTo={rm.MoveTo?.MovementTypeState ?? AcDream.Core.Physics.MovementType.Invalid}");
         }
-        ae.Sequencer.SetCycle(style, plan.Motion, plan.SpeedMod);
+        sequencer.SetCycle(style, plan.Motion, plan.SpeedMod);
     }
 
 }

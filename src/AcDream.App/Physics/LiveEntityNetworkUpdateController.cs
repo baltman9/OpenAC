@@ -399,7 +399,7 @@ internal sealed class LiveEntityNetworkUpdateController
                     if (!IsCurrentLocalMotion())
                         return;
 
-                    AcDream.App.Physics.RemoteInboundMotionDispatchResult localDispatch =
+                    AcDream.Runtime.Physics.RemoteInboundMotionDispatchResult localDispatch =
                         _remoteInboundMotion.Apply(
                             update,
                             _playerController.Movement,
@@ -424,7 +424,7 @@ internal sealed class LiveEntityNetworkUpdateController
             }
             else
             {
-                AcDream.App.Physics.RemoteInboundMotionDispatchResult dispatch =
+                AcDream.Runtime.Physics.RemoteInboundMotionDispatchResult dispatch =
                     DispatchRemoteInboundMotion(
                         update,
                         entity,
@@ -499,7 +499,7 @@ internal sealed class LiveEntityNetworkUpdateController
         ae.CurrFrame = ae.LowFrame;
     }
 
-    private AcDream.App.Physics.RemoteInboundMotionDispatchResult
+    private AcDream.Runtime.Physics.RemoteInboundMotionDispatchResult
         DispatchRemoteInboundMotion(
         AcDream.Core.Net.WorldSession.EntityMotionUpdate update,
         AcDream.Core.World.WorldEntity entity,
@@ -558,7 +558,7 @@ internal sealed class LiveEntityNetworkUpdateController
         if (commandClass == 0u)
             commandClass = 0x41000000u;
 
-        AcDream.App.Physics.RemoteInboundMotionDispatchResult result =
+        AcDream.Runtime.Physics.RemoteInboundMotionDispatchResult result =
             _remoteInboundMotion.Apply(
                 update,
                 remote.Movement,
@@ -1501,7 +1501,7 @@ internal sealed class LiveEntityNetworkUpdateController
                 }
                 RemoteServerControlledVelocityCycle.Apply(
                     update.Guid,
-                    aeForVelocity,
+                    aeForVelocity.Sequencer,
                     rmState,
                     rmState.ServerVelocity);
             }
