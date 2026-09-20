@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="AcDream.Headless.Tests" />
+    <InternalsVisibleTo Include="AcDream.HostParity.Tests" />
   </ItemGroup>
 
   <ItemGroup>
