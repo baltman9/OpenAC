@@ -186,6 +186,30 @@ public sealed class RuntimeNavigationAutomationTests
         Assert.Equal(expected, report.State);
     }
 
+    [Theory]
+    [InlineData((int)NavigationWalkState.NoRoute, PluginGoToState.NoRoute)]
+    [InlineData((int)NavigationWalkState.Blocked, PluginGoToState.Blocked)]
+    [InlineData((int)NavigationWalkState.Stopped, PluginGoToState.Stopped)]
+    [InlineData((int)NavigationWalkState.Interrupted, PluginGoToState.Interrupted)]
+    [InlineData((int)NavigationWalkState.Lost, PluginGoToState.Lost)]
+    public void TerminalWalkOutcomesRemainDistinctForPlugins(
+        int runtimeStateValue,
+        PluginGoToState pluginState)
+    {
+        PluginGoToReport report = RuntimeNavigationProjection.GoToReport(
+            new NavigationWalkReport(
+                12,
+                (NavigationWalkState)runtimeStateValue,
+                0x50000001u,
+                float.NaN,
+                3,
+                "terminal"));
+
+        Assert.Equal(pluginState, report.State);
+        Assert.Equal(12, report.Sequence);
+        Assert.Equal(3, report.Replans);
+    }
+
     [Fact]
     public void AWalkWaitingOnSomethingElseIsReportedToPluginsAsWaiting()
     {
