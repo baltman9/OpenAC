@@ -34,6 +34,9 @@ internal sealed class HeadlessPluginSession : IDisposable
     internal int LoadedCount => _plugins.LoadedCount;
     internal HeadlessPluginHost Host => _host;
 
+    /// <summary>The one command registry this session hands plugins.</summary>
+    internal IPluginCommandRegistry PluginCommands => _host.Commands;
+
     internal IReadOnlyList<WeakReference> CaptureLoadContextWeakReferences() =>
         _plugins.CaptureLoadContextWeakReferences();
 
@@ -44,7 +47,6 @@ internal sealed class HeadlessPluginSession : IDisposable
         string sessionId,
         IEnumerable<string> roots,
         IReadOnlyList<string>? allowList,
-        IPluginCommandRegistry? commands = null,
         IPluginStorage? storage = null,
         IPluginStorage? vtankProfiles = null,
         IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
@@ -69,7 +71,6 @@ internal sealed class HeadlessPluginSession : IDisposable
                 diagnostics,
                 sessionId,
                 () => runtime.Generation.Value),
-            commands,
             storage,
             vtankProfiles,
             sessionSettings,
@@ -80,7 +81,11 @@ internal sealed class HeadlessPluginSession : IDisposable
             requestGracefulStop,
             content,
             sessionCommands,
-            navigationWalk);
+            navigationWalk,
+            (verb, error) => diagnostics.Failure(
+                sessionId,
+                $"plugin-command-{verb}",
+                error));
         var plugins = new PluginSession(
             host,
             status => Report(statusWriter, sessionId, status),

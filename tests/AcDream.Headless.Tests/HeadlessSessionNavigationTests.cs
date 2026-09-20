@@ -62,6 +62,44 @@ public sealed class HeadlessSessionNavigationTests
             entry => entry.Text.Contains("Navigation:", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// The windowless client registers the navigation verbs on the one
+    /// registry it hands plugins -- the plugin surface's own -- so a line
+    /// typed at it finds them, and the two verbs that need something drawn
+    /// say in plain words that there is nothing to draw on rather than being
+    /// missing.
+    /// </summary>
+    [Fact]
+    public void TheGridAndTheRouteAnswerInPlainWordsWithoutAWindow()
+    {
+        using var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var host = new HeadlessSessionHost(
+            HeadlessSessionHostTests.Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new HeadlessSessionHostTests.FixtureSessionOperations());
+        Assert.Equal(RuntimeSessionStartStatus.Connected, host.Start().Status);
+        host.Tick(0.015d);
+
+        Assert.True(host.Plugins.Host.Automation.Chat.Submit("/nav grid"));
+        Assert.True(host.Plugins.Host.Automation.Chat.Submit("/nav route 0x80000001"));
+        host.Tick(0.015d);
+
+        string[] lines = host.Runtime.CommunicationOwner.Chat.Snapshot()
+            .Select(static entry => entry.Text)
+            .ToArray();
+        Assert.Contains(
+            lines,
+            line => line.Contains(
+                "Navigation: this client has nothing to draw the grid on",
+                StringComparison.Ordinal));
+        Assert.Contains(
+            lines,
+            line => line.Contains(
+                "Navigation: this client has nothing to draw a route on",
+                StringComparison.Ordinal));
+    }
+
     /// <summary>A session that loaded no game data has nothing to plan walks over, so it says so.</summary>
     [Fact]
     public void WalksAreUnavailableInASessionWithoutGameData()

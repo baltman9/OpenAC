@@ -31,6 +31,24 @@ public sealed class PluginCommandRegistry : IPluginCommandRegistry
         return registration;
     }
 
+    /// <summary>
+    /// Whether a verb is already registered. A client with a verb of its own
+    /// asks before answering one, so it never shadows a plugin's.
+    /// </summary>
+    /// <param name="verb">
+    /// The verb, with or without its leading <c>/</c> or <c>@</c>.
+    /// </param>
+    public bool IsRegistered(string verb)
+    {
+        if (string.IsNullOrWhiteSpace(verb))
+            return false;
+        string normalized = verb.Trim().TrimStart('/', '@');
+        if (normalized.Length == 0)
+            return false;
+        lock (_gate)
+            return _registrations.ContainsKey(normalized);
+    }
+
     public bool TryHandle(string rawText)
     {
         if (string.IsNullOrWhiteSpace(rawText))

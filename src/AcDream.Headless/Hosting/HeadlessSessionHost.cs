@@ -154,7 +154,6 @@ internal sealed class HeadlessSessionHost : IDisposable
     private readonly IDisposable _policySubscription;
     private readonly HeadlessPluginSession _pluginSession;
     private readonly HeadlessLogoutAutomation _logout;
-    private readonly AcDream.Core.Plugins.PluginCommandRegistry _pluginCommands;
     private readonly LiveChatCommandSurface _chatCommandSurface;
     private readonly LiveSessionHost _liveSession;
     private readonly RuntimeLocalPlayerFrameController _localPlayerFrame;
@@ -162,8 +161,6 @@ internal sealed class HeadlessSessionHost : IDisposable
     /// <summary>The session's walks, when it loaded the game data they plan over.</summary>
     private readonly NavigationWalkController? _navigationWalk;
 
-    /// <summary>The session's /nav and /motor commands.</summary>
-    private readonly NavigationChatCommands? _navigationCommands;
     private readonly HeadlessProcessContentOwner.HeadlessProcessContentLease?
         _contentLease;
     private readonly IRuntimePlacementProjectionSink? _placementSinkOverride;
@@ -259,13 +256,11 @@ internal sealed class HeadlessSessionHost : IDisposable
                 bridge);
 
             var statusWriter = new SessionStatusWriter(descriptor.StatusFile);
-            var pluginCommands = new AcDream.Core.Plugins.PluginCommandRegistry(
-                (verb, error) => diagnostics.Failure(
-                    descriptor.Id,
-                    $"plugin-command-{verb}",
-                    error));
+            // One registry, the plugin surface's own, and it does not exist
+            // until the plugin session below is built -- so the verb lookup is
+            // resolved when a line arrives rather than captured now.
             var chatCommandSurface = new LiveChatCommandSurface(
-                pluginCommands.TryHandle);
+                line => pluginSession?.Host.TryHandlePluginCommand(line) == true);
             var loginCommands = new LoginCommandSequence(
                 descriptor.LoginCommands,
                 TimeSpan.FromMilliseconds(descriptor.LoginCommandDelayMs),
@@ -298,7 +293,6 @@ internal sealed class HeadlessSessionHost : IDisposable
                 RespondToConfirmation(accept);
                 return true;
             }
-            NavigationChatCommands? navigationCommands = null;
             NavigationWalkController? navigationWalk = null;
             if (contentLease is { } navigationContent)
             {
@@ -332,7 +326,6 @@ internal sealed class HeadlessSessionHost : IDisposable
                 descriptor.Id,
                 pluginRoots ?? [],
                 descriptor.Plugins,
-                pluginCommands,
                 storage,
                 vtankProfiles,
                 descriptor.PluginSettings,
@@ -344,20 +337,9 @@ internal sealed class HeadlessSessionHost : IDisposable
                 content: contentLease?.Dats,
                 sessionCommands: commands,
                 navigationWalk: navigationWalk);
-            // The shared surface owns the navigation plugins see; the walk
-            // controller and the movement commands were bound into it by the
-            // one binding pass both hosts run.
-            RuntimeNavigationAutomation navigation = pluginSession.Host.NavigationAutomation;
-            navigationCommands = new NavigationChatCommands(
-                    navigation,
-                    () => runtime.ActionOwner.Selection.SelectedObjectId,
-                    line => runtime.CommunicationOwner.AddText(
-                        line,
-                        RetailLogTextType.Default),
-                    narrate: navigationWalk is { } narrated
-                        ? listener => narrated.Narration = listener
-                        : null)
-                .Register(pluginCommands, pluginSession.Host.Events);
+            // /nav and /motor are registered by the one binding pass both
+            // hosts run, on the one registry the plugin surface owns, so
+            // nothing is built for them here.
             var liveSession = new LiveSessionHost(
                 runtime.Session,
                 new LiveSessionHostBindings(
@@ -429,7 +411,6 @@ internal sealed class HeadlessSessionHost : IDisposable
             Runtime = runtime;
             Commands = commands;
             _liveSession = liveSession;
-            _pluginCommands = pluginCommands;
             _chatCommandSurface = chatCommandSurface;
             _statusWriter = statusWriter;
             _localPlayerFrame =
@@ -441,7 +422,6 @@ internal sealed class HeadlessSessionHost : IDisposable
                         runtime.MovementOwner));
             _contentLease = contentLease;
             _navigationWalk = navigationWalk;
-            _navigationCommands = navigationCommands;
             bridge.Bind(this);
 
             hostLease = runtime.AcquireHostLease(
@@ -484,8 +464,8 @@ internal sealed class HeadlessSessionHost : IDisposable
     internal DirectGameRuntimeCommandAdapter Commands { get; }
     internal HeadlessCharacterOptionsSeeder? OptionsSeeder => _optionsSeeder;
     internal HeadlessPluginSession Plugins => _pluginSession;
-    internal AcDream.Core.Plugins.PluginCommandRegistry PluginCommands =>
-        _pluginCommands;
+    internal AcDream.Plugin.Abstractions.IPluginCommandRegistry PluginCommands =>
+        _pluginSession.PluginCommands;
     internal string SessionId => _descriptor.Id;
     internal Action? ConsolePump { get; set; }
     internal string ActiveCharacterName { get; private set; } =
@@ -739,7 +719,6 @@ internal sealed class HeadlessSessionHost : IDisposable
                     _disposeStage++;
                     break;
                 case 4:
-                    _navigationCommands?.Dispose();
                     _pluginSession.Dispose();
                     _disposeStage++;
                     break;

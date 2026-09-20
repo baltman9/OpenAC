@@ -55,7 +55,6 @@ internal sealed class HeadlessPluginHost
     internal HeadlessPluginHost(
         GameRuntime runtime,
         IPluginLogger logger,
-        IPluginCommandRegistry? commands = null,
         IPluginStorage? storage = null,
         IPluginStorage? vtankProfiles = null,
         IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
@@ -66,16 +65,22 @@ internal sealed class HeadlessPluginHost
         Func<bool>? requestGracefulStop = null,
         AcDream.Content.IDatReaderWriter? content = null,
         IGameRuntimeCommands? sessionCommands = null,
-        NavigationWalkController? navigationWalk = null)
+        NavigationWalkController? navigationWalk = null,
+        Action<string, Exception>? pluginCommandFailed = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         Log = logger ?? throw new ArgumentNullException(nameof(logger));
-        Commands = commands ?? NoOpPluginCommandRegistry.Instance;
         Storage = storage ?? NoOpPluginStorage.Instance;
         VtankProfiles = vtankProfiles ?? NoOpPluginStorage.Instance;
         _sessionSettingsByPlugin = CopySessionSettings(sessionSettings);
         Window = new HeadlessHostWindow(requestGracefulStop);
         _automation = new RuntimeAutomationSurface();
+        // One registry, the surface's own, exactly as the windowed host does
+        // it: the verbs a plugin registers and the verbs the client registers
+        // for itself live together, so a line typed anywhere finds all of them.
+        Commands = _automation.PluginCommands;
+        if (pluginCommandFailed is not null)
+            _automation.ReportPluginCommandFailuresTo(pluginCommandFailed);
         // One wiring, shared with the windowed host: what this host can lend
         // the plugin surface goes in the capability record, and the runtime
         // fills the rest.
@@ -93,6 +98,7 @@ internal sealed class HeadlessPluginHost
                 NavigationWalk = navigationWalk,
                 Logout = logout,
                 AnswerConfirmation = answerConfirmation,
+                Events = this,
             }));
         _wasInWorld = runtime.Lifecycle.State == RuntimeLifecycleState.InWorld;
         runtime.CommunicationOwner.LocalPlayerDied += OnLocalPlayerDied;
@@ -141,6 +147,13 @@ internal sealed class HeadlessPluginHost
 
     /// <summary>The runtime navigation behind <see cref="Automation"/>; the session host binds its walk controller and commands to it.</summary>
     internal RuntimeNavigationAutomation NavigationAutomation => _automation.NavigationAutomation;
+
+    /// <summary>
+    /// Offers a typed line to the one command registry, so the chat route can
+    /// reach the verbs plugins and the client itself registered.
+    /// </summary>
+    internal bool TryHandlePluginCommand(string commandLine) =>
+        _automation.TryHandlePluginCommand(commandLine);
 
     public IUiRegistry Ui => NoOpUiRegistry.Instance;
 

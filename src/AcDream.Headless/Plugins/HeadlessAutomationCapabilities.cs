@@ -1,5 +1,6 @@
 using AcDream.Content;
 using AcDream.Headless.Hosting;
+using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
 using AcDream.Runtime.Navigation;
 using AcDream.Runtime.Plugins;
@@ -29,6 +30,9 @@ internal sealed record HeadlessAutomationParts
     public NavigationWalkController? NavigationWalk { get; init; }
     public HeadlessLogoutAutomation? Logout { get; init; }
     public Func<uint, bool, bool>? AnswerConfirmation { get; init; }
+
+    /// <summary>The tick the plugin surface and its own verbs follow.</summary>
+    public IEvents? Events { get; init; }
 }
 
 /// <summary>
@@ -86,6 +90,9 @@ internal static class HeadlessAutomationCapabilities
             Declared = Declared,
             Conditional = Conditional,
             Warn = parts.Warn,
+            PluginEvents = parts.Events,
+            // Nothing here is drawn, so the two navigation verbs that draw
+            // are left out and answer that in plain words.
             Content = parts.Content,
             MagicCatalog = parts.MagicCatalog,
             SubmitChatText = parts.SubmitChatText,

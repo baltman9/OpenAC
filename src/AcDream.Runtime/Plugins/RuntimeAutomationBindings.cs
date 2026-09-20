@@ -58,6 +58,25 @@ internal sealed record RuntimeAutomationHostCapabilities
     /// </summary>
     public Func<bool>? KeyboardGoesToText { get; init; }
 
+    /// <summary>
+    /// The tick the plugin surface follows. Host-shaped, not a capability:
+    /// every host has one, and which object it is is the host's own business.
+    /// </summary>
+    public IEvents? PluginEvents { get; init; }
+
+    /// <summary>
+    /// Shows or hides the navigation grid. Host-shaped, not a capability:
+    /// there is nothing to draw a grid on without a window, so a windowless
+    /// client leaves it out and the verb says so in plain words.
+    /// </summary>
+    public Func<bool>? NavigationGrid { get; init; }
+
+    /// <summary>
+    /// Draws a planned route without walking it, for the same reason as
+    /// <see cref="NavigationGrid"/>.
+    /// </summary>
+    public Func<uint, bool>? NavigationRoutePreview { get; init; }
+
     public IDatReaderWriter? Content { get; init; }
     public MagicCatalog? MagicCatalog { get; init; }
     public Func<string, bool>? SubmitChatText { get; init; }
@@ -78,7 +97,9 @@ internal sealed record RuntimeAutomationHostCapabilities
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(static property => property.Name is not (
                 nameof(HostName) or nameof(Declared) or nameof(Warn)
-                or nameof(Conditional) or nameof(KeyboardGoesToText)))
+                or nameof(Conditional) or nameof(KeyboardGoesToText)
+                or nameof(PluginEvents) or nameof(NavigationGrid)
+                or nameof(NavigationRoutePreview)))
             .OrderBy(static property => property.Name, StringComparer.Ordinal)
             .ToArray();
 
@@ -141,6 +162,8 @@ internal static class RuntimeAutomationBindings
                 nameof(RuntimeAutomationHostCapabilities.SessionCommands),
             ["BindNavigationWalk"] =
                 nameof(RuntimeAutomationHostCapabilities.NavigationWalk),
+            ["BindNavigationCommands"] = null,
+            ["BindStatusCommand"] = null,
             ["BindEquipment"] = null,
             ["BindEquipment.equipSecondary"] = null,
             ["BindItems"] = null,
@@ -249,6 +272,22 @@ internal static class RuntimeAutomationBindings
             surface.BindNavigationWalk(navigationWalk);
             bound.Add(nameof(surface.BindNavigationWalk));
         }
+        // The client's own navigation verbs are built once, here, on the one
+        // command registry both hosts hand plugins. A host that can draw lends
+        // the two verbs that need drawing; the rest answer the same on either.
+        surface.BindNavigationCommands(
+            runtime,
+            capabilities.PluginEvents,
+            capabilities.NavigationGrid,
+            capabilities.NavigationRoutePreview,
+            capabilities.NavigationWalk is { } narratedWalk
+                ? listener => narratedWalk.Narration = listener
+                : null);
+        bound.Add(nameof(surface.BindNavigationCommands));
+        // /status is the same kind of thing: one verb, one answer, on
+        // whichever front end asked.
+        surface.BindStatusCommand(runtime);
+        bound.Add(nameof(surface.BindStatusCommand));
         // Every item command a plugin can issue is answered by the runtime's
         // own item-interaction owner. Who owns an item, which container is
         // open, which vendor is trading, whether a request is already in

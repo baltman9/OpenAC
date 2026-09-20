@@ -30,6 +30,15 @@ internal sealed record GraphicalAutomationParts
     public AcDream.App.Interaction.SelectionInteractionController? Selection { get; init; }
     public AcDream.App.World.LiveEntityDeletionController? EntityDeletion { get; init; }
     public InputDispatcher? Input { get; init; }
+
+    /// <summary>The tick the plugin surface and its own verbs follow.</summary>
+    public AcDream.Plugin.Abstractions.IEvents? Events { get; init; }
+
+    /// <summary>Shows or hides the navigation grid this window draws.</summary>
+    public Func<bool>? NavigationGrid { get; init; }
+
+    /// <summary>Draws a planned route without walking it.</summary>
+    public Func<uint, bool>? NavigationRoutePreview { get; init; }
 }
 
 /// <summary>
@@ -109,6 +118,9 @@ internal static class GraphicalAutomationCapabilities
             Declared = Declared,
             Conditional = Conditional,
             Warn = parts.Warn,
+            PluginEvents = parts.Events,
+            NavigationGrid = parts.NavigationGrid,
+            NavigationRoutePreview = parts.NavigationRoutePreview,
             // Automation that steers by holding keys has to know when the
             // keyboard is going into text instead of into the character, and
             // only a host with a keyboard can say. The chat entry itself is a

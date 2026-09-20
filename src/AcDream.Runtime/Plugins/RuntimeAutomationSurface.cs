@@ -28,6 +28,10 @@ internal sealed class RuntimeAutomationSurface
       IProjectileAutomation, ISelectionAutomation, IDialogAutomation, IDisposable
 {
     private readonly PluginCommandRegistry _pluginCommands;
+    private Action<string, Exception>? _pluginCommandFailed;
+    private AcDream.Runtime.Navigation.NavigationChatCommands?
+        _navigationCommands;
+    private IDisposable? _statusCommand;
     private const int MaximumPluginChatMessages = 512;
     private const double PeerHeartbeatSeconds = 5d;
     private readonly object _gate = new();
@@ -134,9 +138,7 @@ internal sealed class RuntimeAutomationSurface
     {
         _navigation = new AcDream.Runtime.Navigation.RuntimeNavigationAutomation(() => IsAvailable);
         _activeSpellIdsForPlayer = _ => _enchantments.Select(static enchantment => enchantment.SpellId).ToArray();
-        _pluginCommands = new PluginCommandRegistry((verb, error) =>
-            Console.WriteLine(
-                $"[PluginCommand:{verb}] {error.GetBaseException().Message}"));
+        _pluginCommands = new PluginCommandRegistry(ReportPluginCommandFailure);
         _events = events;
         _pluginEvents = events as WorldEvents;
         _peers = peers ?? new LocalPluginPeerRegistry(Path.Combine(
@@ -154,8 +156,111 @@ internal sealed class RuntimeAutomationSurface
 
     internal IPluginCommandRegistry PluginCommands => _pluginCommands;
 
+    /// <summary>
+    /// Where a plugin command that threw is reported. Host-shaped rather than
+    /// a plugin seam: it lends the surface somewhere to put a line, not
+    /// something a plugin can reach. A host with somewhere
+    /// better to put it -- a diagnostic stream, a log file -- says so; one
+    /// that does not leaves the line on the standard output.
+    /// </summary>
+    internal void ReportPluginCommandFailuresTo(
+        Action<string, Exception> report)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        lock (_gate)
+            _pluginCommandFailed = report;
+    }
+
+    private void ReportPluginCommandFailure(string verb, Exception error)
+    {
+        Action<string, Exception>? report;
+        lock (_gate)
+            report = _pluginCommandFailed;
+        if (report is null)
+        {
+            Console.WriteLine(
+                $"[PluginCommand:{verb}] {error.GetBaseException().Message}");
+            return;
+        }
+        report(verb, error);
+    }
+
+    /// <summary>
+    /// Registers the client's own navigation verbs on this surface's command
+    /// registry. They are built here rather than by each host so both clients
+    /// answer the same words: the two that need something drawn are left out
+    /// by a client with nothing to draw on, and say so in plain terms instead
+    /// of being missing.
+    /// </summary>
+    /// <param name="runtime">The session the verbs act on and answer into.</param>
+    /// <param name="events">The tick the verbs follow their own walks on.</param>
+    /// <param name="toggleGrid">
+    /// Shows or hides the navigation grid; null where nothing is drawn.
+    /// </param>
+    /// <param name="previewRoute">
+    /// Draws a route without walking it; null where nothing is drawn.
+    /// </param>
+    /// <param name="narrate">
+    /// Sets who hears a walk's full narration; null where walks are not
+    /// planned at all.
+    /// </param>
+    internal void BindNavigationCommands(
+        GameRuntime runtime,
+        IEvents? events,
+        Func<bool>? toggleGrid,
+        Func<uint, bool>? previewRoute,
+        Action<Action<string>?>? narrate)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        lock (_gate)
+        {
+            if (_disposed || _navigationCommands is not null)
+                return;
+            _navigationCommands =
+                new AcDream.Runtime.Navigation.NavigationChatCommands(
+                    _navigation,
+                    () => runtime.ActionOwner.Selection.SelectedObjectId,
+                    // Chat rather than an on-screen notice, so a walk report
+                    // and its debug narration can be read back and copied.
+                    line => runtime.CommunicationOwner.AddText(
+                        line, AcDream.Core.Chat.RetailLogTextType.Default),
+                    toggleGrid,
+                    previewRoute,
+                    narrate)
+                .Register(_pluginCommands, events);
+        }
+    }
+
+    /// <summary>
+    /// Registers the client's own <c>/status</c> verb, which answers the one
+    /// line describing the session. It is registered here so a console and a
+    /// chat box answer the same words rather than each printing its own.
+    /// </summary>
+    internal void BindStatusCommand(GameRuntime runtime)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        lock (_gate)
+        {
+            if (_disposed || _statusCommand is not null)
+                return;
+            _statusCommand = _pluginCommands.Register(
+                AcDream.Runtime.Chat.RuntimeSessionStatusText.Verb,
+                _ => runtime.CommunicationOwner.AddText(
+                    AcDream.Runtime.Chat.RuntimeSessionStatusText.For(runtime),
+                    AcDream.Core.Chat.RetailLogTextType.Default));
+        }
+    }
+
     internal bool TryHandlePluginCommand(string commandLine) =>
         _pluginCommands.TryHandle(commandLine);
+
+    /// <summary>
+    /// Whether a verb is already spoken for on this registry. A front end
+    /// with a verb of its own asks before it answers one, so nothing it does
+    /// on its own ever shadows a plugin's.
+    /// </summary>
+    internal bool ClaimsPluginVerb(string verb) =>
+        _pluginCommands.IsRegistered(verb);
 
     public bool IsAvailable
     {
@@ -4213,6 +4318,10 @@ internal sealed class RuntimeAutomationSurface
             _salvageItems = null;
             _sellItem = null;
             _selectionAction = null;
+            _navigationCommands?.Dispose();
+            _navigationCommands = null;
+            _statusCommand?.Dispose();
+            _statusCommand = null;
             DetachLocked();
         }
         _armedAttackTarget = 0u;

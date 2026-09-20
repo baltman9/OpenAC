@@ -245,7 +245,6 @@ public sealed class GameWindow :
     private AcDream.App.Audio.DictionaryEntitySoundTable? _entitySoundTables;
     private AcDream.App.Audio.AudioHookSink? _audioSink;
     private AcDream.App.Audio.AudioMixerCommandBinding? _audioMixerCommand;
-    private AcDream.Runtime.Navigation.NavigationChatCommands? _navigationCommands;
 
     // What the window lends the plugin surface. Composition publishes these
     // owners; the one wiring pass at the end of load hands them over.
@@ -1128,25 +1127,9 @@ public sealed class GameWindow :
 
         _frameRootBindings = result.RuntimeBindings;
         _frameGraphPublication = result.FrameGraphPublication;
-        if (result.NavigationWalk is { } navigationWalk && _automation is { } automation)
-        {
-            _navigationWalk = navigationWalk;
-            _navigationCommands = new AcDream.Runtime.Navigation.NavigationChatCommands(
-                    automation.Navigation,
-                    () => _runtime.ActionOwner.Selection.SelectedObjectId,
-                    // Chat rather than the on-screen notices, so walk reports and debug narration can be copied.
-                    line => _runtimeCommunication.AddText(
-                        line, AcDream.Core.Chat.RetailLogTextType.Default),
-                    toggleGrid: _worldSceneDebugState.ToggleNavMesh,
-                    previewRoute: objectId =>
-                    {
-                        _worldSceneDebugState.ShowNavMesh();
-                        _ = navigationWalk.RouteTo(objectId);
-                        return true;
-                    },
-                    narrate: listener => navigationWalk.Narration = listener)
-                .Register(automation.PluginCommands, _worldEvents);
-        }
+        // /nav and /motor themselves are registered by the one binding pass
+        // both clients run; the window only lends the two verbs that draw.
+        _navigationWalk = result.NavigationWalk;
     }
 
     /// <summary>
@@ -1177,6 +1160,16 @@ public sealed class GameWindow :
                     Selection = _selectionInteractions,
                     EntityDeletion = _liveEntityDeletion,
                     Input = _inputDispatcher,
+                    Events = _worldEvents,
+                    NavigationGrid = _worldSceneDebugState.ToggleNavMesh,
+                    NavigationRoutePreview = _navigationWalk is not { } walk
+                        ? null
+                        : objectId =>
+                        {
+                            _worldSceneDebugState.ShowNavMesh();
+                            _ = walk.RouteTo(objectId);
+                            return true;
+                        },
                 }));
     }
 
@@ -1649,7 +1642,6 @@ public sealed class GameWindow :
         {
             PersistKeyBindingsAtShutdown();
             _audioMixerCommand?.Dispose();
-            _navigationCommands?.Dispose();
             if (_runtime.Session.IsInWorld)
                 _statusWriter.Disconnected(_options.SessionId ?? "app", "stopped");
             _lifetime.PublishShutdownRoots(CaptureShutdownRoots());
