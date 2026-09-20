@@ -34,6 +34,8 @@ internal sealed class HeadlessPluginHost
     private Action<string>? _localPlayerDied;
     private Action<PluginObjectChange>? _objectChanged;
     private long _objectChangeRevision;
+    private Action<PluginPortalTransition>? _portalTransition;
+    private long _portalTransitionRevision;
     private Action<PluginGoToReport>? _navigationChanged;
     private long _lastNavigationSequence;
     private PluginGoToState _lastNavigationState;
@@ -500,6 +502,23 @@ internal sealed class HeadlessPluginHost
         }
     }
 
+    public event Action<PluginPortalTransition> PortalTransition
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_tickGate)
+                _portalTransition += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_tickGate)
+                _portalTransition -= value;
+        }
+    }
+
     public event Action<PluginGoToReport> NavigationChanged
     {
         add
@@ -680,7 +699,30 @@ internal sealed class HeadlessPluginHost
 
     public void OnChat(in RuntimeChatDelta delta) { }
     public void OnMovement(in RuntimeMovementDelta delta) { }
-    public void OnPortal(in RuntimePortalDelta delta) { }
+    public void OnPortal(in RuntimePortalDelta delta)
+    {
+        PluginPortalTransition transition = new(
+            Revision: Interlocked.Increment(ref _portalTransitionRevision),
+            Generation: delta.Portal.Generation,
+            DestinationCell: delta.Portal.DestinationCell,
+            IsReady: delta.Portal.IsReady,
+            IsMaterialized: delta.Portal.IsMaterialized,
+            IsCompleted: delta.Portal.IsCompleted,
+            IsCancelled: delta.Portal.IsCancelled);
+        Action<PluginPortalTransition>? handlers;
+        lock (_tickGate)
+            handlers = _portalTransition;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginPortalTransition>)handler)(transition); }
+            catch (Exception error)
+            {
+                Log.Warn($"Plugin portal-transition handler threw: {error}");
+            }
+        }
+    }
     public void OnCombat(in RuntimeCombatDelta delta) { }
 
     private static WorldEntitySnapshot Convert(
