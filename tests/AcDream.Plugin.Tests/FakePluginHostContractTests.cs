@@ -32,6 +32,15 @@ public sealed class FakePluginHostContractTests
     }
 
     [Fact]
+    public void AllegianceSurfaceIsInertWhenUnavailable()
+    {
+        var host = new FakePluginHost();
+        Assert.False(host.Automation.Allegiance.IsAvailable);
+        Assert.False(host.Automation.Allegiance.Snapshot.IsKnown);
+        Assert.Equal(0u, host.Automation.Allegiance.Snapshot.MonarchObjectId);
+    }
+
+    [Fact]
     public void RecallSurfaceIsInertWhenUnavailable()
     {
         var host = new FakePluginHost();
