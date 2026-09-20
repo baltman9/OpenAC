@@ -127,7 +127,7 @@ internal sealed record RuntimeAutomationHostCapabilities
 /// </summary>
 internal static class RuntimeAutomationBindings
 {
-    /// <summary>The retail skill table every host reads skill names and icons from.</summary>
+    /// <summary>The installed skill table every host reads skill names and icons from.</summary>
     private const uint SkillTableId = 0x0E000004u;
 
     /// <summary>
@@ -471,7 +471,7 @@ internal static class RuntimeAutomationBindings
             || skillTable is null)
         {
             warn?.Invoke(
-                "plugin automation: the retail skill table is missing, so "
+                "plugin automation: the installed skill table is missing, so "
                 + "plugins will see unnamed skills");
             return;
         }

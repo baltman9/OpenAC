@@ -41,7 +41,7 @@ internal static class HeadlessConsoleOptions
         if (env(EnvironmentVariable) is null)
             return standardInputIsTerminal;
         return !string.Equals(
-            env("ACDREAM_HEADLESS_CONSOLE"), "0", StringComparison.Ordinal);
+            env(EnvironmentVariable), "0", StringComparison.Ordinal);
     }
 
     internal static HeadlessConsoleStream ResolveStream(

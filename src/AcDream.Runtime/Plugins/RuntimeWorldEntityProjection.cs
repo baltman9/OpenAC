@@ -21,6 +21,7 @@ public sealed class RuntimeWorldEntityProjection
     : IPluginWorldEntities, IRuntimeEventObserver, IDisposable
 {
     private readonly GameRuntime _runtime;
+    private readonly Action<string>? _report;
     private readonly IDisposable _subscription;
     private readonly object _gate = new();
     private readonly List<Subscription> _subscriptions = [];
@@ -30,9 +31,19 @@ public sealed class RuntimeWorldEntityProjection
     /// <summary>
     /// Starts reading the world off this runtime's object directory.
     /// </summary>
-    public RuntimeWorldEntityProjection(GameRuntime runtime)
+    /// <param name="runtime">The session whose objects are reported.</param>
+    /// <param name="report">
+    /// Where a plugin handler that threw is named. A plugin's failure is its
+    /// own and never stops the client telling the next one, but a client that
+    /// says nothing about it leaves a plugin author with an overlay that
+    /// silently stops updating and no idea why.
+    /// </param>
+    public RuntimeWorldEntityProjection(
+        GameRuntime runtime,
+        Action<string>? report = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
+        _report = report;
         _subscription = runtime.Subscribe(this);
     }
 
@@ -257,14 +268,23 @@ public sealed class RuntimeWorldEntityProjection
                 ?? System.Numerics.Quaternion.Identity);
     }
 
-    private static void Invoke(
+    private void Invoke(
         Action<WorldEntitySnapshot> handler,
         WorldEntitySnapshot snapshot)
     {
         // One plugin's failure is its own: it does not stop the client
-        // telling the next one about the same object.
-        try { handler(snapshot); }
-        catch { }
+        // telling the next one about the same object. It is said out loud all
+        // the same.
+        try
+        {
+            handler(snapshot);
+        }
+        catch (Exception error)
+        {
+            _report?.Invoke(
+                "plugin world objects: a handler threw and was skipped: "
+                + error);
+        }
     }
 
     private sealed class SnapshotVisitor(

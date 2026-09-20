@@ -1,0 +1,37 @@
+# What the scenarios in this suite are worth
+
+Every scenario here plays the same script against both clients and requires
+the two transcripts to match. That is not the same thing as evidence, and the
+difference matters when reading a green run.
+
+**Parity evidence.** The two clients answer from different code, so a
+scenario over one of these could genuinely come out differently and a match
+says something:
+
+- the session bindings each client builds and what happens on connect, on
+  taking hold of a character and on arriving in the world;
+- the character bindings: the skill formulas, the confirmation hooks and how
+  fast the character runs;
+- the plugin events each client raises, and the surfaces a plugin reaches
+  for -- hotkeys, storage, world lines, the clipboard, the host window;
+- each client's own outbound command route and its own per-frame driver:
+  movement, attacks, chat sends, what actually goes out on the wire;
+- what each client passes the shared plugin surface and the shared runtime,
+  which is what the census reads.
+
+**Regression guards.** The owner these exercise has already moved into the
+runtime, so both arms run the same code and agreement is true by
+construction. They are still worth keeping -- they fail if the owner is
+pulled back out into one client, which has happened -- but a green run over
+them is not evidence that two implementations agree:
+
+- items and looting, selection cycling, dismissing a ghost, using a world
+  object, walking to something and then using it, the chat entry box;
+- the objects a plugin can see and where they are.
+
+A scenario whose owner moves into the runtime moves from the first list to
+the second; nothing about the scenario itself changes. Say which list a new
+scenario belongs to in its own doc comment, and mutation-check it against
+the client it is meant to speak for -- a scenario in the first list that
+stays green when one client's half is taken away is in the second list
+without knowing it.

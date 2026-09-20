@@ -568,7 +568,12 @@ public sealed class GameWindow :
         // windowless client uses, so both answer the same population, ids
         // and event order.
         _pluginWorldEntities =
-            new AcDream.Runtime.Plugins.RuntimeWorldEntityProjection(_runtime);
+            new AcDream.Runtime.Plugins.RuntimeWorldEntityProjection(
+                _runtime,
+                // A plugin handler that throws is skipped, not hidden: a
+                // plugin author with an overlay that stopped updating needs
+                // to be told why.
+                line => Serilog.Log.Warning("{Line}", line));
         _worldGameState.BindWorldEntities(_pluginWorldEntities);
         _worldEvents.BindWorldEntities(_pluginWorldEntities);
         _displayFramePacing = new DisplayFramePacingController(

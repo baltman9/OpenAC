@@ -85,7 +85,9 @@ internal sealed class WindowedArm : ParityArm
 
         // What a plugin sees in the world, exactly as the window binds it:
         // the runtime's object directory, not what is drawn.
-        _worldEntities = new RuntimeWorldEntityProjection(Runtime);
+        _worldEntities = new RuntimeWorldEntityProjection(
+            Runtime,
+            _warnings.Add);
         _state.BindWorldEntities(_worldEntities);
         _events.BindWorldEntities(_worldEntities);
         _sessionSource = new LiveSessionAppSource(Runtime.Session, _commands);

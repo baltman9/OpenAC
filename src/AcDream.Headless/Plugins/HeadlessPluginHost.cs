@@ -105,7 +105,7 @@ internal sealed class HeadlessPluginHost
         // mean a plugin hearing every event twice.
         // The one producer of what a plugin sees in the world, shared with
         // the client that has a window.
-        _worldEntities = new RuntimeWorldEntityProjection(runtime);
+        _worldEntities = new RuntimeWorldEntityProjection(runtime, Log.Warn);
     }
 
     private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>

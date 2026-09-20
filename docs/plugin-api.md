@@ -708,12 +708,24 @@ opened where it is, since there is nowhere to walk to.
 
 ### Available, but only with the installed data files
 
-`Navigation`'s walks -- `GoTo`, `StandOn`, `Follow` -- need the collision data
-the installed data files carry, and a windowless session only holds a lease on
-those files when it was configured with content. A content-less bot answers
-navigation calls where a client with a window acts on them. Everything else on
-`Navigation` -- the snapshot, the move channels, `FaceHeading`, `Jump`,
-`TryFindObject` -- is real either way.
+A windowless session holds a lease on the installed data files only when it
+was configured with content, and several parts of the surface are read out of
+those files. On a content-less bot they answer rather than act, where a client
+with a window does the work:
+
+- `Navigation`'s walks -- `GoTo`, `StandOn`, `Follow` -- need the collision
+  data the files carry. Everything else on `Navigation` -- the snapshot, the
+  move channels, `FaceHeading`, `Jump`, `TryFindObject` -- is real either way.
+- `Spells` and `Magic` come from the spell catalogue, so a content-less
+  session knows no spells and casts nothing by name.
+- Skill names and skill icons come from the skill table: without it a plugin
+  sees the character's skills unnamed.
+- The species a creature belongs to, and the colours a character was made
+  with, come from the same files.
+- How much of a skill the server credits the character with is worked out from
+  formulas in those files. Without them a content-less session reads its own
+  skills below what the server allows it -- which also means it runs at the
+  speed those lower numbers give.
 
 Other creatures' bodies come off the same lease. The server says where a
 creature is a few times a second and every client fills the gaps itself from
