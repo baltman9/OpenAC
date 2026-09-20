@@ -29,6 +29,9 @@ internal sealed class ArchRenderScene : IRenderScene, IRenderSceneQuerySource
     private ulong _lastAppliedJournalSequence;
     private ulong _indexRevision = 1;
     private ulong _recordRevision;
+    private readonly Dictionary<uint, ulong> _landblockWriteRevisions = [];
+    private ulong _landblockWriteClock;
+    private ulong _unkeyedWriteRevision;
     private ulong _buildingShellRevision = 1;
     private ulong _directionalShadowTopologyRevision = 1;
     private DirectionalShadowTransformChange[]? _directionalShadowTransformChanges;
@@ -188,6 +191,9 @@ internal sealed class ArchRenderScene : IRenderScene, IRenderSceneQuerySource
                 new PreviousRenderTransform(current.LocalToWorld));
             _world.Set(entry.Entity, update.Transform);
             _world.Set(entry.Entity, update.Bounds);
+            // This channel does not restamp the record revision, but a reader
+            // that asks per landblock still has to see that a dynamic moved.
+            NoteLandblockWrite(entry.Entity);
             if (transformChanged
                 && HasRefreshableDirectionalShadowTransforms(entry.ProjectionClass)
                 && _directionalShadowTransformChanges is not null)
@@ -562,6 +568,8 @@ internal sealed class ArchRenderScene : IRenderScene, IRenderSceneQuerySource
                 RenderProjectionRecord prior = ReadRecord(in existing);
                 WriteRecord(existing.Entity, in record);
                 _entries[record.Id] = existing with { Revision = NextRecordRevision() };
+                NoteLandblockWrite(in prior);
+                NoteLandblockWrite(in record);
                 UpdateIndices(in prior, in record);
                 NoteBuildingShellChange(in prior, in record);
                 if (HasRefreshableDirectionalShadowTransforms(record.ProjectionClass))
@@ -589,6 +597,7 @@ internal sealed class ArchRenderScene : IRenderScene, IRenderSceneQuerySource
             record.OwnerIncarnation,
             record.ProjectionClass,
             NextRecordRevision());
+        NoteLandblockWrite(in record);
         IncrementCount(record.ProjectionClass);
         AddToIndices(in record);
         if (record.EntityPayload.IsBuildingShell)
@@ -653,6 +662,8 @@ internal sealed class ArchRenderScene : IRenderScene, IRenderSceneQuerySource
 
         RenderProjectionRecord current = Read(entry.ProjectionClass, in c);
         _entries[record.Id] = entry with { Revision = NextRecordRevision() };
+        NoteLandblockWrite(in prior);
+        NoteLandblockWrite(in current);
         UpdateIndices(in prior, in current);
         NoteBuildingShellChange(in prior, in current);
         if (HasRefreshableDirectionalShadowTransforms(current.ProjectionClass))
@@ -840,6 +851,7 @@ internal sealed class ArchRenderScene : IRenderScene, IRenderSceneQuerySource
     private void Destroy(in SceneEntry entry)
     {
         RenderProjectionRecord record = ReadRecord(in entry);
+        NoteLandblockWrite(in record);
         if (record.EntityPayload.IsBuildingShell)
             AdvanceBuildingShellRevision();
         _directionalShadowPartPoses?.Remove(record.Id);
@@ -1196,6 +1208,55 @@ internal sealed class ArchRenderScene : IRenderScene, IRenderSceneQuerySource
             _dirty.Remove(record.Id);
         else
             _dirty.Add(record.Id);
+    }
+
+    ulong IRenderSceneQuerySource.GetLandblockWriteRevision(
+        RenderSceneGeneration generation,
+        uint landblockId)
+    {
+        EnsureQueryGeneration(generation);
+        ulong keyed = _landblockWriteRevisions.GetValueOrDefault(
+            LandblockKey(landblockId));
+        return Math.Max(keyed, _unkeyedWriteRevision);
+    }
+
+    private static uint LandblockKey(uint id) => id & 0xFFFF0000u;
+
+    /// <summary>Stamps the landblock a written record belongs to. Both the
+    /// residency landblock and the landblock its cell names are stamped,
+    /// because a record may carry either; a record that names neither stamps
+    /// the answer every landblock reports, so no reader can miss a write.</summary>
+    private void NoteLandblockWrite(in RenderProjectionRecord record)
+    {
+        uint owner = LandblockKey(record.Residency.OwnerLandblockId);
+        uint cell = LandblockKey(record.Residency.FullCellId);
+        if (owner == 0 && cell == 0)
+        {
+            _unkeyedWriteRevision = ++_landblockWriteClock;
+            return;
+        }
+
+        if (owner != 0)
+            _landblockWriteRevisions[owner] = ++_landblockWriteClock;
+        if (cell != 0 && cell != owner)
+            _landblockWriteRevisions[cell] = ++_landblockWriteClock;
+    }
+
+    private void NoteLandblockWrite(Entity entity)
+    {
+        RenderSpatialResidency residency = _world.Get<RenderSpatialResidency>(entity);
+        uint owner = LandblockKey(residency.OwnerLandblockId);
+        uint cell = LandblockKey(residency.FullCellId);
+        if (owner == 0 && cell == 0)
+        {
+            _unkeyedWriteRevision = ++_landblockWriteClock;
+            return;
+        }
+
+        if (owner != 0)
+            _landblockWriteRevisions[owner] = ++_landblockWriteClock;
+        if (cell != 0 && cell != owner)
+            _landblockWriteRevisions[cell] = ++_landblockWriteClock;
     }
 
     private ulong NextRecordRevision()

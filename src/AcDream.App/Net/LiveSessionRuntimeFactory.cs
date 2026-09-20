@@ -80,7 +80,7 @@ internal sealed record LiveSessionWorldRuntime(
     RetailSelectionScene SelectionScene,
     ParticleVisibilityController ParticleVisibility,
     RetailInboundEventDispatcher InboundEvents,
-    LiveEntityLivenessController Liveness,
+    RuntimeEntityLivenessController Liveness,
     LiveEntityNetworkUpdateController NetworkUpdates,
     LiveEntityHydrationController Hydration,
     EntityEffectController EntityEffects,

@@ -193,6 +193,7 @@ internal sealed class VolumetricShaftRenderer : IDisposable
             SampleCount = 1,
         }))
         using (encoder.BeginTimerScope(TimerName))
+        using (AcDream.App.Diagnostics.GpuStageProfiler.Measure(encoder, "volumetric"))
         {
             encoder.BindPipeline(_pipeline);
             encoder.BindUniformBuffer(

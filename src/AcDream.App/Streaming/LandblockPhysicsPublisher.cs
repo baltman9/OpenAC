@@ -151,7 +151,7 @@ public sealed class LandblockPhysicsPublisher
         ArgumentNullException.ThrowIfNull(heightTable);
         if (heightTable.Length < 256)
             throw new ArgumentException(
-                "The retail terrain height table must contain at least 256 entries.",
+                "The terrain height table must contain at least 256 entries.",
                 nameof(heightTable));
 
         _physics = physics;

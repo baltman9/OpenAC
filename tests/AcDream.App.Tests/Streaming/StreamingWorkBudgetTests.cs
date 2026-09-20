@@ -40,6 +40,89 @@ public sealed class StreamingWorkBudgetTests
             retireOperations,
             0.75f);
 
+    /// <summary>
+    /// One meter serves every streaming tick, so a restarted meter must
+    /// report exactly what a meter built for that tick would: the same
+    /// admissions, the same snapshot, and none of the previous tick's
+    /// accounting, ensured-progress grant, lane or overrun state.
+    /// </summary>
+    [Fact]
+    public void ARestartedMeterReportsWhatAFreshOneWould()
+    {
+        long now = 0;
+        long Clock() => now;
+
+        // A first tick that uses the budget up, grants ensured progress,
+        // fails an operation, overruns the frame and leaves a lane set.
+        var reused = new StreamingWorkMeter(
+            Budget(milliseconds: 1, completions: 1, cpuBytes: 1),
+            Clock,
+            timestampFrequency: 1_000,
+            destinationReservationActive: true);
+        using (reused.EnterLane(StreamingWorkLane.Destination))
+        {
+            Assert.Equal(
+                StreamingWorkAdmission.Admitted,
+                reused.TryReserve(new StreamingWorkCost(CompletionAdmissions: 1), "first"));
+            now += 50;
+            reused.Fail();
+            Assert.Equal(
+                StreamingWorkAdmission.OversizedProgress,
+                reused.TryReserve(
+                    new StreamingWorkCost(CompletionAdmissions: 4),
+                    "ensured",
+                    ensureProgress: true));
+            reused.Complete();
+        }
+
+        reused.FinishFrame();
+        now += 500;
+
+        // The second tick, run on the reused meter and on a fresh one.
+        long restartAt = now;
+        reused.Restart(
+            Budget(milliseconds: 10, completions: 2, cpuBytes: 64),
+            destinationReservationActive: false);
+        StreamingWorkMeterSnapshot restarted = RunScriptedTick(reused, ref now);
+
+        now = restartAt;
+        var fresh = new StreamingWorkMeter(
+            Budget(milliseconds: 10, completions: 2, cpuBytes: 64),
+            Clock,
+            timestampFrequency: 1_000);
+        StreamingWorkMeterSnapshot built = RunScriptedTick(fresh, ref now);
+
+        Assert.Equal(built, restarted);
+    }
+
+    private static StreamingWorkMeterSnapshot RunScriptedTick(
+        StreamingWorkMeter meter, ref long now)
+    {
+        Assert.Equal(
+            StreamingWorkAdmission.Admitted,
+            meter.TryReserve(new StreamingWorkCost(CompletionAdmissions: 1), "load"));
+        now += 2;
+        meter.Complete();
+        Assert.Equal(
+            StreamingWorkAdmission.Admitted,
+            meter.TryReserve(new StreamingWorkCost(AdoptedCpuBytes: 64), "adopt"));
+        now += 1;
+        meter.Fail();
+        Assert.Equal(
+            StreamingWorkAdmission.Yielded,
+            meter.TryReserve(new StreamingWorkCost(CompletionAdmissions: 8), "too big"));
+        Assert.Equal(
+            StreamingWorkAdmission.OversizedProgress,
+            meter.TryReserve(
+                new StreamingWorkCost(CompletionAdmissions: 8),
+                "oversized",
+                ensureProgress: true));
+        now += 3;
+        meter.Complete();
+        meter.FinishFrame();
+        return meter.Snapshot;
+    }
+
     [Fact]
     public void MeterYieldsBeforeSecondOperationThatExceedsAnyDimension()
     {

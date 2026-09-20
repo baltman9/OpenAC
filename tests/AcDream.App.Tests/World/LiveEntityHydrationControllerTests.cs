@@ -767,7 +767,7 @@ public sealed class LiveEntityHydrationControllerTests
         Assert.NotNull(fixture.Objects.Get(Guid));
 
         Assert.True(fixture.Controller.OnPrune(
-            new LiveEntityPruneCandidate(
+            new RuntimeEntityExpiryCandidate(
                 fixture.Record.ProjectionKey!.Value,
                 Guid)));
 
@@ -783,7 +783,7 @@ public sealed class LiveEntityHydrationControllerTests
         using var fixture = new Fixture(originKnown: true);
         fixture.Controller.OnCreate(Spawn(Generation: 1, PositionSequence: 1));
         Assert.True(fixture.Controller.OnPrune(
-            new LiveEntityPruneCandidate(
+            new RuntimeEntityExpiryCandidate(
                 fixture.Record.ProjectionKey!.Value,
                 Guid)));
 
@@ -801,7 +801,7 @@ public sealed class LiveEntityHydrationControllerTests
         using var fixture = new Fixture(originKnown: true);
         fixture.Controller.OnCreate(Spawn(Generation: 1, PositionSequence: 1));
         Assert.True(fixture.Controller.OnPrune(
-            new LiveEntityPruneCandidate(
+            new RuntimeEntityExpiryCandidate(
                 fixture.Record.ProjectionKey!.Value,
                 Guid)));
 

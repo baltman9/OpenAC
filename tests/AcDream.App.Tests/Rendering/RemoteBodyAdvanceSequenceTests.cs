@@ -433,11 +433,20 @@ public sealed class RemoteBodyAdvanceSequenceTests
             requested == id ? animation : null;
     }
 
-    private sealed class LoggingHookSink(Action<uint, AnimationSequencer> log)
-        : IAnimationHookCaptureSink
+    private sealed class LoggingHookSink : IAnimationHookCaptureSink
     {
+        private readonly Action<uint, AnimationSequencer> _log;
+
+        public LoggingHookSink(Action<uint, AnimationSequencer> log)
+        {
+            _log = log;
+            CaptureCallback = Capture;
+        }
+
+        public Action<uint, AnimationSequencer> CaptureCallback { get; }
+
         public void Capture(uint ownerLocalId, AnimationSequencer sequencer) =>
-            log(ownerLocalId, sequencer);
+            _log(ownerLocalId, sequencer);
     }
 
     private sealed class LoggingRootPosePublisher(

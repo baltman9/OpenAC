@@ -279,8 +279,14 @@ public sealed class InputDispatcher : IDisposable
         if (Volatile.Read(ref _active) == 0 || action == InputAction.None) return false;
         if (_mouse.WantCaptureKeyboard) return false;
         if (_automationHeldActions.Contains(action)) return true;
-        foreach (var b in _bindings.ForAction(action))
+        // Indexed over the binding list rather than ForAction's iterator: this
+        // is polled for several actions every frame, and the iterator would
+        // allocate a state machine on each call.
+        IReadOnlyList<Binding> bindings = _bindings.All;
+        for (int i = 0; i < bindings.Count; i++)
         {
+            Binding b = bindings[i];
+            if (b.Action != action) continue;
             if (!IsChordHeld(b.Chord)) continue;
             Binding? active = FindActiveHeld(b.Chord, b.Activation);
             if (active?.Action == action) return true;

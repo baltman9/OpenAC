@@ -3341,6 +3341,94 @@ public sealed class RuntimePhysicsStateTests
         Assert.Equal(record.SpatialAuthorityVersion, observed.SpatialAuthorityVersion);
     }
 
+    [Fact]
+    public void OrdinaryCellCommitRefusesWhenTheExternalOwnerTestSaysNo()
+    {
+        using var lifetime = new RuntimeEntityObjectLifetime();
+        RuntimeEntityRecord record =
+            lifetime.Entities.AddActive(Spawn(0x70000027u, 1));
+        var body = new PhysicsBody();
+        lifetime.Entities.SetPhysicsBody(record, body);
+        lifetime.Physics.AcknowledgeSpatialProjection(record, spatial: true);
+        uint before = record.FullCellId;
+
+        Assert.False(lifetime.Physics.CommitOrdinaryCell(
+            record,
+            body,
+            record.ObjectClockEpoch,
+            0x02020001u,
+            externalOwnerValid: static () => false));
+
+        Assert.Equal(before, record.FullCellId);
+    }
+
+    [Fact]
+    public void OrdinaryCellCommitRefusesABodyTheRecordNoLongerOwns()
+    {
+        using var lifetime = new RuntimeEntityObjectLifetime();
+        RuntimeEntityRecord record =
+            lifetime.Entities.AddActive(Spawn(0x70000028u, 1));
+        var body = new PhysicsBody();
+        lifetime.Entities.SetPhysicsBody(record, body);
+        lifetime.Physics.AcknowledgeSpatialProjection(record, spatial: true);
+        uint before = record.FullCellId;
+
+        Assert.False(lifetime.Physics.CommitOrdinaryCell(
+            record,
+            new PhysicsBody(),
+            record.ObjectClockEpoch,
+            0x02020001u,
+            externalOwnerValid: null));
+
+        Assert.Equal(before, record.FullCellId);
+    }
+
+    /// <summary>
+    /// The owner test a cell commit runs is carried on an object, not
+    /// captured, so one commit must not take the object a commit around it
+    /// is using: a commit published from inside another one's cell-committed
+    /// fan-out brings its own, and the outer commit's own test still answers
+    /// for the outer entity after the fan-out returns.
+    /// </summary>
+    [Fact]
+    public void ACellCommitInsideAnothersFanOutDoesNotDisturbIt()
+    {
+        using var lifetime = new RuntimeEntityObjectLifetime();
+        RuntimeEntityRecord outer =
+            lifetime.Entities.AddActive(Spawn(0x70000029u, 1));
+        RuntimeEntityRecord inner =
+            lifetime.Entities.AddActive(Spawn(0x7000002Au, 1));
+        var outerBody = new PhysicsBody();
+        var innerBody = new PhysicsBody();
+        lifetime.Entities.SetPhysicsBody(outer, outerBody);
+        lifetime.Entities.SetPhysicsBody(inner, innerBody);
+        lifetime.Physics.AcknowledgeSpatialProjection(outer, spatial: true);
+        lifetime.Physics.AcknowledgeSpatialProjection(inner, spatial: true);
+        int nested = 0;
+        lifetime.Physics.CellCommitted += commit =>
+        {
+            if (!ReferenceEquals(commit.Record, outer) || nested++ > 0)
+                return;
+            Assert.True(lifetime.Physics.CommitOrdinaryCell(
+                inner,
+                innerBody,
+                inner.ObjectClockEpoch,
+                0x02020002u,
+                externalOwnerValid: null));
+        };
+
+        Assert.True(lifetime.Physics.CommitOrdinaryCell(
+            outer,
+            outerBody,
+            outer.ObjectClockEpoch,
+            0x02020001u,
+            externalOwnerValid: null));
+
+        Assert.Equal(1, nested);
+        Assert.Equal(0x02020001u, outer.FullCellId);
+        Assert.Equal(0x02020002u, inner.FullCellId);
+    }
+
     private static RuntimeCollisionGenerationCommit CommitPrepared(
         RuntimePhysicsState physics,
         RuntimeCollisionAdmission admission,

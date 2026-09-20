@@ -471,6 +471,12 @@ public sealed partial class WbDrawDispatcher : IDisposable, Walk.IWalkShellResid
         float Opacity,
         Vector2 SelectionLighting);
 
+    /// <summary>Eight light indices per instance. The layout is declared
+    /// sequential because the ordered-stream upload reinterprets a run of
+    /// these as the flat int array the shader binds; a test pins that the
+    /// reinterpretation matches <see cref="InstanceLightSet.CopyTo(int[],int)"/>.</summary>
+    [System.Runtime.InteropServices.StructLayout(
+        System.Runtime.InteropServices.LayoutKind.Sequential)]
     internal readonly record struct InstanceLightSet(
         int L0, int L1, int L2, int L3,
         int L4, int L5, int L6, int L7)

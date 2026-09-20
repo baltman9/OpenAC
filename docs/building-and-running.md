@@ -114,6 +114,9 @@ libraries directly. It does not require those environment variables.
 | `ACDREAM_HEADLESS_CONSOLE_STREAM=stderr\|stdout` | Which stream that console prints to; `stderr` by default |
 | `ACDREAM_PLUGIN_TAGS=a,b` | Words this client wants to be found by; plugins on the clients running on this machine can see one another's tags and filter on them. The headless config's `pluginTags` is the same option |
 | `ACDREAM_PLUGIN_SETTINGS_FILE=<path>` | Path to a JSON file holding the startup settings each plugin is given, on either client. The file is the same map the headless config names under `pluginSettings`, which outranks it; a session that names none falls back to this file. A named file that is missing, unreadable or the wrong shape stops startup with the reason; unset means no settings |
+| `ACDREAM_FRAME_PROF=1` | Print the rolling `[frame-prof]` CPU/GPU/allocation line |
+| `ACDREAM_FRAME_HISTORY=<path>` | Write one CSV row per frame to that path on exit |
+| `ACDREAM_GPU_STAGE_PROF=1` | Print the rolling `[gpu-stage]` per-stage GPU attribution line |
 
 A few other `ACDREAM_*` variables switch original-client behaviors that are
 on by default (`ACDREAM_RETAIL_CHASE`, `ACDREAM_CAMERA_COLLIDE`,

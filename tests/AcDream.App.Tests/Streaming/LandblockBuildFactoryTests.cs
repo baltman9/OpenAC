@@ -263,8 +263,14 @@ public sealed class LandblockBuildFactoryTests
         Assert.DoesNotContain(missingCell, result.Collisions.EnvCells.Keys);
     }
 
+    // The gate is held per record read, not for a whole build, so two builds
+    // running on two streaming lanes interleave their reads. What still holds,
+    // and is what the gate is for, is that no two reads ever overlap; and each
+    // build reads exactly the records it read when it ran alone. The build a
+    // lane produces is unchanged either way -- pinned against the installed
+    // content by LandblockBuildContentGateTests.
     [Fact]
-    public async Task Build_SerializesCompleteNearTransactionsOnSharedGate()
+    public async Task Build_NeverOverlapsTwoReadsAndReadsTheSameRecordsConcurrently()
     {
         var dat = CreateDat(out RecordingDatProxy proxy);
         AddNearFixture(proxy, LandblockId, environmentId: 1);
@@ -305,10 +311,13 @@ public sealed class LandblockBuildFactoryTests
         Assert.All(results, Assert.NotNull);
         Assert.Equal(1, proxy.MaxConcurrentReads);
         (Type Type, uint Id)[] combined = proxy.Reads.ToArray();
-        Assert.True(
-            combined.SequenceEqual(firstSequence.Concat(secondSequence))
-            || combined.SequenceEqual(secondSequence.Concat(firstSequence)),
-            "Near-build DAT reads interleaved instead of remaining one serialized transaction.");
+        Assert.Equal(
+            firstSequence.Concat(secondSequence)
+                .OrderBy(read => read.Id).ThenBy(read => read.Type.Name)
+                .ToArray(),
+            combined
+                .OrderBy(read => read.Id).ThenBy(read => read.Type.Name)
+                .ToArray());
     }
 
     [Fact]

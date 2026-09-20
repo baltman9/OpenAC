@@ -27,5 +27,12 @@ public static class RenderingDiagnostics
     public static string? FrameHistoryPath { get; } =
         Environment.GetEnvironmentVariable("ACDREAM_FRAME_HISTORY");
 
+    /// <summary>Per-stage GPU attribution: timestamp queries bracketing the
+    /// shadow, static, dynamic, particle, post-process and UI work of a frame.
+    /// Off by default; it costs two timestamp writes per stage and one query
+    /// read-back per frame.</summary>
+    public static bool GpuStageProfEnabled { get; set; } =
+        Environment.GetEnvironmentVariable("ACDREAM_GPU_STAGE_PROF") == "1";
+
     public static bool DumpWalkTranscriptEnabled { get; set; }
 }

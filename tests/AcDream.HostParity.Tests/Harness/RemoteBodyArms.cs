@@ -163,6 +163,9 @@ internal sealed class WindowedBodyArm : RemoteBodyArm
 
     private sealed class NoHooks : IAnimationHookCaptureSink
     {
+        public Action<uint, AnimationSequencer> CaptureCallback { get; } =
+            static (_, _) => { };
+
         public void Capture(uint ownerLocalId, AnimationSequencer sequencer)
         {
         }

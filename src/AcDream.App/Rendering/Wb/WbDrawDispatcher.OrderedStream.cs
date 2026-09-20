@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using AcDream.App.Rendering.Gpu;
 using AcDream.App.Rendering.Walk;
 using AcDream.Core.Lighting;
@@ -250,16 +251,6 @@ public sealed unsafe partial class WbDrawDispatcher
         EnsureOrderedCullModeCapacity(count);
         if (_orderedIndirectOffsets.Length <= count)
             _orderedIndirectOffsets = new int[count + 65];
-        for (int i = 0; i < count; i++)
-        {
-            WriteMatrix(_instanceData, i * 16, stream.Transforms[i]);
-            _clipSlotData[i] = stream.ClipSlots[i];
-            _indoorData[i] = stream.IndoorFlags[i];
-            _detailCategoryData[i] = stream.DetailCategories[i];
-            _alphaData[i] = stream.Alphas[i];
-            _selectionLightingData[i] = stream.SelectionLighting[i];
-            stream.Lights[i].CopyTo(_lightSetData, i * LightManager.MaxLightsPerObject);
-        }
 
         int drawCount = _orderedInstanceRuns.Count;
         for (int i = 0; i < drawCount; i++)
@@ -281,24 +272,30 @@ public sealed unsafe partial class WbDrawDispatcher
         }
         _orderedIndirectOffsets[count] = drawCount;
 
+        // The stream already holds each per-instance array contiguously and in
+        // upload order, so every one of them goes to the ring as a single
+        // block. Copying them through per-command scratch first meant reading
+        // and writing every field of twenty thousand commands one at a time.
         _orderedViewProjection = viewProjection;
         _orderedInstances = WriteWorldTransformSection(
-            frame, _instanceData.AsSpan(0, count * 16), out uint transformBaseInstance);
+            frame,
+            MemoryMarshal.Cast<Matrix4x4, float>(stream.TransformSpan),
+            out uint transformBaseInstance);
         _orderedTransformBaseInstance = transformBaseInstance;
         _orderedBatches = WriteRingSection<BatchData>(frame, _batchData.AsSpan(0, drawCount));
-        _orderedClipSlots = WriteRingSection<uint>(frame, _clipSlotData.AsSpan(0, count));
+        _orderedClipSlots = WriteRingSection<uint>(frame, stream.ClipSlotSpan);
         int lightCount = GlobalLightPacker.Pack(_pointSnapshot, ref _globalLightData);
         int uploadCount = lightCount > 0 ? lightCount : 1;
         _orderedGlobalLights = WriteRingSection<float>(
             frame,
             _globalLightData.AsSpan(0, uploadCount * GlobalLightPacker.FloatsPerLight));
         _orderedLightSets = WriteRingSection<int>(
-            frame, _lightSetData.AsSpan(0, count * LightManager.MaxLightsPerObject));
-        _orderedIndoor = WriteRingSection<uint>(frame, _indoorData.AsSpan(0, count));
-        _orderedAlpha = WriteRingSection<float>(frame, _alphaData.AsSpan(0, count));
+            frame, MemoryMarshal.Cast<InstanceLightSet, int>(stream.LightSpan));
+        _orderedIndoor = WriteRingSection<uint>(frame, stream.IndoorFlagSpan);
+        _orderedAlpha = WriteRingSection<float>(frame, stream.AlphaSpan);
         _orderedSelectionLighting = WriteRingSection<Vector2>(
-            frame, _selectionLightingData.AsSpan(0, count));
-        _orderedDetailCategory = WriteRingSection<uint>(frame, _detailCategoryData.AsSpan(0, count));
+            frame, stream.SelectionLightingSpan);
+        _orderedDetailCategory = WriteRingSection<uint>(frame, stream.DetailCategorySpan);
         GpuRingAllocation commandsAllocation = WriteIndirectCommands(
             frame, _indirectCommands.AsSpan(0, drawCount), transformBaseInstance);
         _orderedCommands = new RhiSection(

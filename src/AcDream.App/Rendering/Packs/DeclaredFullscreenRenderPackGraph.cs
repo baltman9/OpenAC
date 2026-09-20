@@ -134,7 +134,10 @@ internal class DeclaredFullscreenRenderPackGraph :
                     pass,
                     pipeline,
                     [.. RenderPackTextureBindingResolver.Resolve(pass, _resources)],
-                    timerName));
+                    timerName,
+                    // Once, here, rather than per pass per frame whether or not
+                    // the stage probe is on.
+                    AcDream.App.Diagnostics.GpuStageProfiler.PassStageName(timerName)));
             }
             _nodes = [.. nodes];
             _settings = PackSettingsUniforms.Create(
@@ -529,6 +532,8 @@ internal class DeclaredFullscreenRenderPackGraph :
             SampleCount = 1,
         });
         using IDisposable timer = encoder.BeginTimerScope(node.TimerName);
+        using IDisposable? stage = AcDream.App.Diagnostics.GpuStageProfiler.Measure(
+            encoder, node.StageName);
         encoder.BindPipeline(node.Pipeline);
         encoder.BindUniformBuffer(GpuBindingModel.UniformAtmosphericFrame,
             frameBlock.Buffer, frameBlock.OffsetBytes, AtmosphericFrameUniforms.SizeInBytes);
@@ -783,7 +788,8 @@ internal class DeclaredFullscreenRenderPackGraph :
         RenderPassDeclaration Pass,
         IGpuPipeline Pipeline,
         RenderPackTextureInput[] Inputs,
-        string TimerName);
+        string TimerName,
+        string StageName);
 
     private sealed class TargetSet : IDisposable
     {

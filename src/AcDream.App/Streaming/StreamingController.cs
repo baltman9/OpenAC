@@ -56,6 +56,7 @@ public sealed class StreamingController
     private readonly Func<long> _workTimestamp;
     private readonly long _workTimestampFrequency;
     private StreamingWorkMeter? _activeWorkMeter;
+    private readonly StreamingWorkMeter _workMeter;
     private StreamingWorkMeterSnapshot _lastWorkMeter;
     private readonly StreamingCompletionQueue _completionQueue = new();
     private long _nextCompletionSequence;
@@ -341,6 +342,10 @@ public sealed class StreamingController
         if (workTimestampFrequency <= 0)
             throw new ArgumentOutOfRangeException(nameof(workTimestampFrequency));
         _workTimestampFrequency = workTimestampFrequency;
+        _workMeter = new StreamingWorkMeter(
+            _workBudget,
+            _workTimestamp,
+            _workTimestampFrequency);
         if (!_presentation.MatchesState(_state))
         {
             throw new ArgumentException(
@@ -563,14 +568,16 @@ public sealed class StreamingController
                 "StreamingController.Tick cannot be reentered.");
 
         bool destinationHold = _destinationReservation is not null;
-        var meter = new StreamingWorkMeter(
+        // One meter serves every tick: a tick begins and ends inside this
+        // call, and a meter per tick was one of the last per-frame
+        // allocations. Restarting it is the reset a new one gets.
+        StreamingWorkMeter meter = _workMeter;
+        meter.Restart(
             destinationHold
                 ? _workBudget.WidenForDestinationHold(
                     _configuredWorkBudgetOptions
                         .HoldDestinationCeilingMilliseconds)
                 : _workBudget,
-            _workTimestamp,
-            _workTimestampFrequency,
             destinationReservationActive: destinationHold);
         _activeWorkMeter = meter;
         try

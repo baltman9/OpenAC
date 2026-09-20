@@ -294,6 +294,54 @@ public sealed class LandblockStaticPresentationPublisherTests
             bundle ?? PhysicsDatBundle.Empty),
         Origin: new LandblockBuildOrigin(0xA9, 0xB4));
 
+    /// <summary>
+    /// A republished static keeps its identity, so the same id must keep the
+    /// same source: the publisher remembers each landblock's published source
+    /// ids for exactly this check. This fails when the remembered source is
+    /// dropped or stops being compared.
+    /// </summary>
+    [Fact]
+    public void Reapply_StaticThatChangedItsSource_IsRefused()
+    {
+        var fixture = Fixture();
+        WorldEntity first = Entity(0x80A9B402u, new Vector3(12f, 12f, 0f));
+        Publish(fixture, Build(LandblockId, [first], BundleWithLight()));
+
+        var reused = new WorldEntity
+        {
+            Id = first.Id,
+            ServerGuid = 0u,
+            SourceGfxObjOrSetupId = SetupId + 1u,
+            Position = first.Position,
+            Rotation = Quaternion.Identity,
+            MeshRefs = Array.Empty<MeshRef>(),
+        };
+
+        InvalidOperationException error = Assert.Throws<InvalidOperationException>(
+            () => Publish(fixture, Build(LandblockId, [reused], BundleWithLight())));
+        Assert.Contains("changed source", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// What the publisher remembers per landblock is the source id, not the
+    /// whole plugin snapshot: a republication that moves a static still
+    /// refreshes it, and the plugin world state carries the new position.
+    /// </summary>
+    [Fact]
+    public void Reapply_RememberedSourceDoesNotStandInForThePluginSnapshot()
+    {
+        var fixture = Fixture();
+        WorldEntity first = Entity(0x80A9B403u, new Vector3(12f, 12f, 0f));
+        WorldEntity moved = Entity(first.Id, new Vector3(36f, 12f, 0f));
+
+        Publish(fixture, Build(LandblockId, [first], BundleWithLight()));
+        Publish(fixture, Build(LandblockId, [moved], BundleWithLight()));
+
+        Assert.Equal(moved.Position, Assert.Single(fixture.World.Entities).Position);
+        Assert.Equal(1, fixture.Publisher.Diagnostics.PluginSpawnCount);
+        Assert.Equal(1, fixture.Publisher.Diagnostics.PluginRefreshCount);
+    }
+
     private static WorldEntity Entity(
         uint id,
         Vector3 position,

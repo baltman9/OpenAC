@@ -840,7 +840,7 @@ public sealed class UpdateFrameOrchestratorTests
 
         Type[] typedProductionOwners =
         [
-            typeof(LiveEntityLivenessController),
+            typeof(AcDream.Runtime.Entities.RuntimeEntityLivenessController),
             typeof(AcDream.App.Input.LivePlayerModeAutoEntryContext),
             typeof(LiveSessionLocalPhysicsTimestampPublisher),
             typeof(AcDream.App.Physics.LiveEntityNetworkUpdateController),

@@ -71,6 +71,18 @@ public interface IEvents
     }
 
     /// <summary>
+    /// Raised when the host's current navigation walk report changes. Reports
+    /// are delivered on the same thread as <see cref="Tick"/> and are emitted
+    /// only when the report's sequence or state changes. A host that does not
+    /// expose navigation leaves this event inert.
+    /// </summary>
+    event Action<PluginGoToReport> NavigationChanged
+    {
+        add { }
+        remove { }
+    }
+
+    /// <summary>
     /// Raised when an external container (a corpse, a chest, a housing
     /// storage crate) becomes the client's open container. A vendor's shop
     /// pane is a separate surface and does not raise this.

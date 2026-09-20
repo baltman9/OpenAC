@@ -815,7 +815,8 @@ internal sealed class FrameRootCompositionPhase
             postDiagnostics,
             NullRenderFrameFailureRecovery.Instance,
             d.BuildingDegrades,
-            privateScreenshot);
+            privateScreenshot,
+            d.FrameProfiler);
         Fault(FrameRootCompositionPoint.RenderRootCreated);
 
         var liveFrameCoordinator = new RetailLiveFrameCoordinator(

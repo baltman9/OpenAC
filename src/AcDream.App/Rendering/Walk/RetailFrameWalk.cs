@@ -37,6 +37,10 @@ public sealed class RetailFrameWalk
     private readonly WalkPView _interiorPView = new() { DrawLandscape = true };
     private readonly WalkPView _outdoorPView = new() { DrawLandscape = false };
     private readonly WalkPortalView _defaultView = new();
+    private readonly PortalPassSink _portalPassSink = new();
+    private readonly Action<WalkPortalRef, int> _emitBuildingPortal;
+    private WalkBuilding? _emitBuilding;
+    private IWalkBuildingFrameContext? _emitContext;
 
     public WalkPView InteriorPView => _interiorPView;
     public WalkPView OutdoorPView => _outdoorPView;
@@ -45,12 +49,14 @@ public sealed class RetailFrameWalk
 
     public int ObjectRingLimit = 4;
 
-    public RetailFrameWalk() { }
+    public RetailFrameWalk() => _emitBuildingPortal = EmitBuildingPortal;
 
     internal RetailFrameWalk(BuildingDegradeController degradation)
+        : this()
         => _degradation = degradation ?? throw new ArgumentNullException(nameof(degradation));
 
     internal RetailFrameWalk(float degradeDistance, float degradeMultiplier)
+        : this()
     {
         _fixedDegradeDistance = degradeDistance;
         _fixedDegradeMultiplier = degradeMultiplier;
@@ -194,21 +200,26 @@ public sealed class RetailFrameWalk
         if (selection.DrawingBsp is WalkBspNode bsp)
         {
             int viewCount = Math.Max(activeViews.ViewCount, 0);
-            var passSink = new PortalPassSink(building, sink);
+            // One sink and one emit delegate per walk, re-aimed at this
+            // building: buildings are drawn one at a time from the cell loop,
+            // so carrying them costs nothing and allocates nothing per frame.
+            PortalPassSink passSink = _portalPassSink;
+            passSink.Aim(building, sink);
+            _emitBuilding = building;
+            _emitContext = ctx;
             Vector3 viewpoint = ctx.ViewpointInBuilding(building);
             for (int v = 0; v < viewCount; v++)
             {
                 passSink.ActiveViewIndex = v;
                 ctx.SetActiveView(activeViews, v);
                 WalkBuildingPortals.BuildDrawPortalsOnly(
-                    bsp, 1, viewpoint,
-                    (portalRef, pass) => WalkBuildingPortals.DrawPortal(
-                        _outdoorPView, building, portalRef, pass, ctx, passSink));
+                    bsp, 1, viewpoint, _emitBuildingPortal);
                 WalkBuildingPortals.BuildDrawPortalsOnly(
-                    bsp, 2, viewpoint,
-                    (portalRef, pass) => WalkBuildingPortals.DrawPortal(
-                        _outdoorPView, building, portalRef, pass, ctx, passSink));
+                    bsp, 2, viewpoint, _emitBuildingPortal);
             }
+            _emitBuilding = null;
+            _emitContext = null;
+            passSink.Release();
         }
 
         sink.OnBuildingShellTurn(building, selection);
@@ -235,22 +246,55 @@ public sealed class RetailFrameWalk
             ctx.GetVisible(id)?.PopView();
     }
 
-    private sealed class PortalPassSink(WalkBuilding building, IWalkEventSink sink)
-        : WalkBuildingPortals.IWalkPortalPassSink
+    /// <summary>
+    /// The portal walk's emit callback. It is bound once, to this walk, and
+    /// reads the building currently being drawn from the fields above, so the
+    /// walk allocates no delegate per building and per view.
+    /// </summary>
+    private void EmitBuildingPortal(WalkPortalRef portalRef, int pass)
     {
+        if (_emitBuilding is null || _emitContext is null)
+            throw new InvalidOperationException("no building is being drawn");
+        WalkBuildingPortals.DrawPortal(
+            _outdoorPView, _emitBuilding, portalRef, pass, _emitContext, _portalPassSink);
+    }
+
+    private sealed class PortalPassSink : WalkBuildingPortals.IWalkPortalPassSink
+    {
+        private WalkBuilding? _building;
+        private IWalkEventSink? _sink;
+
         public int ActiveViewIndex;
+
+        public void Aim(WalkBuilding building, IWalkEventSink sink)
+        {
+            _building = building;
+            _sink = sink;
+            ActiveViewIndex = 0;
+        }
+
+        public void Release()
+        {
+            _building = null;
+            _sink = null;
+        }
 
         public void OnPunch(WalkPolygon polygon)
         {
-            sink.OnPunchGeometry(building, polygon, ActiveViewIndex);
+            IWalkEventSink sink = _sink
+                ?? throw new InvalidOperationException("portal pass sink is not aimed at a building");
+            sink.OnPunchGeometry(_building!, polygon, ActiveViewIndex);
         }
 
         public void OnDrawCells(WalkPView pview)
         {
+            IWalkEventSink sink = _sink
+                ?? throw new InvalidOperationException("portal pass sink is not aimed at a building");
             uint[] cells = new uint[pview.CellDrawList.Count];
             for (int i = 0; i < cells.Length; i++)
                 cells[i] = pview.CellDrawList[i].CellId;
             sink.Emit(WalkEvent.DrawCells(pview.OutsideView.ViewCount, cells));
         }
     }
+
 }

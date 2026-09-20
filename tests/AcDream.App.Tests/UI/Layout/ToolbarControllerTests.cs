@@ -82,20 +82,18 @@ public class ToolbarControllerTests
             info.StateMedia["Ghosted"] = (0x3u, 1);
             if (panelId is { } value)
             {
+                var properties = new UiPropertyBag();
+                properties.Set(
+                    0x10000029u,
+                    new UiPropertyValue
+                    {
+                        Kind = UiPropertyKind.Enum,
+                        UnsignedValue = value,
+                    });
                 info.States[UiStateInfo.DirectStateId] = new UiStateInfo
                 {
                     Id = UiStateInfo.DirectStateId,
-                    Properties = new UiPropertyBag
-                    {
-                        Values =
-                        {
-                            [0x10000029u] = new UiPropertyValue
-                            {
-                                Kind = UiPropertyKind.Enum,
-                                UnsignedValue = value,
-                            },
-                        },
-                    },
+                    Properties = properties,
                 };
             }
             var button = new UiButton(info, _ => (0u, 0, 0)) { Width = 32, Height = 32 };

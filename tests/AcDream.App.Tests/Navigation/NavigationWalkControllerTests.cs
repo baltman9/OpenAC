@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Text.RegularExpressions;
 using System.Numerics;
 using AcDream.Runtime.Navigation;
 using AcDream.Core.Navigation;
@@ -251,6 +253,29 @@ public sealed class NavigationWalkControllerTests
         Assert.Contains(narrated, line => line.Contains("from (40.0, 40.0, 0.0) in cell 0xA9B40021 toward (40.0, 150.0, 0.0), within 2.5 m"));
         Assert.Contains(narrated, line => line.StartsWith("Route points: (", StringComparison.Ordinal) && line.Contains("ends in sight of the goal"));
         Assert.DoesNotContain(said, line => line.StartsWith("Route points:", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Narration reads the same on a machine whose culture writes decimals with a comma: the
+    /// numbers it carries are for the log and the tests that read it, not for the locale.
+    /// </summary>
+    [Fact]
+    public void NarrationWritesItsNumbersTheSameUnderACommaDecimalCulture()
+    {
+        using var _ = new CultureScope("sv-SE");
+        var body = new SimulatedBody(new Vector3(40f, 40f, 0f)) { CellId = 0xA9B40021u };
+        var narrated = new List<string>();
+        var walk = new NavigationWalkController(FlatWorld(), body, new Goals { [Target] = new Vector3(40f, 150f, 0f) })
+        {
+            Narration = narrated.Add,
+        };
+
+        walk.WalkTo(Target);
+        Assert.Equal(NavigationWalkState.Arrived, RunUntilSettled(walk, body).State);
+
+        Assert.Contains(narrated, line => line.Contains("toward (40.0, 150.0, 0.0), within 2.5 m", StringComparison.Ordinal));
+        Assert.Contains(narrated, line => line.StartsWith("Route: ", StringComparison.Ordinal) && Regex.IsMatch(line, @" legs, \d+\.\d m, "));
+        Assert.DoesNotContain(narrated, line => Regex.IsMatch(line, @"\d,\d"));
     }
 
     /// <summary>
@@ -2371,6 +2396,24 @@ public sealed class NavigationWalkControllerTests
                 ? obstacle.Centre + (offset / distance * obstacle.Radius)
                 : Flat;
             return new Vector3(pushed, intended.Z);
+        }
+    }
+
+    private sealed class CultureScope : IDisposable
+    {
+        private readonly CultureInfo _culture = CultureInfo.CurrentCulture;
+        private readonly CultureInfo _uiCulture = CultureInfo.CurrentUICulture;
+
+        internal CultureScope(string name)
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(name);
+            CultureInfo.CurrentUICulture = CultureInfo.CurrentCulture;
+        }
+
+        public void Dispose()
+        {
+            CultureInfo.CurrentCulture = _culture;
+            CultureInfo.CurrentUICulture = _uiCulture;
         }
     }
 }

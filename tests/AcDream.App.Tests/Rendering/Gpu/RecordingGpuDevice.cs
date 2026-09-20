@@ -632,6 +632,12 @@ internal sealed class RecordingGpuPassEncoder(RecordingGpuDevice device, GpuPass
         return NullDisposable.Instance;
     }
 
+    public IDisposable BeginStageTimerScope(string scopeName)
+    {
+        device.Record(new GpuRecordedTimerScope(scopeName));
+        return NullDisposable.Instance;
+    }
+
     public void Dispose()
     {
         if (_closed)
@@ -867,6 +873,15 @@ internal sealed class RecordingGpuTimerPool : IGpuTimerPool
         _resolved.Remove(scopeName);
         return true;
     }
+
+    public int ResolveGeneration { get; private set; }
+
+    internal void AdvanceResolveGeneration() => ResolveGeneration++;
+
+    public IReadOnlyList<(string Name, double Milliseconds)> LastResolved =>
+        [.. _resolved.Select(pair => (pair.Key, pair.Value))];
+
+    public int DroppedScopes { get; internal set; }
 }
 
 internal static class RecordingGpuDeviceAssertions

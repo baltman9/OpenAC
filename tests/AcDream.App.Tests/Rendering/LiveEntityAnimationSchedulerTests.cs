@@ -658,11 +658,20 @@ public sealed class LiveEntityAnimationSchedulerTests
             animationHooks);
     }
 
-    private sealed class TestAnimationHookCaptureSink(
-        Action<uint, AnimationSequencer> capture) : IAnimationHookCaptureSink
+    private sealed class TestAnimationHookCaptureSink : IAnimationHookCaptureSink
     {
+        private readonly Action<uint, AnimationSequencer> _capture;
+
+        public TestAnimationHookCaptureSink(Action<uint, AnimationSequencer> capture)
+        {
+            _capture = capture;
+            CaptureCallback = Capture;
+        }
+
+        public Action<uint, AnimationSequencer> CaptureCallback { get; }
+
         public void Capture(uint ownerLocalId, AnimationSequencer sequencer) =>
-            capture(ownerLocalId, sequencer);
+            _capture(ownerLocalId, sequencer);
     }
 
     private sealed class TestRootPosePublisher(

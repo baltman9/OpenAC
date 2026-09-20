@@ -28,6 +28,15 @@ public interface IPluginEventSink : IEvents
     /// <param name="change">Which object, and what happened to it.</param>
     void FireObjectChanged(PluginObjectChange change);
 
+    /// <summary>
+    /// The walk the client is driving reached a new state: it started, made
+    /// progress, arrived or gave up. Raised from the one runtime owner that
+    /// watches the walk, so both clients report the same states in the same
+    /// order for the same walk.
+    /// </summary>
+    /// <param name="report">Where the walk stands now.</param>
+    void FireNavigationChanged(PluginGoToReport report);
+
     /// <summary>A container the character can see inside was opened.</summary>
     /// <param name="containerObjectId">The container that opened.</param>
     void FireContainerOpened(uint containerObjectId);

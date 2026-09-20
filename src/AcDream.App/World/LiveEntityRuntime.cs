@@ -401,6 +401,11 @@ public sealed class LiveEntityRuntime : ILiveEntityRadarSource
         out LiveEntityRecord record) =>
         _projections.TryGet(canonical, out record);
 
+    internal bool TryGetProjection(
+        RuntimeEntityKey key,
+        out LiveEntityRecord record) =>
+        _projections.TryGet(key, out record);
+
     internal bool IsCurrentCanonical(RuntimeEntityRecord canonical) =>
         _directory.IsCurrent(canonical);
 

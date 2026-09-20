@@ -1595,6 +1595,10 @@ public sealed partial class WalkStaticStreamPopulatorTests
         private readonly WbMeshAdapter _meshAdapter;
         private readonly TextureCache _textures;
 
+        /// <summary>The part-fade clock the dispatcher classifies against.
+        /// It advances on its own and never writes the render scene.</summary>
+        public AcDream.Core.Rendering.TranslucencyFadeManager Fades { get; } = new();
+
         public DispatcherFixture(
             bool withAlphaQueue = false,
             IRetailSelectionRenderSink? selectionSink = null,
@@ -1625,7 +1629,7 @@ public sealed partial class WalkStaticStreamPopulatorTests
                 _meshAdapter,
                 entitySpawnAdapter,
                 new EntityClassificationCache(),
-                new AcDream.Core.Rendering.TranslucencyFadeManager(),
+                Fades,
                 selectionSink: selectionSink,
                 alphaQueue: AlphaQueue,
                 buildingDetail: detailAvailable

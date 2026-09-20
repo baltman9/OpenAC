@@ -55,10 +55,10 @@ internal static class ScrollbarFixtures
     {
         var bar = new ElementInfo { Id = 0x100003F8u, Type = 11u, Width = 37f, Height = 307f };
         var direct = new UiStateInfo { Id = UiStateInfo.DirectStateId };
-        direct.Properties.Values[0x77u] = new UiPropertyValue { Kind = UiPropertyKind.Enum, UnsignedValue = 0x10000071u };
-        direct.Properties.Values[0x78u] = new UiPropertyValue { Kind = UiPropertyKind.Enum, UnsignedValue = 0x10000072u };
-        direct.Properties.Values[0x82u] = new UiPropertyValue { Kind = UiPropertyKind.Bool, BoolValue = proportional };
-        direct.Properties.Values[0x89u] = new UiPropertyValue { Kind = UiPropertyKind.Integer, IntegerValue = minThumb };
+        direct.Properties.Set(0x77u, new UiPropertyValue { Kind = UiPropertyKind.Enum, UnsignedValue = 0x10000071u });
+        direct.Properties.Set(0x78u, new UiPropertyValue { Kind = UiPropertyKind.Enum, UnsignedValue = 0x10000072u });
+        direct.Properties.Set(0x82u, new UiPropertyValue { Kind = UiPropertyKind.Bool, BoolValue = proportional });
+        direct.Properties.Set(0x89u, new UiPropertyValue { Kind = UiPropertyKind.Integer, IntegerValue = minThumb });
         bar.States[UiStateInfo.DirectStateId] = direct;
         bar.Children.Add(Button(1u, y: 0f, height: 39f, sprite: 0x06001111u));
         bar.Children.Add(Button(0x10000071u, y: 290f, height: 17f, sprite: 0x06002222u));

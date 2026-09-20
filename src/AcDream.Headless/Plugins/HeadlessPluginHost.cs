@@ -31,6 +31,7 @@ internal sealed class HeadlessPluginHost
     private Action? _logoff;
     private Action<string>? _localPlayerDied;
     private Action<PluginObjectChange>? _objectChanged;
+    private Action<PluginGoToReport>? _navigationChanged;
     private Action<uint>? _containerOpened;
     private Action<uint>? _containerClosed;
     private Action<PluginConfirmation>? _confirmationRequested;
@@ -378,6 +379,23 @@ internal sealed class HeadlessPluginHost
         }
     }
 
+    public event Action<PluginGoToReport> NavigationChanged
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_tickGate)
+                _navigationChanged += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_tickGate)
+                _navigationChanged -= value;
+        }
+    }
+
     public event Action<uint> ContainerOpened
     {
         add
@@ -453,6 +471,28 @@ internal sealed class HeadlessPluginHost
         }
     }
 
+    /// <summary>
+    /// The walk the client is driving reached a new state. The states and
+    /// their order are decided by the shared runtime owner, so a plugin sees
+    /// the same walk here as it does on the windowed client.
+    /// </summary>
+    /// <param name="report">Where the walk stands now.</param>
+    public void FireNavigationChanged(PluginGoToReport report)
+    {
+        Action<PluginGoToReport>? handlers;
+        lock (_tickGate)
+            handlers = _navigationChanged;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginGoToReport>)handler)(report); }
+            catch (Exception error)
+            {
+                Log.Warn($"Plugin navigation handler threw: {error}");
+            }
+        }
+    }
     /// <summary>A container the character can see inside was opened.</summary>
     /// <param name="containerObjectId">The container that opened.</param>
     public void FireContainerOpened(uint containerObjectId)

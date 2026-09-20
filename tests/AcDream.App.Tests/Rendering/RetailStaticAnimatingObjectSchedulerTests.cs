@@ -19,6 +19,71 @@ public sealed class RetailStaticAnimatingObjectSchedulerTests
     private const uint AnimationId = 0x0300AA01u;
     private const uint GfxId = 0x0100AA01u;
 
+    /// <summary>
+    /// The render scene reads the animating statics before the scheduler
+    /// applies that frame's hooks, so a hook's effect -- a part it hides, for
+    /// one -- is only ever visible to the scene one frame later. An owner
+    /// whose last act was a hook must therefore still be offered on the next
+    /// frame, even though nothing advanced it. This is the ordering that made
+    /// a door flip back when an earlier cache skipped it.
+    /// </summary>
+    [Fact]
+    public void OwnerIsOfferedAgainAfterAHookBatchEvenWithoutAnAdvance()
+    {
+        var loader = new Loader();
+        loader.Add(AnimationId, TwoFrameAnimation());
+        var hidden = new List<uint>();
+        var scheduler = new RetailStaticAnimatingObjectScheduler(
+            loader,
+            // A hook batch hides a part: the scene must be told afterwards.
+            (ownerId, _) => hidden.Add(ownerId),
+            (_, _, _) => { });
+        Setup setup = MakeSetup();
+        WorldEntity entity = MakeEntity();
+        scheduler.Register(entity, new ScriptActivationInfo(
+            ScriptId: 0,
+            PartTransforms: entity.IndexedPartTransforms,
+            PartAvailability: entity.IndexedPartAvailable,
+            Setup: setup,
+            DefaultAnimationId: AnimationId,
+            UsesStaticAnimationWorkset: true));
+
+        var offered = new List<WorldEntity>();
+
+        // Registration alone offers it once, so the scene can adopt it.
+        scheduler.CopyActiveDatStaticEntitiesTo(offered);
+        Assert.Same(entity, Assert.Single(offered));
+        scheduler.CopyActiveDatStaticEntitiesTo(offered);
+        Assert.Empty(offered);
+
+        // A frame that advances: the scene reads, then the hooks run.
+        scheduler.Tick(1f / 60f);
+        scheduler.CopyActiveDatStaticEntitiesTo(offered);
+        Assert.Same(entity, Assert.Single(offered));
+        scheduler.ProcessHooks();
+        Assert.Single(hidden);
+
+        // The next frame discards its elapsed, so nothing advances -- but the
+        // hook batch from the previous frame has not reached the scene yet.
+        scheduler.Tick(2.01f);
+        scheduler.CopyActiveDatStaticEntitiesTo(offered);
+        Assert.Same(entity, Assert.Single(offered));
+        scheduler.ProcessHooks();
+        Assert.Single(hidden);
+
+        // Now nothing has written the entity, so it is not offered again.
+        scheduler.Tick(2.01f);
+        scheduler.CopyActiveDatStaticEntitiesTo(offered);
+        Assert.Empty(offered);
+        scheduler.CopyActiveDatStaticEntitiesTo(offered);
+        Assert.Empty(offered);
+
+        // And an advance offers it once more.
+        scheduler.Tick(1f / 60f);
+        scheduler.CopyActiveDatStaticEntitiesTo(offered);
+        Assert.Same(entity, Assert.Single(offered));
+    }
+
     [Fact]
     public void DefaultAnimation_UsesSeparateWholeElapsedStaticWorkset()
     {

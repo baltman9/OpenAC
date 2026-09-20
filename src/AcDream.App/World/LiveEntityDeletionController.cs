@@ -5,16 +5,12 @@ using AcDream.Runtime.Entities;
 
 namespace AcDream.App.World;
 
-internal interface ILiveEntityPruneSink
-{
-    bool Prune(LiveEntityPruneCandidate candidate);
-}
-
 /// <summary>
 /// Owns authoritative and expiry-driven live-object deletion through one
-/// generation-safe runtime transaction.
+/// generation-safe runtime transaction. As the graphical host's expiry
+/// sink it tears the projection down on the way out.
 /// </summary>
-internal sealed class LiveEntityDeletionController : ILiveEntityPruneSink
+internal sealed class LiveEntityDeletionController : IRuntimeEntityExpirySink
 {
     private readonly LiveEntityRuntime _runtime;
     private readonly ILiveEntityTeardownCoordinator _teardown;
@@ -53,7 +49,7 @@ internal sealed class LiveEntityDeletionController : ILiveEntityPruneSink
     /// the object on the same schedule and re-sends a create when the player
     /// returns, so nothing is kept to rebuild it from.
     /// </summary>
-    public bool Prune(LiveEntityPruneCandidate candidate)
+    public bool Expire(RuntimeEntityExpiryCandidate candidate)
     {
         if (!_runtime.TryGetRecord(
                 candidate.Key,

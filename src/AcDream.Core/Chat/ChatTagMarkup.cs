@@ -2,6 +2,43 @@ namespace AcDream.Core.Chat;
 
 public readonly record struct ChatTextTag(string Type, string Format, string Data)
 {
+    public bool TryGetCoordinate(out double eastWest, out double northSouth)
+    {
+        eastWest = 0d;
+        northSouth = 0d;
+        if (!string.Equals(Type, "COORD", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(Format, "World", StringComparison.OrdinalIgnoreCase))
+            return false;
+        return TryParseCoordinatePair(Data, out eastWest, out northSouth);
+    }
+
+    public static bool TryParseCoordinatePair(string? text, out double eastWest, out double northSouth)
+    {
+        eastWest = 0d;
+        northSouth = 0d;
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+        string[] parts = text.Split(',', StringSplitOptions.TrimEntries);
+        return parts.Length == 2
+            && TryParseCoordinate(parts[0], 'N', 'S', out northSouth)
+            && TryParseCoordinate(parts[1], 'E', 'W', out eastWest);
+    }
+
+    private static bool TryParseCoordinate(string text, char positive, char negative, out double value)
+    {
+        value = 0d;
+        if (text.Length < 2)
+            return false;
+        char suffix = char.ToUpperInvariant(text[^1]);
+        if (suffix != positive && suffix != negative)
+            return false;
+        if (!double.TryParse(text[..^1].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double magnitude)
+            || magnitude < 0d)
+            return false;
+        value = suffix == negative ? -magnitude : magnitude;
+        return true;
+    }
+
     public bool TryGetIidString(out uint objectId, out string name)
     {
         objectId = 0;

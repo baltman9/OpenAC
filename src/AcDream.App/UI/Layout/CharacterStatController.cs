@@ -207,7 +207,7 @@ public static class CharacterStatController
                     xpLabel.Left = xpNextLeft >= 0f ? xpNextLeft : 0f;
                 }
 
-                xpLabel.LinesProvider = static () => new[] { new UiText.Line("XP for next level:", Body) };
+                SetConstantLine(xpLabel, "XP for next level:", Body);
             }
             if (FindTextByDatId(layout, contentPage, XpNextValueId) is UiText xpValue)
             {
@@ -216,28 +216,38 @@ public static class CharacterStatController
                 xpValue.RightAligned = true;
                 xpValue.OneLine      = true;
                 xpValue.Padding      = 0f;
-                xpValue.LinesProvider = () => new[] { new UiText.Line(FormatXp(data().XpToNextLevel), Body) };
+                SetSheetLines(
+                    xpValue,
+                    data,
+                    static (_, sheet) => new[]
+                    {
+                        new UiText.Line(FormatXp(sheet.XpToNextLevel), Body),
+                    });
             }
         }
 
-        bool LuminanceVisible(CharacterSheet sheet) =>
-            sheet.Level is int lvl && lvl >= 200 && sheet.MaximumLuminance != 0;
-
         if (FindTextByDatId(layout, contentPage, LuminanceLabelId) is UiText luminanceLabel)
         {
-            luminanceLabel.LinesProvider = () => LuminanceVisible(data())
-                ? new[] { new UiText.Line(LuminanceCaption, luminanceLabel.DefaultColor) }
-                : Array.Empty<UiText.Line>();
+            SetSheetLines(
+                luminanceLabel,
+                data,
+                static (element, sheet) => LuminanceVisible(sheet)
+                    ? new[] { new UiText.Line(LuminanceCaption, element.DefaultColor) }
+                    : Array.Empty<UiText.Line>());
         }
         if (FindTextByDatId(layout, contentPage, LuminanceValueId) is UiText luminanceValue)
         {
-            luminanceValue.LinesProvider = () =>
-            {
-                var sheet = data();
-                if (!LuminanceVisible(sheet)) return Array.Empty<UiText.Line>();
-                string text = $"{FormatXp(sheet.AvailableLuminance)} / {FormatXp(sheet.MaximumLuminance)}";
-                return new[] { new UiText.Line(text, luminanceValue.DefaultColor) };
-            };
+            SetSheetLines(
+                luminanceValue,
+                data,
+                static (element, sheet) =>
+                {
+                    if (!LuminanceVisible(sheet))
+                        return Array.Empty<UiText.Line>();
+                    string text =
+                        $"{FormatXp(sheet.AvailableLuminance)} / {FormatXp(sheet.MaximumLuminance)}";
+                    return new[] { new UiText.Line(text, element.DefaultColor) };
+                });
         }
 
 
@@ -637,22 +647,18 @@ public static class CharacterStatController
                 left: 0f, top: y, width: listW, height: RowHeight,
                 iconDid: ResolveIconDid(iconDidResolve, statId, AttributeIconCategory, iconDid),
                 nameText: rowName,
-                valueProvider: () =>
+                data: data,
+                valueText: sheet => (rowIndex switch
                 {
-                    var s = data();
-                    int v = rowIndex switch
-                    {
-                        0 => s.Strength,
-                        1 => s.Endurance,
-                        2 => s.Coordination,
-                        3 => s.Quickness,
-                        4 => s.Focus,
-                        5 => s.Self,
-                        _ => 0,
-                    };
-                    return v.ToString();
-                },
-                valueColorProvider: () => AttributeValueColor(data(), rowIndex));
+                    0 => sheet.Strength,
+                    1 => sheet.Endurance,
+                    2 => sheet.Coordination,
+                    3 => sheet.Quickness,
+                    4 => sheet.Focus,
+                    5 => sheet.Self,
+                    _ => 0,
+                }).ToString(),
+                valueColor: sheet => AttributeValueColor(sheet, rowIndex));
             row.TooltipText = AttributeDescriptions.GetValueOrDefault(statId);
 
             row.OnClick = () =>
@@ -674,18 +680,15 @@ public static class CharacterStatController
                 left: 0f, top: y, width: listW, height: RowHeight,
                 iconDid: ResolveIconDid(iconDidResolve, maxStatId, VitalIconCategory, iconDid),
                 nameText: rowName,
-                valueProvider: () =>
+                data: data,
+                valueText: sheet => rowIndex switch
                 {
-                    var s = data();
-                    return rowIndex switch
-                    {
-                        0 => $"{s.HealthCurrent}/{s.HealthMax}",
-                        1 => $"{s.StaminaCurrent}/{s.StaminaMax}",
-                        2 => $"{s.ManaCurrent}/{s.ManaMax}",
-                        _ => string.Empty,
-                    };
+                    0 => $"{sheet.HealthCurrent}/{sheet.HealthMax}",
+                    1 => $"{sheet.StaminaCurrent}/{sheet.StaminaMax}",
+                    2 => $"{sheet.ManaCurrent}/{sheet.ManaMax}",
+                    _ => string.Empty,
                 },
-                valueColorProvider: () => VitalValueColor(data(), rowIndex));
+                valueColor: sheet => VitalValueColor(sheet, rowIndex));
             row.TooltipText = Attribute2ndDescriptions.GetValueOrDefault(maxStatId);
 
             row.OnClick = () =>
@@ -737,14 +740,16 @@ public static class CharacterStatController
             foreach (var skill in skills)
             {
                 int rowIndex = bindings.Count;
-                CharacterSkill LiveSkill() =>
-                    FindSkill(data(), skill.Id) ?? skill;
+                CharacterSkill entry = skill;
+                CharacterSkill LiveSkill(CharacterSheet sheet) =>
+                    FindSkill(sheet, entry.Id) ?? entry;
                 var row = AddRow(list, datFont, spriteResolve,
                     left: 0f, top: y, width: listW, height: RowHeight,
                     iconDid: skill.IconDid,
                     nameText: skill.Name,
-                    valueProvider: () => LiveSkill().CurrentLevel.ToString(),
-                    valueColorProvider: () => SkillValueColor(LiveSkill()),
+                    data: data,
+                    valueText: sheet => LiveSkill(sheet).CurrentLevel.ToString(),
+                    valueColor: sheet => SkillValueColor(LiveSkill(sheet)),
                     nameColor: Vector4.One);
                 row.TooltipText = skill.TooltipText;
                 row.OnClick = () =>
@@ -798,8 +803,7 @@ public static class CharacterStatController
             Padding = 1f,
             Anchors = AnchorEdges.Left | AnchorEdges.Top,
         };
-        string captured = title;
-        label.LinesProvider = () => new[] { new UiText.Line(captured, Vector4.One) };
+        SetConstantLine(label, title, Vector4.One);
         header.AddChild(label);
         list.AddChild(header);
         return header;
@@ -1363,8 +1367,9 @@ public static class CharacterStatController
         float left, float top, float width, float height,
         uint iconDid,
         string nameText,
-        Func<string> valueProvider,
-        Func<Vector4>? valueColorProvider = null,
+        Func<CharacterSheet> data,
+        Func<CharacterSheet, string> valueText,
+        Func<CharacterSheet, Vector4>? valueColor = null,
         Vector4? nameColor = null)
     {
         var row = new UiClickablePanel
@@ -1400,7 +1405,6 @@ public static class CharacterStatController
             Anchors         = AnchorEdges.Left | AnchorEdges.Top,
         };
 
-        string capturedName = nameText;
         Vector4 capturedNameColor = nameColor ?? Body;
         var nameEl = new UiText
         {
@@ -1416,7 +1420,7 @@ public static class CharacterStatController
             OneLine      = true,
             Anchors      = AnchorEdges.Left | AnchorEdges.Top,
         };
-        nameEl.LinesProvider = () => new[] { new UiText.Line(capturedName, capturedNameColor) };
+        SetConstantLine(nameEl, nameText, capturedNameColor);
 
         var valueEl = new UiText
         {
@@ -1430,8 +1434,13 @@ public static class CharacterStatController
             OneLine      = true,
             Anchors      = AnchorEdges.Left | AnchorEdges.Top,
         };
-        var capturedProvider = valueProvider;
-        valueEl.LinesProvider = () => new[] { new UiText.Line(capturedProvider(), valueColorProvider?.Invoke() ?? Body) };
+        SetSheetLines(
+            valueEl,
+            data,
+            (_, sheet) => new[]
+            {
+                new UiText.Line(valueText(sheet), valueColor?.Invoke(sheet) ?? Body),
+            });
 
         row.AddChild(iconEl);
         row.AddChild(nameEl);
@@ -1744,11 +1753,70 @@ public static class CharacterStatController
             t.Centered      = true;
             t.OneLine       = true;
             t.ClickThrough  = true;
-            t.LinesProvider = () => new[] { new UiText.Line(text(), color) };
+            SetComposedLine(t, text, color);
         }
     }
 
     private static string FormatXp(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
+
+    private static bool LuminanceVisible(CharacterSheet sheet) =>
+        sheet.Level is int level && level >= 200 && sheet.MaximumLuminance != 0;
+
+    // Every text in this panel is polled on every draw of the panel, and a
+    // provider that builds its line array inside the poll handed the draw a
+    // new array -- and often a freshly composed string -- per text per frame,
+    // for as long as the panel was open. The three below keep the shaped line
+    // and go back to the source only when what it shows changes; the shared
+    // layout cache re-shapes anyway when a layout input the shaping reads
+    // moves (width, padding, default colour, either font, the palette).
+
+    /// <summary>A line whose text never changes.</summary>
+    private static void SetConstantLine(UiText target, string text, Vector4 color)
+    {
+        target.LinesProvider = new UiTextLayoutCache<string>(
+            target,
+            (_, value) => new[] { new UiText.Line(value, color) },
+            text,
+            StringComparer.Ordinal).Provider;
+    }
+
+    /// <summary>A line composed from a source that is cheap to poll: the
+    /// shaping runs again only when the composed text differs.</summary>
+    private static void SetComposedLine(
+        UiText target, Func<string> text, Vector4 color)
+    {
+        target.LinesProvider = new UiTextLayoutCache<string>(
+            target,
+            (_, value) => new[] { new UiText.Line(value, color) },
+            text,
+            StringComparer.Ordinal).Provider;
+    }
+
+    /// <summary>The same, in the colour the layout authored for the element.
+    /// The cache re-shapes when that colour moves.</summary>
+    private static void SetComposedLineInAuthoredColor(
+        UiText target, Func<string> text)
+    {
+        target.LinesProvider = new UiTextLayoutCache<string>(
+            target,
+            static (element, value) =>
+                new[] { new UiText.Line(value, element.DefaultColor) },
+            text,
+            StringComparer.Ordinal).Provider;
+    }
+
+    /// <summary>A line read out of the character sheet. The sheet is
+    /// immutable and replaced when anything on it changes, so the sheet the
+    /// panel is showing is the revision: the text is composed once per sheet,
+    /// not once per draw.</summary>
+    private static void SetSheetLines(
+        UiText target,
+        Func<CharacterSheet> data,
+        Func<UiText, CharacterSheet, IReadOnlyList<UiText.Line>> shape)
+    {
+        target.LinesProvider =
+            new UiTextLayoutCache<CharacterSheet>(target, shape, data).Provider;
+    }
 
     private static void LabelAuthoredColor(ImportedLayout layout, UiElement? scope, uint id, UiDatFont? datFont, Func<string> text)
     {
@@ -1758,7 +1826,7 @@ public static class CharacterStatController
             t.Centered      = true;
             t.OneLine       = true;
             t.ClickThrough  = true;
-            t.LinesProvider = () => new[] { new UiText.Line(text(), t.DefaultColor) };
+            SetComposedLineInAuthoredColor(t, text);
         }
     }
 
@@ -1777,11 +1845,12 @@ public static class CharacterStatController
             t.RightAligned  = false;
             t.ClickThrough  = true;
             t.Padding       = 1f;
-            t.LinesProvider = () => new[]
-            {
+            UiText.Line[] lines =
+            [
                 new UiText.Line(line1, color),
                 new UiText.Line(line2, color),
-            };
+            ];
+            t.LinesProvider = () => lines;
         }
     }
 
@@ -1798,7 +1867,7 @@ public static class CharacterStatController
             t.RightAligned  = false;
             t.ClickThrough  = true;
             t.Padding       = 0f;
-            t.LinesProvider = () => new[] { new UiText.Line(text(), color) };
+            SetComposedLine(t, text, color);
         }
     }
 
@@ -1818,7 +1887,7 @@ public static class CharacterStatController
             t.OneLine = true;
             t.ClickThrough = true;
             t.Padding = 0f;
-            t.LinesProvider = () => new[] { new UiText.Line(text(), color) };
+            SetComposedLine(t, text, color);
         }
     }
 
@@ -1831,7 +1900,7 @@ public static class CharacterStatController
         t.RightAligned  = false;
         t.ClickThrough  = true;
         t.Padding       = 0f;
-        t.LinesProvider = () => new[] { new UiText.Line(text(), color) };
+        SetComposedLine(t, text, color);
     }
 
     // Match by ElementId, not geometry: the x1 and x10 raise buttons are both 30x26.

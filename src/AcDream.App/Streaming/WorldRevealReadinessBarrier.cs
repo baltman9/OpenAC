@@ -33,6 +33,7 @@ internal sealed class WorldRevealReadinessBarrier
     private readonly Action<uint, int> _prepareCompositeTextures;
     private readonly Action _invalidateCompositeTextures;
     private readonly Func<uint, bool> _isSpawnClaimUnhydratable;
+    private readonly Func<uint, bool> _hasLiveCollisionPendingRestore;
 
     public WorldRevealReadinessBarrier(
         Func<StreamingRevealWindow> revealWindow,
@@ -42,8 +43,11 @@ internal sealed class WorldRevealReadinessBarrier
         Func<bool> areCompositeTexturesReady,
         Action<uint, int> prepareCompositeTextures,
         Action invalidateCompositeTextures,
-        Func<uint, bool> isSpawnClaimUnhydratable)
+        Func<uint, bool> isSpawnClaimUnhydratable,
+        Func<uint, bool>? hasLiveCollisionPendingRestore = null)
     {
+        _hasLiveCollisionPendingRestore =
+            hasLiveCollisionPendingRestore ?? (static _ => false);
         _revealWindow = revealWindow
             ?? throw new ArgumentNullException(nameof(revealWindow));
         _isRenderNeighborhoodReady = isRenderNeighborhoodReady
@@ -107,12 +111,17 @@ internal sealed class WorldRevealReadinessBarrier
             required.NearRadius,
             required.FarRadius);
         bool compositesReady = renderReady && _areCompositeTexturesReady();
+        // The destination's collision is not complete while an object standing
+        // in it is still waiting to get its own collision back: an arrival
+        // placed then can be put down inside it. See the research note on
+        // lifestone arrival.
         bool collisionReady = renderReady && compositesReady
             && (isIndoor
                 ? _isSpawnCellReady(destinationCell)
                 : _isTerrainNeighborhoodReady(
                     destinationCell,
-                    required.FarRadius));
+                    required.FarRadius))
+            && !_hasLiveCollisionPendingRestore(destinationCell);
 
         return new WorldRevealReadinessSnapshot(
             destinationCell,

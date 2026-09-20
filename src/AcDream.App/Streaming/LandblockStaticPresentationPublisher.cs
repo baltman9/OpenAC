@@ -11,14 +11,14 @@ public sealed class LandblockStaticPresentationPublication
     private readonly Dictionary<uint, WorldEntity> _entities;
     private readonly Dictionary<uint, WorldEntitySnapshot> _snapshots;
     private readonly uint[] _orderedPreviouslyActiveIds;
-    private readonly Dictionary<uint, WorldEntitySnapshot> _replacementActive;
+    private readonly Dictionary<uint, uint> _replacementActive;
 
     internal LandblockStaticPresentationPublication(
         object owner,
         LandblockPhysicsPublication physicsPublication,
         Dictionary<uint, WorldEntity> entities,
         Dictionary<uint, WorldEntitySnapshot> snapshots,
-        IReadOnlyDictionary<uint, WorldEntitySnapshot> priorActive,
+        IReadOnlyDictionary<uint, uint> priorActive,
         HashSet<uint> previouslyActiveIds,
         uint[] orderedPreviouslyActiveIds)
     {
@@ -29,13 +29,15 @@ public sealed class LandblockStaticPresentationPublication
         PriorActive = priorActive;
         PreviouslyActiveIds = previouslyActiveIds;
         _orderedPreviouslyActiveIds = orderedPreviouslyActiveIds;
-        _replacementActive = new Dictionary<uint, WorldEntitySnapshot>(
+        _replacementActive = new Dictionary<uint, uint>(
             physicsPublication.Build.Landblock.Entities.Count);
     }
 
     internal object Owner { get; }
     internal LandblockPhysicsPublication PhysicsPublication { get; }
-    internal IReadOnlyDictionary<uint, WorldEntitySnapshot> PriorActive { get; }
+    /// <summary>The source id of each static this landblock published last
+    /// time, the only thing a republication reads back from it.</summary>
+    internal IReadOnlyDictionary<uint, uint> PriorActive { get; }
     internal Dictionary<uint, WorldEntity> MutableEntities => _entities;
     internal Dictionary<uint, WorldEntitySnapshot> MutableSnapshots => _snapshots;
     internal HashSet<uint> PreviouslyActiveIds { get; }
@@ -44,7 +46,7 @@ public sealed class LandblockStaticPresentationPublication
     internal IReadOnlyList<KeyValuePair<uint, WorldEntitySnapshot>>
         OrderedSnapshots { get; set; } =
             Array.Empty<KeyValuePair<uint, WorldEntitySnapshot>>();
-    internal Dictionary<uint, WorldEntitySnapshot> ReplacementActive =>
+    internal Dictionary<uint, uint> ReplacementActive =>
         _replacementActive;
     internal int PreparationCursor { get; set; }
     internal bool PreparationCommitted { get; set; }
@@ -74,7 +76,11 @@ public sealed class LandblockStaticPresentationPublisher
     private readonly LightingHookSink _lighting;
     private readonly TranslucencyFadeManager _translucency;
     private readonly ISceneryObjectStore _scenery;
-    private readonly Dictionary<uint, Dictionary<uint, WorldEntitySnapshot>>
+    // Per landblock, the source id of every static it published. The whole
+    // snapshot used to live here, and a republication only ever reads the
+    // source id back out of it; the snapshots themselves are the scenery
+    // store's, which is what a plugin reads.
+    private readonly Dictionary<uint, Dictionary<uint, uint>>
         _activeByLandblock = new();
     private readonly Dictionary<uint, uint> _landblockByEntityId = new();
 
@@ -131,7 +137,7 @@ public sealed class LandblockStaticPresentationPublisher
         uint canonical = Canonicalize(physicsPublication.LandblockId);
         _activeByLandblock.TryGetValue(
             canonical,
-            out Dictionary<uint, WorldEntitySnapshot>? active);
+            out Dictionary<uint, uint>? active);
         var entities = new Dictionary<uint, WorldEntity>();
         var snapshots = new Dictionary<uint, WorldEntitySnapshot>();
         HashSet<uint> previous = active is not null
@@ -143,7 +149,7 @@ public sealed class LandblockStaticPresentationPublisher
             physicsPublication,
             entities,
             snapshots,
-            active ?? new Dictionary<uint, WorldEntitySnapshot>(),
+            active ?? new Dictionary<uint, uint>(),
             previous,
             orderedPrevious);
     }
@@ -181,12 +187,12 @@ public sealed class LandblockStaticPresentationPublisher
             }
             if (publication.PriorActive.TryGetValue(
                     entity.Id,
-                    out WorldEntitySnapshot retained)
-                && retained.SourceId != entity.SourceGfxObjOrSetupId)
+                    out uint retainedSourceId)
+                && retainedSourceId != entity.SourceGfxObjOrSetupId)
             {
                 throw new InvalidOperationException(
                     $"Retained DAT-static ID 0x{entity.Id:X8} changed source " +
-                    $"from 0x{retained.SourceId:X8} to " +
+                    $"from 0x{retainedSourceId:X8} to " +
                     $"0x{entity.SourceGfxObjOrSetupId:X8}.");
             }
 
@@ -323,7 +329,7 @@ public sealed class LandblockStaticPresentationPublisher
             else
                 _pluginSpawnCount++;
             _landblockByEntityId[id] = Canonicalize(publication.LandblockId);
-            publication.ReplacementActive[id] = snapshot;
+            publication.ReplacementActive[id] = snapshot.SourceId;
             publication.PluginCursor++;
             return false;
         }
@@ -362,7 +368,7 @@ public sealed class LandblockStaticPresentationPublisher
         if (_landblockByEntityId.Remove(entity.Id, out uint landblockId)
             && _activeByLandblock.TryGetValue(
                 landblockId,
-                out Dictionary<uint, WorldEntitySnapshot>? active))
+                out Dictionary<uint, uint>? active))
         {
             active.Remove(entity.Id);
             if (active.Count == 0)

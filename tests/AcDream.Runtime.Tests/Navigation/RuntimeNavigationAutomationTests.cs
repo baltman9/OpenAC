@@ -204,6 +204,48 @@ public sealed class RuntimeNavigationAutomationTests
     }
 
     [Fact]
+    public void SnapshotChanged_PublishesOnceWithAMonotonicRevision()
+    {
+        var navigation = new RuntimeNavigationAutomation();
+        var reports = new List<PluginNavigationSnapshot>();
+        navigation.SnapshotChanged += reports.Add;
+
+        navigation.PublishSnapshotChanged();
+        navigation.PublishSnapshotChanged();
+
+        var report = Assert.Single(reports);
+        Assert.Equal(1UL, report.Revision);
+        Assert.False(report.IsAvailable);
+    }
+
+    [Fact]
+    public void SnapshotChanged_IsolatedHandlerExceptions()
+    {
+        var navigation = new RuntimeNavigationAutomation();
+        var reports = new List<PluginNavigationSnapshot>();
+        navigation.SnapshotChanged += _ => throw new InvalidOperationException("test");
+        navigation.SnapshotChanged += reports.Add;
+
+        navigation.PublishSnapshotChanged();
+
+        Assert.Single(reports);
+    }
+
+    [Fact]
+    public void SnapshotChanged_UnsubscribeStopsDelivery()
+    {
+        var navigation = new RuntimeNavigationAutomation();
+        var reports = new List<PluginNavigationSnapshot>();
+        Action<PluginNavigationSnapshot> handler = reports.Add;
+        navigation.SnapshotChanged += handler;
+        navigation.PublishSnapshotChanged();
+        navigation.SnapshotChanged -= handler;
+        navigation.PublishSnapshotChanged();
+
+        Assert.Single(reports);
+    }
+
+    [Fact]
     public void EveryMemberIsUnavailableUntilARuntimeIsBound()
     {
         var navigation = new RuntimeNavigationAutomation();

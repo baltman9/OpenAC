@@ -11,6 +11,8 @@ public sealed class UiHost : System.IDisposable
     public UiRoot Root { get; } = new();
     public RetailWindowManager WindowManager => Root.WindowManager;
     public TextRenderer TextRenderer { get; }
+
+    private readonly UiRenderContext _renderContext;
     public BitmapFont? DefaultFont { get; set; }
 
     public IKeyboard? Keyboard { get; private set; }
@@ -44,6 +46,8 @@ public sealed class UiHost : System.IDisposable
         _quiescence = quiescence ?? throw new ArgumentNullException(nameof(quiescence));
         TextRenderer = new TextRenderer(device, frameSource, shaderDir);
         DefaultFont = defaultFont;
+        // One context for every frame: see UiRenderContext.Begin.
+        _renderContext = new UiRenderContext(TextRenderer, Vector2.Zero, defaultFont);
     }
 
     // ── Per-frame ──────────────────────────────────────────────────────
@@ -59,7 +63,8 @@ public sealed class UiHost : System.IDisposable
         // Set UiRoot bounds to full screen so HitTestTopDown works.
         Root.Width = screenSize.X;
         Root.Height = screenSize.Y;
-        var ctx = new UiRenderContext(TextRenderer, screenSize, DefaultFont);
+        UiRenderContext ctx = _renderContext;
+        ctx.Begin(screenSize, DefaultFont);
         TextRenderer.Begin(screenSize);
         Root.Draw(ctx);
         TextRenderer.Flush(DefaultFont);

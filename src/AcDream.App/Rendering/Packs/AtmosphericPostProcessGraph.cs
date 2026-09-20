@@ -1530,6 +1530,8 @@ internal sealed class AtmosphericPostProcessGraph :
         using IDisposable? timer = measureGpuTimers
             ? encoder.BeginTimerScope(name)
             : null;
+        using IDisposable? stage = AcDream.App.Diagnostics.GpuStageProfiler.Measure(
+            encoder, AcDream.App.Diagnostics.GpuStageProfiler.PassStageName(name));
         encoder.BindPipeline(pipeline);
         encoder.BindUniformBuffer(
             GpuBindingModel.UniformAtmosphericFrame,

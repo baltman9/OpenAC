@@ -12,6 +12,7 @@ public sealed class WorldEvents : IPluginEventSink
     private Action? _logoff;
     private Action<string>? _localPlayerDied;
     private Action<PluginObjectChange>? _objectChanged;
+    private Action<PluginGoToReport>? _navigationChanged;
     private Action<uint>? _containerOpened;
     private Action<uint>? _containerClosed;
     private Action<PluginConfirmation>? _confirmationRequested;
@@ -142,6 +143,23 @@ public sealed class WorldEvents : IPluginEventSink
         }
     }
 
+    public event Action<PluginGoToReport> NavigationChanged
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_lock)
+                _navigationChanged += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_lock)
+                _navigationChanged -= value;
+        }
+    }
+
     public event Action<uint> ContainerOpened
     {
         add
@@ -235,6 +253,20 @@ public sealed class WorldEvents : IPluginEventSink
         {
             try { ((Action<PluginObjectChange>)handler)(change); }
             catch (Exception error) { Report("object-change", error); }
+        }
+    }
+
+    public void FireNavigationChanged(PluginGoToReport report)
+    {
+        Action<PluginGoToReport>? handlers;
+        lock (_lock)
+            handlers = _navigationChanged;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginGoToReport>)handler)(report); }
+            catch { /* plugin errors do not propagate out of event dispatch */ }
         }
     }
 

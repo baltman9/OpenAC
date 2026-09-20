@@ -38,6 +38,11 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
         _isAvailable = isAvailable ?? (static () => true);
     }
 
+    private PluginNavigationSnapshot _lastPublishedSnapshot;
+    private bool _hasPublishedSnapshot;
+    private ulong _snapshotRevision;
+    private Action<PluginNavigationSnapshot>? _snapshotChanged;
+
     /// <summary>
     /// Where a thing is: its body, which every client carries between the
     /// server's updates, and only the server's last word about it when it has
@@ -129,6 +134,47 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
             : PluginNavigationCommandStatus.Rejected;
 
     // ── Where things stand ────────────────────────────────────────────────
+
+    public event Action<PluginNavigationSnapshot> SnapshotChanged
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_gate)
+                _snapshotChanged += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_gate)
+                _snapshotChanged -= value;
+        }
+    }
+
+    internal void PublishSnapshotChanged()
+    {
+        PluginNavigationSnapshot snapshot = Snapshot;
+        Action<PluginNavigationSnapshot>? handlers;
+        lock (_gate)
+        {
+            PluginNavigationSnapshot comparable = snapshot with { Revision = 0UL };
+            if (_hasPublishedSnapshot && comparable.Equals(_lastPublishedSnapshot with { Revision = 0UL }))
+                return;
+            _snapshotRevision++;
+            snapshot = comparable with { Revision = _snapshotRevision };
+            _lastPublishedSnapshot = snapshot;
+            _hasPublishedSnapshot = true;
+            handlers = _snapshotChanged;
+        }
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginNavigationSnapshot>)handler)(snapshot); }
+            catch { /* plugin errors do not propagate out of event dispatch */ }
+        }
+    }
 
     public PluginNavigationSnapshot Snapshot
     {

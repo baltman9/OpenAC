@@ -419,6 +419,12 @@ public sealed class RuntimePhysicsState : IDisposable
     private readonly Dictionary<uint, RuntimeCollisionPrefixMutation>
         _collisionPrefixMutations = new();
     private int _collisionMutationThreadId;
+    // The ordinary cell commit's owner test, carried instead of captured:
+    // it runs for every live entity on every frame, and a capture allocates
+    // a display class and a delegate each time. One probe is idle between
+    // commits; a commit that finds none -- a re-entrant one, or one on
+    // another thread -- brings its own.
+    private OrdinaryOwnerProbe? _idleOrdinaryOwnerProbe;
     private long _nextCollisionPreparationSequence;
     private ulong _collisionWorldAuthority = 1UL;
     private uint _worldFrameCenterLandblockId;
@@ -1709,16 +1715,79 @@ public sealed class RuntimePhysicsState : IDisposable
         EnsureNotDisposed();
         ArgumentNullException.ThrowIfNull(record);
         ArgumentNullException.ThrowIfNull(body);
-        bool IsExactOwner() =>
-            IsSpatialRoot(record)
-            && record.ObjectClockEpoch == objectClockEpoch
-            && ReferenceEquals(record.PhysicsBody, body)
-            && record.RemoteMotion is null
-            && (externalOwnerValid?.Invoke() ?? true);
-        return CommitCanonicalCell(
-            record,
-            fullCellId,
-            IsExactOwner);
+        OrdinaryOwnerProbe probe =
+            Interlocked.Exchange(ref _idleOrdinaryOwnerProbe, null)
+            ?? new OrdinaryOwnerProbe(this);
+        probe.Aim(record, body, objectClockEpoch, externalOwnerValid);
+        try
+        {
+            return CommitCanonicalCell(
+                record,
+                fullCellId,
+                probe.IsExactOwner);
+        }
+        finally
+        {
+            probe.Release();
+            Volatile.Write(ref _idleOrdinaryOwnerProbe, probe);
+        }
+    }
+
+    /// <summary>
+    /// Holds what the ordinary cell commit's owner test reads, so the test
+    /// itself is created once instead of per commit. The test is only ever
+    /// invoked inside the commit that aimed the probe.
+    /// </summary>
+    private sealed class OrdinaryOwnerProbe
+    {
+        private readonly RuntimePhysicsState _physics;
+        private RuntimeEntityRecord? _record;
+        private PhysicsBody? _body;
+        private ulong _objectClockEpoch;
+        private Func<bool>? _externalOwnerValid;
+
+        public OrdinaryOwnerProbe(RuntimePhysicsState physics)
+        {
+            _physics = physics;
+            IsExactOwner = IsOwnerExact;
+        }
+
+        public Func<bool> IsExactOwner { get; }
+
+        public void Aim(
+            RuntimeEntityRecord record,
+            PhysicsBody body,
+            ulong objectClockEpoch,
+            Func<bool>? externalOwnerValid)
+        {
+            _record = record;
+            _body = body;
+            _objectClockEpoch = objectClockEpoch;
+            _externalOwnerValid = externalOwnerValid;
+        }
+
+        public void Release()
+        {
+            _record = null;
+            _body = null;
+            _objectClockEpoch = 0ul;
+            _externalOwnerValid = null;
+        }
+
+        private bool IsOwnerExact()
+        {
+            if (_record is null || _body is null)
+            {
+                throw new InvalidOperationException(
+                    "No ordinary cell commit is aiming this owner test.");
+            }
+
+            return _physics.IsSpatialRoot(_record)
+                && _record.ObjectClockEpoch == _objectClockEpoch
+                && ReferenceEquals(_record.PhysicsBody, _body)
+                && _record.RemoteMotion is null
+                && (_externalOwnerValid?.Invoke() ?? true);
+        }
     }
 
     internal bool CommitProjectileCell(

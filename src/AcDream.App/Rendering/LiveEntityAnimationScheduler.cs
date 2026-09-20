@@ -330,7 +330,7 @@ internal sealed class LiveEntityAnimationScheduler
                         liveCenterY,
                         objectClockEpoch,
                         sequencer,
-                        _animationHooks.Capture))
+                        _animationHooks.CaptureCallback))
                 {
                     completed = false;
                     break;
@@ -487,7 +487,7 @@ internal sealed class LiveEntityAnimationScheduler
                     : (stepSequencer, quantum, rootFrame) =>
                         animation.CaptureSequenceFrames(
                             stepSequencer.Advance(quantum, rootFrame)),
-                _animationHooks.Capture));
+                _animationHooks.CaptureCallback));
 
         if (!advance.Advanced || !StillPresenting())
             return default;
