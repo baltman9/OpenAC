@@ -798,8 +798,15 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         if (payload.SourceKind == ItemDragSource.ShortcutBar)
             return ItemDragAcceptance.None;
         InventoryContainerPlacementRejection legality = EvaluateDrop(
-            targetList, targetCell, payload.ObjId, out _, out uint destination);
+            targetList, targetCell, payload.ObjId, out bool sourceIsBag, out uint destination);
+        // An item held over a pack's own icon is answered for THAT pack: one
+        // with no room shows the refusal, even though letting go there still
+        // finds the item a place in another pack. Anywhere else a full pack
+        // is no refusal while the drop has somewhere to go.
+        bool overAPackIcon = !sourceIsBag
+            && !ReferenceEquals(targetList, _contentsGrid);
         if (IsCapacityRejection(legality)
+            && !overAPackIcon
             && ResolveFallthroughContainer(payload.ObjId, destination, out _) != 0u)
         {
             legality = InventoryContainerPlacementRejection.None;
