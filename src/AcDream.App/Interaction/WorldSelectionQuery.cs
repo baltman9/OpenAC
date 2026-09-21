@@ -87,7 +87,7 @@ internal interface IWorldSelectionQuery
 }
 
 /// <summary>Which rung of the height chain answered for a label anchor.</summary>
-internal enum WorldLabelAnchorSource
+public enum WorldLabelAnchorSource
 {
     /// <summary>The body the physics owner walks the object as, scale applied.</summary>
     PhysicsCylinder,
@@ -107,7 +107,7 @@ internal enum WorldLabelAnchorSource
 /// world metres and how tall the object is, so the label can sit just above
 /// its head rather than in the middle of it.
 /// </summary>
-internal readonly record struct WorldLabelAnchor(
+public readonly record struct WorldLabelAnchor(
     Vector3 BasePosition,
     float Height,
     WorldLabelAnchorSource Source);
