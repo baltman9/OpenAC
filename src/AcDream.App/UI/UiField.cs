@@ -13,11 +13,21 @@ public sealed class UiField : UiElement
     public AcDream.App.Rendering.BitmapFont? Font { get; set; }
     public Vector4 TextColor { get; set; } = new(1f, 1f, 1f, 1f);
 
+    /// <summary>Re-read every frame in place of <see cref="TextColor"/>.</summary>
+    public Func<Vector4>? TextColorSource { get; set; }
+
+    /// <summary>The colour to draw text in this frame.</summary>
+    private Vector4 CurrentTextColor => TextColorSource?.Invoke() ?? TextColor;
+
     public bool Outline { get; set; }
 
     public Vector4 OutlineColor { get; set; } = UiRenderContext.DefaultOutlineColor;
 
     public Vector4 BackgroundColor { get; set; } = new(0f, 0f, 0f, 0f);
+
+    /// <summary>Re-read every frame in place of <see cref="BackgroundColor"/>.</summary>
+    public Func<Vector4>? BackgroundColorSource { get; set; }
+
     /// <summary>Selected-span highlight (translucent blue, behind the text).</summary>
     public Vector4 SelectionColor { get; set; } = new(0.25f, 0.45f, 0.85f, 0.5f);
     public float Padding { get; set; } = 4f;
@@ -462,13 +472,16 @@ public sealed class UiField : UiElement
                 lit = true;
             }
         }
-        if (!lit) ctx.DrawFill(0, 0, Width, Height, BackgroundColor);
+        if (!lit)
+            ctx.DrawFill(0, 0, Width, Height, BackgroundColorSource?.Invoke() ?? BackgroundColor);
 
         if (!OneLine)
         {
             DrawMultiLine(ctx);
             return;
         }
+
+        Vector4 textColor = CurrentTextColor;
 
         float lh = DatFont?.LineHeight ?? Font?.LineHeight ?? 14f;
         float ty = (Height - lh) * 0.5f;
@@ -498,15 +511,15 @@ public sealed class UiField : UiElement
         {
             string vis = _text.Substring(start, end - start);
             float vx = Padding + alignX + (MeasureTo(start) - _scrollX);
-            if (DatFont is { } df2) ctx.DrawStringDat(df2, vis, vx, ty, TextColor, Outline, OutlineColor);
-            else ctx.DrawString(vis, vx, ty, TextColor, Font);
+            if (DatFont is { } df2) ctx.DrawStringDat(df2, vis, vx, ty, textColor, Outline, OutlineColor);
+            else ctx.DrawString(vis, vx, ty, textColor, Font);
         }
 
         if (_focused)
         {
             float cx = Padding + alignX + (caretX - _scrollX);
             if (cx >= Padding - 1f && cx <= Width - Padding + 1f)
-                ctx.DrawFill(cx, ty, 1f, lh, TextColor);
+                ctx.DrawFill(cx, ty, 1f, lh, textColor);
         }
     }
 
@@ -546,6 +559,7 @@ public sealed class UiField : UiElement
     private void DrawMultiLine(UiRenderContext ctx)
     {
         RefreshScrollExtents();
+        Vector4 textColor = CurrentTextColor;
         float lineHeight = _wrappedLineHeight;
         float visibleHeight = MathF.Max(1f, Height - (2f * Padding));
         IReadOnlyList<WrappedLine> lines = _wrappedLines;
@@ -589,9 +603,9 @@ public sealed class UiField : UiElement
             }
 
             if (DatFont is { } dat)
-                ctx.DrawStringDat(dat, line.Text, Padding, y, TextColor, Outline, OutlineColor);
+                ctx.DrawStringDat(dat, line.Text, Padding, y, textColor, Outline, OutlineColor);
             else if (Font is { } bitmap)
-                ctx.DrawString(line.Text, Padding, y, TextColor, bitmap);
+                ctx.DrawString(line.Text, Padding, y, textColor, bitmap);
         }
 
         if (_focused && lines.Count > 0)
@@ -603,7 +617,7 @@ public sealed class UiField : UiElement
                 line.Length);
             float x = Padding + MeasureRange(line.Start, lineColumn);
             float y = Padding + (caretLine * lineHeight) - Scroll.ScrollY;
-            ctx.DrawFill(x, y, 1f, lineHeight, TextColor);
+            ctx.DrawFill(x, y, 1f, lineHeight, textColor);
         }
     }
 

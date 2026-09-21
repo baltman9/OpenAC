@@ -50,6 +50,7 @@ back at runtime instead.
 | Attribute | Type | Missing binding |
 |---|---|---|
 | `label text`, `field text`, `menu selected`, `tooltip` | `string` (via `ToString()`) | silent: the literal text is shown |
+| `color`, `background`, `border` (every element that takes one) | `uint` or `int` holding `0xAARRGGBB`, or a `string` in the `#AARRGGBB` literal form | silent: opaque white, the same as an unparseable literal |
 | `meter cur`, `meter max` | integral, nullable | silent: no value shown |
 | `meter fill`, `slider value` | `float` | silent: 0 |
 | `list items`, `menu items` | `IEnumerable<string>` | throws |
@@ -67,6 +68,42 @@ back at runtime instead.
 Hex literals need the `0x` prefix; `did="165"` is decimal 165, `did="0x165"`
 is hex. `list colors` values are `0xRRGGBB`; every `color`, `background`, and
 `border` attribute is `#AARRGGBB`.
+
+## Bound colours
+
+Every `color`, `background`, and `border` attribute takes a binding in place
+of its literal, so a plugin that lets a player pick colours can show them.
+
+```xml
+<group x="8" y="8" w="404" h="304" background="{PanelColor}" border="{EdgeColor}">
+  <label x="4" y="4" text="Monsters" color="{HeadingColor}"/>
+  <meter x="4" y="24" w="200" h="14" fill="{HealthFraction}" color="{HealthBarColor}"/>
+</group>
+```
+
+```csharp
+public uint PanelColor { get; set; } = 0xC0101018;   // 0xAARRGGBB
+public int EdgeColor { get; set; } = unchecked((int)0xFF4A3A14);
+public string HeadingColor { get; set; } = "#FFE8D8B0";
+```
+
+- A bound colour resolves from a **`uint` or `int` holding `0xAARRGGBB`** --
+  the same byte order as the literal, alpha in the top byte -- or from a
+  **`string` in the `#AARRGGBB` literal form**. Store a colour setting as
+  whichever of the three suits the plugin; all three mean the same colour.
+- The top byte is real alpha, not padding: `0x00FF0000` is invisible, not
+  opaque red, exactly as `background="#00FF0000"` is.
+- The value is re-read every frame, so assigning the property from the thread
+  that calls `Tick` is all it takes to repaint.
+- A binding that names nothing, or a value that is neither of those forms
+  (including text the literal parser rejects), is **silent**: the attribute
+  falls back to opaque white, which is where an unparseable literal already
+  landed. Colours never throw at build the way `onclick` or `selected` do.
+- A colour attribute left out entirely still means what it always did: the
+  element's own default, which for a `group` is no fill and no border.
+
+Per-row colours are a separate thing and unchanged: `list colors` and
+`<column type="text" colors>` take a list of `0xRRGGBB` values with no alpha.
 
 ## Elements
 
@@ -269,8 +306,9 @@ same as any other UI call.
 ## Tests
 
 Markup behavior is covered by `MarkupDocumentTests`, `MarkupIconTests`,
-`MarkupListColumnsTests`, `MarkupResizableAnchorTests`, and
-`PluginSidePanelTests` under `tests/AcDream.App.Tests/UI/`, all against fake
+`MarkupListColumnsTests`, `MarkupColorBindingTests`,
+`MarkupResizableAnchorTests`, and `PluginSidePanelTests` under
+`tests/AcDream.App.Tests/UI/`, all against fake
 resolvers rather than the game's data files. Client-window control is
 covered by `BufferedUiRegistryTests` and `PluginClientWindowNamesTests` in
 the same tree, and by `ScopedUiRegistryClientWindowTests` under

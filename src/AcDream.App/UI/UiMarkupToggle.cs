@@ -10,6 +10,9 @@ public sealed class UiMarkupToggle : UiElement
     public UiDatFont? DatFont { get; set; }
     public Vector4 TextColor { get; set; } =
         new(0.86f, 0.84f, 0.74f, 1f);
+
+    /// <summary>Re-read every frame in place of <see cref="TextColor"/>.</summary>
+    public Func<Vector4>? TextColorSource { get; set; }
     public Action? Toggle { get; set; }
 
     public bool IsChecked => CheckedSource?.Invoke() ?? false;
@@ -29,9 +32,10 @@ public sealed class UiMarkupToggle : UiElement
         UiCheckLamp.Draw(ctx, 1f, MathF.Max(1f, (Height - UiCheckLamp.LampSize) * 0.5f), IsChecked);
 
         string caption = TextSource?.Invoke() ?? Text;
+        Vector4 textColor = TextColorSource?.Invoke() ?? TextColor;
         Vector4 color = Enabled
-            ? TextColor
-            : new Vector4(TextColor.X, TextColor.Y, TextColor.Z, 0.42f);
+            ? textColor
+            : new Vector4(textColor.X, textColor.Y, textColor.Z, 0.42f);
         float y = DatFont is { } font
             ? (Height - font.LineHeight) * 0.5f
             : 1f;
