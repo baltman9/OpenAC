@@ -312,4 +312,10 @@ Markup behavior is covered by `MarkupDocumentTests`, `MarkupIconTests`,
 resolvers rather than the game's data files. Client-window control is
 covered by `BufferedUiRegistryTests` and `PluginClientWindowNamesTests` in
 the same tree, and by `ScopedUiRegistryClientWindowTests` under
-`tests/AcDream.Core.Tests/Plugins/` for the scoped forwarder.
+`tests/AcDream.Core.Tests/Plugins/` for the scoped forwarder. Plugin images
+and canvases (see the plugin API guide) are covered by
+`PluginImageTableTests`, `BufferedUiRegistryImagesTests`,
+`BufferedUiRegistryCanvasTests` and `UI/Layout/PluginCanvasElementTests`
+under `tests/AcDream.App.Tests/`, by `ScopedUiRegistryImagesTests` and
+`ScopedUiRegistryCanvasTests` for the scoped forwarder, and by the contract
+and headless suites for the inert answers a host without a window gives.

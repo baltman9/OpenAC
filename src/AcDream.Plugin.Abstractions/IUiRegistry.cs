@@ -139,6 +139,28 @@ public interface IUiRegistry
 
     /// <summary>Whether one of the client's own windows is currently visible.</summary>
     bool IsClientWindowVisible(PluginClientWindow window) => false;
+
+    /// <summary>
+    /// The images this plugin may draw with: client art, composed icons and
+    /// the plugin's own decoded art, held to a per-plugin budget. Inert on a
+    /// host that draws nothing.
+    /// </summary>
+    IPluginImages Images => NoOpPluginImages.Instance;
+
+    /// <summary>
+    /// Registers a canvas the plugin paints, shown over the world and under
+    /// every window. The paint callback runs on the tick thread, at most
+    /// once per frame, only after <see cref="IPluginCanvas.Invalidate"/>,
+    /// with a painter valid only for the duration of the call. Disposing the
+    /// returned canvas removes it. On a host that draws nothing the canvas is
+    /// accepted and the callback is never called.
+    /// </summary>
+    /// <param name="descriptor">The canvas's id, size and placement.</param>
+    /// <param name="paint">What to draw when the canvas is repainted.</param>
+    /// <returns>The canvas, which the plugin shows, moves, invalidates and disposes.</returns>
+    /// <exception cref="InvalidOperationException">The plugin already has a canvas with this id, or as many canvases as it may have.</exception>
+    IPluginCanvas RegisterCanvas(PluginCanvasDescriptor descriptor, Action<IPluginPainter> paint) =>
+        new NoOpPluginCanvas(descriptor);
 }
 
 /// <summary>
@@ -209,6 +231,25 @@ public interface IScopedUiRegistry : IUiRegistry
 
     /// <summary>Moves keyboard focus to one plugin input control.</summary>
     bool FocusControl(PluginUiOwner owner, string viewName, string controlName) => false;
+
+    /// <summary>
+    /// One plugin's image surface, the same object on every call for the
+    /// same owner until it is disposed. A host that draws nothing hands out
+    /// the inert surface; a host that draws hands out a surface that also
+    /// implements <see cref="IDisposable"/>, and disposing it lets go of
+    /// every image the plugin held.
+    /// </summary>
+    IPluginImages ImagesFor(PluginUiOwner owner) => NoOpPluginImages.Instance;
+
+    /// <summary>Registers a canvas on behalf of one plugin; see <see cref="IUiRegistry.RegisterCanvas"/>.</summary>
+    /// <param name="owner">The plugin the canvas belongs to.</param>
+    /// <param name="descriptor">The canvas's id, size and placement.</param>
+    /// <param name="paint">What to draw when the canvas is repainted.</param>
+    /// <returns>The canvas, which the plugin shows, moves, invalidates and disposes.</returns>
+    IPluginCanvas RegisterCanvas(
+        PluginUiOwner owner,
+        PluginCanvasDescriptor descriptor,
+        Action<IPluginPainter> paint) => new NoOpPluginCanvas(descriptor);
 }
 
 /// <summary>Shared empty registration returned by UI-less/legacy hosts.</summary>

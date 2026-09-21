@@ -884,6 +884,90 @@ itself, from the object's position and its own knowledge of the place.
 The set belongs to the session: when the character leaves the world, every
 plugin's labels are dropped, and a plugin that is unloaded takes its labels
 with it.
+## Images
+
+A plugin that draws its own map or HUD gets its images through
+`host.Ui.Images`. There are four sources and no raw pixel uploads:
+
+```csharp
+IPluginImages images = host.Ui.Images;
+
+PluginImage art   = images.FromClientArt(0x06001234u);   // client art by surface id, or a bare index
+PluginImage spell = images.FromSpellIcon(spellId);        // the icon the spell bar draws
+PluginImage item  = images.FromObjectIcon(objectId);      // the icon the inventory draws, layers and all
+PluginImage own   = images.FromStream("art/compass.png",  // the plugin's own art, decoded by the host
+    () => File.OpenRead(Path.Combine(pluginDirectory, "art", "compass.png")));
+
+if (own.IsValid) { /* own.Width, own.Height */ }
+images.Release(own);
+```
+
+Every request is counted once per distinct thing asked for and held as
+many times as it was asked for: asking twice for the same surface returns
+the same `PluginImage`, and it takes two releases to let it go. The plugin
+may hold at most `MaximumCount` images (256), and its own decoded art at
+most `MaximumBytes` (32 MB) of texture memory, with no image wider or
+taller than `MaximumDimension` (2048). A request past any of these answers
+`PluginImage.None` and is reported once in the client's log. Client art
+and composed icons are shared with the client's own windows and every
+other plugin, so they cost nothing against the byte budget.
+
+`FromStream` accepts PNG, JPEG, BMP, TGA and GIF; the stream is opened only
+when the host does not already hold an image under that name, and disposed
+by the host. Call all of this from the tick thread, as with every other UI
+call. Without a window, or before the client's interface is up,
+`IsAvailable` is false and every request answers `PluginImage.None`;
+images are dropped when the interface is torn down (for example on a
+reconnect), after which the plugin asks again.
+
+## Canvases
+
+A canvas is a rectangle the plugin paints, shown over the world and under
+every window, taking no input. It is positioned by an anchor plus an
+offset, it is exactly its declared size, and everything painted is clipped
+to it; there is no way to draw anywhere else on the screen.
+
+```csharp
+IPluginCanvas hud = host.Ui.RegisterCanvas(
+    new PluginCanvasDescriptor("hud", 200, 60)
+    {
+        Anchor = PluginCanvasAnchor.BottomRight,
+        Offset = new PluginPoint(-10, -10),
+    },
+    painter =>
+    {
+        painter.Clear(PluginColor.Transparent);
+        painter.FillRect(new PluginRect(0, 0, painter.Width, painter.Height), new PluginColor(0, 0, 0, 160));
+        painter.DrawText($"{vitals.Health} / {vitals.MaximumHealth}", new PluginPoint(6, 4), PluginColor.White, outline: true);
+        painter.DrawImageTransformed(compass, new PluginRect(150, 10, 40, 40), PluginColor.White,
+            rotationRadians: heading, pivot: new PluginPoint(20, 20));
+    });
+
+// later, whenever what it shows has changed:
+hud.Invalidate();
+```
+
+Painting is **retained**: the host keeps what was last painted and calls
+the paint callback again only after `Invalidate()`, at most once per
+frame, on the tick thread. Several `Invalidate()` calls before that frame
+paint once. The painter handed to the callback is valid only for the
+duration of the call; keeping it and drawing later throws. Its primitives
+are `Clear`, `FillRect`, `StrokeRect`, `DrawLine`, `DrawText` with
+`MeasureText` (the client's own interface font, one size), `DrawImage`,
+`DrawImageTransformed` (scaled and turned about a pivot, for a compass or
+a rotating map) and `PushClip`/`PopClip`; every clip pushed must be popped
+before the callback returns.
+
+A paint callback is measured. One that stays over its 4 ms budget on three
+frames in a row, throws, or leaves a clip pushed is dropped for the rest
+of the session and the canvas hidden; the client's log says why. A plugin
+may register at most 8 canvases, each with an id unique within the plugin;
+`RegisterCanvas` throws past either. `IsVisible`, `Anchor` and `Offset`
+can be set at any time; disposing the canvas removes it, and everything a
+plugin still holds is removed when the plugin unloads.
+
+Without a window the canvas is accepted, `IsAvailable` is false, the
+state the plugin sets is kept, and the paint callback is never called.
 
 ## Headless
 

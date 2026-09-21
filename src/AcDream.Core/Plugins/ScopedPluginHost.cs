@@ -1532,6 +1532,40 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         public bool IsClientWindowVisible(PluginClientWindow window) =>
             _inner.IsClientWindowVisible(window);
 
+        // The plugin's image surface is asked for once and kept; when the
+        // host's surface can be disposed it is tracked like any other
+        // registration, so the plugin's images go with the plugin.
+        private IPluginImages? _images;
+
+        public IPluginImages Images
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    if (_disposed)
+                        throw new ObjectDisposedException(nameof(ScopedUiRegistry));
+                    if (_images is null)
+                    {
+                        _images = _inner.ImagesFor(_owner);
+                        if (_images is IDisposable disposable)
+                            _registrations.Add(disposable);
+                    }
+                    return _images;
+                }
+            }
+        }
+
+        public IPluginCanvas RegisterCanvas(
+            PluginCanvasDescriptor descriptor,
+            Action<IPluginPainter> paint)
+        {
+            ArgumentNullException.ThrowIfNull(descriptor);
+            ArgumentNullException.ThrowIfNull(paint);
+            IPluginCanvas canvas = _inner.RegisterCanvas(_owner, descriptor, paint);
+            return new IndividualCanvas(canvas, TrackRegistration(canvas));
+        }
+
         private void AddRegistration(IDisposable registration)
         {
             lock (_gate)
@@ -1599,6 +1633,46 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
 
             public void Dispose() => Interlocked.Exchange(ref _owner, null)?
                 .RemoveRegistration(registration);
+        }
+
+        /// <summary>
+        /// The host's canvas as the plugin holds it: every call forwards, and
+        /// disposing it goes through the tracked registration so the plugin's
+        /// list and the host agree on what is still mounted.
+        /// </summary>
+        private sealed class IndividualCanvas(
+            IPluginCanvas inner,
+            IDisposable registration) : IPluginCanvas
+        {
+            public string CanvasId => inner.CanvasId;
+            public int Width => inner.Width;
+            public int Height => inner.Height;
+            public bool IsAvailable => inner.IsAvailable;
+
+            public bool IsVisible
+            {
+                get => inner.IsVisible;
+                set => inner.IsVisible = value;
+            }
+
+            public PluginCanvasAnchor Anchor
+            {
+                get => inner.Anchor;
+                set => inner.Anchor = value;
+            }
+
+            public PluginPoint Offset
+            {
+                get => inner.Offset;
+                set => inner.Offset = value;
+            }
+
+            public void Invalidate() => inner.Invalidate();
+
+            public void Dispose()
+            {
+                registration.Dispose();
+            }
         }
     }
 }

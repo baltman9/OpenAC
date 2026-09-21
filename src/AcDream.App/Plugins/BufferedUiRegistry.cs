@@ -92,6 +92,245 @@ public sealed class BufferedUiRegistry : IScopedUiRegistry, IPluginDirectoryUiRe
         }
     }
 
+    // Image tables, one per plugin, made on first request and kept until the
+    // plugin's surface is disposed. The texture services behind them arrive
+    // with the retail UI runtime and leave with it, on the same thread the
+    // client-window control is bound from; a table made before that is
+    // bound the moment the services arrive.
+    private readonly Dictionary<string, PluginImages> _images = [];
+    private IPluginImageBackend? _imageBackend;
+
+    /// <summary>The per-plugin image ceiling every table is made with.</summary>
+    internal PluginImageBudget ImageBudget { get; init; } = PluginImageBudget.Default;
+
+    public IPluginImages ImagesFor(PluginUiOwner owner)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner.Id);
+        lock (_gate)
+        {
+            if (_images.TryGetValue(owner.Id, out PluginImages? existing))
+                return existing;
+            var table = new PluginImageTable(owner.Id, ImageBudget);
+            if (_imageBackend is { } backend)
+                table.Bind(backend);
+            var images = new PluginImages(table, ForgetImages);
+            _images.Add(owner.Id, images);
+            return images;
+        }
+    }
+
+    private void ForgetImages(PluginImages images)
+    {
+        lock (_gate)
+        {
+            foreach ((string ownerId, PluginImages held) in _images)
+            {
+                if (ReferenceEquals(held, images))
+                {
+                    _images.Remove(ownerId);
+                    return;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Points every plugin's image table, present and future, at the
+    /// interface's texture services. The calling thread is the one the
+    /// tables then accept requests from.
+    /// </summary>
+    internal void BindImageServices(IPluginImageBackend backend)
+    {
+        ArgumentNullException.ThrowIfNull(backend);
+        lock (_gate)
+        {
+            if (_imageBackend is not null)
+                throw new InvalidOperationException("Image services are already bound.");
+            _imageBackend = backend;
+            foreach (PluginImages images in _images.Values)
+                images.Table.Bind(backend);
+        }
+    }
+
+    /// <summary>
+    /// Lets every plugin's images go and forgets the texture services, so a
+    /// disposed interface is never reached through a stale table. Idempotent.
+    /// </summary>
+    internal void UnbindImageServices()
+    {
+        lock (_gate)
+        {
+            if (_imageBackend is null)
+                return;
+            foreach (PluginImages images in _images.Values)
+                images.Table.Unbind();
+            _imageBackend = null;
+        }
+    }
+
+    /// <summary>The image surface of one plugin, or null when none was made.</summary>
+    internal PluginImages? FindImages(PluginUiOwner owner)
+    {
+        lock (_gate)
+            return _images.GetValueOrDefault(owner.Id);
+    }
+
+    // Canvases follow the same path as windows: registered at any time,
+    // drained by the interface once, taken down through the registration
+    // when the plugin disposes it, and handed back to be mounted again when
+    // an interface goes away and a new one comes up.
+    private readonly Dictionary<long, PluginCanvasRegistration> _canvases = [];
+
+    /// <summary>
+    /// The most canvases one plugin may hold at once. A map, a HUD and a few
+    /// gauges fit well inside it; each canvas is its own off-screen texture
+    /// and its own pass on every repaint, so the ceiling is a memory and a
+    /// frame-time bound, not a feature count.
+    /// </summary>
+    internal const int MaximumCanvasesPerPlugin = 8;
+
+    public IPluginCanvas RegisterCanvas(
+        PluginCanvasDescriptor descriptor,
+        Action<IPluginPainter> paint) =>
+        RegisterCanvas(new PluginUiOwner("unscoped", "Plugin"), descriptor, paint);
+
+    public IPluginCanvas RegisterCanvas(
+        PluginUiOwner owner,
+        PluginCanvasDescriptor descriptor,
+        Action<IPluginPainter> paint)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner.Id);
+        ArgumentNullException.ThrowIfNull(descriptor);
+        ArgumentException.ThrowIfNullOrWhiteSpace(descriptor.CanvasId);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(descriptor.Width);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(descriptor.Height);
+        ArgumentNullException.ThrowIfNull(paint);
+        lock (_gate)
+        {
+            int held = 0;
+            foreach (PluginCanvasRegistration existing in _canvases.Values)
+            {
+                if (existing.Owner.Id != owner.Id)
+                    continue;
+                held++;
+                if (existing.Descriptor.CanvasId.Equals(descriptor.CanvasId, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"Plugin canvas '{descriptor.CanvasId}' is already registered. "
+                        + "Canvas ids must be unique within one plugin.");
+                }
+            }
+            if (held >= MaximumCanvasesPerPlugin)
+            {
+                throw new InvalidOperationException(
+                    $"Plugin canvas '{descriptor.CanvasId}' refused: the plugin already holds "
+                    + $"{MaximumCanvasesPerPlugin} canvases, which is the most it may.");
+            }
+            long id = checked(++_nextRegistrationId);
+            var registration = new PluginCanvasRegistration(this, id, owner, descriptor, paint);
+            _canvases.Add(id, registration);
+            return registration;
+        }
+    }
+
+    /// <summary>Returns each not-yet-mounted canvas once.</summary>
+    internal IReadOnlyList<PluginCanvasRegistration> DrainCanvases()
+    {
+        lock (_gate)
+        {
+            var pending = new List<PluginCanvasRegistration>();
+            foreach (PluginCanvasRegistration registration in _canvases.Values)
+            {
+                if (registration.Drained)
+                    continue;
+                registration.Drained = true;
+                pending.Add(registration);
+            }
+            return pending;
+        }
+    }
+
+    /// <summary>Whether a canvas is waiting to be mounted; polled each tick like windows are.</summary>
+    internal bool HasUndrainedCanvases
+    {
+        get
+        {
+            lock (_gate)
+            {
+                foreach (PluginCanvasRegistration registration in _canvases.Values)
+                {
+                    if (!registration.Drained)
+                        return true;
+                }
+                return false;
+            }
+        }
+    }
+
+    internal int CanvasCount
+    {
+        get
+        {
+            lock (_gate)
+                return _canvases.Count;
+        }
+    }
+
+    /// <summary>
+    /// Records how a mounted canvas comes down. A plugin can dispose its
+    /// canvas between the drain and this call; the teardown then runs at
+    /// once instead of leaving the element in the tree with no owner.
+    /// </summary>
+    internal void CompleteCanvasMount(PluginCanvasRegistration registration, Action teardown)
+    {
+        ArgumentNullException.ThrowIfNull(registration);
+        ArgumentNullException.ThrowIfNull(teardown);
+        bool stillRegistered;
+        lock (_gate)
+        {
+            stillRegistered = _canvases.ContainsKey(registration.Id);
+            if (stillRegistered)
+                registration.SetTeardown(teardown);
+        }
+        if (!stillRegistered)
+            teardown();
+    }
+
+    internal void FailCanvasMount(PluginCanvasRegistration registration) =>
+        RemoveCanvas(registration);
+
+    internal void RemoveCanvas(PluginCanvasRegistration registration)
+    {
+        ArgumentNullException.ThrowIfNull(registration);
+        lock (_gate)
+        {
+            if (!_canvases.Remove(registration.Id))
+                return;
+        }
+        registration.Unmount(forget: true);
+    }
+
+    /// <summary>
+    /// Takes every mounted canvas down and queues each one to be mounted
+    /// again by the next interface, keeping the plugins' callbacks: the
+    /// interface is going away, not the plugins.
+    /// </summary>
+    internal void UnbindCanvasHost()
+    {
+        List<PluginCanvasRegistration> registrations;
+        lock (_gate)
+        {
+            registrations = new List<PluginCanvasRegistration>(_canvases.Values);
+            foreach (PluginCanvasRegistration registration in registrations)
+            {
+                registration.Drained = false;
+                registration.IsDropped = false;
+            }
+        }
+        foreach (PluginCanvasRegistration registration in registrations)
+            registration.Unmount(forget: false);
+    }
+
     public bool ToggleClientWindow(PluginClientWindow window)
     {
         Func<PluginClientWindow, bool>? toggle;
@@ -172,6 +411,9 @@ public sealed class BufferedUiRegistry : IScopedUiRegistry, IPluginDirectoryUiRe
         string controlName,
         bool visible) => SetControlVisible(
             new PluginUiOwner("unscoped", "Plugin"), viewName, controlName, visible);
+
+    public IPluginImages Images =>
+        ImagesFor(new PluginUiOwner("unscoped", "Plugin"));
 
     public IDisposable RegisterMarkupPanel(string markupPath, object binding)
         => RegisterPanel(

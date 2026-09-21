@@ -48,7 +48,14 @@ public readonly record struct PluginRect(double X, double Y, double Width, doubl
 /// <param name="G">Green, 0 to 255.</param>
 /// <param name="B">Blue, 0 to 255.</param>
 /// <param name="A">Opacity, 0 (transparent) to 255 (opaque).</param>
-public readonly record struct PluginColor(byte R, byte G, byte B, byte A = 255);
+public readonly record struct PluginColor(byte R, byte G, byte B, byte A = 255)
+{
+    /// <summary>Opaque white: the tint that leaves an image unchanged.</summary>
+    public static PluginColor White => new(255, 255, 255);
+
+    /// <summary>Transparent black: the colour that clears a canvas.</summary>
+    public static PluginColor Transparent => new(0, 0, 0, 0);
+}
 
 /// <summary>How a piece of text is drawn.</summary>
 /// <param name="FontFamily">The name of the font family asked for.</param>

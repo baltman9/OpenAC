@@ -335,7 +335,8 @@ public sealed record RetailUiRuntimeBindings(
     Action? SynchronizeDisplayPhase = null,
     BookRuntimeBindings? Book = null,
     Func<IReadOnlyList<PluginWorldLabel>>? WorldLabels = null,
-    Func<uint, AcDream.App.Interaction.WorldLabelAnchor?>? WorldLabelAnchor = null);
+    Func<uint, AcDream.App.Interaction.WorldLabelAnchor?>? WorldLabelAnchor = null,
+    PluginCanvasHostServices? PluginCanvases = null);
 
 public sealed class RetailUiRuntime : IDisposable
 {
@@ -384,6 +385,8 @@ public sealed class RetailUiRuntime : IDisposable
     private Layout.UiOverlayHost? _overlayHost;
     private ProjectileDebugOverlayController? _projectileDebugOverlay;
     private WorldLabelOverlayController? _worldLabelOverlay;
+    private Layout.PluginCanvasSurface? _pluginCanvasSurface;
+    private Layout.UiOverlayLayer? _pluginCanvasLayer;
 
     /// <summary>
     /// The one click-through overlay band, shared by everything that paints
@@ -420,6 +423,12 @@ public sealed class RetailUiRuntime : IDisposable
             ShowClientWindow,
             HideClientWindow,
             IsClientWindowVisible);
+        bindings.Plugins?.BindImageServices(new RetailPluginImageBackend(
+            bindings.Assets.Dats,
+            bindings.Assets.DatLock,
+            bindings.Assets.TextureCache,
+            bindings.Assets.Icons,
+            bindings.Toolbar.Objects));
 
         ChatSettings chatSettings = bindings.Chat.Store?.LoadChat() ?? ChatSettings.Default;
         WindowLockPresentation = new RetailWindowLockPresentationController(
@@ -744,6 +753,8 @@ public sealed class RetailUiRuntime : IDisposable
         // mount; each registration is drained once.
         if (_pluginsMounted && _bindings.Plugins is { HasUndrained: true })
             MountPlugins();
+        if (_pluginsMounted && _bindings.Plugins is { HasUndrainedCanvases: true })
+            MountPluginCanvases();
         Host.Tick(deltaSeconds);
         TooltipPresenter?.Tick();
         _automation?.Tick(deltaSeconds);
@@ -761,6 +772,9 @@ public sealed class RetailUiRuntime : IDisposable
             _persistence?.SetGameplayActive(gameplay);
             if (gameplay) _persistence?.ReflowToScreen();
             _lastScreenSize = screenSize;
+            // The overlay band covers the whole screen; a canvas anchored to
+            // a right or bottom edge is placed against this rectangle.
+            _overlayHost?.SetViewport(screenSize);
         }
 
         Host.Draw(screenSize);
@@ -4128,6 +4142,57 @@ public sealed class RetailUiRuntime : IDisposable
         }
     }
 
+    /// <summary>
+    /// Mounts every canvas registered since the last drain on the shared
+    /// overlay layer. The same shape as the window mount: ownership is
+    /// published right after the tree mutation, so a plugin that disposed
+    /// its canvas between the drain and here has it taken down at once.
+    /// Without renderer services (a host built without them) every canvas
+    /// fails to mount and is reported, and the plugin's handle stays inert.
+    /// </summary>
+    private void MountPluginCanvases()
+    {
+        if (_bindings.Plugins is not { } plugins) return;
+        foreach (PluginCanvasRegistration canvas in plugins.DrainCanvases())
+        {
+            try
+            {
+                if (_bindings.PluginCanvases is not { } services)
+                {
+                    throw new InvalidOperationException(
+                        "this interface was built without renderer services for plugin canvases");
+                }
+                _pluginCanvasSurface ??= new Layout.PluginCanvasSurface(services, _bindings.Assets.DefaultFont);
+                if (_pluginCanvasLayer is null)
+                {
+                    _pluginCanvasLayer = OverlayHost.AddLayer("PluginCanvases");
+                    _pluginCanvasLayer.Visible = true;
+                }
+                Layout.UiOverlayLayer layer = _pluginCanvasLayer;
+                PluginUiOwner owner = canvas.Owner;
+                var element = new Layout.PluginCanvasElement(
+                    canvas,
+                    _pluginCanvasSurface,
+                    () => plugins.FindImages(owner));
+                layer.AddChild(element);
+                plugins.CompleteCanvasMount(canvas, () =>
+                {
+                    layer.RemoveChild(element);
+                    element.ReleaseTargets();
+                });
+                Console.WriteLine(
+                    $"[UI] plugin canvas mounted: {canvas.Owner.Id}/{canvas.CanvasId} "
+                    + $"({canvas.Width}x{canvas.Height})");
+            }
+            catch (Exception ex)
+            {
+                plugins.FailCanvasMount(canvas);
+                Console.WriteLine(
+                    $"[UI] plugin canvas '{canvas.Owner.Id}/{canvas.CanvasId}' failed to mount: {ex.Message}");
+            }
+        }
+    }
+
     // Uploaded once per plugin id and cached, so a re-run of MountPlugins for a
     // plugin with more than one panel never uploads the same icon.png twice.
     private (uint Texture, int Width, int Height)? ResolvePluginFileIcon(
@@ -5035,6 +5100,15 @@ public sealed class RetailUiRuntime : IDisposable
                 if (SalvageController is { } salvage)
                     _bindings.Inventory.ItemInteraction.PolicyActionRequested -= salvage.HandlePolicyAction;
                 _bindings.Plugins?.UnbindClientWindowControl();
+                // Canvases come down before their images: a canvas may be
+                // showing one. Both hand the plugins' handles back to the
+                // registry for the next interface to mount again.
+                _bindings.Plugins?.UnbindCanvasHost();
+                _pluginCanvasSurface?.Dispose();
+                _pluginCanvasSurface = null;
+                // Before the texture cache can go: every plugin's own images
+                // are given back through it.
+                _bindings.Plugins?.UnbindImageServices();
             },
             () => _itemConfirmationController?.Dispose(),
             () =>
