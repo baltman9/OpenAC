@@ -23,8 +23,12 @@ public sealed class ScopedUiRegistryCanvasTests
         public PluginPoint Offset { get; set; } = descriptor.Offset;
         public int Invalidations { get; private set; }
         public int Disposals { get; private set; }
+        public int PointerReleases { get; private set; }
+        public Action<PluginPointerEvent>? PointerHandler { get; set; }
 
         public void Invalidate() => Invalidations++;
+
+        public void ReleasePointer() => PointerReleases++;
 
         public void Dispose() => Disposals++;
     }
@@ -114,7 +118,13 @@ public sealed class ScopedUiRegistryCanvasTests
         canvas.Offset = new PluginPoint(3, 4);
         canvas.Invalidate();
         canvas.Invalidate();
+        Action<PluginPointerEvent> handler = _ => { };
+        canvas.PointerHandler = handler;
+        canvas.ReleasePointer();
 
+        Assert.Same(handler, hosts.PointerHandler);
+        Assert.Same(handler, canvas.PointerHandler);
+        Assert.Equal(1, hosts.PointerReleases);
         Assert.False(hosts.IsVisible);
         Assert.Equal(PluginCanvasAnchor.Center, hosts.Anchor);
         Assert.Equal(new PluginPoint(3, 4), hosts.Offset);

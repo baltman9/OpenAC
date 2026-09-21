@@ -23,6 +23,15 @@ namespace AcDream.App.UI.Layout;
 /// current frame occupies. The target being shown is never the one being
 /// painted, so a repaint never tears. The pool grows to the flight depth
 /// plus one and no further.</para>
+///
+/// <para>A canvas that opted in to pointer input answers the hit-test for
+/// its own rectangle while it has a handler, and for nothing outside it.
+/// The root gives it the pointer on a press, as it does any element that
+/// owns its interior drag, so the moves and the release reach it wherever
+/// the pointer goes; the plugin sees every event in the canvas's own
+/// pixels. The handler runs under a guard of its own: one that throws or
+/// stays slow is dropped, and the canvas goes back to click-through while
+/// its painting carries on.</para>
 /// </summary>
 internal sealed class PluginCanvasElement : UiElement
 {
@@ -49,30 +58,47 @@ internal sealed class PluginCanvasElement : UiElement
     private readonly PluginCanvasSurface _surface;
     private readonly Func<PluginImages?> _images;
     private readonly UiDrawCallbackGuard _guard;
+    private readonly UiDrawCallbackGuard _inputGuard;
+    private readonly Func<PluginKeyModifiers> _modifiers;
     private readonly Action<string> _report;
     private readonly List<CanvasTarget> _targets = [];
     private CanvasTarget? _shown;
     private bool _targetsUnavailable;
     private bool _released;
+    private PluginPointerButton _heldButton;
+    private readonly Action? _pointerRelease;
 
     internal PluginCanvasElement(
         PluginCanvasRegistration registration,
         PluginCanvasSurface surface,
         Func<PluginImages?> images,
         Action<string>? report = null,
-        Func<double>? nowMilliseconds = null)
+        Func<double>? nowMilliseconds = null,
+        Func<PluginKeyModifiers>? modifiers = null)
     {
         _registration = registration ?? throw new ArgumentNullException(nameof(registration));
         _surface = surface ?? throw new ArgumentNullException(nameof(surface));
         _images = images ?? throw new ArgumentNullException(nameof(images));
         _report = report ?? (line => Serilog.Log.Warning("{Line}", line));
+        _modifiers = modifiers ?? (static () => PluginKeyModifiers.None);
         _guard = new UiDrawCallbackGuard(
             $"plugin canvas {registration.Owner.Id}/{registration.CanvasId}",
             _report,
             nowMilliseconds,
             RepaintBudgetMilliseconds);
+        _inputGuard = new UiDrawCallbackGuard(
+            $"plugin canvas {registration.Owner.Id}/{registration.CanvasId} pointer handler",
+            _report,
+            nowMilliseconds,
+            UiDrawCallbackGuard.FrameBudgetMilliseconds,
+            callUnit: "events");
         Name = $"PluginCanvas:{registration.Owner.Id}:{registration.CanvasId}";
-        ClickThrough = true;
+        // Click-through is the element's own state; the layer it is added
+        // to leaves it alone for a canvas that takes input.
+        ClickThrough = !registration.AcceptsPointerInput;
+        // No drag-and-drop from a press on the canvas: the press is the
+        // plugin's, held until the button comes up, wherever the pointer went.
+        CapturesPointerDrag = registration.AcceptsPointerInput;
         Anchors = AnchorEdges.None;
         Width = registration.Width;
         Height = registration.Height;
@@ -80,6 +106,11 @@ internal sealed class PluginCanvasElement : UiElement
         // plugin hid and shows again is ticked and drawn on the next frame.
         VisibleSource = () => _registration.IsVisible && !_registration.IsDropped && !_released;
         Visible = VisibleSource();
+        if (registration.AcceptsPointerInput)
+        {
+            _pointerRelease = ReleasePointer;
+            registration.PointerRelease = _pointerRelease;
+        }
     }
 
     internal PluginCanvasRegistration Registration => _registration;
@@ -91,9 +122,135 @@ internal sealed class PluginCanvasElement : UiElement
     /// <summary>The interface texture currently shown, or 0 before the first paint.</summary>
     internal uint ShownTextureHandle => _shown is { HasContent: true } shown ? shown.Handle : 0u;
 
+    /// <summary>True once the pointer handler was dropped; the canvas is click-through from then on.</summary>
+    internal bool IsInputDropped => _inputGuard.IsTripped;
+
+    /// <summary>
+    /// Whether the canvas answers for its rectangle right now: it opted in,
+    /// someone is listening, and the listener has not been dropped.
+    /// </summary>
+    private bool TakesInput =>
+        _registration.AcceptsPointerInput && !_inputGuard.IsTripped && _registration.PointerHandler is not null;
+
     protected override bool ClipsChildren => true;
 
     protected override void OnTick(double deltaSeconds) => Layout();
+
+    protected override bool OnHitTest(float localX, float localY) =>
+        TakesInput && base.OnHitTest(localX, localY);
+
+    public override bool OnEvent(in UiEvent e)
+    {
+        if (!ReferenceEquals(e.Target, this))
+            return false;
+
+        switch (e.Type)
+        {
+            case UiEventType.MouseDown:
+                return Press(PluginPointerButton.Left, e.Data1, e.Data2);
+            case UiEventType.RightDown:
+                return Press(PluginPointerButton.Right, e.Data1, e.Data2);
+            case UiEventType.MiddleDown:
+                return Press(PluginPointerButton.Middle, e.Data1, e.Data2);
+
+            case UiEventType.MouseMove:
+                if (_heldButton == PluginPointerButton.None) return false;
+                Deliver(PluginPointerEventKind.Move, e.Data1, e.Data2, _heldButton);
+                return true;
+
+            case UiEventType.MouseUp:
+                return Release(PluginPointerButton.Left, e.Data1, e.Data2);
+            case UiEventType.RightUp:
+                return Release(PluginPointerButton.Right, e.Data1, e.Data2);
+            case UiEventType.MiddleUp:
+                return Release(PluginPointerButton.Middle, e.Data1, e.Data2);
+
+            case UiEventType.Scroll:
+            {
+                // The root's scroll coordinates belong to the top-level child
+                // it hit, not to this element; the pointer's own position does.
+                if (FindRoot() is not { } root || !TakesInput) return false;
+                Vector2 screen = ScreenPosition;
+                Deliver(
+                    PluginPointerEventKind.Wheel,
+                    root.MouseX - (int)screen.X,
+                    root.MouseY - (int)screen.Y,
+                    PluginPointerButton.None,
+                    e.Data0);
+                return true;
+            }
+
+            case UiEventType.CaptureChanged:
+            {
+                // The root took the pointer back with a button still held:
+                // the canvas was hidden or removed, or something else
+                // captured. The plugin's release clears the button first,
+                // so it never sees a cancel it asked for.
+                if (_heldButton == PluginPointerButton.None) return false;
+                PluginPointerButton held = _heldButton;
+                _heldButton = PluginPointerButton.None;
+                if (FindRoot() is { } root)
+                {
+                    Vector2 screen = ScreenPosition;
+                    Deliver(PluginPointerEventKind.Cancelled, root.MouseX - (int)screen.X, root.MouseY - (int)screen.Y, held);
+                }
+                return true;
+            }
+
+            // Click, double-click and right-click are the root's reading of a
+            // press and release the plugin already saw; nothing beneath the
+            // canvas should act on them either.
+            case UiEventType.Click:
+            case UiEventType.DoubleClick:
+            case UiEventType.RightClick:
+                return true;
+        }
+        return false;
+    }
+
+    private bool Press(PluginPointerButton button, int localX, int localY)
+    {
+        if (!TakesInput) return false;
+        if (_heldButton == PluginPointerButton.None)
+            _heldButton = button;
+        Deliver(PluginPointerEventKind.Down, localX, localY, button);
+        return true;
+    }
+
+    private bool Release(PluginPointerButton button, int localX, int localY)
+    {
+        if (_heldButton != button) return false;
+        _heldButton = PluginPointerButton.None;
+        Deliver(PluginPointerEventKind.Up, localX, localY, button);
+        return true;
+    }
+
+    /// <summary>
+    /// Ends the press the canvas holds, on the plugin's request. The button
+    /// is forgotten before the root is asked, so the capture change that
+    /// follows is not reported back as a cancel.
+    /// </summary>
+    internal void ReleasePointer()
+    {
+        if (_heldButton == PluginPointerButton.None) return;
+        _heldButton = PluginPointerButton.None;
+        if (FindRoot() is { } root && ReferenceEquals(root.Captured, this))
+            root.ReleaseCapture();
+    }
+
+    private void Deliver(PluginPointerEventKind kind, int localX, int localY, PluginPointerButton button, int wheelDelta = 0)
+    {
+        Action<PluginPointerEvent>? handler = _registration.PointerHandler;
+        if (handler is null || _inputGuard.IsTripped) return;
+        var pointer = new PluginPointerEvent(kind, new PluginPoint(localX, localY), button, _modifiers(), wheelDelta);
+        _inputGuard.Invoke(() => handler(pointer));
+        if (_inputGuard.IsTripped)
+        {
+            // Nobody is listening any more: let go of the pointer so the
+            // press does not hang, and stop answering the hit-test.
+            ReleasePointer();
+        }
+    }
 
     /// <summary>
     /// Places the canvas by anchor plus offset inside its layer, which the
@@ -239,6 +396,8 @@ internal sealed class PluginCanvasElement : UiElement
         if (_released) return;
         _released = true;
         _shown = null;
+        if (ReferenceEquals(_registration.PointerRelease, _pointerRelease))
+            _registration.PointerRelease = null;
         IGpuDevice device = _surface.Services.Device;
         foreach (CanvasTarget target in _targets)
         {

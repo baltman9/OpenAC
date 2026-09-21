@@ -54,6 +54,7 @@ internal sealed class UiDrawCallbackGuard
     internal const int ConsecutiveOverrunsBeforeTrip = 3;
 
     private readonly string _name;
+    private readonly string _callUnit;
     private readonly Action<string> _report;
     private readonly Func<double> _nowMilliseconds;
     private int _consecutiveOverruns;
@@ -67,15 +68,22 @@ internal sealed class UiDrawCallbackGuard
     /// draws into its own off-screen surface once in a while rather than
     /// on every frame may be given more.
     /// </param>
+    /// <param name="callUnit">
+    /// What one call is called in the overrun report: "frames" for a
+    /// callback run once a frame, "events" for one run per pointer event.
+    /// </param>
     internal UiDrawCallbackGuard(
         string name,
         Action<string>? report = null,
         Func<double>? nowMilliseconds = null,
-        double budgetMilliseconds = FrameBudgetMilliseconds)
+        double budgetMilliseconds = FrameBudgetMilliseconds,
+        string callUnit = "frames")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(budgetMilliseconds);
+        ArgumentException.ThrowIfNullOrWhiteSpace(callUnit);
         _name = name;
+        _callUnit = callUnit;
         BudgetMilliseconds = budgetMilliseconds;
         _report = report ?? (line => Serilog.Log.Warning("{Line}", line));
         // One clock for the whole guard: a budget measured against two
@@ -147,16 +155,53 @@ internal sealed class UiDrawCallbackGuard
 
         _consecutiveOverruns++;
         if (_consecutiveOverruns >= ConsecutiveOverrunsBeforeTrip)
-        {
-            Trip(
-                $"took more than {BudgetMilliseconds:0.##} ms on "
-                + $"{_consecutiveOverruns} frames in a row "
-                + $"(last {LastMilliseconds:0.##} ms)");
-        }
+            TripForOverruns();
 
         // It did draw, and it drew correctly -- it was only slow.
         return true;
     }
+
+    /// <summary>
+    /// Runs a callback that draws nothing -- a pointer handler -- under the
+    /// same time budget and the same exception rule, with no drawing state
+    /// to check. Returns true when it ran to the end, including on the
+    /// overrun that drops it.
+    /// </summary>
+    internal bool Invoke(Action callback)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        if (IsTripped) return false;
+
+        double start = _nowMilliseconds();
+        try
+        {
+            callback();
+        }
+        catch (Exception exception)
+        {
+            LastMilliseconds = _nowMilliseconds() - start;
+            Trip($"threw {exception.GetType().Name}: {exception.Message}");
+            return false;
+        }
+
+        LastMilliseconds = _nowMilliseconds() - start;
+        if (LastMilliseconds <= BudgetMilliseconds)
+        {
+            _consecutiveOverruns = 0;
+            return true;
+        }
+
+        _consecutiveOverruns++;
+        if (_consecutiveOverruns >= ConsecutiveOverrunsBeforeTrip)
+            TripForOverruns();
+        return true;
+    }
+
+    private void TripForOverruns() =>
+        Trip(
+            $"took more than {BudgetMilliseconds:0.##} ms on "
+            + $"{_consecutiveOverruns} {_callUnit} in a row "
+            + $"(last {LastMilliseconds:0.##} ms)");
 
     private static void RestoreDepths(
         UiRenderContext context, int clipDepth, int transformDepth, int alphaDepth)

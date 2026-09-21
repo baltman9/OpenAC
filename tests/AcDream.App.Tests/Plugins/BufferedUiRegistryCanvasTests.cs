@@ -50,6 +50,29 @@ public sealed class BufferedUiRegistryCanvasTests
     }
 
     [Fact]
+    public void ThroughTheHostThePointerHandlerIsKeptAndInertUntilMounted()
+    {
+        var registry = new BufferedUiRegistry();
+        IPluginHost host = new AppPluginHost(
+            new SilentLogger(), new WorldGameState(), new WorldEvents(), new SelectionState(),
+            registry, NoOpAutomationSurface.Instance);
+        int calls = 0;
+        Action<PluginPointerEvent> handler = _ => calls++;
+
+        IPluginCanvas canvas = host.Ui.RegisterCanvas(
+            new PluginCanvasDescriptor("map", 10, 10) { AcceptsPointerInput = true }, Paint);
+        canvas.PointerHandler = handler;
+        canvas.ReleasePointer();
+
+        var registration = Assert.IsType<PluginCanvasRegistration>(canvas);
+        Assert.True(registration.AcceptsPointerInput);
+        Assert.Same(handler, canvas.PointerHandler);
+        Assert.Equal(0, calls);
+        canvas.Dispose();
+        Assert.Null(registration.PointerHandler);
+    }
+
+    [Fact]
     public void APluginMayHoldAtMostTheCapAndTheNextIsRefused()
     {
         var registry = new BufferedUiRegistry();

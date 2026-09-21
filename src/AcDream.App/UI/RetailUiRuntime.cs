@@ -4173,8 +4173,9 @@ public sealed class RetailUiRuntime : IDisposable
                 var element = new Layout.PluginCanvasElement(
                     canvas,
                     _pluginCanvasSurface,
-                    () => plugins.FindImages(owner));
-                layer.AddChild(element);
+                    () => plugins.FindImages(owner),
+                    modifiers: HeldPointerModifiers);
+                layer.AddChild(element, takesInput: canvas.AcceptsPointerInput);
                 plugins.CompleteCanvasMount(canvas, () =>
                 {
                     layer.RemoveChild(element);
@@ -4191,6 +4192,23 @@ public sealed class RetailUiRuntime : IDisposable
                     $"[UI] plugin canvas '{canvas.Owner.Id}/{canvas.CanvasId}' failed to mount: {ex.Message}");
             }
         }
+    }
+
+    /// <summary>
+    /// The modifier keys held right now, read from the window's keyboard
+    /// for each pointer event a plugin canvas delivers; none without one.
+    /// </summary>
+    private PluginKeyModifiers HeldPointerModifiers()
+    {
+        if (Host.Keyboard is not { } keyboard) return PluginKeyModifiers.None;
+        PluginKeyModifiers held = PluginKeyModifiers.None;
+        if (keyboard.IsKeyPressed(Silk.NET.Input.Key.ShiftLeft) || keyboard.IsKeyPressed(Silk.NET.Input.Key.ShiftRight))
+            held |= PluginKeyModifiers.Shift;
+        if (keyboard.IsKeyPressed(Silk.NET.Input.Key.ControlLeft) || keyboard.IsKeyPressed(Silk.NET.Input.Key.ControlRight))
+            held |= PluginKeyModifiers.Control;
+        if (keyboard.IsKeyPressed(Silk.NET.Input.Key.AltLeft) || keyboard.IsKeyPressed(Silk.NET.Input.Key.AltRight))
+            held |= PluginKeyModifiers.Alt;
+        return held;
     }
 
     // Uploaded once per plugin id and cached, so a re-run of MountPlugins for a

@@ -978,9 +978,10 @@ reconnect), after which the plugin asks again.
 ## Canvases
 
 A canvas is a rectangle the plugin paints, shown over the world and under
-every window, taking no input. It is positioned by an anchor plus an
-offset, it is exactly its declared size, and everything painted is clipped
-to it; there is no way to draw anywhere else on the screen.
+every window, taking no input unless it asks for it (see
+[Pointer input](#pointer-input) below). It is positioned by an anchor plus
+an offset, it is exactly its declared size, and everything painted is
+clipped to it; there is no way to draw anywhere else on the screen.
 
 ```csharp
 IPluginCanvas hud = host.Ui.RegisterCanvas(
@@ -1023,6 +1024,75 @@ plugin still holds is removed when the plugin unloads.
 
 Without a window the canvas is accepted, `IsAvailable` is false, the
 state the plugin sets is kept, and the paint callback is never called.
+
+### Pointer input
+
+A canvas is click-through by default. One that wants to be dragged,
+zoomed at the cursor or clicked opts in with `AcceptsPointerInput` on the
+descriptor and sets a `PointerHandler` on the canvas; input and
+click-through are the two states of one switch, and input wins: while the
+canvas is shown and has a handler, everything the pointer does inside the
+canvas's rectangle goes to the handler and no further, and the world
+beneath gets no mouse there. Outside the rectangle nothing changes.
+Without a handler an opted-in canvas stays click-through, since nobody is
+listening.
+
+```csharp
+IPluginCanvas map = host.Ui.RegisterCanvas(
+    new PluginCanvasDescriptor("map", 300, 300) { AcceptsPointerInput = true },
+    painter => DrawMap(painter));
+
+PluginPoint? dragFrom = null;
+map.PointerHandler = e =>
+{
+    switch (e.Kind)
+    {
+        case PluginPointerEventKind.Down when e.Button == PluginPointerButton.Left:
+            dragFrom = e.Position;
+            break;
+        case PluginPointerEventKind.Move when dragFrom is { } from:
+            bool measuring = (e.Modifiers & PluginKeyModifiers.Shift) != 0;
+            Pan(e.Position.X - from.X, e.Position.Y - from.Y, measuring);
+            dragFrom = e.Position;
+            map.Invalidate();
+            break;
+        case PluginPointerEventKind.Up or PluginPointerEventKind.Cancelled:
+            dragFrom = null;
+            break;
+        case PluginPointerEventKind.Wheel:
+            ZoomAbout(e.Position, e.WheelDelta);
+            map.Invalidate();
+            break;
+    }
+};
+```
+
+Every event arrives on the tick thread as a `PluginPointerEvent`: its
+`Kind` (`Down`, `Up`, `Move`, `Wheel`, `Cancelled`), its `Position` in
+the canvas's own pixels from its top-left corner, whatever anchor, offset
+or interface scale the canvas is shown at, the `Button` it is about
+(`Left`, `Right`, `Middle`, or `None` for the wheel), the `Modifiers`
+held (`Shift`, `Control`, `Alt`, as flags) and, for the wheel, a
+`WheelDelta` in notches, positive away from the user. A press inside the
+canvas holds the pointer until the button comes up: `Move` events keep
+coming with that button, and the position may lie outside the rectangle,
+so a fast drag never loses the canvas. A move with nothing held is not
+reported. The wheel reaches the canvas only while the pointer is over it.
+`Cancelled` means a press ended without its `Up`: the canvas was hidden
+or removed, or the host took the pointer for something else; treat it as
+the end of the drag. `ReleasePointer()` ends the press the canvas holds
+on the plugin's own say-so, from inside the handler or anywhere else;
+nothing more arrives for that press, and no `Cancelled` is sent for a
+release the plugin asked for.
+
+The handler is measured like the paint callback, against the interface's
+2 ms frame budget: one that stays over it on three events in a row, or
+throws, is dropped for the rest of the session and the canvas goes back to
+click-through; painting continues and the client's log says why. The
+handler is dropped with the paint callback when the canvas is disposed.
+
+Without a window `AcceptsPointerInput` and the handler are kept, the
+handler is never called, and `ReleasePointer()` does nothing.
 
 ## Dungeon map
 

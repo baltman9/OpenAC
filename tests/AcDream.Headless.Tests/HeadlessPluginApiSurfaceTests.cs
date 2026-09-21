@@ -980,6 +980,33 @@ public sealed class HeadlessPluginApiSurfaceTests
         canvas.Dispose();
     }
 
+    /// <summary>
+    /// A canvas that opted in to pointer input is accepted without a
+    /// window in the same way: the handler is kept so the plugin's own
+    /// logic runs unchanged, nothing ever calls it, and releasing the
+    /// pointer does nothing.
+    /// </summary>
+    [Fact]
+    public void WithoutAWindowAPointerHandlerIsKeptAndNeverCalled()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        IPluginHost pluginHost = host;
+        int calls = 0;
+        Action<PluginPointerEvent> handler = _ => calls++;
+
+        IPluginCanvas canvas = pluginHost.Ui.RegisterCanvas(
+            new PluginCanvasDescriptor("map", 200, 100) { AcceptsPointerInput = true },
+            _ => { });
+        canvas.PointerHandler = handler;
+        canvas.ReleasePointer();
+
+        Assert.False(canvas.IsAvailable);
+        Assert.Same(handler, canvas.PointerHandler);
+        Assert.Equal(0, calls);
+        canvas.Dispose();
+    }
+
     private static GameRuntime NewRuntime()
     {
         var operations = new InertOperations();
