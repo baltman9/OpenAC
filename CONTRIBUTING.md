@@ -74,7 +74,7 @@ Plugins target `AcDream.Plugin.Abstractions` only and never import `AcDream.App`
 `AcDream.Runtime` or `AcDream.Core`. `docs/plugin-development.md` is the
 guide for plugin authors; `docs/plugin-api.md` describes the surfaces and
 `docs/plugin-ui-markup.md` the panel markup. Plugins belong in their own
-repositories; `AcDream.Plugins.MossTank` in `src/` is the bundled example.
+repositories; the render packs under `samples/` are the in-tree examples.
 
 ### Changing the plugin API
 

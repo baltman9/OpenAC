@@ -17,6 +17,4 @@
   <ItemGroup>
     <ProjectReference Include="..\AcDream.Runtime\AcDream.Runtime.csproj" />
   </ItemGroup>
-
-  <Import Project="..\AcDream.Plugins.MossTank\BundledPlugin.targets" />
 </Project>

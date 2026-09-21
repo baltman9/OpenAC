@@ -198,8 +198,6 @@ jobs:
           test -f "$root/libglfw.so.3"
           test -f "$root/libopenal.so"
           test -f "$root/Rendering/Shaders/mesh_modern.vert"
-          test -f "$root/plugins/AcDream.Plugins.MossTank/AcDream.Plugins.MossTank.dll"
-          test -f "$root/plugins/AcDream.Plugins.MossTank/plugin.json"
 
           test "$(grep -RIl --include='*.cs' 'LibraryImport(\"kernel32.dll\"' \
             src/AcDream.App | wc -l)" -eq 1

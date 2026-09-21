@@ -83,12 +83,9 @@ dotnet pack <OpenAcRoot>/src/AcDream.Plugin.Abstractions -c Release -o <feed>
 dotnet restore --source <feed>
 ```
 
-The bundled example plugin builds both ways, so the package path is exercised
-rather than assumed: it takes the checkout reference by default and the package
-reference under `-p:UsePluginApiPackage=true`, with
-`-p:PluginApiPackageVersion=<version>` choosing the contract version. That
-switch is how a plugin still inside this repository is checked against the
-reference it will use once it leaves;
+A plugin developed inside a checkout of this repository should be built the
+package way at least once before it ships, so the reference it will actually
+use is exercised rather than assumed;
 [extracting a plugin](plugins/extracting-a-plugin.md) is the rest of that
 checklist.
 
@@ -293,6 +290,6 @@ and additive.
 - [OpenAC-MagTools](https://github.com/eriknihlen/OpenAC-MagTools): an
   external plugin in its own repository, built and installed exactly as
   described above.
-- `src/AcDream.Plugins.MossTank` in this repository: the bundled example,
-  which uses the panel markup heavily.
+- [openac-mosstank](https://github.com/eriknihlen/openac-mosstank): a large
+  external plugin, which uses the panel markup heavily.
 - `samples/`: render packs, the `RenderPack` kind.

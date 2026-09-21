@@ -391,6 +391,11 @@ The headless host hands plugins the same `RuntimeNavigationAutomation`, so moves
 
 ## MossTank
 
+[MossTank](https://github.com/eriknihlen/openac-mosstank) is an external
+automation plugin, in its own repository and installed through the launcher.
+It is written up here because it is the heaviest caller of this API and shows
+what the two ways to move look like side by side in one plugin.
+
 MossTank walks its routes the reference way: straight at each point with held keys, and its own corpse and monster walks the same. Its per-profile **Client pathing** choice on the Route tab says when the client's navigation walks a leg for it instead. **When stuck**, the default, hands a leg to `GoTo` once per visit to a waypoint when the straight walk has held the forward key for three seconds without covering three quarters of a metre; the clock runs only while MossTank's route rule has the character, so a fight or a corpse walk never counts. While the client walks, the route keeps its turn and watches the report: arriving advances the route; a walk that ends any other way returns the keys to the straight walk, and a second stall at the same waypoint is said once in chat. Losing the turn to combat or loot stops the client's walk with the rest of the movement. **Never** keeps the straight walk and only says in chat when it stalls. **Always** sends every leg to `GoTo`; a leg the client cannot walk pauses the route where it stands and says so once, until the route is reset or the choice changes. MossTank registers `PauseGoToWhile`, so a client walk it asked for waits while it buffs. A profile written with the older "walk legs with client pathing" checkbox on reads as Always.
 
 ## Seeing it in the client
@@ -422,7 +427,6 @@ The grid and the route line are hidden behind walls, floors and ceilings, as the
 | `tests/AcDream.Runtime.Tests/Navigation/` | The navigation API's projection and pauses, and every `/nav` and `/motor` command. |
 | `tests/AcDream.App.Tests/Navigation/NavigationWalkControllerTests.cs` | Walk requests against a simulated body and world: planning again and the recovery ladder, doors, creatures, waiting, player input in every state, grids let go, narration, place floors, object tops, and following: holding, replanning, portals, landings, sleeping and stepping off. |
 | `tests/AcDream.Headless.Tests/HeadlessSessionNavigationTests.cs` | A headless session's navigation, walk and console commands. |
-| `tests/AcDream.Plugins.MossTank.Tests/` | Client pathing: a straight walk stuck for three seconds hands its leg to the navigation API once per waypoint and takes the keys back however that walk ends; a lost turn stops the walk; Always sends every leg and pauses on one it cannot walk; the choice round-trips through the profile. |
 | `NavigationWalkCorpusTests`, `RockJumpPuzzleInstalledDatTests` | Fixed walks through real dungeons, Holtburg and a staged walk across the 3x3 landblocks around it, over the collision the client loads and over the collision the headless host loads, and the rock jump puzzle, from the installed game files (`InstalledDat` lane). `ACDREAM_UPDATE_WALK_CORPUS=1` records the corpus again, from the client's walks. |
 | `HeadlessCollisionParityInstalledDatTests` | Grids over a town, dungeons and the example landblocks come out identical from the collision either host loads. |
 | `HoltburgRoofJumpInstalledDatTests` | A 26 m running jump from a Holtburg porch onto a roof over a room plans at jump skill 443. |
@@ -438,4 +442,4 @@ The grid and the route line are hidden behind walls, floors and ceilings, as the
 | Planning | `src/AcDream.Core/Navigation/NavGeometry.cs`, `NavGrid.cs`, `NavRoute.cs`, `NavLeaps.cs`, `NavColumnTiles.cs` |
 | Client | `src/AcDream.App/Navigation/NavigationWalkFramePhase.cs`, `src/AcDream.App/Rendering/NavMeshDebugOverlay.cs`, `DebugLineRenderer.cs` |
 | Headless | `src/AcDream.Headless/Hosting/HeadlessSessionHost.cs`; shared collision loading in `src/AcDream.Content/LandblockPhysicsContentBuilder.cs` |
-| MossTank | `src/AcDream.Plugins.MossTank/Navigation.cs` |
+| MossTank | [its own repository](https://github.com/eriknihlen/openac-mosstank) |

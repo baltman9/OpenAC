@@ -93,12 +93,11 @@ enabling anything, **All characters**, or **Choose** to pick specific
 characters; an update carries no such choice, since it can only affect a
 plugin already enabled where it was chosen before. A character's own **…**
 action opens a checklist of installed plugins compatible with its launch
-mode; only checked plugins load, and a blank list loads nothing, bundled
-plugins included. A row set to **Character select** picks its character inside
+mode; only checked plugins load, and a blank list loads nothing at all. A row set to **Character select** picks its character inside
 the client, after the plugin list is already fixed, so it loads only the plugins
 every character on that account has enabled; its **…** action ticks a plugin for
 all of them in one step. Existing profiles are not migrated: anyone who relied on a
-plugin loading by default, MossTank included, must tick it once.
+plugin loading by default must tick it once.
 
 A blocked plugin (listed as unsafe by the curated list) shows a red
 "Blocked: <reason>" badge, cannot be installed or updated to, and is filtered

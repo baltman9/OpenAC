@@ -21,7 +21,7 @@
   and build output lands under -ScratchRoot.
 
 .EXAMPLE
-  pwsh tools/plugin-extraction-dryrun.ps1 -Plugin AcDream.Plugins.MossTank
+  pwsh tools/plugin-extraction-dryrun.ps1 -Plugin AcDream.Plugins.Example
 #>
 [CmdletBinding()]
 param(

@@ -35,8 +35,8 @@ public sealed class HeadlessNavigationSteeringLiveTests(ITestOutputHelper output
     private const uint ArenaCell = 0xA9B40029u;
 
     /// <summary>
-    /// The first waypoint of `Fixtures/vt-proof/navs/vt-proof-route.af`, in the
-    /// same game coordinates the route file carries.
+    /// The first waypoint of the recorded arena route, in the game coordinates
+    /// the route was recorded in.
     /// </summary>
     private const double FirstWaypointEastWest = 33.8066816d;
     private const double FirstWaypointNorthSouth = 42.1557993d;
