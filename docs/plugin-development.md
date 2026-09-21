@@ -46,8 +46,41 @@ assembly; the host already ships it:
 
 `OpenAcRoot` points at a checkout of this repository. Give it a default in
 your `Directory.Build.props` and let people override it on the command line
-with `-p:OpenAcRoot=<path>`. A published contract package will replace the
-checkout reference; until then, build against the tagged release you target.
+with `-p:OpenAcRoot=<path>`.
+
+### Or against the contract package
+
+`AcDream.Plugin.Abstractions` is packable, so a plugin can build against a
+version of the contract instead of against a checkout. That is the reference a
+plugin in its own repository wants: it pins the contract version the plugin
+targets, and it needs no client sources to build.
+
+```xml
+<ItemGroup>
+  <PackageReference Include="AcDream.Plugin.Abstractions" Version="0.1.12"
+                    ExcludeAssets="runtime" />
+</ItemGroup>
+```
+
+`ExcludeAssets="runtime"` does for a package reference what `Private=false`
+does for a project reference: compile against the contract, ship no copy of
+it. The package carries the XML documentation, so your IDE shows the same text
+the [API reference](plugin-api.md) does.
+
+The package is not on a public feed. Produce one from a checkout and restore
+against the folder:
+
+```
+dotnet pack <OpenAcRoot>/src/AcDream.Plugin.Abstractions -c Release -o <feed>
+dotnet restore --source <feed>
+```
+
+The bundled example plugin builds both ways, so the package path is exercised
+rather than assumed: it takes the checkout reference by default and the package
+reference under `-p:UsePluginApiPackage=true`, with
+`-p:PluginApiPackageVersion=<version>` choosing the contract version. That
+switch is how a plugin still inside this repository is checked against the
+reference it will use once it leaves.
 
 Put a `plugin.json` next to your project and copy it to the output
 directory:
