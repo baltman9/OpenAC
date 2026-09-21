@@ -1,3 +1,4 @@
+using System.Threading;
 using System.Collections.Generic;
 using AcDream.App.Plugins;
 using AcDream.Core.Plugins;
@@ -111,6 +112,45 @@ public sealed class BufferedUiRegistryImagesTests
 
         Assert.True(images.IsAvailable);
         Assert.True(images.FromSpellIcon(1u).IsValid);
+    }
+
+    /// <summary>
+    /// The interface thread is the one the services were bound from, whichever
+    /// thread a plugin first asks for its images on. A plugin whose first
+    /// ask is from a worker must not make the worker the accepted thread and
+    /// the interface the refused one; its uploads would then leave the
+    /// render thread.
+    /// </summary>
+    [Fact]
+    public void ATableFirstAskedForOnAWorkerThreadStillAnswersOnlyTheInterfaceThread()
+    {
+        (_, BufferedUiRegistry registry) = Host();
+        registry.BindImageServices(new FakeBackend());
+        var owner = new PluginUiOwner("worker.plugin", "Worker");
+        IPluginImages? madeOnWorker = null;
+        Exception? workerFailure = null;
+
+        var worker = new Thread(() =>
+        {
+            try
+            {
+                madeOnWorker = registry.ImagesFor(owner);
+                madeOnWorker.FromSpellIcon(1u);
+            }
+            catch (Exception caught)
+            {
+                workerFailure = caught;
+            }
+        });
+        worker.Start();
+        worker.Join();
+
+        Assert.NotNull(madeOnWorker);
+        Assert.IsType<InvalidOperationException>(workerFailure);
+        IPluginImages images = registry.ImagesFor(owner);
+        Assert.Same(madeOnWorker, images);
+        Assert.True(images.FromSpellIcon(1u).IsValid);
+        Assert.Equal(1, images.Count);
     }
 
     [Fact]

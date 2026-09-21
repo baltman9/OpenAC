@@ -141,17 +141,21 @@ internal sealed class PluginImageTable : IDisposable
     internal bool IsBound => _backend is not null;
 
     /// <summary>
-    /// Points the table at the interface's texture services. The calling
-    /// thread becomes the only thread the table accepts requests from.
+    /// Points the table at the interface's texture services.
+    /// <paramref name="uiThreadId"/> is the interface thread, the only thread
+    /// the table then accepts requests from. It is passed in rather than
+    /// taken from the caller because a table is made on whatever thread a
+    /// plugin first asks for its images from, and that thread is not
+    /// necessarily the interface's.
     /// </summary>
-    internal void Bind(IPluginImageBackend backend)
+    internal void Bind(IPluginImageBackend backend, int uiThreadId)
     {
         ArgumentNullException.ThrowIfNull(backend);
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_backend is not null)
             throw new InvalidOperationException("The image table is already bound.");
         _backend = backend;
-        _uiThreadId = Environment.CurrentManagedThreadId;
+        _uiThreadId = uiThreadId;
     }
 
     /// <summary>

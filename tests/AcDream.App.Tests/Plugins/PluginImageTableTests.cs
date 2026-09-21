@@ -63,7 +63,7 @@ public sealed class PluginImageTableTests
         var reports = new List<string>();
         var table = new PluginImageTable("example.plugin", budget ?? PluginImageBudget.Default, reports.Add);
         var backend = new FakeBackend();
-        table.Bind(backend);
+        table.Bind(backend, Environment.CurrentManagedThreadId);
         return (table, backend, reports);
     }
 
@@ -260,7 +260,7 @@ public sealed class PluginImageTableTests
         Assert.False(table.AcquireClientArt(0x06001234u).IsValid);
         Assert.False(table.AcquireDecoded("map", Png64()).IsValid);
 
-        table.Bind(new FakeBackend());
+        table.Bind(new FakeBackend(), Environment.CurrentManagedThreadId);
         Assert.True(table.AcquireClientArt(0x06001234u).IsValid);
     }
 

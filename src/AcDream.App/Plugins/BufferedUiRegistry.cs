@@ -99,6 +99,10 @@ public sealed class BufferedUiRegistry : IScopedUiRegistry, IPluginDirectoryUiRe
     // bound the moment the services arrive.
     private readonly Dictionary<string, PluginImages> _images = [];
     private IPluginImageBackend? _imageBackend;
+    // The thread the services were bound from, which every table is told to
+    // accept requests from; a table made later, on a plugin's worker thread,
+    // must not take that worker for the interface.
+    private int _imageUiThreadId;
 
     /// <summary>The per-plugin image ceiling every table is made with.</summary>
     internal PluginImageBudget ImageBudget { get; init; } = PluginImageBudget.Default;
@@ -112,7 +116,7 @@ public sealed class BufferedUiRegistry : IScopedUiRegistry, IPluginDirectoryUiRe
                 return existing;
             var table = new PluginImageTable(owner.Id, ImageBudget);
             if (_imageBackend is { } backend)
-                table.Bind(backend);
+                table.Bind(backend, _imageUiThreadId);
             var images = new PluginImages(table, ForgetImages);
             _images.Add(owner.Id, images);
             return images;
@@ -147,8 +151,9 @@ public sealed class BufferedUiRegistry : IScopedUiRegistry, IPluginDirectoryUiRe
             if (_imageBackend is not null)
                 throw new InvalidOperationException("Image services are already bound.");
             _imageBackend = backend;
+            _imageUiThreadId = Environment.CurrentManagedThreadId;
             foreach (PluginImages images in _images.Values)
-                images.Table.Bind(backend);
+                images.Table.Bind(backend, _imageUiThreadId);
         }
     }
 
