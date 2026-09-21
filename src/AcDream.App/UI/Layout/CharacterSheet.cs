@@ -27,6 +27,13 @@ public sealed class CharacterSheet
 
     public long XpToNextLevel { get; init; }
 
+    /// <summary>
+    /// What stands in place of the number when there is no next level to
+    /// earn: the character is at the top of the level table. Null while
+    /// there is experience still to go, or while the table is not known.
+    /// </summary>
+    public string? XpToNextLevelText { get; init; }
+
     public float XpFraction { get; init; }
 
     public string? PkStatus { get; init; }

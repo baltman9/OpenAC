@@ -120,6 +120,11 @@ public sealed class CharacterSheetProvider
             PkStatus = PkStatusText(CurrentPlayerBitfield(), _resolveUiString),
             TotalXp = totalXp,
             XpToNextLevel = xp.toNext,
+            XpToNextLevelText = xp.noNextLevel
+                ? _resolveUiString?.Invoke(
+                    "ID_StatManagement_Header_XPToLevelMeterInfinity")
+                    ?? "Infinity!"
+                : null,
             XpFraction = xp.fraction,
             AvailableLuminance = props.GetInt64(6u),
             MaximumLuminance = props.GetInt64(7u),
@@ -346,20 +351,25 @@ public sealed class CharacterSheetProvider
         return null;
     }
 
-    private (long toNext, float fraction) ComputeLevelXp(int level, long totalXp)
+    private (long toNext, float fraction, bool noNextLevel) ComputeLevelXp(
+        int level, long totalXp)
     {
         var levels = ExperienceTable?.Levels;
-        if (levels is null || level < 0 || level + 1 >= levels.Length)
-            return (0L, 0f);
+        if (levels is null || level < 0)
+            return (0L, 0f, false);
+        // The top of the table: there is no next level to measure towards.
+        if (level + 1 >= levels.Length)
+            return (0L, 0f, true);
 
         long current = ClampToLong(levels[level]);
         long next = ClampToLong(levels[level + 1]);
-        if (next <= current) return (0L, 0f);
+        if (next <= current) return (0L, 0f, true);
 
         long clampedXp = totalXp < current ? current : totalXp > next ? next : totalXp;
         long toNext = next - clampedXp;
         float fraction = (float)(clampedXp - current) / (next - current);
-        return (toNext, fraction);
+        // Nothing left to earn reads the same way as no next level at all.
+        return (toNext, fraction, toNext <= 0L);
     }
 
     private long[] BuildAttributeRaiseCosts(int amount)

@@ -221,7 +221,9 @@ public static class CharacterStatController
                     data,
                     static (_, sheet) => new[]
                     {
-                        new UiText.Line(FormatXp(sheet.XpToNextLevel), Body),
+                        new UiText.Line(
+                            sheet.XpToNextLevelText ?? FormatXp(sheet.XpToNextLevel),
+                            Body),
                     });
             }
         }

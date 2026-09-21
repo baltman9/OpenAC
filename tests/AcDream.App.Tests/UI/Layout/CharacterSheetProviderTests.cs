@@ -95,6 +95,33 @@ public sealed class CharacterSheetProviderTests
     }
 
 
+    // OpenAC #137: at the top of the level table the experience to the next
+    // level read 0. There is no next level, and the page says so in words.
+    [Fact]
+    public void BuildSheet_AtTheTopOfTheLevelTable_SaysThereIsNoNextLevel()
+    {
+        var h = new Harness();
+        ClientObject player = h.AddPlayerObject();
+        player.Properties.Ints[0x19u] = 3;          // the table's last level
+        player.Properties.Int64s[1u] = 9_000L;
+
+        var sheet = h.Provider.BuildSheet();
+
+        Assert.Equal("Infinity!", sheet.XpToNextLevelText);
+    }
+
+    [Fact]
+    public void BuildSheet_WithExperienceStillToGo_ShowsTheNumber()
+    {
+        var h = new Harness();
+        h.AddPlayerObject();
+
+        var sheet = h.Provider.BuildSheet();
+
+        Assert.Null(sheet.XpToNextLevelText);
+        Assert.Equal(100L, sheet.XpToNextLevel);
+    }
+
     // OpenAC #144: "innate" is what the attribute started at. Ranks bought
     // with experience are not part of it, and neither is an enchantment.
     [Fact]
