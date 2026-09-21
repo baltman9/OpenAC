@@ -719,7 +719,13 @@ public sealed class DirectGameRuntimeCommandAdapter
         if (gate != RuntimeCommandStatus.Accepted)
             return Result(gate);
         RuntimeCommandStatus status = RuntimeCommandStatus.Accepted;
-        if (command.StatId == 0u || command.Cost == 0u)
+        // Every one of these costs rides a 32-bit field on the wire. A cost
+        // too wide for it does not fail on the way out, it arrives as a
+        // smaller and perfectly legal amount, so it is refused here rather
+        // than cut down into a spend nobody asked for.
+        if (command.StatId == 0u
+            || command.Cost == 0u
+            || command.Cost > uint.MaxValue)
         {
             status = RuntimeCommandStatus.Rejected;
         }
@@ -742,8 +748,7 @@ public sealed class DirectGameRuntimeCommandAdapter
                         command.StatId,
                         command.Cost);
                     break;
-                case RuntimeAdvancementKind.TrainSkill
-                    when command.Cost <= uint.MaxValue:
+                case RuntimeAdvancementKind.TrainSkill:
                     session!.SendTrainSkill(
                         command.StatId,
                         (uint)command.Cost);

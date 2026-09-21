@@ -197,6 +197,14 @@ not the same numbers as their `Kind`, which is only a position in the list.
 `PluginAdvancementKind.TrainSkill` spends skill credits rather than
 experience, so its cost is a small number.
 
+An experience cost is capped at `PluginAdvancement.MaxExperienceCost`, which
+is the largest number the request's own field holds -- it is 32 bits wide.
+Anything above it is refused rather than quietly cut down to fit, because
+cutting it down would not fail: it would spend a smaller, perfectly legal
+amount you never asked for. Banked experience in the billions is ordinary at
+high level, so "spend everything I have banked" has to expect this answer and
+split the spend.
+
 The client checks the request before it sends it, and answers:
 
 | `Status` | when |

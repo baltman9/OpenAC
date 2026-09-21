@@ -34,18 +34,22 @@ public enum PluginAdvancementKind
 public static class PluginAdvancement
 {
     /// <summary>
-    /// The largest experience cost the client will carry to the server. It is
-    /// far above anything a single raise can cost and far below the largest
-    /// number the field can hold, so a cost that overflowed or was never set
-    /// is refused here instead of being sent.
+    /// The largest experience cost the client will carry to the server, which
+    /// is the largest number the request's own field holds: it is 32 bits
+    /// wide. A cost past this is refused rather than cut down to fit, because
+    /// cutting it down would not fail -- it would spend a smaller, perfectly
+    /// legal amount the plugin never asked for. Banked experience in the
+    /// billions is ordinary at high level, so a plugin asking to spend what
+    /// the character has must expect this answer and split the spend.
     /// </summary>
-    public const ulong MaxExperienceCost = 1_000_000_000_000UL;
+    public const ulong MaxExperienceCost = uint.MaxValue;
 
     /// <summary>
     /// The largest number of skill credits the client will carry to the
-    /// server for <see cref="PluginAdvancementKind.TrainSkill"/>, for the same
-    /// reason as <see cref="MaxExperienceCost"/>. Training costs a handful of
-    /// credits, so anything near this is already a mistake.
+    /// server for <see cref="PluginAdvancementKind.TrainSkill"/>. Credits ride
+    /// the same 32-bit field <see cref="MaxExperienceCost"/> is bounded by,
+    /// but training costs a handful of them, so the ceiling sits far lower:
+    /// anything near it is already a mistake.
     /// </summary>
     public const uint MaxSkillCredits = 1_000u;
 }

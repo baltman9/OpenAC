@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using AcDream.Core.Net.Messages;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Plugins;
@@ -179,6 +181,49 @@ public sealed class RuntimeAutomationSurfaceAdvancementTests
         Assert.Equal(PluginAdvancementStatus.InvalidCost, result.Status);
         Assert.Empty(fixture.Commands.Sent);
     }
+
+    /// <summary>
+    /// The field that carries a cost to the server is 32 bits wide, so the
+    /// experience ceiling is the widest number that field holds. A cost at
+    /// the ceiling goes out whole; one past it is refused, because a cost
+    /// that does not fit does not fail -- it arrives as a smaller, perfectly
+    /// legal amount, and the character spends something it never asked to.
+    /// </summary>
+    [Fact]
+    public void ACostTooWideForTheRequestFieldIsRefusedRatherThanCutDown()
+    {
+        const ulong widest = uint.MaxValue;
+        Assert.Equal(widest, PluginAdvancement.MaxExperienceCost);
+
+        // Why the ceiling sits there and not higher: one past it is a
+        // different number by the time it is on the wire.
+        Assert.Equal(
+            widest,
+            CostOnTheWire(
+                CharacterActions.BuildRaiseSkill(1u, KnownSkill, widest)));
+        Assert.NotEqual(
+            widest + 1UL,
+            CostOnTheWire(
+                CharacterActions.BuildRaiseSkill(1u, KnownSkill, widest + 1UL)));
+
+        using Fixture fixture = Fixture.InWorld();
+
+        PluginAdvancementResult atTheCeiling =
+            fixture.Surface.RequestAdvancement(
+                PluginAdvancementKind.Skill, KnownSkill, widest);
+        Assert.Equal(PluginAdvancementStatus.Sent, atTheCeiling.Status);
+        Assert.Equal(widest, Assert.Single(fixture.Commands.Sent).Cost);
+
+        PluginAdvancementResult pastIt = fixture.Surface.RequestAdvancement(
+            PluginAdvancementKind.Skill, KnownSkill, widest + 1UL);
+        Assert.Equal(PluginAdvancementStatus.InvalidCost, pastIt.Status);
+        // Still the one from above: nothing new went out.
+        Assert.Single(fixture.Commands.Sent);
+    }
+
+    /// <summary>The cost a built request really carries, read back off it.</summary>
+    private static ulong CostOnTheWire(byte[] gameAction) =>
+        BinaryPrimitives.ReadUInt32LittleEndian(gameAction.AsSpan(16));
 
     /// <summary>
     /// Before the character is in the world there is nothing to spend on and
