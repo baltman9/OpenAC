@@ -117,8 +117,10 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         Directory.CreateDirectory(_directory);
         DateTimeOffset now = _time.GetUtcNow();
         PeerDocument document;
+        long publishedThrough;
         lock (_gate)
         {
+            publishedThrough = _castSequence;
             document = PeerDocument.From(
                 client with { ClientId = ClientId },
                 _instanceId,
@@ -137,10 +139,14 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                 File.Delete(temporary);
         }
         // The note carries the whole ring, so any write -- a heartbeat as
-        // much as a cast -- is what the debounce is counting from.
+        // much as a cast -- is what the debounce is counting from. A cast
+        // recorded WHILE the file was being written is not in the note that
+        // just went out, so it stays waiting rather than being cleared with
+        // the ones that did.
         lock (_gate)
         {
-            _castWritePending = false;
+            if (_castSequence == publishedThrough)
+                _castWritePending = false;
             _lastWriteAt = now;
         }
     }

@@ -427,9 +427,9 @@ internal sealed class RuntimeAutomationSurface
 
     /// <summary>
     /// Puts one cast in the note the other clients on this machine read.
-    /// Everything is checked here rather than trusted from a plugin: the
-    /// note is a file any process on the machine can write, so the rules on
-    /// the way in are the same rules applied on the way out.
+    /// What only this client knows is settled here -- who is casting, and
+    /// whether the spell is one its own table can name. The rest is the
+    /// ring's one rule, which is the same rule a peer's note is read by.
     /// </summary>
     private bool AnnounceCast(
         uint targetObjectId,
