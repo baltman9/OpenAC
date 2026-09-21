@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using AcDream.Runtime.Plugins;
 using AcDream.Plugin.Abstractions;
 
@@ -320,6 +321,168 @@ public sealed class LocalPluginPeerRegistryTests
         {
             Delete(root);
         }
+    }
+
+    /// <summary>
+    /// A note is written by another process running as this user, so it is
+    /// hostile input: nothing in it may come back out of a plugin call as an
+    /// exception. These two shapes did. A JSON null element was dereferenced
+    /// by the walk that sorts the casts, and a stamp outside the range a date
+    /// can represent threw inside the conversion that ages a cast -- both
+    /// straight through the capture call and into the plugin.
+    ///
+    /// The honest writer cannot produce either, which is why every test that
+    /// went through it missed them; these write the bytes themselves.
+    ///
+    /// Mutation check (2026-09-21): with the per-entry check taken back out
+    /// of the point where a note is accepted, the null row threw
+    /// NullReferenceException and both stamp rows threw
+    /// ArgumentOutOfRangeException out of CaptureRemoteCasts.
+    /// </summary>
+    [Theory]
+    [InlineData("null-element")]
+    [InlineData("stamp-at-long-max")]
+    [InlineData("stamp-at-long-min")]
+    public void ANoteNoHonestWriterCouldProduceIsRefusedRatherThanThrown(
+        string shape)
+    {
+        string root = TemporaryRoot();
+        var now = new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);
+        var time = new ManualTimeProvider(now);
+        try
+        {
+            using var reader = Registry(root, time, 2);
+            JsonObject note = RawNote(now, HostileInstance);
+            note["Casts"] = new JsonArray(shape switch
+            {
+                "null-element" => null,
+                "stamp-at-long-max" => RawCast(1L, long.MaxValue),
+                _ => RawCast(1L, long.MinValue),
+            });
+            WriteRawNote(root, HostileInstance, note);
+            // A second, honest peer in the same folder: the reader has to
+            // survive the hostile note, not merely not crash on an empty one.
+            using var honest = Registry(root, time, 1);
+            honest.RecordCast(Landed(10u, 0x50000012u, 42u));
+            honest.Publish(Client(honest.ClientId, 10u, "Alpha", []));
+
+            IReadOnlyList<PluginPeerCast> read =
+                reader.CaptureRemoteCasts(0L, "Coldeve", 20u);
+
+            PluginPeerCast only = Assert.Single(read);
+            Assert.Equal(honest.ClientId, only.ClientId);
+            Assert.Equal(42u, only.SpellId);
+            // The hostile note names a client too, and its note is refused
+            // for the client list on the same rule.
+            PluginNetworkClient client = Assert.Single(
+                reader.CaptureRemoteClients());
+            Assert.Equal(honest.ClientId, client.ClientId);
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    /// <summary>
+    /// One bad entry refuses the whole note rather than being skipped. The
+    /// writer applies the same rule before an entry ever reaches the ring, so
+    /// a note carrying one was not written by an honest client and nothing
+    /// else in it is worth believing either.
+    /// </summary>
+    [Fact]
+    public void ANoteWithOneImpossibleCastIsRefusedWhole()
+    {
+        string root = TemporaryRoot();
+        var now = new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);
+        var time = new ManualTimeProvider(now);
+        try
+        {
+            using var reader = Registry(root, time, 2);
+            JsonObject note = RawNote(now, HostileInstance);
+            note["Casts"] = new JsonArray(
+                RawCast(1L, now.ToUnixTimeMilliseconds()),
+                RawCast(2L, now.ToUnixTimeMilliseconds(), spellId: 0u),
+                RawCast(3L, now.ToUnixTimeMilliseconds()));
+            WriteRawNote(root, HostileInstance, note);
+
+            Assert.Empty(reader.CaptureRemoteCasts(0L, "Coldeve", 20u));
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    /// <summary>The identity every raw note in these tests claims.</summary>
+    private static readonly Guid HostileInstance =
+        Guid.Parse("99999999-9999-9999-9999-999999999999");
+
+    /// <summary>
+    /// A peer note as another process on this computer would write it: the
+    /// bytes are composed here rather than by this client's own writer, so a
+    /// test can put things in the file that the writer would never produce.
+    /// Every field carries the value an honest note would, so a test changes
+    /// only the one thing it is about.
+    /// </summary>
+    private static JsonObject RawNote(DateTimeOffset now, Guid instanceId) =>
+        new()
+        {
+            ["InstanceId"] = instanceId.ToString(),
+            ["UpdatedUnixMs"] = now.ToUnixTimeMilliseconds(),
+            ["ClientId"] = 7u,
+            ["PlayerId"] = 10u,
+            ["Name"] = "Alpha",
+            ["WorldName"] = "Coldeve",
+            ["Tags"] = new JsonArray(),
+            ["CellId"] = 0x7F7F0001u,
+            ["EastWest"] = 33.5d,
+            ["NorthSouth"] = -72.8d,
+            ["Elevation"] = 1d,
+            ["IsOutdoor"] = true,
+            ["Heading"] = 90f,
+            ["CurrentHealth"] = 90u,
+            ["CurrentMana"] = 70u,
+            ["CurrentStamina"] = 80u,
+            ["MaxHealth"] = 100u,
+            ["MaxMana"] = 100u,
+            ["MaxStamina"] = 100u,
+            ["Casts"] = new JsonArray(),
+        };
+
+    private static JsonObject RawCast(
+        long sequence,
+        long atUnixMs,
+        uint casterObjectId = 10u,
+        uint targetObjectId = 0x50000012u,
+        uint spellId = 42u) => new()
+        {
+            ["Sequence"] = sequence,
+            ["AtUnixMs"] = atUnixMs,
+            ["CasterObjectId"] = casterObjectId,
+            ["TargetObjectId"] = targetObjectId,
+            ["SpellId"] = spellId,
+            ["EffectiveSkill"] = 357,
+            ["DurationSeconds"] = 60d,
+            ["Landed"] = true,
+        };
+
+    private static void WriteRawNote(
+        string root,
+        Guid instanceId,
+        JsonNode note) =>
+        WriteRawNote(root, instanceId, note.ToJsonString());
+
+    /// <summary>
+    /// Puts bytes where a peer's note lives. The name is the one the reader
+    /// scans for; nothing else about the file went through this client.
+    /// </summary>
+    private static void WriteRawNote(string root, Guid instanceId, string json)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(
+            Path.Combine(root, $"peer-{instanceId:N}.json"),
+            json);
     }
 
     private static LocalPluginCast Landed(

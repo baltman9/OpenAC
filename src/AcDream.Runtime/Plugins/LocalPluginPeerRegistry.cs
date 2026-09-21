@@ -67,6 +67,21 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     /// </summary>
     internal const double MaximumCastDurationSeconds = 24d * 60d * 60d;
 
+    /// <summary>
+    /// The earliest and latest instants a cast may be stamped with. A note is
+    /// a file written by another process, so its stamp is any eight bytes at
+    /// all, and a number outside this range is not a time: converting it
+    /// throws rather than returning something absurd, and that throw would
+    /// come out of the plugin's own capture call. The window rule below
+    /// narrows this to a few seconds; this pair only keeps the arithmetic
+    /// legal.
+    /// </summary>
+    private static readonly long EarliestCastUnixMs =
+        DateTimeOffset.MinValue.ToUnixTimeMilliseconds();
+
+    private static readonly long LatestCastUnixMs =
+        DateTimeOffset.MaxValue.ToUnixTimeMilliseconds();
+
     private const long MaximumDocumentBytes = 64 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -337,7 +352,8 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                     || !double.IsFinite(document.Elevation)
                     || !float.IsFinite(document.Heading)
                     || document.Casts is null
-                    || document.Casts.Length > CastRingCapacity)
+                    || document.Casts.Length > CastRingCapacity
+                    || !AreCastsWellFormed(document.Casts))
                 {
                     continue;
                 }
@@ -387,8 +403,7 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                 _observedPeers.TryGetValue(document.InstanceId, out ObservedPeer peer)
                     ? peer.HighestSequence
                     : 0L;
-            foreach (PeerCastEntry entry in document.Casts
-                .OrderBy(static entry => entry.Sequence))
+            foreach (PeerCastEntry entry in OldestFirst(document.Casts))
             {
                 if (entry.Sequence <= highest)
                     continue;
@@ -411,6 +426,34 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     }
 
     /// <summary>
+    /// Whether every cast in a note is one this client could have written
+    /// itself. Applied where the note is accepted, before anything walks it:
+    /// a JSON null element and a stamp that is not a time both throw in that
+    /// walk, and the throw would leave through the plugin's capture call.
+    ///
+    /// <para>One bad entry refuses the whole note. The same rule runs before
+    /// an entry reaches this client's own ring, so a note carrying one was
+    /// not written by an honest client and the rest of it is worth no more
+    /// than the bad row.</para>
+    /// </summary>
+    private static bool AreCastsWellFormed(PeerCastEntry?[] casts)
+    {
+        foreach (PeerCastEntry? entry in casts)
+        {
+            if (entry is null || !IsWellFormed(entry))
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// A note's casts, oldest first. Null elements cannot reach here: a note
+    /// carrying one was refused whole when it was read.
+    /// </summary>
+    private static IEnumerable<PeerCastEntry> OldestFirst(PeerCastEntry?[] casts) =>
+        casts.OfType<PeerCastEntry>().OrderBy(static entry => entry.Sequence);
+
+    /// <summary>
     /// Whether a cast makes sense at all. The one rule, applied on the way
     /// into this client's own ring and again on the way out of a peer's
     /// note, so a note this client would refuse to read is a note it never
@@ -418,6 +461,8 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     /// </summary>
     private static bool IsWellFormed(PeerCastEntry entry) =>
         entry.Sequence > 0L
+        && entry.AtUnixMs >= EarliestCastUnixMs
+        && entry.AtUnixMs <= LatestCastUnixMs
         && entry.CasterObjectId != 0u
         && entry.TargetObjectId != 0u
         && entry.SpellId != 0u
@@ -439,13 +484,15 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         DateTimeOffset now,
         uint ownPlayerObjectId)
     {
+        // The well-formed rule comes first and the age is only measured
+        // after it: a stamp this rule refuses is one the measurement would
+        // throw on.
+        if (!IsWellFormed(entry) || entry.CasterObjectId == ownPlayerObjectId)
+            return false;
         TimeSpan age = Age(entry, now);
-        return IsWellFormed(entry)
-            && entry.CasterObjectId != ownPlayerObjectId
-            // Too old to act on, or stamped in the future by a note whose
-            // clock cannot be trusted.
-            && age <= StaleAfter
-            && age >= -StaleAfter;
+        // Too old to act on, or stamped in the future by a note whose clock
+        // cannot be trusted.
+        return age <= StaleAfter && age >= -StaleAfter;
     }
 
     private static TimeSpan Age(PeerCastEntry entry, DateTimeOffset now) =>
@@ -542,8 +589,12 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         /// The recent casts this client has announced, oldest first. A
         /// heartbeat carries them again unchanged; a reader tells old from
         /// new by the sequence.
+        ///
+        /// <para>Nullable because the wire is a file another process wrote:
+        /// a JSON null in the array lands here as a null element, and the
+        /// type has to say so or the check for one reads as dead code.</para>
         /// </summary>
-        public PeerCastEntry[] Casts { get; set; } = [];
+        public PeerCastEntry?[] Casts { get; set; } = [];
 
         public static PeerDocument From(
             in PluginNetworkClient client,
