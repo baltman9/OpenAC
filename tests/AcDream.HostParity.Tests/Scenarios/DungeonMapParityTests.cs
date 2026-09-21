@@ -23,11 +23,17 @@ public sealed class DungeonMapParityTests
             Assert.Equal(ParityPlayerBody.Landblock, landblock);
 
             transcript.Step("a sealed cell, without the files to say");
-            transcript.Record("sealed", map.IsSealedDungeon(ParityPlayerBody.Cell));
+            bool sealedCell = map.IsSealedDungeon(ParityPlayerBody.Cell);
+            transcript.Record("sealed", sealedCell);
+            // Neither arm holds the files, so neither can say a cell is
+            // sealed; the honest answer is no, not a guess.
+            Assert.False(sealedCell);
 
             transcript.Step("the plan, without the files to read");
             PluginDungeonFloorplan plan = map.CaptureFloorplan(landblock);
             transcript.Record("empty", plan.IsEmpty);
             transcript.Record("layers", plan.Layers.Count);
+            Assert.True(plan.IsEmpty);
+            Assert.Empty(plan.Layers);
         });
 }

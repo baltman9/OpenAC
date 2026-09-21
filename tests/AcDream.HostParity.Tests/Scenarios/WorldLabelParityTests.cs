@@ -31,7 +31,10 @@ public sealed class WorldLabelParityTests
             ]);
             transcript.Record("taken", taken);
             Assert.True(taken);
-            Record(transcript, arm);
+            // The two unusable entries are dropped; the two usable ones show.
+            AssertShown(transcript, arm,
+                $"{ParityWorld.Monster:X8} 'Drudge' line 0",
+                $"{ParityWorld.Monster:X8} '12 m' line 1");
 
             transcript.Step("a set past the cap");
             PluginWorldLabel[] tooMany = Enumerable
@@ -42,27 +45,39 @@ public sealed class WorldLabelParityTests
             bool refused = labels.ShowLabels(tooMany);
             transcript.Record("taken", refused);
             Assert.False(refused);
-            Record(transcript, arm);
+            // A refused set leaves the labels already showing as they were.
+            AssertShown(transcript, arm,
+                $"{ParityWorld.Monster:X8} 'Drudge' line 0",
+                $"{ParityWorld.Monster:X8} '12 m' line 1");
 
             transcript.Step("an empty set clears");
-            transcript.Record("taken", labels.ShowLabels([]));
-            Record(transcript, arm);
+            bool cleared = labels.ShowLabels([]);
+            transcript.Record("taken", cleared);
+            Assert.True(cleared);
+            AssertShown(transcript, arm);
         });
 
     /// <summary>
     /// What the drawing side of either client would read back: the same
-    /// surface object a plugin pushed into, on both.
+    /// surface object a plugin pushed into, on both. Each arm is held to
+    /// the expected set on its own; two clients agreeing on the wrong set
+    /// would not be parity worth having.
     /// </summary>
-    private static void Record(ParityTranscript transcript, ParityArm arm)
+    private static void AssertShown(
+        ParityTranscript transcript,
+        ParityArm arm,
+        params string[] expected)
     {
         var surface = Assert.IsType<RuntimeAutomationSurface>(arm.Host.Automation);
         IReadOnlyList<PluginWorldLabel> shown = surface.CaptureWorldLabels();
         transcript.Record("shown.count", shown.Count);
+        var lines = new string[shown.Count];
         for (int index = 0; index < shown.Count; index++)
         {
-            transcript.Record(
-                $"shown[{index}]",
-                $"{shown[index].ObjectId:X8} '{shown[index].Text}' line {shown[index].Line}");
+            lines[index] =
+                $"{shown[index].ObjectId:X8} '{shown[index].Text}' line {shown[index].Line}";
+            transcript.Record($"shown[{index}]", lines[index]);
         }
+        Assert.Equal(expected, lines);
     }
 }
