@@ -91,6 +91,31 @@ public sealed class BundledPluginManifestTests
         Assert.Equal(manifest.Version, VersionCore(assemblyVersion));
     }
 
+    /// <summary>What ships in the plugin folder is the other half of the contract boundary: the
+    /// plugin compiles against one contract assembly, and its dependency list has to say the same,
+    /// or the host would be asked to load a client assembly out of a plugin folder.</summary>
+    [Fact]
+    public void TheBuiltPluginFolderShipsNoClientAssemblyBesideThePlugin()
+    {
+        string directory = BundledPluginOutputDirectory();
+
+        string[] clientAssemblies = Directory
+            .EnumerateFiles(directory, "AcDream.*.dll", SearchOption.AllDirectories)
+            .Select(Path.GetFileName)
+            .Select(name => name!)
+            .Where(name => !string.Equals(name, ExpectedEntryDll, StringComparison.Ordinal))
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Empty(clientAssemblies);
+
+        string dependencyList = File.ReadAllText(
+            Path.Combine(directory, "AcDream.Plugins.MossTank.deps.json"));
+        Assert.DoesNotContain("AcDream.Core", dependencyList);
+        Assert.DoesNotContain("AcDream.Runtime", dependencyList);
+        Assert.DoesNotContain("AcDream.Plugin.Abstractions", dependencyList);
+    }
+
     /// <summary>The windowless host scans a <c>plugins</c> folder beside its own executable, so its
     /// build output has to hold a folder the client's discovery accepts, with no manifest written by
     /// hand.</summary>
