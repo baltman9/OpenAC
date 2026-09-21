@@ -926,7 +926,9 @@ Each plugin may have at most `IWorldLabelAutomation.MaximumLabels` (256)
 labels showing. A larger set is refused as a whole -- `ShowLabels` returns
 false and the labels already showing stay -- rather than trimmed, so the
 plugin finds out. Inside an accepted set, a label with a zero object id, no
-text, or a range that is not a positive finite number is dropped and the
+text, text longer than `IWorldLabelAutomation.MaximumTextLength` (128
+characters), a colour component or height offset that is not a finite
+number, or a range that is not a positive finite number is dropped and the
 rest are shown. A label over an object the client does not hold is simply
 not drawn until the object appears.
 

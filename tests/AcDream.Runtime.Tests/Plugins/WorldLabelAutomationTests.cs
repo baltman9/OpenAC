@@ -30,6 +30,11 @@ public sealed class WorldLabelAutomationTests
             Label(0x7000_0005u) with { MaxRange = float.NaN },
             Label(0x7000_0006u) with { HeightOffset = float.NaN },
             Label(0x7000_0007u) with { MaxRange = 12f, Line = 1 },
+            // Text is laid out every frame, so it is capped at the boundary.
+            Label(0x7000_0008u, new string('x', IWorldLabelAutomation.MaximumTextLength + 1)),
+            Label(0x7000_0009u, new string('x', IWorldLabelAutomation.MaximumTextLength)),
+            Label(0x7000_000Au) with { Color = new Vector4(float.NaN, 1f, 1f, 1f) },
+            Label(0x7000_000Bu) with { Color = new Vector4(1f, 1f, 1f, float.PositiveInfinity) },
         ];
 
         Assert.True(surface.Labels.ShowLabels(source));
@@ -37,7 +42,7 @@ public sealed class WorldLabelAutomationTests
 
         IReadOnlyList<PluginWorldLabel> shown = surface.CaptureWorldLabels();
         Assert.Equal(
-            [0x7000_0001u, 0x7000_0007u],
+            [0x7000_0001u, 0x7000_0007u, 0x7000_0009u],
             shown.Select(static label => label.ObjectId).ToArray());
         Assert.Equal(1, shown[1].Line);
     }

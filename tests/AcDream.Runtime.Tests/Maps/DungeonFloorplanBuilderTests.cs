@@ -127,6 +127,37 @@ public sealed class DungeonFloorplanBuilderTests
         Assert.Equal(8, plan.Counts.WallsAfterMerge);
     }
 
+    /// <summary>
+    /// Folding goes round until nothing more folds: a floorless cell whose
+    /// only way down is another floorless cell is folded once that one has
+    /// been. The fixture numbers its cells so a single pass meets the top
+    /// before the middle, which a single pass would leave in its own band.
+    /// </summary>
+    [Fact]
+    public void AFloorlessCellOverAnotherFloorlessCellFoldsAllTheWayDown()
+    {
+        var dats = new ChainedShaftLandblock();
+        var builder = new DungeonFloorplanBuilder(dats, dats.Lock);
+
+        DungeonFloorplan? plan = builder.TryBuild(ChainedShaftLandblock.Landblock);
+
+        Assert.NotNull(plan);
+        DungeonFloorplanLayer ground = Assert.Single(plan.Layers);
+        Assert.Equal(0f, ground.Z);
+        Assert.Single(ground.Floors);
+        // Twelve wall polygons, four per cell, one on top of another: four lines.
+        Assert.Equal(4, ground.Walls.Length);
+        Assert.Equal(
+            [ChainedShaftLandblock.BottomCell, ChainedShaftLandblock.MiddleCell, ChainedShaftLandblock.TopCell],
+            plan.Cells.Select(static cell => cell.CellId).ToArray());
+        Assert.Equal([0f, 0f, 0f], plan.Cells.Select(static cell => cell.LayerZ).ToArray());
+        Assert.Equal(1, plan.Counts.Floors);
+        Assert.Equal(1, plan.Counts.Ceilings);
+        Assert.Equal(2, plan.Counts.Portals);
+        Assert.Equal(12, plan.Counts.Walls);
+        Assert.Equal(4, plan.Counts.WallsAfterMerge);
+    }
+
     private static bool Matches(DungeonFloorplanWall wall, Vector2 a, Vector2 b) =>
         (Near(wall.Start, a) && Near(wall.End, b))
         || (Near(wall.Start, b) && Near(wall.End, a));

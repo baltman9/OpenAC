@@ -19,12 +19,15 @@ public readonly record struct PluginDungeonWall(Vector2 Start, Vector2 End);
 public readonly record struct PluginDungeonCell(uint CellId, Vector3 Center, float LayerZ);
 
 /// <summary>
-/// One storey of a floorplan: the cells whose origin falls in one six-metre
-/// band of height, flattened together.
+/// One storey of a floorplan: the cells whose floor lies in one six-metre
+/// band of height, flattened together. A cell with no floor of its own, such
+/// as the upper cell of a tall room, is drawn in the band of the cell it
+/// opens onto below, however many floorless cells sit between; a cell with
+/// no floor and no way down is drawn in the band its origin is in.
 /// </summary>
 /// <param name="Z">
 /// The lowest height the band covers, in metres; bands are six metres tall
-/// and shifted down three, so a cell at height z is in the band
+/// and shifted down three, so a floor at height z is in the band
 /// floor((z + 3) / 6) * 6.
 /// </param>
 /// <param name="Floors">

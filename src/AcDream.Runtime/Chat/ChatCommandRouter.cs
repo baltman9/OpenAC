@@ -15,6 +15,24 @@ public static class ChatCommandRouter
     /// </summary>
     public const int MaximumRewritePasses = 8;
 
+    /// <summary>
+    /// How deep a line may be submitted from inside the handling of another.
+    /// A plugin interceptor or verb handler that submits chat re-enters the
+    /// router on the same thread with a fresh rewrite count, so the rewrite
+    /// bound does not cover it; a handler that always submits would recurse
+    /// without end. Past this depth a submission is refused with a notice.
+    /// </summary>
+    public const int MaximumReentrancyDepth = 4;
+
+    /// <summary>
+    /// How many submissions are in progress on this thread. Chat is handled
+    /// on the thread that typed it, and a handler that submits again does so
+    /// on the same thread before the first submission returns, so the depth
+    /// is the thread's.
+    /// </summary>
+    [ThreadStatic]
+    private static int t_depth;
+
     public static SubmitOutcome Submit(
         string? raw,
         IChatCommandFeedback feedback,
@@ -29,6 +47,36 @@ public static class ChatCommandRouter
         if (trimmed.Length == 0)
             return SubmitOutcome.Empty;
 
+        if (t_depth >= MaximumReentrancyDepth)
+        {
+            string notice =
+                $"A plugin submitted chat from inside the handling of chat "
+                + $"{t_depth} deep; the line was dropped: {trimmed}";
+            Serilog.Log.Warning("{Notice}", notice);
+            feedback.ShowSystemMessage(notice);
+            return SubmitOutcome.Dropped;
+        }
+
+        t_depth++;
+        try
+        {
+            return SubmitEntered(
+                trimmed, feedback, bus, defaultChannel, defaultTellTarget, defaultTellTargetGuid);
+        }
+        finally
+        {
+            t_depth--;
+        }
+    }
+
+    private static SubmitOutcome SubmitEntered(
+        string trimmed,
+        IChatCommandFeedback feedback,
+        ICommandBus bus,
+        ChatChannelKind defaultChannel,
+        string? defaultTellTarget,
+        uint defaultTellTargetGuid)
+    {
         // Plugin interceptors may rewrite the line, and a rewrite re-enters
         // here so it is treated exactly as if it had been typed: the client's
         // own commands are consulted first and a rewrite can become a plugin

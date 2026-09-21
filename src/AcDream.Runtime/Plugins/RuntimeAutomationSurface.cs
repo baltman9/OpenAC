@@ -2491,6 +2491,11 @@ internal sealed class RuntimeAutomationSurface
             PluginWorldLabel label = labels[index];
             if (label.ObjectId == 0u
                 || string.IsNullOrEmpty(label.Text)
+                || label.Text.Length > IWorldLabelAutomation.MaximumTextLength
+                || !float.IsFinite(label.Color.X)
+                || !float.IsFinite(label.Color.Y)
+                || !float.IsFinite(label.Color.Z)
+                || !float.IsFinite(label.Color.W)
                 || !float.IsFinite(label.MaxRange)
                 || label.MaxRange <= 0f
                 || !float.IsFinite(label.HeightOffset))

@@ -25,6 +25,7 @@ public sealed class ChatCommandRouterInterceptorTests
         internal List<string> VerbsOffered { get; } = [];
         internal HashSet<string> PluginVerbs { get; } = new(StringComparer.OrdinalIgnoreCase);
         internal List<Func<string, PluginChatInputDecision>> Interceptors { get; } = [];
+        internal Action<string>? OnPluginVerb { get; set; }
 
         public void Publish<T>(T command) where T : notnull =>
             Published.Add(command);
@@ -33,7 +34,10 @@ public sealed class ChatCommandRouterInterceptorTests
         {
             VerbsOffered.Add(commandLine);
             string verb = commandLine.Split(' ')[0].TrimStart('/', '@');
-            return PluginVerbs.Contains(verb);
+            if (!PluginVerbs.Contains(verb))
+                return false;
+            OnPluginVerb?.Invoke(commandLine);
+            return true;
         }
 
         public PluginChatInputDecision InterceptChatInput(string typed)
@@ -212,6 +216,78 @@ public sealed class ChatCommandRouterInterceptorTests
         Assert.Equal(
             "hello" + new string('!', ChatCommandRouter.MaximumRewritePasses),
             said.Text);
+    }
+
+    /// <summary>
+    /// An interceptor that submits chat re-enters the router with a fresh
+    /// rewrite count, so the rewrite bound does not cover it. The router
+    /// counts how deep it is instead and refuses past a small bound with a
+    /// notice, rather than recursing until the stack runs out.
+    /// </summary>
+    [Fact]
+    public void AnInterceptorThatSubmitsChatIsRefusedPastTheReentrancyBound()
+    {
+        var bus = new InterceptingBus();
+        var feedback = new RecordingFeedback();
+        int deepest = 0;
+        int depth = 0;
+        bus.Interceptors.Add(typed =>
+        {
+            // The interceptor gives up on its own far past the router's
+            // bound, so a router that does not refuse still ends, and is
+            // seen to have let the recursion run that deep.
+            if (++depth > 64)
+                return PluginChatInputDecision.Pass;
+            deepest = Math.Max(deepest, depth);
+            try
+            {
+                Submit("again " + typed, bus, feedback);
+            }
+            finally
+            {
+                depth--;
+            }
+            return PluginChatInputDecision.Pass;
+        });
+
+        SubmitOutcome outcome = Submit("hello", bus, feedback);
+
+        Assert.Equal(SubmitOutcome.Sent, outcome);
+        Assert.Equal(ChatCommandRouter.MaximumReentrancyDepth, deepest);
+        Assert.Contains(feedback.Lines, line => line.Contains("dropped", StringComparison.Ordinal));
+        // The submissions inside the bound went out; the one past it did not.
+        Assert.Equal(ChatCommandRouter.MaximumReentrancyDepth, bus.Published.Count);
+    }
+
+    /// <summary>The same guard covers a plugin verb handler that submits chat.</summary>
+    [Fact]
+    public void AVerbHandlerThatSubmitsChatIsRefusedPastTheReentrancyBound()
+    {
+        var bus = new InterceptingBus();
+        var feedback = new RecordingFeedback();
+        int deepest = 0;
+        int depth = 0;
+        bus.PluginVerbs.Add("echo");
+        bus.OnPluginVerb = line =>
+        {
+            if (++depth > 64)
+                return;
+            deepest = Math.Max(deepest, depth);
+            try
+            {
+                Submit(line, bus, feedback);
+            }
+            finally
+            {
+                depth--;
+            }
+        };
+
+        SubmitOutcome outcome = Submit("/echo hello", bus, feedback);
+
+        Assert.Equal(SubmitOutcome.ClientHandled, outcome);
+        Assert.Equal(ChatCommandRouter.MaximumReentrancyDepth, deepest);
+        Assert.Contains(feedback.Lines, line => line.Contains("dropped", StringComparison.Ordinal));
     }
 
     [Fact]

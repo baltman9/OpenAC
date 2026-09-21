@@ -11,11 +11,13 @@ namespace AcDream.Plugin.Abstractions;
 /// a zero id is dropped.
 /// </param>
 /// <param name="Text">
-/// What the label says. A label with no text is dropped. Text is drawn on
-/// one line as given; it is not wrapped.
+/// What the label says. A label with no text, or with more than
+/// <see cref="IWorldLabelAutomation.MaximumTextLength"/> characters, is
+/// dropped. Text is drawn on one line as given; it is not wrapped.
 /// </param>
 /// <param name="Color">
-/// The text colour, red, green, blue and alpha each from 0 to 1.
+/// The text colour, red, green, blue and alpha each from 0 to 1. A label
+/// whose colour has a component that is not a finite number is dropped.
 /// </param>
 /// <param name="HeightOffset">
 /// Metres added to the host's own measure of the object's height, so a label
@@ -63,10 +65,19 @@ public interface IWorldLabelAutomation
     const int MaximumLabels = 256;
 
     /// <summary>
+    /// The most characters one label's text may have. A label is laid out
+    /// again every frame, so its text is bounded; a longer one is dropped
+    /// from the set rather than cut short.
+    /// </summary>
+    const int MaximumTextLength = 128;
+
+    /// <summary>
     /// Replaces every label this plugin has showing with the given set. The
     /// set is copied; the list may be reused afterwards. Labels with a zero
-    /// object id, no text, or a range that is not a positive finite number
-    /// are dropped from the set. An empty set clears the plugin's labels.
+    /// object id, no text, text longer than <see cref="MaximumTextLength"/>,
+    /// a colour component or height offset that is not a finite number, or
+    /// a range that is not a positive finite number are dropped from the
+    /// set. An empty set clears the plugin's labels.
     /// </summary>
     /// <param name="labels">The labels to show from now on.</param>
     /// <returns>
