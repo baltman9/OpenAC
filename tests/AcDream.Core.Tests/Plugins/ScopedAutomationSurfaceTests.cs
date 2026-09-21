@@ -113,9 +113,9 @@ public sealed class ScopedAutomationSurfaceTests
         EventInfo[] events = typeof(IPluginChat)
             .GetEvents(BindingFlags.Public | BindingFlags.Instance);
         Assert.True(
-            methods.Length == 11 && events.Length == 2,
+            methods.Length == 12 && events.Length == 2,
             "IPluginChat should still have exactly the members this test "
-                + "knows about (11 methods incl. event accessors, 2 events) -- "
+                + "knows about (12 methods incl. event accessors, 2 events) -- "
                 + "a member was added or removed without updating this test.");
 
         chat.CaptureMessages(0);
@@ -138,6 +138,9 @@ public sealed class ScopedAutomationSurfaceTests
 
         chat.RegisterFilter(static _ => true);
         Assert.Equal(1, recording.FilterCount);
+
+        chat.RegisterInputInterceptor(static _ => PluginChatInputDecision.Pass);
+        Assert.Equal(1, recording.InterceptorCount);
 
         chat.LinkClicked += static _ => { };
         Assert.Equal(1, recording.LinkClickedSubscriberCount);
@@ -209,6 +212,15 @@ public sealed class ScopedAutomationSurfaceTests
         {
             _filters.Add(suppress);
             return new Removal(this, suppress);
+        }
+
+        internal int InterceptorCount { get; private set; }
+
+        public IDisposable RegisterInputInterceptor(
+            Func<string, PluginChatInputDecision> intercept)
+        {
+            InterceptorCount++;
+            return NoOpPluginRegistration.Instance;
         }
 
         public event Action<PluginChatLinkClicked> LinkClicked

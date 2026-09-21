@@ -75,6 +75,51 @@ public sealed class FakePluginChat : IPluginChat
     public IDisposable RegisterFilter(Func<PluginChatMessage, bool> suppress) =>
         NoOpPluginRegistration.Instance;
 
+    /// <summary>
+    /// Every input interceptor currently installed, in registration order.
+    /// A test drives them with <see cref="Intercept"/>.
+    /// </summary>
+    public List<Func<string, PluginChatInputDecision>> InputInterceptors { get; } = [];
+
+    /// <inheritdoc/>
+    public IDisposable RegisterInputInterceptor(
+        Func<string, PluginChatInputDecision> intercept)
+    {
+        ArgumentNullException.ThrowIfNull(intercept);
+        lock (_gate)
+            InputInterceptors.Add(intercept);
+        return new InterceptorRemoval(this, intercept);
+    }
+
+    /// <summary>
+    /// Runs <paramref name="typed"/> through the installed interceptors the
+    /// way a host does: in order, the first that does not pass decides.
+    /// </summary>
+    public PluginChatInputDecision Intercept(string typed)
+    {
+        Func<string, PluginChatInputDecision>[] interceptors;
+        lock (_gate)
+            interceptors = InputInterceptors.ToArray();
+        foreach (Func<string, PluginChatInputDecision> interceptor in interceptors)
+        {
+            PluginChatInputDecision decision = interceptor(typed);
+            if (decision.Action != PluginChatInputAction.Pass)
+                return decision;
+        }
+        return PluginChatInputDecision.Pass;
+    }
+
+    private sealed class InterceptorRemoval(
+        FakePluginChat owner,
+        Func<string, PluginChatInputDecision> intercept) : IDisposable
+    {
+        public void Dispose()
+        {
+            lock (owner._gate)
+                owner.InputInterceptors.Remove(intercept);
+        }
+    }
+
     /// <inheritdoc/>
     public void PostSystemMessage(string text)
     {

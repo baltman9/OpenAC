@@ -275,6 +275,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     {
         private readonly object _gate = new();
         private readonly List<IDisposable> _filters = [];
+        private readonly List<IDisposable> _interceptors = [];
         private readonly List<Action<PluginChatLinkClicked>> _linkClickedSubscriptions = [];
         private readonly List<Action<PluginChatMessage>> _subscriptions = [];
         private bool _disposed;
@@ -307,6 +308,48 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             return inner.Submit(text);
+        }
+
+        public IDisposable RegisterInputInterceptor(
+            Func<string, PluginChatInputDecision> intercept)
+        {
+            ArgumentNullException.ThrowIfNull(intercept);
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            // The cap is checked before the host is touched, so a refused
+            // registration leaves nothing behind on the host to revoke.
+            lock (_gate)
+            {
+                if (_interceptors.Count >= IPluginChat.MaximumInputInterceptors)
+                {
+                    throw new InvalidOperationException(
+                        $"This plugin already has {IPluginChat.MaximumInputInterceptors} chat input interceptors installed.");
+                }
+            }
+            IDisposable registration = inner.RegisterInputInterceptor(intercept);
+            lock (_gate)
+            {
+                if (!_disposed
+                    && _interceptors.Count < IPluginChat.MaximumInputInterceptors)
+                {
+                    _interceptors.Add(registration);
+                    return new IndividualInterceptor(this, registration);
+                }
+            }
+            registration.Dispose();
+            if (_disposed)
+                throw new ObjectDisposedException(nameof(ScopedPluginChat));
+            throw new InvalidOperationException(
+                $"This plugin already has {IPluginChat.MaximumInputInterceptors} chat input interceptors installed.");
+        }
+
+        private void RemoveInterceptor(IDisposable registration)
+        {
+            lock (_gate)
+            {
+                if (!_interceptors.Remove(registration))
+                    return;
+            }
+            registration.Dispose();
         }
 
         public event Action<PluginChatLinkClicked> LinkClicked
@@ -441,6 +484,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         public void Dispose()
         {
             IDisposable[] filters;
+            IDisposable[] interceptors;
             Action<PluginChatLinkClicked>[] linkClickedSubscriptions;
             Action<PluginChatMessage>[] subscriptions;
             lock (_gate)
@@ -450,6 +494,8 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
                 _disposed = true;
                 filters = _filters.ToArray();
                 _filters.Clear();
+                interceptors = _interceptors.ToArray();
+                _interceptors.Clear();
                 linkClickedSubscriptions = _linkClickedSubscriptions.ToArray();
                 _linkClickedSubscriptions.Clear();
                 subscriptions = _subscriptions.ToArray();
@@ -459,6 +505,12 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             for (int index = filters.Length - 1; index >= 0; index--)
             {
                 try { filters[index].Dispose(); }
+                catch { }
+            }
+
+            for (int index = interceptors.Length - 1; index >= 0; index--)
+            {
+                try { interceptors[index].Dispose(); }
                 catch { }
             }
 
@@ -483,6 +535,16 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
 
             public void Dispose() => Interlocked.Exchange(ref _owner, null)?
                 .RemoveFilter(registration);
+        }
+
+        private sealed class IndividualInterceptor(
+            ScopedPluginChat owner,
+            IDisposable registration) : IDisposable
+        {
+            private ScopedPluginChat? _owner = owner;
+
+            public void Dispose() => Interlocked.Exchange(ref _owner, null)?
+                .RemoveInterceptor(registration);
         }
     }
 

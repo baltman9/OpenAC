@@ -1517,6 +1517,9 @@ public sealed class GameWindow :
                     _automation is null
                         ? null
                         : _automation.TryHandlePluginCommand,
+                    _automation is null
+                        ? null
+                        : _automation.InterceptChatInput,
                     _statusWriter),
                 this).Compose(
                     hostInputCamera,

@@ -1,3 +1,4 @@
+using AcDream.Plugin.Abstractions;
 using AcDream.Core.Chat;
 using AcDream.Core.Net.Messages;
 using AcDream.Runtime.Gameplay;
@@ -318,11 +319,15 @@ public sealed class LiveChatCommandSurface : IPluginCommandBus
 {
     private readonly object _gate = new();
     private readonly Func<string, bool>? _tryHandlePluginCommand;
+    private readonly Func<string, PluginChatInputDecision>? _interceptChatInput;
     private LiveChatCommandRoute? _active;
 
-    public LiveChatCommandSurface(Func<string, bool>? tryHandlePluginCommand = null)
+    public LiveChatCommandSurface(
+        Func<string, bool>? tryHandlePluginCommand = null,
+        Func<string, PluginChatInputDecision>? interceptChatInput = null)
     {
         _tryHandlePluginCommand = tryHandlePluginCommand;
+        _interceptChatInput = interceptChatInput;
     }
 
     public ILiveSessionCommandRouting Attach(LiveChatCommandRoute route)
@@ -350,6 +355,9 @@ public sealed class LiveChatCommandSurface : IPluginCommandBus
 
     public bool TryHandlePluginCommand(string commandLine) =>
         _tryHandlePluginCommand?.Invoke(commandLine) == true;
+
+    public PluginChatInputDecision InterceptChatInput(string typed) =>
+        _interceptChatInput?.Invoke(typed) ?? PluginChatInputDecision.Pass;
 
     private void Release(LiveChatCommandRoute expected)
     {

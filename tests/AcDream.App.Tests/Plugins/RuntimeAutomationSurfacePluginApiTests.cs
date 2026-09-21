@@ -290,6 +290,66 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
         Assert.Equal(0, runtime.CommunicationOwner.Chat.Count);
     }
 
+    /// <summary>
+    /// The windowed client's plugin host over the shared surface, and the
+    /// bus its session composition hangs off that surface: an interceptor a
+    /// plugin registers through the host is what the bus answers the chat
+    /// router with, so a typed line goes out rewritten.
+    /// </summary>
+    [Fact]
+    public void AnInterceptorRegisteredThroughTheWindowedHostRewritesWhatTheRouterSends()
+    {
+        using var surface = new RuntimeAutomationSurface();
+        IPluginHost host = new AppPluginHost(
+            new TestPluginLogger(), new WorldGameState(), new WorldEvents(),
+            new SelectionState(), NoOpUiRegistry.Instance, surface);
+        using IDisposable alias = host.Automation.Chat.RegisterInputInterceptor(
+            static typed => typed == "go"
+                ? PluginChatInputDecision.Rewrite("hello there")
+                : PluginChatInputDecision.Pass);
+        // The bus exactly as the session composition builds it, with the
+        // surface's decision behind it.
+        var bus = new AcDream.App.Net.LiveSessionCommandSurface(
+            interceptChatInput: surface.InterceptChatInput);
+        using var communication = new RuntimeCommunicationState();
+
+        PluginChatInputDecision decision =
+            ((AcDream.Runtime.Chat.IPluginCommandBus)bus).InterceptChatInput("go");
+        var recording = new RecordingPluginBus(bus);
+        AcDream.Runtime.Chat.SubmitOutcome outcome = AcDream.Runtime.Chat.ChatCommandRouter.Submit(
+            "go",
+            new AcDream.Runtime.Chat.RuntimeChatCommandFeedback(communication),
+            recording,
+            AcDream.Runtime.Chat.ChatChannelKind.Say);
+
+        Assert.Equal(PluginChatInputAction.Rewrite, decision.Action);
+        Assert.Equal("hello there", decision.Text);
+        Assert.Equal(AcDream.Runtime.Chat.SubmitOutcome.Sent, outcome);
+        var said = Assert.IsType<AcDream.Runtime.Chat.SendChatCmd>(
+            Assert.Single(recording.Published));
+        Assert.Equal("hello there", said.Text);
+    }
+
+    /// <summary>
+    /// The windowed bus with what was published kept, so the words that
+    /// would have gone to the world can be read back.
+    /// </summary>
+    private sealed class RecordingPluginBus(
+        AcDream.Runtime.Chat.IPluginCommandBus inner)
+        : AcDream.Runtime.Chat.IPluginCommandBus
+    {
+        internal List<object> Published { get; } = [];
+
+        public void Publish<T>(T command) where T : notnull =>
+            Published.Add(command);
+
+        public bool TryHandlePluginCommand(string commandLine) =>
+            inner.TryHandlePluginCommand(commandLine);
+
+        public PluginChatInputDecision InterceptChatInput(string typed) =>
+            inner.InterceptChatInput(typed);
+    }
+
     [Fact]
     public void UnbindingRemovesTheSurfaceFiltersFromTheSessionsLog()
     {

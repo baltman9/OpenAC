@@ -84,6 +84,7 @@ internal sealed record SessionPlayerDependencies(
     TransferableResourceSlot<PortalTunnelPresentation> PortalTunnelFallback,
     Action<string> Log,
     Func<string, bool>? TryHandlePluginCommand,
+    Func<string, AcDream.Plugin.Abstractions.PluginChatInputDecision>? InterceptChatInput,
     SessionStatusWriter StatusWriter)
 {
     public RuntimeActionState Actions => Runtime.ActionOwner;
@@ -332,7 +333,8 @@ internal sealed class SessionPlayerCompositionPhase
 
         bindings = new SessionPlayerRuntimeBindings();
         var liveSessionCommands = new LiveSessionCommandSurface(
-            d.TryHandlePluginCommand);
+            d.TryHandlePluginCommand,
+            d.InterceptChatInput);
         var settingsTargets = new RuntimeSettingsTargets(
             d.Settings.DisplayWindowTarget ?? new SilkRuntimeDisplayWindowTarget(d.Window),
             live.DrawDispatcher,

@@ -42,7 +42,7 @@ internal sealed class WindowlessArm : ParityArm
     /// hangs it: the shared chat command route behind the surface the host
     /// hands its console and its plugins.
     /// </summary>
-    private readonly LiveChatCommandSurface _chatCommands = new();
+    private readonly LiveChatCommandSurface _chatCommands;
     private DirectGameRuntimeCommandAdapter _commands = null!;
 
     internal WindowlessArm()
@@ -61,6 +61,11 @@ internal sealed class WindowlessArm : ParityArm
                 sessionOperations: operations))
     {
         _gameplay = gameplay;
+        // The bus asks this client's plugin host what its plugins make of a
+        // typed line, as the session host hangs it; the verb lookup is left
+        // out so the bare route the chat scenarios pin stays bare.
+        _chatCommands = new LiveChatCommandSurface(
+            interceptChatInput: line => _host!.InterceptChatInput(line));
         _gameplay.Bind(Runtime, catalog: null, accountName: () => "parity");
         // The windowless client's own command adapter, the one its session
         // host really builds, over this arm's session.

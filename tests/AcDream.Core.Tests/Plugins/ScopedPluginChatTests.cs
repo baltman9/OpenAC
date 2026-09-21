@@ -59,6 +59,101 @@ public sealed class ScopedPluginChatTests
         Assert.Equal(0, chat.FilterCount);
     }
 
+    // -- Input interceptors ------------------------------------------------
+
+    [Fact]
+    public void UnloadingAPluginRemovesEveryInputInterceptorItLeft()
+    {
+        var chat = new RecordingChat();
+        var scoped = new ScopedPluginHost(
+            new StubHost(chat), "example.plugin", "Example");
+
+        scoped.Automation.Chat.RegisterInputInterceptor(
+            static _ => PluginChatInputDecision.Pass);
+        scoped.Automation.Chat.RegisterInputInterceptor(
+            static _ => PluginChatInputDecision.Suppress);
+        Assert.Equal(2, chat.InterceptorCount);
+
+        scoped.Dispose();
+
+        Assert.Equal(0, chat.InterceptorCount);
+    }
+
+    [Fact]
+    public void DisposingOneInterceptorRegistrationLeavesTheOthers()
+    {
+        var chat = new RecordingChat();
+        var scoped = new ScopedPluginHost(
+            new StubHost(chat), "example.plugin", "Example");
+
+        IDisposable first = scoped.Automation.Chat.RegisterInputInterceptor(
+            static _ => PluginChatInputDecision.Pass);
+        scoped.Automation.Chat.RegisterInputInterceptor(
+            static _ => PluginChatInputDecision.Pass);
+
+        first.Dispose();
+        Assert.Equal(1, chat.InterceptorCount);
+
+        scoped.Dispose();
+        Assert.Equal(0, chat.InterceptorCount);
+    }
+
+    [Fact]
+    public void APluginPastTheInterceptorCapIsRefusedAndTheHostIsNotTouched()
+    {
+        var chat = new RecordingChat();
+        var scoped = new ScopedPluginHost(
+            new StubHost(chat), "example.plugin", "Example");
+        for (int index = 0; index < IPluginChat.MaximumInputInterceptors; index++)
+        {
+            scoped.Automation.Chat.RegisterInputInterceptor(
+                static _ => PluginChatInputDecision.Pass);
+        }
+
+        Assert.Throws<InvalidOperationException>(() =>
+            scoped.Automation.Chat.RegisterInputInterceptor(
+                static _ => PluginChatInputDecision.Pass));
+        Assert.Equal(IPluginChat.MaximumInputInterceptors, chat.InterceptorCount);
+
+        scoped.Dispose();
+        Assert.Equal(0, chat.InterceptorCount);
+    }
+
+    [Fact]
+    public void DisposingAnInterceptorFreesItsPlaceUnderTheCap()
+    {
+        var chat = new RecordingChat();
+        var scoped = new ScopedPluginHost(
+            new StubHost(chat), "example.plugin", "Example");
+        var handles = new List<IDisposable>();
+        for (int index = 0; index < IPluginChat.MaximumInputInterceptors; index++)
+        {
+            handles.Add(scoped.Automation.Chat.RegisterInputInterceptor(
+                static _ => PluginChatInputDecision.Pass));
+        }
+
+        handles[0].Dispose();
+        using IDisposable again = scoped.Automation.Chat.RegisterInputInterceptor(
+            static _ => PluginChatInputDecision.Pass);
+
+        Assert.Equal(IPluginChat.MaximumInputInterceptors, chat.InterceptorCount);
+        scoped.Dispose();
+    }
+
+    [Fact]
+    public void RegisteringAnInterceptorAfterUnloadThrowsWithoutTouchingTheHost()
+    {
+        var chat = new RecordingChat();
+        var scoped = new ScopedPluginHost(
+            new StubHost(chat), "example.plugin", "Example");
+        scoped.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() =>
+            scoped.Automation.Chat.RegisterInputInterceptor(
+                static _ => PluginChatInputDecision.Pass));
+        Assert.Equal(0, chat.InterceptorCount);
+    }
+
     [Fact]
     public void CallingChatMethodsAfterUnloadThrows()
     {
@@ -122,9 +217,25 @@ public sealed class ScopedPluginChatTests
     private sealed class RecordingChat : IPluginChat
     {
         private readonly List<Func<PluginChatMessage, bool>> _filters = [];
+        private readonly List<Func<string, PluginChatInputDecision>> _interceptors = [];
         private Action<PluginChatMessage>? _received;
 
         internal int FilterCount => _filters.Count;
+        internal int InterceptorCount => _interceptors.Count;
+
+        public IDisposable RegisterInputInterceptor(
+            Func<string, PluginChatInputDecision> intercept)
+        {
+            _interceptors.Add(intercept);
+            return new InterceptorRemoval(this, intercept);
+        }
+
+        private sealed class InterceptorRemoval(
+            RecordingChat owner,
+            Func<string, PluginChatInputDecision> intercept) : IDisposable
+        {
+            public void Dispose() => owner._interceptors.Remove(intercept);
+        }
         internal int SubscriberCount =>
             _received?.GetInvocationList().Length ?? 0;
 

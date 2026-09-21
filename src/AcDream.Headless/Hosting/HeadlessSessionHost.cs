@@ -283,7 +283,9 @@ internal sealed class HeadlessSessionHost : IDisposable
             // until the plugin session below is built -- so the verb lookup is
             // resolved when a line arrives rather than captured now.
             var chatCommandSurface = new LiveChatCommandSurface(
-                line => pluginSession?.Host.TryHandlePluginCommand(line) == true);
+                line => pluginSession?.Host.TryHandlePluginCommand(line) == true,
+                line => pluginSession?.Host.InterceptChatInput(line)
+                    ?? AcDream.Plugin.Abstractions.PluginChatInputDecision.Pass);
             var loginCommands = new LoginCommandSequence(
                 descriptor.LoginCommands,
                 TimeSpan.FromMilliseconds(descriptor.LoginCommandDelayMs),

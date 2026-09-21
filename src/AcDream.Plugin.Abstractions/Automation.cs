@@ -689,12 +689,79 @@ public readonly record struct PluginChatMessage(
     public DateTimeOffset Received { get; init; }
 }
 
+/// <summary>What an input interceptor decided about a line the player typed.</summary>
+public enum PluginChatInputAction
+{
+    /// <summary>Leave the line alone; the next interceptor, if any, sees it.</summary>
+    Pass,
+
+    /// <summary>
+    /// Replace the line with <see cref="PluginChatInputDecision.Text"/> and
+    /// run the replacement through the chat pipeline from the start.
+    /// </summary>
+    Rewrite,
+
+    /// <summary>
+    /// Drop the line. It is sent nowhere, no command runs for it, and the
+    /// player is told nothing unless the plugin says something itself.
+    /// </summary>
+    Suppress,
+}
+
 /// <summary>
-/// Reading the client's text, printing into it, and dropping lines before
-/// they are shown.
+/// The answer an input interceptor gives for one typed line. Build it from
+/// <see cref="Pass"/>, <see cref="Suppress"/> or <see cref="Rewrite(string)"/>;
+/// the default value is <see cref="Pass"/>.
+/// </summary>
+public readonly record struct PluginChatInputDecision
+{
+    private PluginChatInputDecision(PluginChatInputAction action, string? text)
+    {
+        Action = action;
+        Text = text;
+    }
+
+    /// <summary>What to do with the line.</summary>
+    public PluginChatInputAction Action { get; }
+
+    /// <summary>
+    /// The replacement line when <see cref="Action"/> is
+    /// <see cref="PluginChatInputAction.Rewrite"/>; null otherwise.
+    /// </summary>
+    public string? Text { get; }
+
+    /// <summary>Leave the line alone.</summary>
+    public static PluginChatInputDecision Pass { get; } = default;
+
+    /// <summary>Drop the line without sending it anywhere.</summary>
+    public static PluginChatInputDecision Suppress { get; } =
+        new(PluginChatInputAction.Suppress, null);
+
+    /// <summary>
+    /// Replace the line with <paramref name="text"/>. A blank replacement is
+    /// treated as <see cref="Suppress"/> by the host.
+    /// </summary>
+    /// <param name="text">The line to send instead of what was typed.</param>
+    public static PluginChatInputDecision Rewrite(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        return new(PluginChatInputAction.Rewrite, text);
+    }
+}
+
+/// <summary>
+/// Reading the client's text, printing into it, dropping lines before they
+/// are shown, and intercepting lines before they are sent.
 /// </summary>
 public interface IPluginChat
 {
+    /// <summary>
+    /// The most input interceptors one plugin may have installed at once. A
+    /// registration past this is refused with an exception rather than
+    /// silently ignored, so a plugin finds out.
+    /// </summary>
+    const int MaximumInputInterceptors = 16;
+
     /// <summary>
     /// Every retained line whose <see cref="PluginChatMessage.Sequence"/> is
     /// above the one given. The host keeps only the most recent few hundred
@@ -732,6 +799,46 @@ public interface IPluginChat
     /// filter a plugin installed when that plugin unloads.
     /// </summary>
     IDisposable RegisterFilter(Func<PluginChatMessage, bool> suppress) =>
+        NoOpPluginRegistration.Instance;
+
+    /// <summary>
+    /// Installs an interceptor consulted for every line the player sends from
+    /// the chat entry, on either front end, and for every line a plugin sends
+    /// through <see cref="Submit"/>. The interceptor sees the line trimmed,
+    /// otherwise exactly as typed, and answers with a
+    /// <see cref="PluginChatInputDecision"/>.
+    /// <para>
+    /// Ordering: interceptors run AFTER the client's own command catalogue, so
+    /// a line the client claims as one of its own commands never reaches an
+    /// interceptor and no plugin can shadow or rewrite a client command. They
+    /// run BEFORE plugin verbs and before the line is dispatched to a channel
+    /// or a tell, so a rewritten line can itself become a plugin verb or a
+    /// channel message. Interceptors run in registration order across every
+    /// plugin, and the first one that does not pass decides.
+    /// </para>
+    /// <para>
+    /// A rewrite is fed back through the pipeline from the start, so it may be
+    /// intercepted again. The host bounds the rewrite passes; once the bound
+    /// is reached the last text is sent as it stands. A suppressed line is
+    /// sent nowhere and runs no command; the player is told nothing unless
+    /// the plugin posts something. An interceptor that throws is logged once
+    /// and skipped for that line, and chat carries on without it.
+    /// </para>
+    /// Dispose the result to remove the interceptor; the host also removes
+    /// every interceptor a plugin installed when that plugin unloads. A host
+    /// that has no chat pipeline to intercept returns a handle that revokes
+    /// nothing and never calls the interceptor, which is what the default
+    /// implementation does.
+    /// </summary>
+    /// <param name="intercept">
+    /// Given the typed line, answers what to do with it.
+    /// </param>
+    /// <returns>A handle that removes the interceptor when disposed.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The plugin already has <see cref="MaximumInputInterceptors"/> installed.
+    /// </exception>
+    IDisposable RegisterInputInterceptor(
+        Func<string, PluginChatInputDecision> intercept) =>
         NoOpPluginRegistration.Instance;
 
     /// <summary>
