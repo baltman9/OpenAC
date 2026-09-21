@@ -332,8 +332,6 @@ public sealed class RuntimePlacementShadowCompositionTests
             GpuWorldState spatial,
             LiveEntityRuntime runtime,
             RuntimeWorldTransitState transit,
-            WorldGameState worldState,
-            WorldEvents worldEvents,
             EntityEffectPoseRegistry effectPoses,
             LocalPlayerShadowState localShadow,
             LocalPlayerShadowSynchronizer synchronizer)
@@ -342,20 +340,15 @@ public sealed class RuntimePlacementShadowCompositionTests
             Spatial = spatial;
             Runtime = runtime;
             Transit = transit;
-            WorldState = worldState;
-            WorldEvents = worldEvents;
             EffectPoses = effectPoses;
             LocalShadow = localShadow;
             Synchronizer = synchronizer;
             Sink = new RuntimePlacementPresentationSink(
                 runtime,
                 transit,
-                worldState,
-                worldEvents,
                 effectPoses,
                 synchronizer,
                 () => Guid,
-                _ => { },
                 [(_, _) => { }]);
         }
 
@@ -363,8 +356,6 @@ public sealed class RuntimePlacementShadowCompositionTests
         internal GpuWorldState Spatial { get; }
         internal LiveEntityRuntime Runtime { get; }
         internal RuntimeWorldTransitState Transit { get; }
-        internal WorldGameState WorldState { get; }
-        internal WorldEvents WorldEvents { get; }
         internal EntityEffectPoseRegistry EffectPoses { get; }
         internal LocalPlayerShadowState LocalShadow { get; }
         internal LocalPlayerShadowSynchronizer Synchronizer { get; }
@@ -413,8 +404,6 @@ public sealed class RuntimePlacementShadowCompositionTests
                 spatial,
                 runtime,
                 new RuntimeWorldTransitState(),
-                new WorldGameState(),
-                new WorldEvents(),
                 new EntityEffectPoseRegistry(),
                 localShadow,
                 synchronizer);
@@ -427,13 +416,6 @@ public sealed class RuntimePlacementShadowCompositionTests
                 record.Canonical));
             Assert.True(record.ResourcesRegistered);
             WorldEntity entity = record.WorldEntity!;
-            var snapshot = new AcDream.Plugin.Abstractions.WorldEntitySnapshot(
-                entity.Id,
-                entity.SourceGfxObjOrSetupId,
-                entity.Position,
-                entity.Rotation);
-            WorldState.Add(snapshot);
-            WorldEvents.UpsertCurrent(snapshot);
             EffectPoses.PublishMeshRefs(entity);
             return record;
         }

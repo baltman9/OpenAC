@@ -1,3 +1,4 @@
+using AcDream.Content;
 using System.Globalization;
 using System.Text;
 using AcDream.App.Spells;
@@ -46,7 +47,7 @@ public sealed class AppraisalUiController : IRetainedPanelController
 
     private readonly ImportedLayout _layout;
     private readonly ClientObjectTable _objects;
-    private readonly ItemInteractionController _interaction;
+    private readonly RuntimeItemInteraction _interaction;
     private readonly SelectionState _selection;
     private readonly CombatState _combat;
     private readonly Spellbook _spellbook;
@@ -110,7 +111,7 @@ public sealed class AppraisalUiController : IRetainedPanelController
     private AppraisalUiController(
         ImportedLayout layout,
         ClientObjectTable objects,
-        ItemInteractionController interaction,
+        RuntimeItemInteraction interaction,
         SelectionState selection,
         CombatState combat,
         Spellbook spellbook,
@@ -265,12 +266,26 @@ public sealed class AppraisalUiController : IRetainedPanelController
     }
 
     public AppraisalView ActiveView => _activeView;
-    public uint CurrentObjectId => _interaction.CurrentAppraisalId;
+
+    /// <summary>
+    /// What this window is showing — which is not the same question as which
+    /// appraisal the client last asked the server for. A plugin's appraisal
+    /// travels the same wire exchange without ever being presented, so the
+    /// answer comes from the page on screen and not from the request slot.
+    /// The portrait in the creature page renders whatever this names.
+    /// </summary>
+    public uint CurrentObjectId => _activeView switch
+    {
+        AppraisalView.Item => _itemObjectId,
+        AppraisalView.Creature => _creatureObjectId,
+        AppraisalView.Character => _characterObjectId,
+        _ => 0u,
+    };
 
     public static AppraisalUiController? Bind(
         ImportedLayout layout,
         ClientObjectTable objects,
-        ItemInteractionController interaction,
+        RuntimeItemInteraction interaction,
         SelectionState selection,
         CombatState combat,
         Spellbook spellbook,
@@ -403,7 +418,7 @@ public sealed class AppraisalUiController : IRetainedPanelController
 
     public bool Apply(AppraiseInfoParser.Parsed appraisal)
     {
-        ItemInteractionController.AppraisalResponseAcceptance acceptance =
+        RuntimeItemInteraction.AppraisalResponseAcceptance acceptance =
             _interaction.AcceptAppraisalResponse(appraisal.Guid);
         if (!acceptance.Accepted)
             return false;

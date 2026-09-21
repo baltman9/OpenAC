@@ -413,6 +413,186 @@ public sealed class RuntimeCombatAttackStateTests
         Assert.Equal(0, cancels);
     }
 
+    [Fact]
+    public void AutomationControlledAttacksAskForNoAutoTargetOnStartOrSend()
+    {
+        double now = 1d;
+        var allowed = new List<bool>();
+        var combat = new CombatState();
+        using var controller = new RuntimeCombatAttackState(
+            combat,
+            new DelegateRuntimeCombatAttackOperations(
+                allow => { allowed.Add(allow); return true; },
+                (_, _, allow) => { allowed.Add(allow); return true; },
+                prepareAttackRequest: null,
+                sendCancelAttack: null,
+                isDualWield: null,
+                playerReadyForAttack: null,
+                autoRepeatAttack: () => true),
+            () => now);
+        combat.SetCombatMode(CombatMode.Melee);
+
+        controller.AutomationControlled = true;
+        controller.PressAttack(AttackHeight.Medium);
+        now = 2d;
+        controller.ReleaseAttack();
+        Assert.NotEmpty(allowed);
+        Assert.All(allowed, Assert.False);
+
+        allowed.Clear();
+        controller.AutomationControlled = false;
+        controller.PressAttack(AttackHeight.Medium);
+        now = 3d;
+        controller.ReleaseAttack();
+        Assert.NotEmpty(allowed);
+        Assert.All(allowed, Assert.True);
+    }
+
+    /// <summary>
+    /// Both hosts bind this one state through the same operations contract, so
+    /// what reaches the send here is what reaches the wire under a window and
+    /// without one alike. Mutation: commit Math.Max(DesiredPower, currentPower)
+    /// for an owner that names its power and the swing goes out at the level
+    /// the bar had run on to, followed by a second swing to bring the setting
+    /// back.
+    /// </summary>
+    [Fact]
+    public void AnOwnerThatNamesItsPowerGetsExactlyThatPowerInOneSwing()
+    {
+        double now = 0d;
+        var sent = new List<(AttackHeight Height, float Power)>();
+        var combat = new CombatState();
+        using var controller = Create(combat, () => now, sent);
+        combat.SetCombatMode(CombatMode.Melee);
+        controller.AutomationControlled = true;
+        controller.SetDesiredPower(0.9f);
+
+        controller.PressAttack(AttackHeight.High);
+        // The bar is only looked at every so often, and by the time it is
+        // looked at it has run past the setting.
+        now = 0.94d;
+        controller.Tick();
+        Assert.True(controller.ReleaseAttack());
+
+        var attack = Assert.Single(sent);
+        Assert.Equal(AttackHeight.High, attack.Height);
+        Assert.Equal(0.9f, attack.Power, 3);
+    }
+
+    /// <summary>
+    /// A player's own key-up is untouched: a late release still fires at the
+    /// level being held.
+    /// </summary>
+    [Fact]
+    public void APlayerKeyUpStillCommitsTheLevelBeingHeld()
+    {
+        double now = 0d;
+        var sent = new List<(AttackHeight Height, float Power)>();
+        var combat = new CombatState();
+        using var controller = Create(combat, () => now, sent);
+        combat.SetCombatMode(CombatMode.Melee);
+        controller.SetDesiredPower(0.5f);
+
+        controller.PressAttack(AttackHeight.Medium);
+        now = 0.8d;
+        controller.ReleaseAttack();
+
+        Assert.Equal(0.8f, sent[0].Power, 3);
+    }
+
+    /// <summary>
+    /// Mutation: leave the request in progress on an abort and the bar starts
+    /// loading again by itself, firing a swing nobody asked for, and every
+    /// request until then is refused behind it.
+    /// </summary>
+    [Fact]
+    public void AbortingEndsTheRequestInsteadOfLeavingTheBarLoading()
+    {
+        double now = 0d;
+        var sent = new List<(AttackHeight Height, float Power)>();
+        var combat = new CombatState();
+        using var controller = Create(combat, () => now, sent);
+        combat.SetCombatMode(CombatMode.Melee);
+        controller.AutomationControlled = true;
+        controller.SetDesiredPower(1f);
+        controller.PressAttack(AttackHeight.Medium);
+        Assert.True(controller.AttackRequestInProgress);
+
+        controller.AbortAutomaticAttack();
+
+        Assert.False(controller.AttackRequestInProgress);
+        Assert.False(controller.AttackServerResponsePending);
+        Assert.False(controller.BuildInProgress);
+
+        now = 3d;
+        controller.Tick();
+        now = 6d;
+        controller.Tick();
+
+        Assert.Empty(sent);
+        Assert.False(controller.BuildInProgress);
+    }
+
+    /// <summary>
+    /// Mutation: reset the bar on every answer and a request that is still
+    /// being charged goes back to zero, so each swing pays the charge of the
+    /// one before it a second time.
+    /// </summary>
+    [Fact]
+    public void TheAnswerToAFinishedSwingDoesNotRestartAChargeInProgress()
+    {
+        double now = 0d;
+        var sent = new List<(AttackHeight Height, float Power)>();
+        var combat = new CombatState();
+        using var controller = Create(combat, () => now, sent);
+        combat.SetCombatMode(CombatMode.Melee);
+        controller.SetDesiredPower(1f);
+        controller.PressAttack(AttackHeight.Medium);
+
+        now = 0.6d;
+        controller.Tick();
+        Assert.Equal(0.6f, controller.PowerBarLevel, 3);
+
+        // The server answers for an earlier swing while this one is loading.
+        combat.OnAttackDone(1u, 0u);
+
+        now = 1d;
+        controller.Tick();
+        Assert.Equal(1f, controller.PowerBarLevel, 3);
+    }
+
+    /// <summary>
+    /// Mutation: park the commit behind the server for an owner that names its
+    /// own targets and the swing fires whenever the answer finally arrives, by
+    /// then at whatever that owner has moved on to.
+    /// </summary>
+    [Fact]
+    public void AnOwnerNamedReleaseOverABusyServerSaysNothingWentOut()
+    {
+        double now = 0d;
+        var sent = new List<(AttackHeight Height, float Power)>();
+        var combat = new CombatState();
+        using var controller = Create(combat, () => now, sent);
+        combat.SetCombatMode(CombatMode.Melee);
+        controller.AutomationControlled = true;
+        controller.SetDesiredPower(1f);
+        controller.PressAttack(AttackHeight.Medium);
+        combat.OnCombatCommenceAttack();
+        Assert.True(controller.AttackServerResponsePending);
+
+        now = 1d;
+        Assert.False(controller.ReleaseAttack());
+        Assert.False(controller.AttackRequestInProgress);
+        Assert.Empty(sent);
+
+        // The answer arrives long after the owner has moved on: no swing may
+        // come out of it.
+        combat.OnAttackDone(1u, 0u);
+        now = 5d;
+        controller.Tick();
+        Assert.Empty(sent);
+    }
+
     private static RuntimeCombatAttackState Create(
         CombatState combat,
         Func<double> now,

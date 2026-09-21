@@ -7,6 +7,7 @@ using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 using AcDream.Core.World;
+using AcDream.Runtime.Physics;
 using AcDream.Runtime.Entities;
 using DatReaderWriter.DBObjs;
 using DatReaderWriter.Types;
@@ -559,7 +560,7 @@ public sealed class LiveEntityAnimationPresenterTests
             LowFrame = 0,
             HighFrame = 0,
             Framerate = 0f,
-            Scale = scale,
+            Simulation = new RuntimeRemoteAnimationState { Scale = scale },
             PartTemplate = Enumerable.Range(0, partCount)
                 .Select(i => new LiveAnimationPartTemplate(0x01000001u + (uint)i, null, true))
                 .ToArray(),

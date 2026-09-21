@@ -43,7 +43,6 @@ internal sealed class HeadlessGameplayOperations
     private SpellComponentRequirementService? _componentRequirements;
     private WorldSession? _session;
     private SessionRoute? _route;
-    private AutoWieldController? _autoWield;
 
     internal void Bind(
         GameRuntime runtime,
@@ -65,10 +64,7 @@ internal sealed class HeadlessGameplayOperations
             accountName);
     }
 
-    internal void BindAutoWield(AutoWieldController autoWield)
-    {
-        _autoWield = autoWield ?? throw new ArgumentNullException(nameof(autoWield));
-    }
+
 
     internal ILiveSessionCommandRouting CreateRoute(
         WorldSession session)
@@ -77,7 +73,7 @@ internal sealed class HeadlessGameplayOperations
         return new SessionRoute(this, session);
     }
 
-    public bool CanStartAttack()
+    public bool CanStartAttack(bool allowAutoTarget)
     {
         GameRuntime runtime = RequireRuntime();
         if (!IsInWorld
@@ -86,18 +82,16 @@ internal sealed class HeadlessGameplayOperations
         {
             return false;
         }
-        return GetSelectedOrClosestTarget(runtime) is not null;
+        return GetSelectedOrClosestTarget(runtime, allowAutoTarget) is not null;
     }
 
-    public void PrepareAttackRequest()
-    {
-        _ = RequireRuntime().MovementOwner.PrepareForAttackRequest();
-    }
+    public void PrepareAttackRequest() =>
+        RequireRuntime().PrepareLocalPlayerForAttackRequest();
 
-    public bool SendAttack(AttackHeight height, float power)
+    public bool SendAttack(AttackHeight height, float power, bool allowAutoTarget)
     {
         GameRuntime runtime = RequireRuntime();
-        uint? target = GetSelectedOrClosestTarget(runtime);
+        uint? target = GetSelectedOrClosestTarget(runtime, allowAutoTarget);
         if (target is null || !TryGetSession(out WorldSession? session))
             return false;
 
@@ -131,23 +125,10 @@ internal sealed class HeadlessGameplayOperations
     public bool AutoTarget =>
         RequireRuntime().CharacterOwner.Options.GetOptionBit(CharacterOptionId.AutoTarget);
 
-    public uint? SelectClosestTarget()
-    {
-        GameRuntime runtime = RequireRuntime();
-        uint? closest = RuntimeHostileTargetQuery.FindClosest(runtime);
-        if (closest is { } target)
-        {
-            runtime.ActionOwner.Selection.Select(
-                target,
-                AcDream.Core.Selection.SelectionChangeSource.Keyboard);
-        }
-        else
-        {
-            runtime.ActionOwner.Selection.Clear(
-                AcDream.Core.Selection.SelectionChangeSource.Keyboard);
-        }
-        return closest;
-    }
+    // Auto-target means the same thing here as it does under a window: one
+    // owner answers for both hosts.
+    public uint? SelectClosestTarget() =>
+        RuntimeAttackTargetResolver.SelectClosest(RequireRuntime());
 
     public bool IsInWorld => _runtime?.Session.IsInWorld == true;
     public IReadOnlyList<ClientObject> GetOrderedEquipment()
@@ -157,9 +138,12 @@ internal sealed class HeadlessGameplayOperations
             runtime.PlayerIdentity.ServerGuid);
     }
 
+    // A stance the player asked for stands down whatever equipment switch
+    // the item owner has in flight. There is one such owner per client, the
+    // runtime's, so this tells that one.
     public void NotifyExplicitCombatModeRequest()
     {
-        _autoWield?.NotifyExplicitCombatModeRequest();
+        _runtime?.ItemInteractionOwner.NotifyExplicitCombatModeRequest();
     }
 
     public void SendChangeCombatMode(CombatMode mode)
@@ -211,10 +195,8 @@ internal sealed class HeadlessGameplayOperations
         return result.Allowed;
     }
 
-    public void StopCompletely()
-    {
-        _ = RequireRuntime().MovementOwner.PrepareForAttackRequest();
-    }
+    public void StopCompletely() =>
+        RequireRuntime().PrepareLocalPlayerForAttackRequest();
 
     public void SendUntargeted(uint spellId)
     {
@@ -237,17 +219,10 @@ internal sealed class HeadlessGameplayOperations
         RequireRuntime().ActionOwner.Transactions
             .IncrementBusyCount();
 
-    private uint? GetSelectedOrClosestTarget(GameRuntime runtime)
-    {
-        uint? selected =
-            runtime.ActionOwner.Selection.SelectedObjectId;
-        if (selected is { } target
-            && RuntimeHostileTargetQuery.IsHostile(runtime, target))
-        {
-            return target;
-        }
-        return AutoTarget ? SelectClosestTarget() : null;
-    }
+    private static uint? GetSelectedOrClosestTarget(
+        GameRuntime runtime,
+        bool allowAutoTarget) =>
+        RuntimeAttackTargetResolver.Resolve(runtime, allowAutoTarget).Target;
 
     private GameRuntime RequireRuntime() =>
         _runtime

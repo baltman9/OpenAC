@@ -57,11 +57,58 @@ public readonly record struct PluginEquipmentItem(
     /// </summary>
     public uint AmmoType { get; init; }
 
-    /// <summary>How many of the item this stack holds; at least one.</summary>
+    /// <summary>How many of the item this stack holds; zero for an empty stack.</summary>
     public int StackSize { get; init; } = 1;
+
+    /// <summary>
+    /// The object's category as classified by the client;
+    /// <see cref="PluginObjectClass.Unknown"/> when unavailable.
+    /// </summary>
+    public PluginObjectClass ObjectClass { get; init; }
 
     /// <summary>The weapon category the item belongs to; zero when it is not a weapon.</summary>
     public int WeaponType { get; init; }
+
+    /// <summary>
+    /// How many creatures one swing of this weapon can strike. Greater than
+    /// one means a kill sentence may name a creature the swing was not aimed
+    /// at.
+    /// </summary>
+    public int Cleaving { get; init; }
+
+    /// <summary>
+    /// The imbue burned into the weapon: the rends that change which element
+    /// it strikes with, plus the critical bonuses.
+    /// </summary>
+    public int ImbuedEffect { get; init; }
+
+    /// <summary>
+    /// The damage type this weapon cleaves the target's resistance to. Same
+    /// bit layout as <see cref="DamageType"/>. The name is the profile
+    /// format's word for it; the client calls the same property a resistance
+    /// modifier type.
+    /// </summary>
+    public int ResistanceCleaving { get; init; }
+
+    /// <summary>
+    /// The creature type this weapon slays, or zero. A weapon that slays what
+    /// is being fought outranks every other consideration.
+    /// </summary>
+    public int SlayerCreatureType { get; init; }
+
+    /// <summary>
+    /// Rating bonuses a quest weapon can carry. Each says only whether the
+    /// weapon has the bonus at all, which is the only thing weapon choice
+    /// asks: a bonus is worth a fixed number of points however large its own
+    /// multiplier happens to be.
+    /// </summary>
+    public bool CrushingBlow { get; init; }
+
+    /// <inheritdoc cref="CrushingBlow"/>
+    public bool BitingStrike { get; init; }
+
+    /// <inheritdoc cref="CrushingBlow"/>
+    public bool ArmorCleaving { get; init; }
 }
 
 /// <summary>How the client answered a plugin's equip request.</summary>
@@ -102,6 +149,29 @@ public readonly record struct PluginEquipmentCommandResult(
         or PluginEquipmentCommandStatus.Started;
 }
 
+/// <summary>One object's equipment placement as observed in the world.</summary>
+/// <param name="ObjectId">The object's ID.</param>
+/// <param name="EquippedLocation">Its exact current wielded location.</param>
+public readonly record struct PluginEquipmentPlacement(
+    uint ObjectId,
+    uint EquippedLocation);
+
+/// <summary>An authoritative equipment placement or removal observation.</summary>
+/// <param name="ObjectId">The object affected by the receipt.</param>
+/// <param name="EquippedLocation">Its exact new location, or zero on removal.</param>
+/// <param name="IsRemoval">Whether the receipt removes the object from equipment.</param>
+public readonly record struct PluginEquipmentObservation(
+    uint ObjectId,
+    uint EquippedLocation,
+    bool IsRemoval)
+{
+    /// <summary>
+    /// Whether an object entered the world already in this location, rather
+    /// than changing location after it was present.
+    /// </summary>
+    public bool IsInitialPlacement { get; init; }
+}
+
 /// <summary>
 /// Reads what the player owns that can be worn or wielded, and asks the
 /// server to equip a chosen item.
@@ -118,12 +188,36 @@ public interface IEquipmentAutomation
     bool IsBusy => false;
 
     /// <summary>
+    /// Everything the character owns that can be worn or wielded, in a
+    /// defined order: what is equipped first, then by name, then by object
+    /// id. Clients rely on that order — "the first wand" means the one being
+    /// held if any wand is — so a host must not hand back an arbitrary
+    /// sequence.
     /// Lists every owned item that can occupy an equipment slot, equipped
     /// items first and then by name. Returns an empty list when the surface
     /// is unavailable.
     /// </summary>
     IReadOnlyList<PluginEquipmentItem> CaptureOwnedEquipment() =>
         Array.Empty<PluginEquipmentItem>();
+
+    /// <summary>
+    /// Current equipment placements in the world object's enumeration order.
+    /// This preserves the order of the underlying object table and includes
+    /// objects without a usable equipment profile.
+    /// </summary>
+    IReadOnlyList<PluginEquipmentPlacement> CaptureWorldPlacementsInOrder() =>
+        Array.Empty<PluginEquipmentPlacement>();
+
+    /// <summary>
+    /// Raised for a server-confirmed placement or removal, including an item
+    /// that enters the world already equipped. Optimistic inventory moves and
+    /// ordinary world movement do not raise this event.
+    /// </summary>
+    event Action<PluginEquipmentObservation> PlacementObserved
+    {
+        add { }
+        remove { }
+    }
 
     /// <summary>
     /// Asks the server to wear or wield an owned item, the same way dragging
@@ -134,5 +228,13 @@ public interface IEquipmentAutomation
     PluginEquipmentCommandResult Equip(
         uint objectId,
         uint requestedLocation = 0u) =>
+        new(PluginEquipmentCommandStatus.Unavailable);
+
+    /// <summary>
+    /// Requests the secondary hand. A melee item can be placed there even
+    /// when its ordinary valid-location mask only lists a weapon slot. The
+    /// client resolves the resulting slot and any blocking item.
+    /// </summary>
+    PluginEquipmentCommandResult EquipSecondary(uint objectId) =>
         new(PluginEquipmentCommandStatus.Unavailable);
 }

@@ -61,6 +61,55 @@ public sealed class AppraisalUiControllerTests
         Assert.Equal(2, closed);
     }
 
+    /// <summary>
+    /// A plugin reading an object is not the player examining one. The request
+    /// goes out and the answer is taken — the object's own numbers are updated
+    /// either way — but nothing is put on screen: the examination window stays
+    /// shut, and whatever it was last showing is left alone. The player's own
+    /// Assess opens it exactly as before.
+    ///
+    /// Mutation: drop the origin test from <c>Apply</c>, and a plugin's
+    /// appraisal throws the window open — several times per corpse — and
+    /// swaps its contents for whatever the plugin was reading.
+    /// </summary>
+    [Fact]
+    public void APluginsOwnAppraisalIsAnsweredWithoutOpeningTheWindow()
+    {
+        ImportedLayout layout = FixtureLoader.LoadExamination();
+        var objects = new ClientObjectTable();
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = ObjectId,
+            Name = "Corpse of Drudge Prowler",
+            Type = ItemType.Misc,
+        });
+        var sent = new List<uint>();
+        using var interaction = NewInteraction(objects, sent);
+        int shown = 0;
+        int closed = 0;
+        using AppraisalUiController controller = Bind(
+            layout, objects, interaction, new CombatState(), [], [],
+            () => shown++, () => closed++)!;
+
+        Assert.True(interaction.TryAppraiseForAutomation(ObjectId));
+        Assert.True(controller.Apply(Parsed(new PropertyBundle())));
+
+        Assert.Equal(0, shown);
+        Assert.Equal(0, closed);
+        // The request was still answered: the busy reference the appraisal
+        // took is back, so the next one may go out.
+        Assert.Equal(0, interaction.BusyCount);
+        Assert.Equal(0u, controller.CurrentObjectId);
+        Assert.Equal(new[] { ObjectId }, sent);
+
+        // The player asking for the same object still opens the window.
+        Assert.True(interaction.ExamineSelectedOrEnterMode(ObjectId));
+        Assert.True(controller.Apply(Parsed(new PropertyBundle())));
+
+        Assert.Equal(1, shown);
+        Assert.Equal(ObjectId, controller.CurrentObjectId);
+    }
+
     [Fact]
     public void ItemResponse_UsesAuthoredItemSubviewTitleAndScrollbars()
     {
@@ -1885,7 +1934,7 @@ public sealed class AppraisalUiControllerTests
             spellComponentTemplates: componentTemplate)!;
 
         Assert.True(interaction.ExamineSelectedOrEnterMode(ObjectId));
-        Assert.Equal(1, interaction.BusyCount);
+        Assert.Equal(1, interaction.AppraisalCount);
 
         Assert.True(controller.ExamineSpell(metadata.SpellId));
 
@@ -1950,7 +1999,7 @@ public sealed class AppraisalUiControllerTests
     private static AppraisalUiController? Bind(
         ImportedLayout layout,
         ClientObjectTable objects,
-        ItemInteractionController interaction,
+        RuntimeItemInteraction interaction,
         CombatState combat,
         List<(uint ObjectId, string Text)> inscriptions,
         List<string> messages,
@@ -1991,7 +2040,7 @@ public sealed class AppraisalUiControllerTests
             resolveCharacterTitle,
             localFactionBits);
 
-    private static ItemInteractionController NewInteraction(
+    private static RuntimeItemInteraction NewInteraction(
         ClientObjectTable objects,
         List<uint> sent)
         => new(

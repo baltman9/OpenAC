@@ -14,6 +14,17 @@ public static class RetailSpellTargetPolicy
 {
     private const uint SpecialTargetMask = 0x00008107u;
 
+    /// <summary>
+    /// Whether the caster can be the target: a self-targeted or untargeted
+    /// spell, or one whose mask carries a self bit. The same rule as the
+    /// first refusal in <see cref="Evaluate"/>, for a caller that has no
+    /// target object yet.
+    /// </summary>
+    public static bool CanTargetSelf(SpellMetadata spell) =>
+        spell.IsSelfTargeted
+        || spell.IsUntargeted
+        || (spell.TargetMask & SpecialTargetMask) != 0u;
+
     public static SpellTargetPolicyResult Evaluate(
         uint localPlayerId,
         ClientObject target,

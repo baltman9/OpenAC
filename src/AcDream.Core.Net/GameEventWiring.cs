@@ -22,7 +22,7 @@ public static class GameEventWiring
         LocalPlayerState? localPlayer = null,
         TurbineChatState? turbineChat = null,
         Action<int /*runSkill*/, int /*jumpSkill*/>? onSkillsUpdated = null,
-        Func<uint /*skillId*/, IReadOnlyDictionary<uint, uint> /*attrCurrents*/, uint /*formulaBonus*/>? resolveSkillFormulaBonus = null,
+        Func<uint /*skillId*/, uint /*advancementClass*/, IReadOnlyDictionary<uint, uint> /*attrCurrents*/, uint /*formulaBonus*/>? resolveSkillFormulaBonus = null,
         Action<IReadOnlyList<ShortcutEntry>>? onShortcuts = null,
         Func<uint>? playerGuid = null,
         Action<uint /*weenieError*/>? onUseDone = null,
@@ -922,7 +922,7 @@ public static class GameEventWiring
                 foreach (var s in p.Value.Skills)
                 {
                     uint formulaBonus = resolveSkillFormulaBonus is not null
-                        ? resolveSkillFormulaBonus(s.SkillId, attrCurrents)
+                        ? resolveSkillFormulaBonus(s.SkillId, s.Status, attrCurrents)
                         : 0u;
 
                     localPlayer?.OnSkillUpdate(

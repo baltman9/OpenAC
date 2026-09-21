@@ -475,6 +475,41 @@ public sealed class HeadlessConfigurationLoaderTests
             () => HeadlessConfigurationLoader.Load(blankPolicy.Path));
     }
 
+    /// <summary>
+    /// The words a session wants to be found by. They are how a plugin tells
+    /// one bot apart from another on a machine running several, so a config
+    /// that names a blank one is rejected rather than quietly dropped.
+    /// </summary>
+    [Fact]
+    public void PluginTagsParseAndRoundTrip()
+    {
+        using TemporaryConfiguration file = TemporaryConfiguration.Create(
+            ConfigurationWith(Session(
+                "bot",
+                "BOT_PASSWORD",
+                "\"pluginTags\":[\"tank\",\"group-a\"]")));
+
+        HeadlessConfiguration configuration =
+            HeadlessConfigurationLoader.Load(file.Path);
+
+        List<string>? tags = Assert.Single(configuration.Sessions)!.PluginTags;
+        Assert.NotNull(tags);
+        Assert.Equal(["tank", "group-a"], tags!);
+    }
+
+    [Fact]
+    public void ABlankPluginTagIsRejected()
+    {
+        using TemporaryConfiguration file = TemporaryConfiguration.Create(
+            ConfigurationWith(Session(
+                "bot",
+                "BOT_PASSWORD",
+                "\"pluginTags\":[\"tank\",\" \"]")));
+
+        Assert.Throws<HeadlessConfigurationException>(
+            () => HeadlessConfigurationLoader.Load(file.Path));
+    }
+
     [Fact]
     public void PluginSettingsWithAllSixKeysParsesAndRoundTrips()
     {

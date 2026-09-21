@@ -65,7 +65,7 @@ public sealed class ExternalContainerControllerTests
         public readonly UiItemList Containers = new() { Width = 680f, Height = 36f };
         public readonly UiItemList Contents = new() { Width = 784f, Height = 32f };
         public readonly RetailWindowHandle Window;
-        public readonly ItemInteractionController Interaction;
+        public readonly RuntimeItemInteraction Interaction;
         public readonly ExternalContainerLifecycleController Lifecycle;
         public readonly ExternalContainerController Controller;
         public bool InRange = true;
@@ -104,7 +104,7 @@ public sealed class ExternalContainerControllerTests
                     Resizable = false,
                 });
 
-            Interaction = new ItemInteractionController(
+            Interaction = new RuntimeItemInteraction(
                 Objects,
                 new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(Objects)),
                 new InteractionState(),

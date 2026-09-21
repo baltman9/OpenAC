@@ -29,7 +29,7 @@ public sealed class SessionStatusWriterTests
         writer.Disconnected("s1", "stopped");
         writer.Exited("s1", 0, "disposed");
 
-        string[] lines = File.ReadAllLines(file.Path);
+        string[] lines = ReadSharing(file.Path);
         Assert.Equal(9, lines.Length);
 
         JsonElement started = Parse(lines[0]);
@@ -120,7 +120,7 @@ public sealed class SessionStatusWriterTests
         writer.CharacterCreated("s1", 0x50000010u, "NewChar");
         writer.CreationFailed("s1", 3u, "NameInUse", "Bob");
 
-        string[] lines = File.ReadAllLines(file.Path);
+        string[] lines = ReadSharing(file.Path);
         Assert.Equal(2, lines.Length);
 
         JsonElement created = Parse(lines[0]);
@@ -160,7 +160,7 @@ public sealed class SessionStatusWriterTests
         writer.Connected("s1");
         writer.Connected("s1");
 
-        JsonElement[] events = File.ReadAllLines(file.Path)
+        JsonElement[] events = ReadSharing(file.Path)
             .Select(Parse)
             .ToArray();
         Assert.Equal(
@@ -182,7 +182,7 @@ public sealed class SessionStatusWriterTests
         writer.Exited("s1", 1, "duplicate-must-not-win");
         writer.Connected("s1");
 
-        JsonElement[] events = File.ReadAllLines(file.Path)
+        JsonElement[] events = ReadSharing(file.Path)
             .Select(Parse)
             .ToArray();
         Assert.Equal(
@@ -216,7 +216,7 @@ public sealed class SessionStatusWriterTests
         writer.Disconnected("bot", "stopped");
         writer.Exited("bot", 0, "disposed");
 
-        string[] lines = File.ReadAllLines(file.Path);
+        string[] lines = ReadSharing(file.Path);
         Assert.Equal(9, lines.Length);
 
         AssertExactProperties(lines[0], "v", "e", "t", "sessionId");
@@ -270,7 +270,7 @@ public sealed class SessionStatusWriterTests
             writer.Connected("s1");
 
             Assert.True(writer.IsEnabled);
-            string[] lines = File.ReadAllLines(path);
+            string[] lines = ReadSharing(path);
             Assert.Equal(2, lines.Length);
             Assert.Contains("\"started\"", lines[0]);
             Assert.Contains("\"connected\"", lines[1]);
@@ -283,7 +283,7 @@ public sealed class SessionStatusWriterTests
     }
 
     [Fact]
-    public void ParentSegmentIsAFileLatchesTheWriterInsteadOfThrowing()
+    public void ParentSegmentIsAFileReportsInsteadOfThrowing()
     {
         string blocker = Path.Combine(
             Path.GetTempPath(),
@@ -292,12 +292,10 @@ public sealed class SessionStatusWriterTests
         string path = Path.Combine(blocker, "status.jsonl");
         try
         {
-            var writer = new SessionStatusWriter(path);
+            using var writer = new SessionStatusWriter(path);
             Assert.True(writer.IsEnabled);
 
             writer.Started("s1");
-            Assert.False(writer.IsEnabled);
-
             writer.Connected("s1");
             writer.Exited("s1", 0, "disposed");
         }
@@ -330,6 +328,133 @@ public sealed class SessionStatusWriterTests
         string? secondLine = tailerReader.ReadLine();
         Assert.NotNull(secondLine);
         Assert.Contains("\"connected\"", secondLine);
+    }
+
+    [Fact]
+    public void AnOrdinaryReaderCannotSilenceTheStream()
+    {
+        using TemporaryFile file = TemporaryFile.Create();
+        using var writer = new SessionStatusWriter(file.Path);
+
+        writer.Started("s1");
+
+        // An onlooker reads the file the ordinary way, which asks for the
+        // file to stay unwritten while the read is in flight. That request
+        // is the one that used to cost the session its whole status stream.
+        FileStream? onlooker = null;
+        try
+        {
+            onlooker = File.OpenRead(file.Path);
+        }
+        catch (IOException)
+        {
+            // The platform refused the onlooker instead. That is the
+            // outcome that matters: the refusal lands on the side that
+            // asked for exclusivity, never on the session.
+        }
+
+        try
+        {
+            writer.Connected("s1");
+            writer.EnteredWorld("s1", 0x50000001u, "Ready");
+            writer.Exited("s1", 0, "graceful");
+        }
+        finally
+        {
+            onlooker?.Dispose();
+        }
+
+        Assert.True(writer.IsEnabled);
+        string[] lines = ReadSharing(file.Path);
+        Assert.Equal(
+            ["started", "connected", "enteredWorld", "disconnected", "exited"],
+            lines.Select(static line => Parse(line).GetProperty("e").GetString()));
+    }
+
+    [Fact]
+    public void AWriteThatFailsIsNotTheEndOfTheStream()
+    {
+        using TemporaryFile file = TemporaryFile.Create();
+        File.WriteAllText(file.Path, string.Empty);
+        using var writer = new SessionStatusWriter(file.Path);
+
+        // Hold the file the way a reader that wants no writer would, before
+        // the session has written anything at all.
+        using (File.OpenRead(file.Path))
+        {
+            writer.Started("s1");
+        }
+
+        // Whatever became of that first line, the stream is still on.
+        writer.Connected("s1");
+        writer.Exited("s1", 0, "graceful");
+
+        Assert.True(writer.IsEnabled);
+        string[] events = ReadSharing(file.Path)
+            .Select(static line => Parse(line).GetProperty("e").GetString()!)
+            .ToArray();
+        Assert.Contains("connected", events);
+        Assert.Contains("exited", events);
+    }
+
+    [Fact]
+    public void DisposeReleasesTheFileForDeletion()
+    {
+        using TemporaryFile file = TemporaryFile.Create();
+        var writer = new SessionStatusWriter(file.Path);
+
+        writer.Started("s1");
+        writer.Exited("s1", 0, "graceful");
+        writer.Dispose();
+
+        File.Delete(file.Path);
+        Assert.False(File.Exists(file.Path));
+    }
+
+    [Fact]
+    public void AFailingDestinationIsReportedOnceUntilWritesRecover()
+    {
+        string blocker = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-status-blocker-{Guid.NewGuid():N}");
+        File.WriteAllText(blocker, "not a directory");
+        string path = Path.Combine(blocker, "status.jsonl");
+        List<string> reports = [];
+        try
+        {
+            using var writer = new SessionStatusWriter(
+                path,
+                timeProvider: null,
+                diagnostic: reports.Add);
+
+            writer.Started("s1");
+            writer.Connected("s1");
+            writer.Disconnected("s1", "stopped");
+
+            // Three impossible writes, one complaint -- and the writer is
+            // still willing to try the next line.
+            Assert.Single(reports);
+            Assert.True(writer.IsEnabled);
+        }
+        finally
+        {
+            if (File.Exists(blocker))
+                File.Delete(blocker);
+        }
+    }
+
+    private static string[] ReadSharing(string path)
+    {
+        using FileStream stream = new(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd()
+            .Split(
+                Environment.NewLine,
+                StringSplitOptions.RemoveEmptyEntries);
     }
 
     private static JsonElement Parse(string line) =>

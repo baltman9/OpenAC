@@ -118,19 +118,19 @@ public sealed class LiveEntityNetworkRemoteSteadyStateIntegrationTests
         remote.Body.TransientState = TransientStateFlags.Active;
         var landing = new Vector3(10.5f, 10f, 5f); // 0.5 m — well within 4 m.
 
-        LiveEntityNetworkUpdateController.RemoteContactRouting routing =
-            LiveEntityNetworkUpdateController.ApplyRemoteContactRouting(
+        RuntimeRemoteContactRouting routing =
+            RuntimeRemoteArming.ApplyRemoteContactRouting(
                 fixture.Drive,
                 record,
                 remote,
                 route,
                 landing,
                 Quaternion.Identity,
-                willBeDrTicked: true,
+                willBeAdvanced: true,
                 runTeleportHook: () => true);
 
         Assert.Equal(
-            LiveEntityNetworkUpdateController.RemoteContactArm.AirborneSnap,
+            RuntimeRemoteContactArm.AirborneSnap,
             routing.Arm);
         Assert.Equal(landing, remote.Body.Position);
     }
@@ -145,19 +145,19 @@ public sealed class LiveEntityNetworkRemoteSteadyStateIntegrationTests
         remote.Airborne = false;
         var target = new Vector3(10.5f, 10f, 5f);
 
-        LiveEntityNetworkUpdateController.RemoteContactRouting routing =
-            LiveEntityNetworkUpdateController.ApplyRemoteContactRouting(
+        RuntimeRemoteContactRouting routing =
+            RuntimeRemoteArming.ApplyRemoteContactRouting(
                 fixture.Drive,
                 record,
                 remote,
                 Classify(hasContact: true, playerDistance: 10f),
                 target,
                 Quaternion.Identity,
-                willBeDrTicked: true,
+                willBeAdvanced: true,
                 runTeleportHook: () => true);
 
         Assert.Equal(
-            LiveEntityNetworkUpdateController.RemoteContactArm
+            RuntimeRemoteContactArm
                 .SteadyStateInterpolate,
             routing.Arm);
         Assert.Equal(new Vector3(10f, 10f, 5f), remote.Body.Position);
@@ -179,19 +179,19 @@ public sealed class LiveEntityNetworkRemoteSteadyStateIntegrationTests
         remote.Airborne = !remote.Body.OnWalkable;
         Assert.True(remote.Airborne);
 
-        LiveEntityNetworkUpdateController.RemoteContactRouting routing =
-            LiveEntityNetworkUpdateController.ApplyRemoteContactRouting(
+        RuntimeRemoteContactRouting routing =
+            RuntimeRemoteArming.ApplyRemoteContactRouting(
                 fixture.Drive,
                 record,
                 remote,
                 Classify(hasContact: true, playerDistance: 10f),
                 before + new Vector3(0.5f, 0f, 0f),
                 Quaternion.Identity,
-                willBeDrTicked: true,
+                willBeAdvanced: true,
                 runTeleportHook: () => true);
 
         Assert.Equal(
-            LiveEntityNetworkUpdateController.RemoteContactArm
+            RuntimeRemoteContactArm
                 .SteadyStateInterpolate,
             routing.Arm);
         Assert.Equal(before, remote.Body.Position);
@@ -209,19 +209,19 @@ public sealed class LiveEntityNetworkRemoteSteadyStateIntegrationTests
         remote.Airborne = !remote.Body.OnWalkable;
         var landing = new Vector3(10.5f, 10f, 5f);
 
-        LiveEntityNetworkUpdateController.RemoteContactRouting routing =
-            LiveEntityNetworkUpdateController.ApplyRemoteContactRouting(
+        RuntimeRemoteContactRouting routing =
+            RuntimeRemoteArming.ApplyRemoteContactRouting(
                 fixture.Drive,
                 record,
                 remote,
                 Classify(hasContact: true, playerDistance: 10f),
                 landing,
                 Quaternion.Identity,
-                willBeDrTicked: true,
+                willBeAdvanced: true,
                 runTeleportHook: () => true);
 
         Assert.Equal(
-            LiveEntityNetworkUpdateController.RemoteContactArm.AirborneSnap,
+            RuntimeRemoteContactArm.AirborneSnap,
             routing.Arm);
         Assert.Equal(landing, remote.Body.Position);
     }
@@ -240,19 +240,19 @@ public sealed class LiveEntityNetworkRemoteSteadyStateIntegrationTests
         remote.Airborne = !remote.Body.OnWalkable;
         Assert.False(remote.Airborne);
 
-        LiveEntityNetworkUpdateController.RemoteContactRouting routing =
-            LiveEntityNetworkUpdateController.ApplyRemoteContactRouting(
+        RuntimeRemoteContactRouting routing =
+            RuntimeRemoteArming.ApplyRemoteContactRouting(
                 fixture.Drive,
                 record,
                 remote,
                 Classify(hasContact: true, playerDistance: 10f),
                 before + new Vector3(0.5f, 0f, 0f),
                 Quaternion.Identity,
-                willBeDrTicked: true,
+                willBeAdvanced: true,
                 runTeleportHook: () => true);
 
         Assert.Equal(
-            LiveEntityNetworkUpdateController.RemoteContactArm
+            RuntimeRemoteContactArm
                 .SteadyStateInterpolate,
             routing.Arm);
         Assert.Equal(before, remote.Body.Position);

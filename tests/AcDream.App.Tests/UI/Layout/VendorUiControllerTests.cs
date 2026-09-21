@@ -40,7 +40,7 @@ public sealed class VendorUiControllerTests
             });
 
         var objects = new ClientObjectTable();
-        using var itemInteraction = new ItemInteractionController(
+        using var itemInteraction = new RuntimeItemInteraction(
             objects,
             new RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -84,7 +84,7 @@ public sealed class VendorUiControllerTests
             });
 
         var objects = new ClientObjectTable();
-        using var itemInteraction = new ItemInteractionController(
+        using var itemInteraction = new RuntimeItemInteraction(
             objects,
             new RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -180,7 +180,7 @@ public sealed class VendorUiControllerTests
         public readonly List<(uint VendorGuid, IReadOnlyList<(int Amount, uint ItemGuid)> Items)> Sells = new();
         public readonly List<(uint Item, uint Container, uint Placement, uint Amount)> SplitPuts = new();
         public readonly List<string> SystemMessages = new();
-        public readonly ItemInteractionController ItemInteraction;
+        public readonly RuntimeItemInteraction ItemInteraction;
         public readonly RetailDialogFactory Dialogs;
         public ImportedLayout? ShownDialog;
 
@@ -309,9 +309,10 @@ public sealed class VendorUiControllerTests
                     Resizable = false,
                 });
 
-            ItemInteraction = new ItemInteractionController(
+            ItemInteraction = new RuntimeItemInteraction(
                 Objects,
-                new RuntimeInteractionTransactionState(new InventoryTransactionState(Objects)),
+                new RuntimeInteractionTransactionState(
+                    new InventoryTransactionState(Objects, State)),
                 new InteractionState(),
                 playerGuid: static () => PlayerGuid,
                 sendUse: null,
@@ -1110,7 +1111,7 @@ public sealed class VendorUiControllerTests
     }
 
     [Fact]
-    public void BuyButton_DisablesTheInstantAPurchaseIsInFlight_AndReenablesOnCompletion()
+    public void BuyButton_ReenablesOnMatchingVendorResponse()
     {
         var h = new Harness();
         h.State.Apply(VendorGuid, Profile(), new[]
@@ -1123,11 +1124,17 @@ public sealed class VendorUiControllerTests
 
         // TryBuy's reservation increments BusyCount synchronously, before
         // any wire response — the button must reflect that immediately,
-        // with no per-frame polling (ItemInteractionController.StateChanged
+        // with no per-frame polling (RuntimeItemInteraction.StateChanged
         // drives RecomputeBuyButtonEnabled).
         Assert.False(h.BuyButton.Enabled);
 
         h.ItemInteraction.CompleteUse(0);
+
+        Assert.False(h.BuyButton.Enabled);
+        h.State.Apply(VendorGuid, Profile(), new[]
+        {
+            new VendorShopItem(ArmorItemGuid, -1, 2u, "Chainmail", (uint)ItemType.Armor, 200u, 500),
+        });
 
         Assert.True(h.BuyButton.Enabled);
     }
@@ -2778,7 +2785,7 @@ public sealed class VendorUiControllerTests
         spellbook.SetDesiredComponent(ScarabWcid, 5u);
 
         var messages = new List<string>();
-        ClientCommandController commands = AcDream.App.Tests.UI.ClientCommandControllerTests
+        RuntimeClientCommandDispatcher commands = AcDream.Runtime.Tests.Chat.RuntimeClientCommandDispatcherTests
             .NewController(
                 messages: messages,
                 vendorOpen: true,
@@ -2828,7 +2835,7 @@ public sealed class VendorUiControllerTests
         spellbook.SetDesiredComponent(TaperWcid, 20u);
         spellbook.SetDesiredComponent(ScarabWcid, 5u);
 
-        ClientCommandController commands = AcDream.App.Tests.UI.ClientCommandControllerTests
+        RuntimeClientCommandDispatcher commands = AcDream.Runtime.Tests.Chat.RuntimeClientCommandDispatcherTests
             .NewController(
                 vendorOpen: true,
                 fillComponentBuyList: (category, maximumPrice) =>

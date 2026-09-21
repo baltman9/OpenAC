@@ -8,6 +8,7 @@ using AcDream.Core.Properties;
 using AcDream.Core.Spells;
 using AcDream.Runtime.Entities;
 using AcDream.Runtime.Gameplay;
+using AcDream.Runtime.Physics;
 
 namespace AcDream.Runtime.Tests.Gameplay;
 
@@ -44,15 +45,23 @@ public sealed class RuntimeHostileTargetQueryTests
 
         Assert.Equal(
             0x50000010u,
-            RuntimeHostileTargetQuery.FindClosest(runtime));
+            RuntimeHostileTargetQuery.FindClosest(
+                runtime,
+                HostileTargetScope.Selectable));
         Assert.True(
             RuntimeHostileTargetQuery.IsHostile(
                 runtime,
-                0x50000010u));
+                0x50000010u,
+                HostileTargetScope.Classified));
     }
 
+    /// <summary>
+    /// Mutation: drop the <c>scope == Classified</c> early return from
+    /// <c>IsEligible</c> and the hidden, no-draw and dead monsters disappear
+    /// from the automation view.
+    /// </summary>
     [Fact]
-    public void Query_RejectsHiddenNoDrawDeadPlayersPetsNpcsAndNonCreatures()
+    public void ClassifiedScope_KeepsHiddenNoDrawAndZeroHealthMonsters()
     {
         using GameRuntime runtime = Create();
         runtime.PlayerIdentity.ServerGuid = Player;
@@ -81,6 +90,130 @@ public sealed class RuntimeHostileTargetQueryTests
             10f,
             Hostile(0x50000012u));
         runtime.ActionOwner.Combat.OnUpdateHealth(0x50000012u, 0f);
+
+        Assert.Equal(
+            [0x50000010u, 0x50000011u, 0x50000012u],
+            RuntimeHostileTargetQuery
+                .Capture(runtime, 10f, HostileTargetScope.Classified)
+                .Select(static target => target.ObjectId)
+                .Order());
+        Assert.Equal(
+            0x50000010u,
+            RuntimeHostileTargetQuery.FindClosest(
+                runtime,
+                HostileTargetScope.Classified));
+        foreach (uint objectId in
+            (uint[])[0x50000010u, 0x50000011u, 0x50000012u])
+        {
+            Assert.True(RuntimeHostileTargetQuery.IsHostile(
+                runtime,
+                objectId,
+                HostileTargetScope.Classified));
+        }
+    }
+
+    /// <summary>
+    /// The selectable scope is what a select-nearest key and a bot's
+    /// auto-target mean by "a monster".
+    /// Mutation: answer <c>true</c> unconditionally after the classification
+    /// in <c>IsEligible</c> and the hidden monster wins the pick.
+    /// </summary>
+    [Fact]
+    public void SelectableScope_SkipsHiddenNoDrawAndZeroHealthMonsters()
+    {
+        using GameRuntime runtime = Create();
+        runtime.PlayerIdentity.ServerGuid = Player;
+        Add(runtime, Player, 0x01010001u, 10f, 10f, PlayerObject(Player));
+        Add(
+            runtime,
+            0x50000010u,
+            0x01010001u,
+            11f,
+            10f,
+            Hostile(0x50000010u),
+            PhysicsStateFlags.Hidden);
+        Add(
+            runtime,
+            0x50000011u,
+            0x01010001u,
+            12f,
+            10f,
+            Hostile(0x50000011u),
+            PhysicsStateFlags.NoDraw);
+        Add(
+            runtime,
+            0x50000012u,
+            0x01010001u,
+            13f,
+            10f,
+            Hostile(0x50000012u));
+        runtime.ActionOwner.Combat.OnUpdateHealth(0x50000012u, 0f);
+        Add(
+            runtime,
+            0x50000013u,
+            0x01010001u,
+            14f,
+            10f,
+            Hostile(0x50000013u));
+
+        Assert.Equal(
+            [0x50000013u],
+            RuntimeHostileTargetQuery
+                .Capture(runtime, 10f, HostileTargetScope.Selectable)
+                .Select(static target => target.ObjectId)
+                .Order());
+        Assert.Equal(
+            0x50000013u,
+            RuntimeHostileTargetQuery.FindClosest(
+                runtime,
+                HostileTargetScope.Selectable));
+        foreach (uint refused in
+            (uint[])[0x50000010u, 0x50000011u, 0x50000012u])
+        {
+            Assert.False(RuntimeHostileTargetQuery.IsHostile(
+                runtime,
+                refused,
+                HostileTargetScope.Selectable));
+        }
+        Assert.True(RuntimeHostileTargetQuery.IsHostile(
+            runtime,
+            0x50000013u,
+            HostileTargetScope.Selectable));
+    }
+
+    [Fact]
+    public void Capture_MeasuresTheVerticalSeparationToo()
+    {
+        using GameRuntime runtime = Create();
+        runtime.PlayerIdentity.ServerGuid = Player;
+        Add(runtime, Player, 0x01010001u, 10f, 10f, PlayerObject(Player));
+        Add(
+            runtime,
+            0x50000030u,
+            0x01010001u,
+            13f,
+            10f,
+            Hostile(0x50000030u),
+            z: 9f);
+
+        RuntimeHostileTargetSnapshot target = Assert.Single(
+            RuntimeHostileTargetQuery.Capture(
+                runtime,
+                10f,
+                HostileTargetScope.Classified));
+        Assert.Equal(5f, target.Distance, 3);
+        Assert.Empty(RuntimeHostileTargetQuery.Capture(
+            runtime,
+            4.9f,
+            HostileTargetScope.Classified));
+    }
+
+    [Fact]
+    public void Query_RejectsPlayersPetsNpcsAndNonCreatures()
+    {
+        using GameRuntime runtime = Create();
+        runtime.PlayerIdentity.ServerGuid = Player;
+        Add(runtime, Player, 0x01010001u, 10f, 10f, PlayerObject(Player));
         Add(
             runtime,
             0x50000013u,
@@ -129,24 +262,33 @@ public sealed class RuntimeHostileTargetQueryTests
 
         Assert.Equal(
             0x50000017u,
-            RuntimeHostileTargetQuery.FindClosest(runtime));
-        Assert.False(RuntimeHostileTargetQuery.IsHostile(runtime, 0u));
+            RuntimeHostileTargetQuery.FindClosest(
+                runtime,
+                HostileTargetScope.Selectable));
+        Assert.False(RuntimeHostileTargetQuery.IsHostile(
+            runtime,
+            0u,
+            HostileTargetScope.Classified));
         Assert.False(
             RuntimeHostileTargetQuery.IsHostile(
                 runtime,
-                0x50000010u));
+                0x50000013u,
+                HostileTargetScope.Classified));
         Assert.False(
             RuntimeHostileTargetQuery.IsHostile(
                 runtime,
-                0x50000012u));
+                0x50000015u,
+                HostileTargetScope.Classified));
         Assert.False(
             RuntimeHostileTargetQuery.IsHostile(
                 runtime,
-                0x50000014u));
+                0x50000014u,
+                HostileTargetScope.Classified));
         Assert.True(
             RuntimeHostileTargetQuery.IsHostile(
                 runtime,
-                0x50000017u));
+                0x50000017u,
+                HostileTargetScope.Classified));
     }
 
     [Fact]
@@ -163,7 +305,7 @@ public sealed class RuntimeHostileTargetQueryTests
         record.SetPhysicsBody(body);
 
         IReadOnlyList<RuntimeHostileTargetSnapshot> targets =
-            RuntimeHostileTargetQuery.Capture(runtime, maximumDistance: 50f);
+            RuntimeHostileTargetQuery.Capture(runtime, maximumDistance: 50f, HostileTargetScope.Classified);
 
         RuntimeHostileTargetSnapshot target = Assert.Single(targets);
         Assert.Equal(2f, target.Distance, 3);
@@ -172,9 +314,193 @@ public sealed class RuntimeHostileTargetQueryTests
 
         // The floor above: 6 m up, the straight line says so and the height is reported.
         body.SnapToCell(0x01010001u, new Vector3(10f, 10f, 11f), new Vector3(10f, 10f, 11f));
-        target = Assert.Single(RuntimeHostileTargetQuery.Capture(runtime, maximumDistance: 50f));
+        target = Assert.Single(RuntimeHostileTargetQuery.Capture(runtime, maximumDistance: 50f, HostileTargetScope.Classified));
         Assert.Equal(6f, target.Distance, 3);
         Assert.Equal(6f, target.HeightDifference, 3);
+    }
+
+    /// <summary>
+    /// The one owner of "where is this entity now": the simulated body once
+    /// it has a cell, otherwise the last position the server sent.
+    /// Mutation: answer from the server's position first and the advanced
+    /// body is never heard from.
+    /// </summary>
+    [Fact]
+    public void AbsoluteWorldPosition_PrefersTheAdvancedBodyOverTheWirePosition()
+    {
+        using GameRuntime runtime = Create();
+        runtime.PlayerIdentity.ServerGuid = Player;
+        Add(runtime, 0x50000010u, 0x01010001u, 10f, 30f, Hostile(0x50000010u));
+        Assert.True(runtime.EntityObjects.Entities.TryGetActive(
+            0x50000010u, out RuntimeEntityRecord record));
+
+        // No body yet: the server's word is all there is.
+        Assert.True(RuntimePhysicsState.TryGetAbsoluteWorldPosition(
+            record, out Vector3 wire));
+        Assert.Equal(new Vector3(10f + 192f, 30f + 192f, 5f), wire);
+
+        // A body that has not been placed yet has no cell, so it is not an
+        // answer either.
+        var body = new PhysicsBody();
+        record.SetPhysicsBody(body);
+        Assert.True(RuntimePhysicsState.TryGetAbsoluteWorldPosition(
+            record, out Vector3 cellless));
+        Assert.Equal(wire, cellless);
+
+        // Placed, then advanced ten metres by the frame loop.
+        body.SnapToCell(
+            0x01010001u,
+            new Vector3(10f, 30f, 5f),
+            new Vector3(10f, 30f, 5f));
+        body.Position = new Vector3(10f, 20f, 5f);
+        Assert.True(RuntimePhysicsState.TryGetAbsoluteWorldPosition(
+            record, out Vector3 advanced));
+        Assert.Equal(new Vector3(10f + 192f, 20f + 192f, 5f), advanced);
+    }
+
+    /// <summary>
+    /// A creature the server placed twenty metres off walks ten metres into
+    /// an eight-metre watch window. One scan has to see it there, because
+    /// that is where it is swinging from.
+    /// Mutation: measure the creature from its server position and it stays
+    /// invisible to the scan until the next server update.
+    /// </summary>
+    [Fact]
+    public void Capture_SeesACreatureThatWalkedIntoTheWindowWithinOneScan()
+    {
+        using GameRuntime runtime = Create();
+        runtime.PlayerIdentity.ServerGuid = Player;
+        Add(runtime, Player, 0x01010001u, 10f, 10f, PlayerObject(Player));
+        Add(runtime, 0x50000010u, 0x01010001u, 10f, 30f, Hostile(0x50000010u));
+        Assert.True(runtime.EntityObjects.Entities.TryGetActive(
+            0x50000010u, out RuntimeEntityRecord record));
+        var body = new PhysicsBody();
+        body.SnapToCell(
+            0x01010001u,
+            new Vector3(10f, 30f, 5f),
+            new Vector3(10f, 30f, 5f));
+        record.SetPhysicsBody(body);
+
+        Assert.Empty(RuntimeHostileTargetQuery.Capture(
+            runtime, 8f, HostileTargetScope.Classified));
+
+        body.Position = new Vector3(10f, 12f, 5f);
+
+        RuntimeHostileTargetSnapshot target = Assert.Single(
+            RuntimeHostileTargetQuery.Capture(
+                runtime, 8f, HostileTargetScope.Classified));
+        Assert.Equal(2f, target.Distance, 3);
+        Assert.Equal(
+            0x50000010u,
+            RuntimeHostileTargetQuery.FindClosest(
+                runtime, HostileTargetScope.Classified));
+    }
+
+    /// <summary>
+    /// The reader a looting client asks how far a corpse is and the reader a
+    /// fighting client asks how far a creature is have to answer the same
+    /// for the same entity, or the client walks away from a fight it is
+    /// still in.
+    /// Mutation: let either reader fall back to the server's position on its
+    /// own and the two answers part company the moment anything moves.
+    /// </summary>
+    [Fact]
+    public void ObjectDistanceReaderAgreesWithTheHostileScan()
+    {
+        using GameRuntime runtime = Create();
+        runtime.PlayerIdentity.ServerGuid = Player;
+        Add(runtime, Player, 0x01010001u, 10f, 10f, PlayerObject(Player));
+        Add(runtime, 0x50000010u, 0x01010001u, 10f, 30f, Hostile(0x50000010u));
+        Assert.True(runtime.EntityObjects.Entities.TryGetActive(
+            0x50000010u, out RuntimeEntityRecord record));
+        var body = new PhysicsBody();
+        body.SnapToCell(
+            0x01010001u,
+            new Vector3(10f, 30f, 5f),
+            new Vector3(10f, 30f, 5f));
+        record.SetPhysicsBody(body);
+        body.Position = new Vector3(10f, 13f, 5f);
+
+        RuntimeHostileTargetSnapshot target = Assert.Single(
+            RuntimeHostileTargetQuery.Capture(
+                runtime, 50f, HostileTargetScope.Classified));
+        Assert.True(RuntimeFriendlyTargetQuery.TryGetDistance(
+            runtime, 0x50000010u, out float objectDistance));
+
+        Assert.Equal(3f, target.Distance, 3);
+        Assert.Equal(target.Distance, objectDistance, 3);
+    }
+
+    /// <summary>
+    /// The same two readers, on a slope. Every distance a plugin is handed
+    /// between two objects is the straight line between them, height
+    /// included: three metres along the ground and four metres up is five
+    /// metres away, not three. Measuring one of them flat makes a corpse on
+    /// the storey below read as lying at the character's feet, and a client
+    /// that walks to it never arrives.
+    /// Mutation: drop the height term from either reader and the flat three
+    /// metres comes back instead of five.
+    /// </summary>
+    [Fact]
+    public void DistancesAreTheStraightLineHeightIncluded()
+    {
+        using GameRuntime runtime = Create();
+        runtime.PlayerIdentity.ServerGuid = Player;
+        Add(runtime, Player, 0x01010001u, 10f, 10f, PlayerObject(Player));
+        Add(runtime, 0x50000010u, 0x01010001u, 10f, 30f, Hostile(0x50000010u));
+        Assert.True(runtime.EntityObjects.Entities.TryGetActive(
+            0x50000010u, out RuntimeEntityRecord record));
+        var body = new PhysicsBody();
+        body.SnapToCell(
+            0x01010001u,
+            new Vector3(10f, 30f, 5f),
+            new Vector3(10f, 30f, 5f));
+        record.SetPhysicsBody(body);
+        // Three metres north of the character and four metres above it.
+        body.Position = new Vector3(10f, 13f, 9f);
+
+        RuntimeHostileTargetSnapshot target = Assert.Single(
+            RuntimeHostileTargetQuery.Capture(
+                runtime, 50f, HostileTargetScope.Classified));
+        Assert.True(RuntimeFriendlyTargetQuery.TryGetDistance(
+            runtime, 0x50000010u, out float objectDistance));
+
+        Assert.Equal(5f, target.Distance, 3);
+        Assert.Equal(5f, objectDistance, 3);
+        Assert.Equal(4f, target.HeightDifference, 3);
+    }
+
+    /// <summary>
+    /// The local character is measured from its own simulated body too, so a
+    /// character that has run away from where the server last placed it does
+    /// not drag every distance in the client along with it.
+    /// Mutation: read the player's server position and every distance is off
+    /// by how far the character has run since.
+    /// </summary>
+    [Fact]
+    public void DistancesFollowTheLocalCharactersOwnBody()
+    {
+        using GameRuntime runtime = Create();
+        runtime.PlayerIdentity.ServerGuid = Player;
+        Add(runtime, Player, 0x01010001u, 10f, 10f, PlayerObject(Player));
+        Add(runtime, 0x50000010u, 0x01010001u, 10f, 30f, Hostile(0x50000010u));
+        Assert.True(runtime.EntityObjects.Entities.TryGetActive(
+            Player, out RuntimeEntityRecord playerRecord));
+        var playerBody = new PhysicsBody();
+        playerBody.SnapToCell(
+            0x01010001u,
+            new Vector3(10f, 10f, 5f),
+            new Vector3(10f, 10f, 5f));
+        playerRecord.SetPhysicsBody(playerBody);
+        playerBody.Position = new Vector3(10f, 26f, 5f);
+
+        RuntimeHostileTargetSnapshot target = Assert.Single(
+            RuntimeHostileTargetQuery.Capture(
+                runtime, 50f, HostileTargetScope.Classified));
+        Assert.Equal(4f, target.Distance, 3);
+        Assert.True(RuntimeFriendlyTargetQuery.TryGetDistance(
+            runtime, 0x50000010u, out float objectDistance));
+        Assert.Equal(4f, objectDistance, 3);
     }
 
     [Fact]
@@ -184,7 +510,9 @@ public sealed class RuntimeHostileTargetQueryTests
         runtime.PlayerIdentity.ServerGuid = Player;
         runtime.InventoryOwner.Objects.AddOrUpdate(PlayerObject(Player));
 
-        Assert.Null(RuntimeHostileTargetQuery.FindClosest(runtime));
+        Assert.Null(RuntimeHostileTargetQuery.FindClosest(
+                runtime,
+                HostileTargetScope.Selectable));
 
         Add(runtime, Player, 0x01010001u, 10f, 10f, PlayerObject(Player));
         Add(
@@ -199,7 +527,9 @@ public sealed class RuntimeHostileTargetQueryTests
                 Type = ItemType.Creature,
             });
 
-        Assert.Null(RuntimeHostileTargetQuery.FindClosest(runtime));
+        Assert.Null(RuntimeHostileTargetQuery.FindClosest(
+                runtime,
+                HostileTargetScope.Selectable));
     }
 
     [Fact]
@@ -223,7 +553,10 @@ public sealed class RuntimeHostileTargetQueryTests
         runtime.ActionOwner.Combat.OnUpdateHealth(east.ObjectId, 0.75f);
 
         IReadOnlyList<RuntimeHostileTargetSnapshot> captured =
-            RuntimeHostileTargetQuery.Capture(runtime, 4f);
+            RuntimeHostileTargetQuery.Capture(
+                runtime,
+                4f,
+                HostileTargetScope.Classified);
 
         RuntimeHostileTargetSnapshot target = Assert.Single(captured);
         Assert.Equal(east.ObjectId, target.ObjectId);
@@ -235,8 +568,10 @@ public sealed class RuntimeHostileTargetQueryTests
         Assert.Equal(0.75f, target.HealthFraction, 3);
         Assert.Equal(4, target.SpeciesId);
         Assert.True(target.HasShield);
-        Assert.Equal(0, target.MaximumHealth);
-        Assert.Empty(RuntimeHostileTargetQuery.Capture(runtime, 2.9f));
+        Assert.Empty(RuntimeHostileTargetQuery.Capture(
+            runtime,
+            2.9f,
+            HostileTargetScope.Classified));
     }
 
     private static GameRuntime Create()
@@ -275,11 +610,12 @@ public sealed class RuntimeHostileTargetQueryTests
         float x,
         float y,
         ClientObject item,
-        PhysicsStateFlags state = 0)
+        PhysicsStateFlags state = 0,
+        float z = 5f)
     {
         RuntimeEntityRecord record = runtime.EntityObjects
             .RegisterEntity(
-                Spawn(guid, landblock, x, y, state))
+                Spawn(guid, landblock, x, y, state, z))
             .Canonical!;
         Assert.True(runtime.EntityObjects.ApplyAcceptedSpawn(
             record,
@@ -294,13 +630,14 @@ public sealed class RuntimeHostileTargetQueryTests
         uint landblock,
         float x,
         float y,
-        PhysicsStateFlags state)
+        PhysicsStateFlags state,
+        float z)
     {
         var position = new CreateObject.ServerPosition(
             landblock,
             x,
             y,
-            5f,
+            z,
             1f,
             0f,
             0f,
@@ -363,9 +700,9 @@ public sealed class RuntimeHostileTargetQueryTests
         IRuntimeCombatModeOperations,
         IRuntimeSpellCastOperations
     {
-        public bool CanStartAttack() => false;
+        public bool CanStartAttack(bool allowAutoTarget) => false;
         public void PrepareAttackRequest() { }
-        public bool SendAttack(AttackHeight height, float power) => false;
+        public bool SendAttack(AttackHeight height, float power, bool allowAutoTarget) => false;
         public void SendCancelAttack() { }
         public bool IsDualWield => false;
         public bool PlayerReadyForAttack => false;

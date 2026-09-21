@@ -446,12 +446,15 @@ public sealed class CurrentGameRuntimeAdapterTests
             recording.Entries,
             entry => entry.Kind == RuntimeTraceKind.Entity
                 && entry.PrimaryObjectId == Harness.TargetGuid);
-        Assert.Equal(1, harness.EntityObjects.Events.SubscriberCount);
+        // The runtime keeps one observer of its own on this stream -- the
+        // one that lets the selection go when its object leaves the world --
+        // so the count here is that one plus this test's own.
+        Assert.Equal(2, harness.EntityObjects.Events.SubscriberCount);
         Assert.Equal(0, harness.EntityObjects.Events.DispatchFailureCount);
 
         first.Dispose();
         second.Dispose();
-        Assert.Equal(0, harness.EntityObjects.Events.SubscriberCount);
+        Assert.Equal(1, harness.EntityObjects.Events.SubscriberCount);
     }
 
     [Fact]
@@ -788,7 +791,7 @@ public sealed class CurrentGameRuntimeAdapterTests
         public const uint PlayerGuid = 0x50000002u;
         public const uint TargetGuid = 0x70000001u;
 
-        private readonly ItemInteractionController _items;
+        private readonly RuntimeItemInteraction _items;
         private readonly LiveSessionController _session;
         private readonly IDisposable _combatModeBinding;
         private readonly GameRuntime _gameRuntime;
@@ -825,7 +828,7 @@ public sealed class CurrentGameRuntimeAdapterTests
                 MovementInput,
                 mouseLook: null,
                 new NoopCombatInput());
-            Clock = new UpdateFrameClock(_gameRuntime.Clock);
+            Clock = new UpdateFrameClock(_gameRuntime);
             WorldReveal = new WorldRevealCoordinator(
                 WorldTransit,
                 static () => new StreamingRevealWindow(1, 1),
@@ -837,7 +840,7 @@ public sealed class CurrentGameRuntimeAdapterTests
                 static () => { },
                 static _ => false);
 
-            _items = new ItemInteractionController(
+            _items = new RuntimeItemInteraction(
                 Objects,
                 Actions.Transactions,
                 Actions.Interaction,
@@ -853,7 +856,9 @@ public sealed class CurrentGameRuntimeAdapterTests
                 _items,
                 new SelectionTransport(() => _session?.IsInWorld == true),
                 new NoopInteractionMovement(),
-                _gameRuntime.ActionOwner.CombatTarget);
+                _gameRuntime.ActionOwner.CombatTarget,
+                _gameRuntime.WorldObjectUseOwner,
+                _gameRuntime.ArmedApproachDrive);
 
             Host = CreateHost(
                 _session,
@@ -958,13 +963,14 @@ public sealed class CurrentGameRuntimeAdapterTests
         public bool PlayerReadyForAttack => true;
         public bool AutoRepeatAttack => false;
 
-        public bool CanStartAttack() => true;
+        public bool CanStartAttack(bool allowAutoTarget) => true;
 
         public void PrepareAttackRequest() => Trace.Add("prepare");
 
         public bool SendAttack(
             AcDream.Core.Combat.AttackHeight height,
-            float power)
+            float power,
+            bool allowAutoTarget)
         {
             Trace.Add($"attack:{height}:{power}");
             return true;
@@ -1408,7 +1414,7 @@ public sealed class CurrentGameRuntimeAdapterTests
     {
         public bool BeginApproach(
             InteractionApproach approach,
-            Action<PlayerApproachToken>? armAfterCancel = null) => false;
+            Action<RuntimeInteractionApproachToken>? armAfterCancel = null) => false;
 
         public uint? CurrentApproachFailProgressCount() => null;
 

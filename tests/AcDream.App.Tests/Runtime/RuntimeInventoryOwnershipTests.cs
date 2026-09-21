@@ -48,21 +48,25 @@ public sealed class RuntimeInventoryOwnershipTests
     {
         IReadOnlyList<CompiledCall> ui =
             CompiledCallGraph.ReadOwned(typeof(RetailInteractionRetainedUiCompositionFactory));
-        AssertRuntimeCall(ui, typeof(RuntimeActionState), "get_Transactions");
+        AssertRuntimeCall(ui, typeof(GameRuntime), "get_ItemInteractionOwner");
         Assert.DoesNotContain(
             ui,
             call => call.Target.DeclaringType == typeof(InventoryTransactionState)
                 && call.Target.IsConstructor);
+        Assert.DoesNotContain(
+            ui,
+            call => call.Target.DeclaringType == typeof(RuntimeItemInteraction)
+                && call.Target.IsConstructor);
 
         FieldInfo transactions = Assert.Single(
-            typeof(ItemInteractionController).GetFields(Declared),
+            typeof(RuntimeItemInteraction).GetFields(Declared),
             field => field.Name == "_runtimeTransactions");
         Assert.Equal(typeof(RuntimeInteractionTransactionState), transactions.FieldType);
         Assert.DoesNotContain(
-            typeof(ItemInteractionController).GetFields(Declared),
+            typeof(RuntimeItemInteraction).GetFields(Declared),
             field => field.Name == "_ownsTransactions");
         Assert.DoesNotContain(
-            CompiledCallGraph.ReadDeclared(typeof(ItemInteractionController)),
+            CompiledCallGraph.ReadDeclared(typeof(RuntimeItemInteraction)),
             call => call.Target.DeclaringType == typeof(InventoryTransactionState)
                 && call.Target.IsConstructor);
 

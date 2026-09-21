@@ -1,6 +1,7 @@
 using AcDream.App.World;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
+using AcDream.Runtime.Physics;
 using DatReaderWriter.DBObjs;
 
 namespace AcDream.App.Rendering;
@@ -13,14 +14,12 @@ internal static class LiveEntityCreateSupersessionRecovery
         ulong expectedCreateIntegrationVersion,
         Func<LiveEntityAppearanceUpdateState?> captureAppearance,
         Func<LiveEntityAppearanceUpdateState, bool> publishAppearance,
-        Action<LiveEntityAppearanceUpdateState> publishCurrentSnapshot,
         Action<LiveEntityAppearanceUpdateState> synchronizeAnimation)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(expectedRecord);
         ArgumentNullException.ThrowIfNull(captureAppearance);
         ArgumentNullException.ThrowIfNull(publishAppearance);
-        ArgumentNullException.ThrowIfNull(publishCurrentSnapshot);
         ArgumentNullException.ThrowIfNull(synchronizeAnimation);
 
         if (!runtime.IsCurrentCreateIntegration(
@@ -32,14 +31,6 @@ internal static class LiveEntityCreateSupersessionRecovery
                 expectedCreateIntegrationVersion)
             || !publishAppearance(visualUpdate)
             || !runtime.IsCurrentCreateIntegration(
-                expectedRecord,
-                expectedCreateIntegrationVersion))
-        {
-            return false;
-        }
-
-        publishCurrentSnapshot(visualUpdate);
-        if (!runtime.IsCurrentCreateIntegration(
                 expectedRecord,
                 expectedCreateIntegrationVersion))
         {
@@ -62,11 +53,13 @@ internal static class LiveEntityCreateAnimationSynchronization
         int canonicalLowFrame,
         int canonicalHighFrame,
         float canonicalFramerate,
-        MotionTable? motionTable,
+        RuntimeMotionStateBuilder motionStates,
+        uint motionTableId,
         CreateObject.ServerMotionState? wireState)
     {
         ArgumentNullException.ThrowIfNull(record);
         ArgumentNullException.ThrowIfNull(animation);
+        ArgumentNullException.ThrowIfNull(motionStates);
         if (record.InitialHydrationCompleted)
             return false;
 
@@ -79,11 +72,11 @@ internal static class LiveEntityCreateAnimationSynchronization
             animation.CurrFrame = canonicalLowFrame;
         }
 
-        if (animation.Sequencer is { } sequencer && motionTable is not null)
+        if (animation.Sequencer is { } sequencer)
         {
-            SpawnMotionInitializer.Reinitialize(
+            motionStates.TryReinitialize(
                 sequencer,
-                motionTable,
+                motionTableId,
                 wireState);
         }
         return true;

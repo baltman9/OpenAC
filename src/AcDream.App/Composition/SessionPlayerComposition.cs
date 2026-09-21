@@ -56,7 +56,7 @@ internal sealed record SessionPlayerDependencies(
     LiveEntityRuntimeSlot RuntimeSlot,
     LiveEntityAnimationRuntimeView<LiveEntityAnimationState> AnimatedEntities,
     RemoteMovementObservationTracker RemoteMovementObservations,
-    RemotePhysicsUpdater RemotePhysicsUpdater,
+    AcDream.Runtime.Physics.RuntimeRemoteBodyOwner RemoteBodies,
     RemoteInboundMotionDispatcher RemoteInboundMotion,
     RetailInboundEventDispatcher InboundEntityEvents,
     DeferredLiveEntityMotionRuntimeBindings MotionBindings,
@@ -70,7 +70,7 @@ internal sealed record SessionPlayerDependencies(
     WorldRenderRangeState RenderRange,
     LocalPlayerShadowState PlayerShadow,
     ViewportAspectState ViewportAspect,
-    PlayerApproachCompletionState PlayerApproachCompletions,
+    RuntimeApproachCompletionState RuntimeApproachCompletions,
     PointerPositionState PointerPosition,
     DispatcherMovementInputSource MovementInput,
     IInputCaptureSource InputCapture,
@@ -278,21 +278,10 @@ internal sealed class SessionPlayerCompositionPhase
             d.DatLock,
             world.TerrainBuild.HeightTable,
             d.Options.DumpSceneryZ);
-        AcDream.Core.Quests.ContractCatalog? pluginContractCatalog = null;
-        d.WorldGameState.ContractsSource = () =>
-        {
-            if (pluginContractCatalog is null)
-            {
-                lock (d.DatLock)
-                    pluginContractCatalog =
-                        AcDream.Content.ContractTableReader.Load(content.Dats);
-            }
-
-            return AcDream.Runtime.Gameplay.ContractPluginProjection.Project(
-                d.Runtime.ContractsOwner.View,
-                pluginContractCatalog,
-                DateTime.UtcNow);
-        };
+        // One answer for both clients, named from the one table the
+        // shared content pass read.
+        d.WorldGameState.ContractsSource =
+            d.Runtime.ContractsOwner.ProjectForPlugins;
 
         var streamerLease = scope.Acquire(
             "landblock streamer",
@@ -488,8 +477,6 @@ internal sealed class SessionPlayerCompositionPhase
             d.ClassificationCache,
             d.EffectPoses,
             live.EquippedChildren,
-            d.WorldGameState,
-            d.WorldEvents,
             d.PhysicsEngine.ShadowObjects,
             content.CollisionBuilder,
             live.ProjectileController,
@@ -540,6 +527,10 @@ internal sealed class SessionPlayerCompositionPhase
             d.EntityObjects,
             teardown,
             d.PlayerIdentity);
+        // Dismissing an object the client still believes in is decided by the
+        // runtime; this client has a drawn world to take down as well, so it
+        // lends the route it already runs for an authoritative delete.
+        d.Runtime.GhostDismissalOwner.BindAuthoritativeDelete(deletion.Delete);
         live.LiveEntities.Physics.BindObjectTableHostResolver(
             guid => d.MotionBindings.ResolvePhysicsHost(guid));
         IPreparedCollisionSource firstEntryCollision =
@@ -547,6 +538,13 @@ internal sealed class SessionPlayerCompositionPhase
             ?? throw new NotSupportedException(
                 "Production prepared assets must expose the matching "
                 + "prepared-collision catalog.");
+        // The shared physics owner is told where authored shapes come from, the
+        // same catalog and on the same terms as the windowless host. Both hosts
+        // then answer how wide and how tall a thing is from one place; with a
+        // window the streamed cache usually answers first, and this is what
+        // keeps the answer from being zero in the moment before a newly
+        // arrived creature's shape has been published.
+        live.LiveEntities.Physics.BindSetupCollisionSource(firstEntryCollision);
         uint firstEntryCylinderLocalId = 0u;
         float firstEntryCylinderRadius = 0f;
         float firstEntryCylinderHeight = 0f;
@@ -558,8 +556,8 @@ internal sealed class SessionPlayerCompositionPhase
                 d.Runtime.CharacterOwner.MovementSkills.Snapshot),
             record =>
             {
-                float radius = 0.48f;
-                float height = 1.835f;
+                float radius = DefaultPlayerBody.Radius;
+                float height = DefaultPlayerBody.Height;
                 uint localId = record.Key?.LocalEntityId ?? 0u;
                 if (localId != 0u && localId == firstEntryCylinderLocalId)
                 {
@@ -614,13 +612,22 @@ internal sealed class SessionPlayerCompositionPhase
                     portal.RevealGeneration,
                     portal.TeleportSequence,
                     portal.Projection.DestinationCell));
-        var remotePlacementDrive = new RuntimeRemotePlacementDriveController(
+        // Arming another creature's body from the server's word about it is one
+        // implementation for every client, and it owns the drive that carries
+        // out an accepted re-placement, so a body the server moved lands in
+        // the same place here as it does without a window. This client hands
+        // it the short list of things only a drawn world can answer.
+        var remoteArming = RuntimeRemoteArming.Create(
             d.EntityObjects,
             d.Runtime.Clock,
             firstEntryCollision,
             new GraphicalRemotePlacementServiceWindow(
                 live.WorldState,
-                streaming.IsLandblockPresentationReady));
+                streaming.IsLandblockPresentationReady),
+            d.MotionBindings.HostFacts);
+        d.MotionBindings.BindArming(remoteArming);
+        RuntimeRemotePlacementDriveController remotePlacementDrive =
+            remoteArming.PlacementDrive;
         var hydration = new LiveEntityHydrationController(
             live.LiveEntities,
             d.EntityObjects,
@@ -667,13 +674,12 @@ internal sealed class SessionPlayerCompositionPhase
             live.ProjectileController,
             d.AnimatedEntities,
             d.RemoteMovementObservations,
-            d.RemotePhysicsUpdater,
+            d.RemoteBodies,
             d.RemoteInboundMotion,
             live.MotionRuntime,
             d.PhysicsEngine,
             content.Dats,
             content.AnimationLoader,
-            d.Actions.CombatTarget,
             d.WorldOrigin,
             d.TeleportSink,
             d.PlayerController,
@@ -725,14 +731,9 @@ internal sealed class SessionPlayerCompositionPhase
             d.CombatAttackOperations.BindOwned(
                 new LiveCombatAttackOperations(
                     d.Actions.Combat,
-                    new CombatAttackTargetSource(
-                        d.Actions.Selection,
-                        live.LiveEntities,
-                        d.EntityObjects.Objects,
-                        d.PlayerIdentity),
+                    new CombatAttackTargetSource(d.Runtime),
                     new CharacterOptionCombatSettingsSource(d.Character.Options),
-                    d.PlayerController,
-                    d.PlayerOutbound,
+                    d.Runtime,
                     liveSessionSource,
                     liveSessionSource,
                     d.CombatFeedback)));
@@ -849,6 +850,14 @@ internal sealed class SessionPlayerCompositionPhase
             d.AnimatedEntities,
             live.AnimationPresenter,
             content.AnimationHookFrames);
+        // What this client hangs off the character's own locomotion: the same
+        // one cycle advance, with the poses of its parts built along the way,
+        // and the hooks that advance reached. A client with nothing to draw
+        // hands over neither and covers exactly the same ground.
+        d.Runtime.LocalPlayerMotion.BindPresentation(
+            new AcDream.Runtime.Gameplay.RuntimeLocalPlayerMotionPresentation(
+                localPlayerAnimation.AdvanceRoot,
+                localPlayerAnimation.CaptureHooks));
         var localPlayerShadow = live.LocalPlayerShadowSynchronizer;
         var localPlayerProjection = new LocalPlayerProjectionController(
             new LiveLocalPlayerProjectionRuntime(
@@ -862,7 +871,7 @@ internal sealed class SessionPlayerCompositionPhase
             d.PlayerController,
             d.ChaseCameraInput,
             d.MovementInput,
-            live.LiveEntities,
+            new LiveEntityWorldFacts(live.LiveEntities),
             d.PlayerIdentity,
             d.PlayerHost,
             localPlayerProjection,
@@ -886,7 +895,8 @@ internal sealed class SessionPlayerCompositionPhase
             live.EquippedChildren,
             liveEffectFrame,
             live.RenderSceneShadow?.LiveProjections,
-            live.RenderSceneShadow?.StaticProjections);
+            live.RenderSceneShadow?.StaticProjections,
+            new RuntimeRemoteBodyPass(d.Runtime));
         Fault(SessionPlayerCompositionPoint.UpdateLeavesCreated);
 
         var playerMode = new PlayerModeController(
@@ -904,9 +914,8 @@ internal sealed class SessionPlayerCompositionPhase
             d.DatLock,
             content.CollisionAssets,
             d.AnimatedEntities,
-            localPlayerAnimation,
+            d.Runtime.LocalPlayerMotion,
             localPlayerShadow,
-            d.PlayerApproachCompletions,
             gameplayInput,
             liveSessionSource,
             d.MovementDiagnostics,
@@ -922,6 +931,13 @@ internal sealed class SessionPlayerCompositionPhase
                 playerMode));
         playerMode.BindAutoEntry(playerModeAutoEntry);
         Fault(SessionPlayerCompositionPoint.PlayerModeBound);
+
+        // The character options a session document declared are seeded by the
+        // runtime, the same way on both clients. The seeder needs the
+        // character command adapter, which is built further down, so it is
+        // filled in there and reached through this slot until it is.
+        AcDream.Runtime.Gameplay.RuntimeCharacterOptionsSeeder? optionsSeeder =
+            null;
 
         LocalPlayerTeleportController localTeleport =
             d.PortalTunnelFallback.Transfer(CreateLocalTeleportWithTunnel);
@@ -948,7 +964,9 @@ internal sealed class SessionPlayerCompositionPhase
                     d.PlayerHost,
                     d.ChaseCameraInput,
                     liveSpatialReconciler),
-                new LocalPlayerTeleportSession(liveSessionSource),
+                new LocalPlayerTeleportSession(
+                    liveSessionSource,
+                    () => optionsSeeder?.NoteLoginCompleteSent()),
                 presentation,
                 acceptedPositionDrive,
                 new RuntimeLoginLifecycleSource(d.Runtime),
@@ -1071,7 +1089,8 @@ internal sealed class SessionPlayerCompositionPhase
             d.StatusWriter,
             d.Options.SessionId ?? "app",
             d.Options.LoginCommands,
-            d.Options.LoginCommandDelayMs);
+            d.Options.LoginCommandDelayMs,
+            noteOptionsSeeded: () => optionsSeeder?.NoteOptionsSeeded());
         LiveSessionHost sessionHost = sessionRuntimeFactory.Create(
             liveSession,
             new LiveSessionConnectOptions(
@@ -1110,6 +1129,10 @@ internal sealed class SessionPlayerCompositionPhase
             liveSessionCommands,
             live.SelectionInteractions);
         bindings.Adopt("current game runtime adapter", gameRuntime);
+        optionsSeeder = new AcDream.Runtime.Gameplay.RuntimeCharacterOptionsSeeder(
+            d.Options.DeclaredCharacterOptions,
+            d.Runtime,
+            gameRuntime.CharacterCommands);
         bindings.Adopt(
             "retained-UI game runtime commands",
             interaction.LateBindings.GameRuntime.Bind(gameRuntime, gameRuntime));

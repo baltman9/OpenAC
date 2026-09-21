@@ -5,6 +5,8 @@ using AcDream.Headless.Diagnostics;
 using AcDream.Headless.Hosting;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
+using AcDream.Runtime.Navigation;
+using AcDream.Runtime.Plugins;
 using AcDream.Runtime.Session;
 
 namespace AcDream.Headless.Plugins;
@@ -34,6 +36,9 @@ internal sealed class HeadlessPluginSession : IDisposable
     internal int LoadedCount => _plugins.LoadedCount;
     internal HeadlessPluginHost Host => _host;
 
+    /// <summary>The one command registry this session hands plugins.</summary>
+    internal IPluginCommandRegistry PluginCommands => _host.Commands;
+
     internal IReadOnlyList<WeakReference> CaptureLoadContextWeakReferences() =>
         _plugins.CaptureLoadContextWeakReferences();
 
@@ -44,16 +49,19 @@ internal sealed class HeadlessPluginSession : IDisposable
         string sessionId,
         IEnumerable<string> roots,
         IReadOnlyList<string>? allowList,
-        IPluginCommandRegistry? commands = null,
         IPluginStorage? storage = null,
         IPluginStorage? vtankProfiles = null,
-        IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
+        PluginSessionSettings? sessionSettings = null,
         Func<string, bool>? submitChatText = null,
-        HeadlessItemAutomation? items = null,
         MagicCatalog? magicCatalog = null,
         HeadlessLogoutAutomation? logout = null,
         Func<uint, bool, bool>? answerConfirmation = null,
         Func<bool>? requestGracefulStop = null,
+        AcDream.Content.IDatReaderWriter? content = null,
+        IGameRuntimeCommands? sessionCommands = null,
+        NavigationWalkController? navigationWalk = null,
+        string? dataDirectory = null,
+        IReadOnlyList<string>? pluginTags = null,
         PluginHostVersion? hostVersion = null)
     {
         ArgumentNullException.ThrowIfNull(runtime);
@@ -68,16 +76,23 @@ internal sealed class HeadlessPluginSession : IDisposable
                 diagnostics,
                 sessionId,
                 () => runtime.Generation.Value),
-            commands,
             storage,
             vtankProfiles,
             sessionSettings,
             submitChatText,
-            items,
             magicCatalog,
             logout,
             answerConfirmation,
-            requestGracefulStop);
+            requestGracefulStop,
+            content,
+            sessionCommands,
+            navigationWalk,
+            (verb, error) => diagnostics.Failure(
+                sessionId,
+                $"plugin-command-{verb}",
+                error),
+            dataDirectory,
+            pluginTags);
         var plugins = new PluginSession(
             host,
             status => Report(statusWriter, sessionId, status),

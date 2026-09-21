@@ -5,7 +5,8 @@ internal sealed record HeadlessCommandLine(
     string ConfigurationPath,
     HeadlessPathOverrides Paths,
     HeadlessDirectCredentials? DirectCredentials,
-    bool ConsoleEnabled = false)
+    bool ConsoleEnabled = false,
+    string? ConsoleStream = null)
 {
     internal static HeadlessCommandLine Parse(
         IReadOnlyList<string> arguments)
@@ -25,6 +26,7 @@ internal sealed record HeadlessCommandLine(
         string? user = null;
         string? password = null;
         bool console = false;
+        string? consoleStream = null;
         int index = 1;
         while (index < arguments.Count)
         {
@@ -63,6 +65,16 @@ internal sealed record HeadlessCommandLine(
                 case "--cache-dir":
                     SetOnce(ref cacheDirectory, value);
                     break;
+                case "--console-stream":
+                    if (!HeadlessConsoleOptions.TryParseStream(value, out _))
+                    {
+                        throw new HeadlessCommandLineException(
+                            "--console-stream must be "
+                            + $"'{HeadlessConsoleOptions.StdoutValue}' or "
+                            + $"'{HeadlessConsoleOptions.StderrValue}'.");
+                    }
+                    SetOnce(ref consoleStream, value);
+                    break;
                 case "-user":
                 case "--user":
                     SetOnce(ref user, value);
@@ -98,6 +110,11 @@ internal sealed record HeadlessCommandLine(
             throw new HeadlessCommandLineException(
                 "--console is valid only for run mode.");
         }
+        if (consoleStream is not null && command != "run")
+        {
+            throw new HeadlessCommandLineException(
+                "--console-stream is valid only for run mode.");
+        }
 
         return new HeadlessCommandLine(
             command,
@@ -109,7 +126,8 @@ internal sealed record HeadlessCommandLine(
             user is null
                 ? null
                 : new HeadlessDirectCredentials(user, password!),
-            console);
+            console,
+            consoleStream);
     }
 
     private static void SetOnce(ref string? destination, string value)

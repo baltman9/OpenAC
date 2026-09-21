@@ -38,6 +38,11 @@ public static class InventoryPlacementSearch
         if (containerId == 0u || itemId == containerId)
             return false;
         ClientObject? container = objects.Get(containerId);
+        // A spell focus counts as a container for slot accounting but
+        // holds nothing: naming one as the destination is a request the
+        // server refuses outright.
+        if (container is not null && InventoryContainerPlacementPolicy.IsFocus(container))
+            return false;
         if (container is null)
         {
             // The player's own object is the root of every inventory; when

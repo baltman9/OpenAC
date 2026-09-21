@@ -498,6 +498,28 @@ public sealed class RuntimePhysicsState : IDisposable
     public int SpatialRootCount => _spatialRoots.Count;
     public int SpatialRemoteCount => _spatialRemotes.Count;
     public int SpatialProjectileCount => _spatialProjectiles.Count;
+    private readonly HashSet<uint> _remoteBodiesCarriedThisPass = [];
+
+    /// <summary>
+    /// Notes that this creature's body was carried forward in the pass that
+    /// is running now. A body that was carried tells its own watchers where
+    /// it has got to as the last stage of that; one that was not has to be
+    /// asked separately, once the pass is over.
+    /// </summary>
+    internal void NoteRemoteBodyCarried(uint serverGuid) =>
+        _remoteBodiesCarriedThisPass.Add(serverGuid);
+
+    /// <summary>
+    /// Whether this creature's body was carried forward in the pass that is
+    /// running now.
+    /// </summary>
+    internal bool DidCarryRemoteBody(uint serverGuid) =>
+        _remoteBodiesCarriedThisPass.Contains(serverGuid);
+
+    /// <summary>Forgets which bodies this frame's pass carried.</summary>
+    internal void ForgetRemoteBodiesCarried() =>
+        _remoteBodiesCarriedThisPass.Clear();
+
     internal double UtcNowSeconds =>
         (_timeProvider.GetUtcNow() - DateTimeOffset.UnixEpoch)
             .TotalSeconds;
@@ -523,6 +545,37 @@ public sealed class RuntimePhysicsState : IDisposable
 
     internal uint WorldFrameCenterLandblockId => _worldFrameCenterLandblockId;
 
+    /// <summary>
+    /// The landblock this client measures every world position from, as the
+    /// pair of landblock coordinates those offsets are worked out against. A
+    /// client that has not seen the character's own place yet measures from
+    /// the corner of the world.
+    /// </summary>
+    internal (int X, int Y) WorldFrameCenter
+    {
+        get
+        {
+            EnsureNotDisposed();
+            uint center = _worldFrameCenterLandblockId;
+            return ((int)((center >> 24) & 0xFFu), (int)((center >> 16) & 0xFFu));
+        }
+    }
+
+    /// <summary>
+    /// The uniform scale the server gave this particular thing, read from the
+    /// one place every measurement of it reads: its creation description. A
+    /// thing with none declared wears its authored size.
+    /// </summary>
+    internal float EntityObjectScale(RuntimeEntityRecord record)
+    {
+        EnsureNotDisposed();
+        ArgumentNullException.ThrowIfNull(record);
+        float declared = record.Snapshot.Physics?.Scale
+            ?? record.Snapshot.ObjScale
+            ?? 1f;
+        return declared > 0f ? declared : 1f;
+    }
+
     internal void ObserveLocalPlayerCreate(uint fullCellId)
     {
         EnsureNotDisposed();
@@ -541,6 +594,56 @@ public sealed class RuntimePhysicsState : IDisposable
             + $"landblock 0x{fullCellId & 0xFFFF0000u:X8} can never resolve. "
             + "A local-player CreateObject must carry a non-zero landblock.");
     }
+
+    /// <summary>
+    /// Where an entity is right now, in absolute world metres measured from
+    /// the corner of the world rather than from any one landblock: the
+    /// simulated body once that body has a cell, otherwise the last position
+    /// the server sent. This is the one answer to "how far away is that" --
+    /// a creature walking at the character, the corpse behind it and the
+    /// vendor beside it are all measured the same way, so two readers can
+    /// never disagree about the same entity.
+    /// </summary>
+    public static bool TryGetAbsoluteWorldPosition(
+        RuntimeEntityRecord record,
+        out System.Numerics.Vector3 world)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        if (record.PhysicsBody?.CellPosition is { ObjCellId: not 0u } placed)
+        {
+            world = AbsoluteWorldPosition(
+                placed.ObjCellId,
+                placed.Frame.Origin);
+            return true;
+        }
+
+        if (record.Snapshot.Position is { } wire)
+        {
+            world = AbsoluteWorldPosition(
+                wire.LandblockId,
+                new System.Numerics.Vector3(
+                    wire.PositionX,
+                    wire.PositionY,
+                    wire.PositionZ));
+            return true;
+        }
+
+        world = default;
+        return false;
+    }
+
+    /// <summary>
+    /// Adds the landblock's corner to a position measured inside that
+    /// landblock. A landblock is 192 metres on a side and its x/y index sits
+    /// in the top two bytes of the cell id.
+    /// </summary>
+    private static System.Numerics.Vector3 AbsoluteWorldPosition(
+        uint cellId,
+        System.Numerics.Vector3 blockLocal) =>
+        new(
+            blockLocal.X + (int)((cellId >> 24) & 0xFFu) * 192f,
+            blockLocal.Y + (int)((cellId >> 16) & 0xFFu) * 192f,
+            blockLocal.Z);
 
     internal bool TryGetWorldFrameOffset(
         uint fullCellId,
@@ -561,6 +664,43 @@ public sealed class RuntimePhysicsState : IDisposable
         worldOffsetX = (landblockX - centerX) * 192f;
         worldOffsetY = (landblockY - centerY) * 192f;
         return true;
+    }
+
+    /// <summary>
+    /// A place named as an offset inside a landblock, carried into the frame
+    /// the local character's own body is measured in. With no frame published
+    /// yet the offset is zero, which measures from the corner of the world.
+    /// </summary>
+    internal System.Numerics.Vector3 WireOriginToWorldFrame(
+        uint originCellId,
+        float originX,
+        float originY,
+        float originZ)
+    {
+        EnsureNotDisposed();
+        _ = TryGetWorldFrameOffset(
+            originCellId,
+            out float offsetX,
+            out float offsetY);
+        return new System.Numerics.Vector3(
+            originX + offsetX,
+            originY + offsetY,
+            originZ);
+    }
+
+    /// <summary>
+    /// Where a thing this client could be ordered to walk at or stick to is,
+    /// or null when there is nothing to follow: no live record, nothing to
+    /// see, or no position to aim at. Null is the refusal such an order needs.
+    /// </summary>
+    internal System.Numerics.Vector3? InteractionTargetPosition(uint serverGuid)
+    {
+        EnsureNotDisposed();
+        return Entities.TryGetActive(serverGuid, out RuntimeEntityRecord record)
+            && (record.FinalPhysicsState & PhysicsStateFlags.Hidden) == 0
+            && TryGetObjectTablePosition(record, out Position position)
+                ? position.Frame.Origin
+                : null;
     }
 
     public RuntimePhysicsOwnershipSnapshot CaptureOwnership()
@@ -1159,13 +1299,299 @@ public sealed class RuntimePhysicsState : IDisposable
         _objectTableHostResolver = resolver;
     }
 
+    private AcDream.Content.IPreparedCollisionSource? _setupCollisionSource;
+
+    /// <summary>
+    /// Where the minimal body reads an entity's authored cylinder from, on a
+    /// host that has no richer body maker of its own. Without it an entity's
+    /// girth is unknown and the body answers zero, which is the honest answer
+    /// but a poor one: a walk that must finish "within arm's reach" of a thing
+    /// measures to that thing's SIDE, not to the line through its middle.
+    /// </summary>
+    public void BindSetupCollisionSource(
+        AcDream.Content.IPreparedCollisionSource? source)
+    {
+        EnsureNotDisposed();
+        _setupCollisionSource = source;
+    }
+
+    private RuntimeMotionStateBuilder? _motionStates;
+
+    /// <summary>
+    /// Where this host's animation content comes from. Bound once per host;
+    /// a host that binds nothing gets bodies that play nothing, which is what
+    /// a host with no content files has always had.
+    /// </summary>
+    internal void BindMotionContentSource(IRuntimeMotionContentSource? source)
+    {
+        EnsureNotDisposed();
+        _motionStates = source is null
+            ? null
+            : new RuntimeMotionStateBuilder(source);
+    }
+
+    /// <summary>
+    /// Builds a body's motion simulation state from the bound content, or null
+    /// when this host has bound none.
+    /// </summary>
+    internal RuntimeMotionStateBuilder? MotionStates
+    {
+        get
+        {
+            EnsureNotDisposed();
+            return _motionStates;
+        }
+    }
+
+    /// <summary>
+    /// Records that this is the motion simulation state the thing with this
+    /// record is now advancing with. Replacing it discards the previous one,
+    /// because a body that is built afresh starts its cycles afresh.
+    /// </summary>
+    /// <remarks>
+    /// A record that is no longer the current one is left alone: its body has
+    /// already been let go, and a late report about it must not reach whatever
+    /// took its place.
+    /// </remarks>
+    internal void SetRemoteAnimation(
+        RuntimeEntityRecord record,
+        RuntimeRemoteAnimationState? state)
+    {
+        EnsureNotDisposed();
+        ArgumentNullException.ThrowIfNull(record);
+        if (!Entities.IsCurrent(record))
+            return;
+        Entities.SetRemoteAnimation(record, state);
+    }
+
+    /// <summary>
+    /// The motion simulation state the thing with this id is advancing with,
+    /// or null when it has none.
+    /// </summary>
+    internal RuntimeRemoteAnimationState? EntityRemoteAnimation(uint serverGuid)
+    {
+        EnsureNotDisposed();
+        return Entities.TryGetActive(serverGuid, out RuntimeEntityRecord record)
+            ? record.RemoteAnimation
+            : null;
+    }
+
+    /// <summary>
+    /// How wide an entity is, in metres, measured the way everything that
+    /// compares two bodies measures it: the girth its authored shape declares,
+    /// grown or shrunk by the scale the server gave this particular one.
+    /// Zero when the shape is not to hand.
+    /// </summary>
+    internal float EntityRadius(RuntimeEntityRecord record) =>
+        TryGetEntityShape(record, out FlatSetupCollision? setup, out float scale)
+            ? setup!.Radius * scale
+            : 0f;
+
+    /// <summary>
+    /// How tall an entity is, in metres, by the same measure as its girth: the
+    /// height its authored shape declares, grown or shrunk by the scale the
+    /// server gave this particular one. Zero when the shape is not to hand.
+    /// A walk ordered at a thing measures the gap between the two bodies as
+    /// cylinders, so the height counts as much as the girth does: with none,
+    /// a tall thing is measured as a flat disc on the floor.
+    /// </summary>
+    internal float EntityHeight(RuntimeEntityRecord record) =>
+        TryGetEntityShape(record, out FlatSetupCollision? setup, out float scale)
+            ? setup!.Height * scale
+            : 0f;
+
+    /// <summary>
+    /// The girth and height of the thing with this id, as one answer, or null
+    /// when nothing live is carrying that id.
+    /// </summary>
+    public (float Radius, float Height)? EntityBodyShape(uint serverGuid)
+    {
+        EnsureNotDisposed();
+        return Entities.TryGetActive(serverGuid, out RuntimeEntityRecord record)
+            ? (EntityRadius(record), EntityHeight(record))
+            : null;
+    }
+
+    /// <summary>
+    /// The shape a moving body is swept as, for the thing with this id: the
+    /// balls its authored shape is built from, the scale they are to be grown
+    /// by, and how high a lip it may step up onto or down off.
+    /// </summary>
+    /// <remarks>
+    /// The same authored shape and the same scale as
+    /// <see cref="EntityBodyShape"/> reads, presented the other way the
+    /// movement code needs it. When the shape is not to hand, or declares no
+    /// step heights of its own, the answer is the ordinary step allowance of
+    /// four tenths of a metre in each direction, which is what a body with no
+    /// declared lip has always been given.
+    /// </remarks>
+    public (ImmutableArray<FlatCollisionSphere> Spheres,
+            float Scale,
+            float StepUpHeight,
+            float StepDownHeight)
+        EntityMoverShape(uint serverGuid)
+    {
+        EnsureNotDisposed();
+        const float DefaultStepHeight = 0.4f;
+        if (!Entities.TryGetActive(serverGuid, out RuntimeEntityRecord record)
+            || !TryGetEntityShape(record, out FlatSetupCollision? setup, out float scale))
+        {
+            return (
+                ImmutableArray<FlatCollisionSphere>.Empty,
+                1f,
+                DefaultStepHeight,
+                DefaultStepHeight);
+        }
+
+        float stepUp = setup!.StepUpHeight > 0f
+            ? setup.StepUpHeight * scale
+            : DefaultStepHeight;
+        float stepDown = setup.StepDownHeight > 0f
+            ? setup.StepDownHeight * scale
+            : DefaultStepHeight;
+        return (setup.Spheres, scale, stepUp, stepDown);
+    }
+
+    private bool TryGetEntityShape(
+        RuntimeEntityRecord record,
+        out FlatSetupCollision? setup,
+        out float scale)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        setup = null;
+        scale = 1f;
+        uint setupId = record.Snapshot.Physics?.SetupTableId
+            ?? record.Snapshot.SetupTableId
+            ?? 0u;
+        if (setupId == 0u)
+            return false;
+        setup = DataCache.GetFlatSetup(setupId);
+        if (setup is null && _setupCollisionSource is { } source)
+        {
+            AcDream.Content.PreparedCollisionReadResult<FlatSetupCollision>
+                read = source.ReadSetupCollision(setupId);
+            if (read.Status
+                == AcDream.Content.PreparedAssetReadStatus.Loaded)
+                setup = read.Data;
+        }
+        if (setup is null)
+            return false;
+        float authored = record.Snapshot.Physics?.Scale
+            ?? record.Snapshot.ObjScale
+            ?? 1f;
+        scale = authored > 0f ? authored : 1f;
+        return true;
+    }
+
+    /// <summary>
+    /// The body the movement machinery may ask about an entity by id, made on
+    /// first demand for anything live that has not been given one yet.
+    /// </summary>
+    /// <remarks>
+    /// A walk the server orders at a THING rather than a place has to ask that
+    /// thing where it is, over and over, for as long as the walk lasts. Ask an
+    /// id with no body and there is nothing to ask, and the walk quietly
+    /// becomes a walk to wherever the order happened to be written - which is
+    /// stale the moment the thing moves, and for a corpse or a creature a
+    /// couple of metres off it means the character never arrives at all.
+    /// <para>
+    /// Making the body here rather than at one host is what lets both hosts
+    /// answer that question. A host with more to say about its entities may
+    /// bind a richer maker; it is used in place of this one.
+    /// </para>
+    /// </remarks>
     public AcDream.Core.Physics.Motion.IPhysicsObjHost? ResolveObjectTableHost(
         uint serverGuid)
     {
         EnsureNotDisposed();
         if (_objectTableHostResolver is { } resolver)
             return resolver(serverGuid);
-        return TryGetPhysicsHost(serverGuid, out var host) ? host : null;
+        if (TryGetPhysicsHost(serverGuid, out var host))
+            return host;
+        return CreateObjectTableHost(serverGuid);
+    }
+
+    /// <summary>
+    /// The smallest body that can answer "where are you, and how fast": where
+    /// the entity is and how it is moving, and nothing else. It is installed
+    /// on the entity, so a later, fuller body rebinds this one rather than
+    /// replacing it, and every watcher already holding it keeps working.
+    /// </summary>
+    private AcDream.Core.Physics.Motion.IPhysicsObjHost? CreateObjectTableHost(
+        uint serverGuid)
+    {
+        if (!Entities.TryGetActive(serverGuid, out RuntimeEntityRecord record)
+            || (record.FinalPhysicsState & PhysicsStateFlags.Hidden) != 0
+            || !TryGetObjectTablePosition(record, out Position position))
+        {
+            return null;
+        }
+
+        Position lastKnown = position;
+        double Now() =>
+            _gameClock?.SimulationTimeSeconds ?? UtcNowSeconds;
+        var host = new EntityPhysicsHost(
+            serverGuid,
+            getPosition: () =>
+                TryGetObjectTablePosition(record, out Position current)
+                    ? lastKnown = current
+                    : lastKnown,
+            getVelocity: () =>
+                record.PhysicsBody?.Velocity
+                    ?? System.Numerics.Vector3.Zero,
+            getRadius: () => EntityRadius(record),
+            inContact: () => record.PhysicsBody?.InContact ?? true,
+            minterpMaxSpeed: static () => null,
+            curTime: Now,
+            physicsTimerTime: Now,
+            getObjectA: ResolveObjectTableHost,
+            handleUpdateTarget: static _ => { },
+            interruptCurrentMovement: static () => { });
+        InstallPhysicsHost(record, host);
+        return host;
+    }
+
+    /// <summary>
+    /// Where an entity is, in the frame the local character's own body is
+    /// measured in: its simulated body when it has one, else the server's last
+    /// word carried into that frame. False when neither is available, which is
+    /// the one case an order to follow it cannot be honoured.
+    /// </summary>
+    private bool TryGetObjectTablePosition(
+        RuntimeEntityRecord record,
+        out Position position)
+    {
+        if (record.PhysicsBody is { } body)
+        {
+            uint cellId = body.CellPosition.ObjCellId != 0u
+                ? body.CellPosition.ObjCellId
+                : record.FullCellId;
+            position = new Position(cellId, body.Position, body.Orientation);
+            return true;
+        }
+
+        if (record.Snapshot.Position is { } wire
+            && TryGetWorldFrameOffset(
+                wire.LandblockId,
+                out float offsetX,
+                out float offsetY))
+        {
+            position = new Position(
+                wire.LandblockId,
+                new System.Numerics.Vector3(
+                    wire.PositionX + offsetX,
+                    wire.PositionY + offsetY,
+                    wire.PositionZ),
+                new System.Numerics.Quaternion(
+                    wire.RotationX,
+                    wire.RotationY,
+                    wire.RotationZ,
+                    wire.RotationW));
+            return true;
+        }
+
+        position = default;
+        return false;
     }
 
     public bool ClearRemoteMotion(RuntimeEntityRecord record)
@@ -2078,6 +2504,7 @@ public sealed class RuntimePhysicsState : IDisposable
         CellCommitted = null;
         _collisionGenerationCommittedObservers.Clear();
         _objectTableHostResolver = null;
+        _setupCollisionSource = null;
         _disposed = true;
     }
 

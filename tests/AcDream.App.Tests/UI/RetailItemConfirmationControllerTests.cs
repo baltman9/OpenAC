@@ -16,7 +16,7 @@ public sealed class RetailItemConfirmationControllerTests
     {
         var objects = BuildObjects(PublicWeenieFlags.VolatileRare);
         var uses = new List<uint>();
-        var items = new ItemInteractionController(
+        var items = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -52,7 +52,7 @@ public sealed class RetailItemConfirmationControllerTests
     {
         var objects = BuildObjects(PublicWeenieFlags.PlayerKillerSwitch);
         var uses = new List<uint>();
-        var items = new ItemInteractionController(
+        var items = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -82,7 +82,7 @@ public sealed class RetailItemConfirmationControllerTests
         var objects = BuildObjects(PublicWeenieFlags.VolatileRare);
         var uses = new List<uint>();
         var messages = new List<string>();
-        var items = new ItemInteractionController(
+        var items = new RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),
@@ -107,7 +107,7 @@ public sealed class RetailItemConfirmationControllerTests
 
         Assert.Empty(uses);
         Assert.Equal(0, items.BusyCount);
-        Assert.Equal(new[] { ItemInteractionController.InventoryRequestBusyMessage }, messages);
+        Assert.Equal(new[] { RuntimeItemInteraction.InventoryRequestBusyMessage }, messages);
     }
 
     private static ClientObjectTable BuildObjects(PublicWeenieFlags flags)

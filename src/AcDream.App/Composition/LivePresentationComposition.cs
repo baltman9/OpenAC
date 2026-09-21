@@ -53,7 +53,7 @@ internal sealed record LivePresentationDependencies(
     DeferredLiveEntityMotionRuntimeBindings MotionBindings,
     DeferredEntityEffectAdvanceSource EffectAdvance,
     EntityEffectPoseRegistry EffectPoses,
-    RemotePhysicsUpdater RemotePhysicsUpdater,
+    AcDream.Runtime.Physics.RuntimeRemoteBodyOwner RemoteBodies,
     LocalPlayerShadowState LocalPlayerShadow,
     LiveEntityAnimationRuntimeView<LiveEntityAnimationState> AnimatedEntities,
     AnimationPresentationDiagnostics AnimationDiagnostics,
@@ -65,7 +65,7 @@ internal sealed record LivePresentationDependencies(
     LocalPlayerIdentityState PlayerIdentity,
     ChaseCameraInputState ChaseCameraInput,
     PointerPositionState PointerPosition,
-    PlayerApproachCompletionState PlayerApproachCompletions,
+    RuntimeApproachCompletionState RuntimeApproachCompletions,
     GameRenderResourceLifetime RenderResourceLifetime,
     TransferableResourceSlot<PortalTunnelPresentation> PortalTunnelFallback,
     AnimationHookRouter HookRouter,
@@ -451,7 +451,6 @@ internal sealed class LivePresentationCompositionPhase
                 new DeferredSelectionInteractionSource();
             var motionRuntime = new LiveEntityMotionRuntimeController(
                 liveEntities,
-                d.PhysicsDataCache,
                 () => selectionInteractionSource.Current,
                 d.Selection,
                 d.WorldOrigin);
@@ -510,20 +509,9 @@ internal sealed class LivePresentationCompositionPhase
             var placementProjection = new RuntimePlacementPresentationSink(
                 liveEntities,
                 worldTransit,
-                d.WorldGameState,
-                d.WorldEvents,
                 d.EffectPoses,
                 localPlayerShadowSynchronizer,
                 () => d.PlayerIdentity.ServerGuid,
-                guid =>
-                {
-                    if (d.Selection.SelectedObjectId == guid)
-                    {
-                        d.Selection.Clear(
-                            SelectionChangeSource.System,
-                            SelectionChangeReason.SelectedObjectRemoved);
-                    }
-                },
                 placementVisibilitySinks);
             Fault(LivePresentationCompositionPoint.ProjectionVisibilityBound);
 
@@ -540,8 +528,6 @@ internal sealed class LivePresentationCompositionPhase
                 new LiveEntityProjectionWithdrawalController(
                     liveEntities,
                     projectileController,
-                    d.WorldGameState,
-                    d.WorldEvents,
                     d.PhysicsEngine.ShadowObjects,
                     d.EffectPoses,
                     d.LocalPlayerShadow);
@@ -563,7 +549,7 @@ internal sealed class LivePresentationCompositionPhase
             var animationScheduler = new LiveEntityAnimationScheduler(
                 liveEntities,
                 d.PlayerIdentity,
-                d.RemotePhysicsUpdater,
+                d.RemoteBodies,
                 ordinaryPhysicsUpdater,
                 projectileController,
                 new EntityRootPosePublisher(d.EffectPoses),
@@ -815,7 +801,21 @@ internal sealed class LivePresentationCompositionPhase
             hasOpenedCorpse:
                 d.Runtime.InventoryOwner.ExternalContainers.HasCorpseBeenOpened,
             combatMode: () => d.Runtime.ActionOwner.Combat.CurrentMode,
-            isFellow: guid => d.Runtime.Fellowship.TryGetMember(guid, out _));
+            isFellow: guid => d.Runtime.Fellowship.TryGetMember(guid, out _),
+            findPlayer: (direction, anchor) =>
+                d.Runtime.SelectionCycleOwner.FindPlayer(
+                    direction switch
+                    {
+                        RetailSelectionDirection.Previous =>
+                            AcDream.Runtime.Gameplay
+                                .RuntimeSelectionCycleDirection.Previous,
+                        RetailSelectionDirection.Next =>
+                            AcDream.Runtime.Gameplay
+                                .RuntimeSelectionCycleDirection.Next,
+                        _ => AcDream.Runtime.Gameplay
+                            .RuntimeSelectionCycleDirection.Closest,
+                    },
+                    anchor));
         var radarSnapshotProvider = new RadarSnapshotProvider(
             d.EntityObjects.Objects,
             liveEntities,
@@ -841,20 +841,29 @@ internal sealed class LivePresentationCompositionPhase
             d.Selection,
             selectionQuery,
             interaction.ItemInteraction,
-            new WorldSessionSelectionInteractionTransport(
+            new AcDream.Runtime.Gameplay.RuntimeSessionInteractionTransport(
                 () => interaction.LateBindings.Session.CurrentSession),
             new PlayerInteractionMovementSink(
                 () => d.PlayerController.Controller,
-                d.PlayerApproachCompletions),
+                d.RuntimeApproachCompletions),
             d.Runtime.ActionOwner.CombatTarget,
+            d.Runtime.WorldObjectUseOwner,
+            d.Runtime.ArmedApproachDrive,
             d.Toast,
-            d.PlayerApproachCompletions,
+            d.RuntimeApproachCompletions,
             splitStack: guid =>
                 interaction.RetainedUi?.Runtime.SelectedObjectController?
                     .FocusSplitStackEntry(guid) ?? false,
             fellowshipMembers: () =>
                 d.Runtime.Fellowship.GetMembers().Select(static member => member.Guid));
         selectionInteractionSource.Bind(selectionInteractions);
+        // This client's own half of ending an armed walk: the pickup, whose
+        // outcome changes what is drawn, and the words a person who clicked
+        // is told. The decision to end the walk is the shared drive's.
+        bindings.Adopt(
+            "armed approach presentation",
+            d.Runtime.ArmedApproachDrive.BindPresentationOwned(
+                selectionInteractions));
         bindings.Adopt(
             "world selection",
             interaction.LateBindings.Selection.Bind(
@@ -1163,8 +1172,7 @@ internal sealed class LivePresentationCompositionPhase
             new LandblockStaticPresentationPublisher(
                 content.LightingSink,
                 d.TranslucencyFades,
-                d.WorldGameState,
-                d.WorldEvents);
+                d.WorldGameState);
         var landblockRetirementOwner =
             new LandblockPresentationRetirementOwner(
                 landblockRenderPublisher,

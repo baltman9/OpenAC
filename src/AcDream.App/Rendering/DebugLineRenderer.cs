@@ -21,6 +21,7 @@ public sealed class DebugLineRenderer : IDisposable
     private readonly IWorldPassScope? _worldPass;
     private readonly IGpuPipeline? _worldPipeline;
     private readonly IGpuPipeline? _hiddenWorldPipeline;
+    private readonly IGpuPipeline? _worldSolidPipeline;
 
     private readonly List<float> _buffer = new(4096);
     private int _vertexCount;
@@ -28,6 +29,10 @@ public sealed class DebugLineRenderer : IDisposable
     /// <summary>Lines the world's walls, floors and ceilings hide, drawn with a depth test in the world pass.</summary>
     private readonly List<float> _hiddenBuffer = new(4096);
     private int _hiddenVertexCount;
+
+    /// <summary>Solid triangles drawn in the world pass with its depth, for bars and ribbons plugins put in the world.</summary>
+    private readonly List<float> _solidBuffer = new(4096);
+    private int _solidVertexCount;
 
     /// <summary>
     /// Lines draw in a pass of their own, or, given <paramref name="worldPass"/>,
@@ -52,6 +57,8 @@ public sealed class DebugLineRenderer : IDisposable
                 "debug-line-world-hidden",
                 worldPass.SampleCount,
                 new GpuDepthState(Test: true, Write: false, WorldDepthContract.WorldCompare)));
+            _worldSolidPipeline = device.CreatePipeline(PipelineFor("world-line-solid", worldPass.SampleCount, GpuDepthState.OpaqueDefault)
+                with { Topology = GpuPrimitiveTopology.TriangleList });
         }
     }
 
@@ -61,6 +68,8 @@ public sealed class DebugLineRenderer : IDisposable
         _vertexCount = 0;
         _hiddenBuffer.Clear();
         _hiddenVertexCount = 0;
+        _solidBuffer.Clear();
+        _solidVertexCount = 0;
     }
 
     /// <summary>
@@ -175,6 +184,7 @@ public sealed class DebugLineRenderer : IDisposable
         _pipeline.Dispose();
         _worldPipeline?.Dispose();
         _hiddenWorldPipeline?.Dispose();
+        _worldSolidPipeline?.Dispose();
     }
 
     private void Draw(
@@ -199,6 +209,44 @@ public sealed class DebugLineRenderer : IDisposable
         System.Runtime.InteropServices.CollectionsMarshal.AsSpan(buffer).CopyTo(allocation.AsSpan<float>());
         encoder.BindVertexBuffer(0, allocation.Buffer, allocation.OffsetBytes);
         encoder.Draw((uint)vertexCount, 1, 0, 0);
+    }
+
+    internal void AddTriangle(Vector3 a, Vector3 b, Vector3 c, Vector3 color)
+    {
+        AddSolidVertex(a, color);
+        AddSolidVertex(b, color);
+        AddSolidVertex(c, color);
+    }
+
+    private void AddSolidVertex(Vector3 position, Vector3 color)
+    {
+        _solidBuffer.Add(position.X); _solidBuffer.Add(position.Y); _solidBuffer.Add(position.Z);
+        _solidBuffer.Add(color.X); _solidBuffer.Add(color.Y); _solidBuffer.Add(color.Z);
+        _solidVertexCount++;
+    }
+
+    /// <summary>
+    /// Draws the accumulated solid triangles into the open world pass, with
+    /// its depth, so they sit in the scene like the world does.
+    /// </summary>
+    internal void FlushWorld(IGpuPassEncoder encoder, Matrix4x4 viewProjection, int width, int height)
+    {
+        if (_solidVertexCount == 0 || _worldSolidPipeline is null || encoder.Pass.Depth is null)
+            return;
+        IGpuFrame frame = _frameSource.CurrentFrame
+            ?? throw new InvalidOperationException("World lines require an active frame.");
+        encoder.BindPipeline(_worldSolidPipeline);
+        encoder.SetViewport(0, 0, width, height);
+        encoder.SetScissor(0, 0, width, height);
+        encoder.SetDepthWrite(true);
+        encoder.SetStencil(GpuStencilState.Default);
+        GpuPushConstants constants = GpuPushConstants.Default;
+        constants.ViewProjection = viewProjection;
+        encoder.SetPushConstants(constants);
+        GpuRingAllocation allocation = frame.AllocateRing(_solidBuffer.Count * sizeof(float), GpuRingUsage.Vertex);
+        System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_solidBuffer).CopyTo(allocation.AsSpan<float>());
+        encoder.BindVertexBuffer(0, allocation.Buffer, allocation.OffsetBytes);
+        encoder.Draw((uint)_solidVertexCount, 1, 0, 0);
     }
 
     private static GpuPipelineDescription PipelineFor(string name, int sampleCount, GpuDepthState depth) => new()

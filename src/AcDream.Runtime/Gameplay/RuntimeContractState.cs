@@ -1,4 +1,6 @@
 using AcDream.Core.Net.Messages;
+using AcDream.Core.Quests;
+using AcDream.Plugin.Abstractions;
 
 namespace AcDream.Runtime.Gameplay;
 
@@ -34,11 +36,55 @@ public sealed class RuntimeContractState : IDisposable
     private readonly Dictionary<uint, ContractTracker> _contracts = [];
     private uint _displayContractId;
     private long _revision;
+    private Lazy<ContractCatalog?>? _catalog;
     private bool _disposed;
 
     public RuntimeContractState() => View = new ContractView(this);
 
     public IRuntimeContractView View { get; }
+
+    /// <summary>
+    /// Names where the authored words about a contract -- its name, its
+    /// description, the wording of its progress line -- are read from. There
+    /// is one source for the whole session, whichever client is running:
+    /// when each client kept its own, one of them reported the character's
+    /// contracts by number and no words while the other reported the same
+    /// contracts named.
+    /// </summary>
+    /// <param name="catalog">
+    /// Reads the table. Called at most once, the first time something asks
+    /// for the contracts, so a session that never asks never pays for it.
+    /// </param>
+    public void BindCatalog(Func<ContractCatalog?> catalog)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        lock (_gate)
+        {
+            if (_catalog is not null)
+                throw new InvalidOperationException(
+                    "The authored words about contracts already have a "
+                    + "source; a second one would mean two answers to the "
+                    + "same question.");
+            _catalog = new Lazy<ContractCatalog?>(
+                catalog,
+                LazyThreadSafetyMode.ExecutionAndPublication);
+        }
+    }
+
+    /// <summary>
+    /// The character's contracts as a plugin reads them, named from whatever
+    /// table this session was given. The one answer both clients hand over.
+    /// </summary>
+    public IReadOnlyList<ContractSnapshot> ProjectForPlugins()
+    {
+        Lazy<ContractCatalog?>? catalog;
+        lock (_gate)
+            catalog = _catalog;
+        return ContractPluginProjection.Project(
+            View,
+            catalog?.Value,
+            DateTime.UtcNow);
+    }
 
     public void ApplyTable(IReadOnlyDictionary<uint, ContractTracker> table)
     {

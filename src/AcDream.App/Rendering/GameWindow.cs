@@ -79,6 +79,14 @@ public sealed class GameWindow :
     private readonly string _datDir;
     private readonly WorldGameState _worldGameState;
     private readonly WorldEvents _worldEvents;
+    /// <summary>
+    /// Paces the plugin tick, which every client raises at a fixed rate
+    /// rather than at whatever rate this one happens to draw.
+    /// </summary>
+    private readonly AcDream.Runtime.Plugins.RuntimePluginTickClock
+        _pluginTick;
+    private readonly AcDream.Runtime.Plugins.RuntimeWorldEntityProjection
+        _pluginWorldEntities;
     private readonly HostQuiescenceGate _hostQuiescence = new();
     private IWindow? _window;
     private bool _renderLoopArmed;
@@ -111,6 +119,7 @@ public sealed class GameWindow :
     private AcDream.App.Interaction.WorldSelectionQuery? _worldSelectionQuery;
     private AcDream.App.Interaction.SelectionInteractionController? _selectionInteractions;
     private DebugLineRenderer? _debugLines;
+    public AcDream.App.Plugins.PluginWorldLineStore WorldLines { get; } = new();
     private readonly AcDream.App.Rendering.WorldSceneDebugState
         _worldSceneDebugState = new();
 
@@ -186,8 +195,8 @@ public sealed class GameWindow :
             _runtimeEntityObjects.Objects,
             serverGuid);
 
-    private readonly AcDream.App.Physics.RemotePhysicsUpdater _remotePhysicsUpdater;
-    private readonly AcDream.App.Physics.RemoteInboundMotionDispatcher
+    private readonly AcDream.Runtime.Physics.RuntimeRemoteBodyOwner _remoteBodies;
+    private readonly AcDream.Runtime.Physics.RemoteInboundMotionDispatcher
         _remoteInboundMotion;
     private readonly AcDream.App.World.RetailInboundEventDispatcher
         _inboundEntityEvents = new();
@@ -244,7 +253,11 @@ public sealed class GameWindow :
     private AcDream.App.Audio.DictionaryEntitySoundTable? _entitySoundTables;
     private AcDream.App.Audio.AudioHookSink? _audioSink;
     private AcDream.App.Audio.AudioMixerCommandBinding? _audioMixerCommand;
-    private AcDream.Runtime.Navigation.NavigationChatCommands? _navigationCommands;
+
+    // What the window lends the plugin surface. Composition publishes these
+    // owners; the one wiring pass at the end of load hands them over.
+    private AcDream.Runtime.Navigation.NavigationWalkController? _navigationWalk;
+    private AcDream.App.Runtime.CurrentGameRuntimeAdapter? _pluginSessionCommands;
 
     private AcDream.Core.Vfx.EmitterDescRegistry? _emitterRegistry;
     private AcDream.Core.Vfx.ParticleSystem? _particleSystem;
@@ -360,7 +373,7 @@ public sealed class GameWindow :
     private readonly AcDream.App.Combat.CombatFeedbackSlot
         _combatFeedback = new();
     private RuntimeCombatAttackState? _combatAttackController;
-    private AcDream.App.UI.ItemInteractionController? _itemInteractionController;
+    private AcDream.Runtime.Gameplay.RuntimeItemInteraction? _itemInteractionController;
     private AcDream.App.World.ExternalContainerLifecycleController? _externalContainerLifecycle;
     private AcDream.App.Spells.MagicRuntime? _magicRuntime;
     private MagicCatalog? _magicCatalog;
@@ -419,8 +432,6 @@ public sealed class GameWindow :
     private readonly AcDream.App.Input.ViewportAspectState _viewportAspect = new();
     private readonly FramebufferResizeController _framebufferResize;
     private AcDream.App.Input.PlayerModeController? _playerModeController;
-    private readonly AcDream.App.Interaction.PlayerApproachCompletionState
-        _playerApproachCompletions = new();
     private AcDream.App.Input.LocalPlayerAnimationController?
         _localPlayerAnimation;
     private AcDream.App.Physics.LocalPlayerShadowSynchronizer?
@@ -510,22 +521,22 @@ public sealed class GameWindow :
         _applicationPaths = _platformServices.Paths;
         _keyBindings = LoadStartupKeyBindings(
             _applicationPaths.KeyBindingsFile);
-        _runtime = new GameRuntime(new GameRuntimeDependencies(
-            _combatAttackOperations,
-            _combatTargetOperations,
-            _combatModeOperations,
-            _spellCastOperations,
-            Log: Console.WriteLine,
-            TimeSyncDiagnostic:
-                options.DumpSky ? Console.WriteLine : null));
+        _runtime = new GameRuntime(
+            AcDream.App.Plugins.GraphicalAutomationCapabilities
+                .BuildRuntimeDependencies(
+                    _combatAttackOperations,
+                    _combatTargetOperations,
+                    _combatModeOperations,
+                    _spellCastOperations,
+                    timeSyncDiagnostic:
+                        options.DumpSky ? Console.WriteLine : null));
         _runtimeHostLease = _runtime.AcquireHostLease(
             "graphical GameWindow");
         _automation?.Bind(_runtime, _runtime.CharacterOwner, _runtime.ActionOwner.SpellCast);
-        _automation?.BindProjectileCollision(_physicsEngine);
         _localPlayerIdentity = new AcDream.App.Input.LocalPlayerIdentityState(
             _runtime.PlayerIdentity);
         _updateFrameClock = new AcDream.App.Update.UpdateFrameClock(
-            _runtime.Clock);
+            _runtime);
         _worldEnvironment = new AcDream.App.World.WorldEnvironmentController(
             _runtime.EnvironmentOwner,
             options.ForcedDayGroupIndex,
@@ -558,6 +569,22 @@ public sealed class GameWindow :
         _datDir = options.DatDir;
         _worldGameState = worldGameState;
         _worldEvents = worldEvents;
+        _pluginTick = new AcDream.Runtime.Plugins.RuntimePluginTickClock(
+            _worldEvents.FireTick,
+            () => _runtime.Generation.Value);
+        // What a plugin sees in the world comes from the runtime's object
+        // directory, not from what happens to be drawn: the same producer the
+        // windowless client uses, so both answer the same population, ids
+        // and event order.
+        _pluginWorldEntities =
+            new AcDream.Runtime.Plugins.RuntimeWorldEntityProjection(
+                _runtime,
+                // A plugin handler that throws is skipped, not hidden: a
+                // plugin author with an overlay that stopped updating needs
+                // to be told why.
+                line => Serilog.Log.Warning("{Line}", line));
+        _worldGameState.BindWorldEntities(_pluginWorldEntities);
+        _worldEvents.BindWorldEntities(_pluginWorldEntities);
         _displayFramePacing = new DisplayFramePacingController(
             options.UncappedRendering,
             _frameProfiler,
@@ -581,13 +608,10 @@ public sealed class GameWindow :
         _renderPackRegistry = renderPackRegistry;
         _animatedEntities = new LiveEntityAnimationRuntimeView<LiveEntityAnimationState>(
             _liveEntityRuntimeSlot);
-        _remotePhysicsUpdater = new AcDream.App.Physics.RemotePhysicsUpdater(
+        _remoteBodies = new AcDream.Runtime.Physics.RuntimeRemoteBodyOwner(
             _runtimeEntityObjects.Physics,
-            _liveEntityMotionBindings.GetSetupCylinder,
-            _liveEntityMotionBindings.GetSetupMoverShape,
-            AcDream.App.Physics.RemoteServerControlledVelocityCycle.Apply,
             GetMoverPvpState);
-        _remoteInboundMotion = new AcDream.App.Physics.RemoteInboundMotionDispatcher(
+        _remoteInboundMotion = new AcDream.Runtime.Physics.RemoteInboundMotionDispatcher(
             (movement, cellId, update) =>
                 _liveEntityMotionBindings.RouteServerMoveTo(
                     movement, cellId, update),
@@ -783,31 +807,6 @@ public sealed class GameWindow :
         IDatReaderWriter value)
     {
         PublishCompositionOwner(ref _dats, value, "DAT collection");
-
-        if (_automation is null)
-            return;
-        _automation.BindSpeciesNameResolver(
-            AcDream.App.UI.Layout.CreatureDisplayNameResolver.Load(value).Resolve);
-        _automation.BindPaletteColorResolver(
-            new AcDream.Content.CharGen.ChargenAppearanceCatalog(value));
-        if (!value.TryGet<DatReaderWriter.DBObjs.SkillTable>(0x0E000004u, out var skillTable)
-            || skillTable is null)
-        {
-            Console.Error.WriteLine(
-                "plugin automation: retail SkillTable 0x0E000004 missing; "
-                + "plugins will see unnamed skills");
-            return;
-        }
-
-        var names = new Dictionary<uint, string>(skillTable.Skills.Count);
-        var icons = new Dictionary<uint, uint>(skillTable.Skills.Count);
-        foreach (var entry in skillTable.Skills)
-        {
-            names[(uint)entry.Key] = entry.Value.Name;
-            icons[(uint)entry.Key] = entry.Value.IconId;
-        }
-        _automation.BindSkillNames(names);
-        _automation.BindSkillIcons(icons);
     }
 
     void IGameWindowContentEffectsAudioPublication.PublishPreparedAssetSource(
@@ -821,7 +820,6 @@ public sealed class GameWindow :
         MagicCatalog value)
     {
         PublishCompositionOwner(ref _magicCatalog, value, "magic catalog");
-        _automation?.BindMagicCatalog(value);
     }
 
     void IGameWindowContentEffectsAudioPublication.PublishAnimationLoader(
@@ -987,32 +985,6 @@ public sealed class GameWindow :
         _combatAttackController = result.CombatAttack;
         _externalContainerLifecycle = result.ExternalContainerLifecycle;
         _itemInteractionController = result.ItemInteraction;
-        _automation?.BindEquipment(
-            (itemId, requestedLocation) =>
-                result.ItemInteraction.TryWieldItem(
-                    itemId,
-                    (AcDream.Core.Items.EquipMask)requestedLocation),
-            () => result.ItemInteraction.IsAutoWieldBusy);
-        _automation?.BindItems(
-            result.ItemInteraction.TryUseItemForAutomation,
-            result.ItemInteraction.TryApplyItem,
-            result.ItemInteraction.TryMoveItemForAutomation,
-            result.ItemInteraction.TryMergeItemsForAutomation,
-            result.ItemInteraction.TryDropItemForAutomation,
-            result.ItemInteraction.TryGiveItemForAutomation,
-            result.ItemInteraction.PlaceWorldItemInBackpack,
-            result.ItemInteraction.TryAppraiseForAutomation,
-            result.ItemInteraction.TrySalvageItemsForAutomation,
-            (vendorId, itemId, amount) => result.ItemInteraction.TrySell(
-                vendorId,
-                [(amount, itemId)]));
-        _automation?.BindLogout(
-            () => _localPlayerTeleport?.TryRequestLogout() == true,
-            () => _localPlayerTeleport is not null
-                && _runtime.Session.IsInWorld
-                && !_runtime.TransitOwner.IsLogoutActive
-                && !_runtime.TransitOwner.IsTeleportActive
-                && !_runtime.TransitOwner.HasPendingTeleportStart);
         _interactionUiLateBindings = result.LateBindings;
         _magicRuntime = result.Magic;
         if (result.RetainedUi is { } retained)
@@ -1025,7 +997,6 @@ public sealed class GameWindow :
             retained.Runtime.AttachNativeCursorWindow(_window?.Native?.Glfw ?? 0);
             if (_automation is { } automation)
             {
-                automation.BindDialogs(retained.Runtime.TryAnswerConfirmation);
                 retained.Runtime.ConfirmationRequested +=
                     automation.RaiseConfirmationRequested;
             }
@@ -1092,20 +1063,6 @@ public sealed class GameWindow :
         _retailSelectionScene = result.SelectionScene;
         _worldSelectionQuery = result.SelectionQuery;
         _selectionInteractions = result.SelectionInteractions;
-        _automation?.BindSelectionActions(action =>
-            result.SelectionInteractions.HandleInputAction(action switch
-            {
-                AcDream.Plugin.Abstractions.PluginSelectionAction.PreviousSelection =>
-                    InputAction.SelectionPreviousSelection,
-                AcDream.Plugin.Abstractions.PluginSelectionAction.PreviousPlayer =>
-                    InputAction.SelectionPreviousPlayer,
-                AcDream.Plugin.Abstractions.PluginSelectionAction.NextPlayer =>
-                    InputAction.SelectionNextPlayer,
-                _ => InputAction.None,
-            }));
-        _automation?.BindWorldObjectUse(objectId =>
-            AcDream.Runtime.Plugins.RuntimeAutomationSurface.MapWorldObjectUseOutcome(
-                result.SelectionInteractions.TryUseForAutomation(objectId)));
         _retainedUiGameplayBinding = result.RetainedGameplay;
         _paperdollViewportRenderer = result.PaperdollRenderer;
         _paperdollFramePresenter = result.PaperdollPresenter;
@@ -1159,7 +1116,6 @@ public sealed class GameWindow :
         _worldReveal = result.WorldReveal;
         _spawnClaimHydration = result.SpawnClaimHydration;
         _liveEntityHydration = result.Hydration;
-        _automation?.BindGhostDeletion(result.Deletion.DeleteClientGhost);
         _liveEntityNetworkUpdates = result.NetworkUpdates;
         _liveEntityLiveness = result.Liveness;
         _liveEntitySessionEvents = result.SessionEvents;
@@ -1170,8 +1126,7 @@ public sealed class GameWindow :
         _playerModeAutoEntry = result.PlayerModeAutoEntry;
         _localPlayerTeleport = result.LocalTeleport;
         _liveSessionHost = result.SessionHost;
-        _automation?.BindSessionCommands(result.GameRuntime);
-        _automation?.BindSubmit(result.GameRuntime.SubmitChatText);
+        _pluginSessionCommands = result.GameRuntime;
         _gameplayInputActions = result.GameplayActions;
         _sessionPlayerBindings = result.RuntimeBindings;
     }
@@ -1189,25 +1144,49 @@ public sealed class GameWindow :
 
         _frameRootBindings = result.RuntimeBindings;
         _frameGraphPublication = result.FrameGraphPublication;
-        if (result.NavigationWalk is { } navigationWalk && _automation is { } automation)
-        {
-            automation.BindNavigationWalk(navigationWalk);
-            _navigationCommands = new AcDream.Runtime.Navigation.NavigationChatCommands(
-                    automation.Navigation,
-                    () => _runtime.ActionOwner.Selection.SelectedObjectId,
-                    // Chat rather than the on-screen notices, so walk reports and debug narration can be copied.
-                    line => _runtimeCommunication.AddText(
-                        line, AcDream.Core.Chat.RetailLogTextType.Default),
-                    toggleGrid: _worldSceneDebugState.ToggleNavMesh,
-                    previewRoute: objectId =>
-                    {
-                        _worldSceneDebugState.ShowNavMesh();
-                        _ = navigationWalk.RouteTo(objectId);
-                        return true;
-                    },
-                    narrate: listener => navigationWalk.Narration = listener)
-                .Register(automation.PluginCommands, _worldEvents);
-        }
+        // /nav and /motor themselves are registered by the one binding pass
+        // both clients run; the window only lends the two verbs that draw.
+        _navigationWalk = result.NavigationWalk;
+    }
+
+    /// <summary>
+    /// Hands the plugin surface everything this host can lend it, through
+    /// the one binding pass the windowless host runs too. Composition has
+    /// published every owner by the time this runs, so all the window does
+    /// is name its parts: the capability record is built beside the host's
+    /// declaration of what it can supply, and the runtime fills the rest.
+    /// </summary>
+    private void ApplyPluginAutomationBindings()
+    {
+        if (_automation is not { } automation)
+            return;
+        AcDream.Runtime.Plugins.RuntimeAutomationBindings.Apply(
+            automation,
+            _runtime,
+            AcDream.App.Plugins.GraphicalAutomationCapabilities.Build(
+                new AcDream.App.Plugins.GraphicalAutomationParts
+                {
+                    Runtime = _runtime,
+                    Warn = Console.Error.WriteLine,
+                    Content = _dats,
+                    MagicCatalog = _magicCatalog,
+                    SessionCommands = _pluginSessionCommands,
+                    NavigationWalk = _navigationWalk,
+                    Teleport = _localPlayerTeleport,
+                    RetainedUi = _retailUiRuntime,
+                    Selection = _selectionInteractions,
+                    Input = _inputDispatcher,
+                    Events = _worldEvents,
+                    NavigationGrid = _worldSceneDebugState.ToggleNavMesh,
+                    NavigationRoutePreview = _navigationWalk is not { } walk
+                        ? null
+                        : objectId =>
+                        {
+                            _worldSceneDebugState.ShowNavMesh();
+                            _ = walk.RouteTo(objectId);
+                            return true;
+                        },
+                }));
     }
 
     private static void PublishCompositionOwner<T>(
@@ -1447,7 +1426,7 @@ public sealed class GameWindow :
                     _liveEntityMotionBindings,
                     _entityEffectAdvance,
                     _effectPoses,
-                    _remotePhysicsUpdater,
+                    _remoteBodies,
                     _localPlayerShadow,
                     _animatedEntities,
                     _animationDiagnostics,
@@ -1459,7 +1438,7 @@ public sealed class GameWindow :
                     _localPlayerIdentity,
                     _chaseCameraInput,
                     _pointerPosition,
-                    _playerApproachCompletions,
+                    _runtime.ApproachCompletions,
                     _renderResourceLifetime,
                     _portalTunnelFallback,
                     _hookRouter,
@@ -1507,7 +1486,7 @@ public sealed class GameWindow :
                     _liveEntityRuntimeSlot,
                     _animatedEntities,
                     _remoteMovementObservations,
-                    _remotePhysicsUpdater,
+                    _remoteBodies,
                     _remoteInboundMotion,
                     _inboundEntityEvents,
                     _liveEntityMotionBindings,
@@ -1521,7 +1500,7 @@ public sealed class GameWindow :
                     _renderRange,
                     _localPlayerShadow,
                     _viewportAspect,
-                    _playerApproachCompletions,
+                    _runtime.ApproachCompletions,
                     _pointerPosition,
                     _movementInput,
                     _inputCapture,
@@ -1587,7 +1566,8 @@ public sealed class GameWindow :
                         _updateFrameClock,
                         _frameGraphs,
                         Console.WriteLine,
-                        _renderPackDiagnostics),
+                        _renderPackDiagnostics,
+                        WorldLines),
                     this).Compose(
                         platformResult,
                         hostInputCamera,
@@ -1601,6 +1581,8 @@ public sealed class GameWindow :
                 new SessionStartDependencies(
                     Console.WriteLine))
                 .Start(frameRoots));
+
+        ApplyPluginAutomationBindings();
     }
 
     private void OnUpdate(double dt)
@@ -1616,7 +1598,7 @@ public sealed class GameWindow :
                 _runtime.CharacterSelection.Snapshot.Lifecycle
                     == RuntimeCharacterSelectionLifecycle.InWorld);
         }
-        _worldEvents.FireTick(dt);
+        _pluginTick.Feed(dt);
         _renderLoopArmed = false;
     }
 
@@ -1676,7 +1658,6 @@ public sealed class GameWindow :
         {
             PersistKeyBindingsAtShutdown();
             _audioMixerCommand?.Dispose();
-            _navigationCommands?.Dispose();
             if (_runtime.Session.IsInWorld)
                 _statusWriter.Disconnected(_options.SessionId ?? "app", "stopped");
             _lifetime.PublishShutdownRoots(CaptureShutdownRoots());
@@ -1774,12 +1755,12 @@ public sealed class GameWindow :
             _cameraPointerInput,
             _retailUiLease,
             _magicRuntime,
-            _itemInteractionController,
             _externalContainerLifecycle,
             _streamer,
             _equippedChildRenderer,
             _liveEntities,
             _runtime,
+            _pluginWorldEntities,
             _runtimeHostLease,
             _renderSceneShadow,
             _livePresentationBindings,
@@ -1840,6 +1821,9 @@ public sealed class GameWindow :
     public void Dispose()
     {
         CompleteShutdown(releaseNativeWindow: true);
+        // After the terminal status line, release the status file so it can
+        // be read, moved or deleted freely.
+        _statusWriter.Dispose();
         _window = null;
         _pluginWindowHandle = null;
     }

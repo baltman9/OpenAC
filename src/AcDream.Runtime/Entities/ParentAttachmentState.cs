@@ -8,6 +8,8 @@ namespace AcDream.Runtime.Entities;
 public sealed class ParentAttachmentState
 {
     private readonly Dictionary<uint, Queue<ParentAttachmentRelation>> _unresolvedByChild = new();
+    private readonly Dictionary<uint, CreateObjectParentRelationRequest>
+        _awaitingParentByChild = new();
     private readonly Dictionary<uint, ParentAttachmentRelation> _stagedByChild = new();
     private readonly Dictionary<uint, ParentAttachmentRelation> _recoveryByChild = new();
     private readonly Dictionary<uint, ParentAttachmentRelation> _lastAcceptedByChild = new();
@@ -37,6 +39,7 @@ public sealed class ParentAttachmentState
 
     public int UnresolvedRelationCount =>
         _unresolvedByChild.Values.Sum(queue => queue.Count);
+    public int RelationsAwaitingParentCount => _awaitingParentByChild.Count;
     public int StagedRelationCount => _stagedByChild.Count;
     public int RecoveryRelationCount => _recoveryByChild.Count;
     public int CommittedRelationCount => _lastAcceptedByChild.Count;
@@ -297,8 +300,76 @@ public sealed class ParentAttachmentState
 
     public void AcceptCreateObjectRelation(ParentAttachmentRelation relation)
     {
+        _awaitingParentByChild.Remove(relation.ChildGuid);
         _stagedByChild[relation.ChildGuid] = relation;
     }
+
+    /// <summary>
+    /// Holds a CreateObject-carried parent relation whose parent side is not
+    /// addressable yet, so the relation waits instead of being discarded. The
+    /// parent generation is deliberately not pinned: the relation binds to
+    /// whichever generation of that parent is current when the parent first
+    /// becomes addressable, exactly as a relation naming an already-known
+    /// parent binds to that parent's current generation.
+    /// </summary>
+    public void DeferCreateObjectRelationUntilParentKnown(
+        uint parentGuid,
+        uint childGuid,
+        uint parentLocation,
+        uint placementId,
+        ushort childPositionSequence)
+    {
+        if (parentGuid == 0u || childGuid == 0u)
+        {
+            throw new ArgumentException(
+                "A waiting CreateObject-carried parent relation requires nonzero parent and child GUIDs.");
+        }
+        _awaitingParentByChild[childGuid] = new CreateObjectParentRelationRequest(
+            parentGuid,
+            childGuid,
+            parentLocation,
+            placementId,
+            childPositionSequence);
+    }
+
+    /// <summary>
+    /// The children holding a CreateObject-carried relation that names
+    /// <paramref name="parentGuid"/> and is still waiting for that parent.
+    /// </summary>
+    public IReadOnlyList<uint> ChildrenAwaitingParent(uint parentGuid)
+    {
+        List<uint>? result = null;
+        foreach ((uint childGuid, CreateObjectParentRelationRequest request)
+            in _awaitingParentByChild)
+        {
+            if (request.ParentGuid != parentGuid)
+                continue;
+            result ??= new List<uint>();
+            result.Add(childGuid);
+        }
+        return (IReadOnlyList<uint>?)result ?? Array.Empty<uint>();
+    }
+
+    public bool TryTakeRelationAwaitingParent(
+        uint childGuid,
+        out CreateObjectParentRelationRequest request) =>
+        _awaitingParentByChild.Remove(childGuid, out request);
+
+    /// <summary>
+    /// Whether a later word on where this child hangs has already landed: a
+    /// relation staged for it, or a parent it is already hanging from.
+    /// </summary>
+    /// <remarks>
+    /// A relation that waited for its parent can be admitted long after it
+    /// was received, and by then the child may have been told something newer
+    /// -- picked up by somebody else, or put somewhere else by the same
+    /// wielder. Applying the old word then would hang the item back in a hand
+    /// that no longer holds it. The other order of arrival is already
+    /// refused; this is the same refusal said for this one.
+    /// </remarks>
+    public bool HasLaterWordOnChild(uint childGuid) =>
+        _stagedByChild.ContainsKey(childGuid)
+        || _lastAcceptedByChild.ContainsKey(childGuid);
 
     public void Enqueue(ParentEvent.Parsed update)
     {
@@ -587,6 +658,8 @@ public sealed class ParentAttachmentState
 
     public void RemoveObject(uint guid)
     {
+        RemoveRelationsAwaitingParent(guid);
+        _awaitingParentByChild.Remove(guid);
         RemoveDeferredChildCreates(guid);
         RemoveDeferredAcceptedRelationsForChild(guid);
         _stagedByChild.Remove(guid);
@@ -617,6 +690,11 @@ public sealed class ParentAttachmentState
     /// </summary>
     public void EndGeneration(uint guid, ushort replacementGeneration)
     {
+        // A relation this generation of the child was created carrying is
+        // about this generation. The replacement arrives with its own word on
+        // where it hangs, so the old one is dropped rather than left to be
+        // admitted later against the replacement.
+        _awaitingParentByChild.Remove(guid);
         FilterDeferredCreates(candidate =>
             candidate.Spawn.Guid != guid
             || candidate.Spawn.InstanceSequence == replacementGeneration
@@ -648,6 +726,7 @@ public sealed class ParentAttachmentState
 
     public void DeleteGeneration(uint guid, ushort deletedGeneration)
     {
+        _awaitingParentByChild.Remove(guid);
         CancelDeferredChildGeneration(guid, deletedGeneration);
         FilterChildCandidates(
             guid,
@@ -674,6 +753,7 @@ public sealed class ParentAttachmentState
 
     public void RemoveChild(uint childGuid)
     {
+        _awaitingParentByChild.Remove(childGuid);
         RemoveDeferredChildCreates(childGuid);
         RemoveDeferredAcceptedRelationsForChild(childGuid);
         _stagedByChild.Remove(childGuid);
@@ -685,6 +765,7 @@ public sealed class ParentAttachmentState
 
     public void Clear()
     {
+        _awaitingParentByChild.Clear();
         _deferredCreatesByParent.Clear();
         _deferredAcceptedRelationsByParent.Clear();
         _createWindows.Clear();
@@ -697,6 +778,13 @@ public sealed class ParentAttachmentState
             children.Clear();
         _committedChildrenByParent.Clear();
         _loggedIncarnationRefusals.Clear();
+    }
+
+    private void RemoveRelationsAwaitingParent(uint parentGuid)
+    {
+        IReadOnlyList<uint> children = ChildrenAwaitingParent(parentGuid);
+        for (int i = 0; i < children.Count; i++)
+            _awaitingParentByChild.Remove(children[i]);
     }
 
     private void RemoveDeferredChildCreates(uint childGuid)
@@ -875,6 +963,18 @@ internal readonly record struct DeferredReplayWindowToken(
 {
     internal bool IsValid => Id != 0UL;
 }
+
+/// <summary>
+/// A CreateObject-carried parent relation held until both sides exist. It
+/// names no parent generation: the parent generation is read when the parent
+/// first becomes addressable.
+/// </summary>
+public readonly record struct CreateObjectParentRelationRequest(
+    uint ParentGuid,
+    uint ChildGuid,
+    uint ParentLocation,
+    uint PlacementId,
+    ushort ChildPositionSequence);
 
 public readonly record struct ParentAttachmentRelation(
     uint ParentGuid,

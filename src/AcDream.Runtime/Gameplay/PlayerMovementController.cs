@@ -1525,8 +1525,8 @@ public sealed class PlayerMovementController
                     previousPosition,
                     _body.Position,
                     CellId,
-                    sphereRadius: 0.48f,
-                    sphereHeight: 1.835f,
+                    sphereRadius: DefaultPlayerBody.Radius,
+                    sphereHeight: DefaultPlayerBody.Height,
                     stepUpHeight: StepUpHeight,
                     stepDownHeight: StepDownHeight,
                     isOnGround: previousOnWalkable,
@@ -1612,7 +1612,12 @@ public sealed class PlayerMovementController
             _hasInputSnapshot = true;
             _prevRunHeld = input.Run;
             _prevRunHold = input.Run;
-            _motion.set_hold_run(input.Run, interrupt: false);
+            // The first input this controller ever sees is an observation, not
+            // a key edge: nobody pressed anything, we simply had not looked
+            // before. Recording it is all that is wanted. Treating it as an
+            // edge would re-derive the motion state from raw keys that hold no
+            // turn, discarding one the move-to layer had already started.
+            _motion.SeedHoldRun(input.Run);
         }
 
         bool externallyRequestedMovementEvent =
@@ -1647,26 +1652,67 @@ public sealed class PlayerMovementController
 
             var p = new AcDream.Core.Physics.Motion.MovementParameters();
 
+            // Stop under the existing run hold before releasing that hold.
+            // Releasing it first re-applies a still-held forward command as a
+            // walk, inserting an unwanted walking transition before the stop.
+            if (input.IsPersistentCommand && !input.Forward && !input.Backward
+                && _motion.RawState.ForwardCommand is
+                    MotionCommand.WalkForward or MotionCommand.WalkBackward)
+            {
+                StopMotionAtPhysicsObjectBoundary(_motion.RawState.ForwardCommand, p);
+                motionEdgeFired = true;
+            }
+
             if (input.Run != _prevRunHeld)
             {
                 _motion.set_hold_run(input.Run, interrupt: true);
                 motionEdgeFired = true;
             }
 
-            if (input.Forward && !_prevForwardHeld)
-            { DoMotionAtPhysicsObjectBoundary(MotionCommand.WalkForward, p); motionEdgeFired = true; }
-            else if (input.Backward && !_prevBackwardHeld && !input.Forward)
-            { DoMotionAtPhysicsObjectBoundary(MotionCommand.WalkBackward, p); motionEdgeFired = true; }
-            if (!input.Forward && _prevForwardHeld)
+            if (input.IsPersistentCommand)
             {
-                if (input.Backward)
-                    DoMotionAtPhysicsObjectBoundary(MotionCommand.WalkBackward, p);
-                else
-                    StopMotionAtPhysicsObjectBoundary(MotionCommand.WalkForward, p);
-                motionEdgeFired = true;
+                // A retained automation command replaces the whole directional
+                // intent. Raw motion can differ from the previous input after
+                // initial publication or a server update, so reconcile the
+                // command with the motion that is actually active.
+                uint desiredForward = input.Forward
+                    ? MotionCommand.WalkForward
+                    : input.Backward
+                        ? MotionCommand.WalkBackward
+                        : MotionCommand.Ready;
+                uint activeForward = _motion.RawState.ForwardCommand;
+                bool activeIsDirectional = activeForward is
+                    MotionCommand.WalkForward or MotionCommand.WalkBackward;
+
+                if (activeIsDirectional && activeForward != desiredForward)
+                {
+                    StopMotionAtPhysicsObjectBoundary(activeForward, p);
+                    motionEdgeFired = true;
+                }
+                if (desiredForward != MotionCommand.Ready
+                    && activeForward != desiredForward)
+                {
+                    DoMotionAtPhysicsObjectBoundary(desiredForward, p);
+                    motionEdgeFired = true;
+                }
             }
-            else if (!input.Backward && _prevBackwardHeld && !input.Forward)
-            { StopMotionAtPhysicsObjectBoundary(MotionCommand.WalkBackward, p); motionEdgeFired = true; }
+            else
+            {
+                if (input.Forward && !_prevForwardHeld)
+                { DoMotionAtPhysicsObjectBoundary(MotionCommand.WalkForward, p); motionEdgeFired = true; }
+                else if (input.Backward && !_prevBackwardHeld && !input.Forward)
+                { DoMotionAtPhysicsObjectBoundary(MotionCommand.WalkBackward, p); motionEdgeFired = true; }
+                if (!input.Forward && _prevForwardHeld)
+                {
+                    if (input.Backward)
+                        DoMotionAtPhysicsObjectBoundary(MotionCommand.WalkBackward, p);
+                    else
+                        StopMotionAtPhysicsObjectBoundary(MotionCommand.WalkForward, p);
+                    motionEdgeFired = true;
+                }
+                else if (!input.Backward && _prevBackwardHeld && !input.Forward)
+                { StopMotionAtPhysicsObjectBoundary(MotionCommand.WalkBackward, p); motionEdgeFired = true; }
+            }
 
             (uint? desiredSidestep, bool sidestepUsesRunHold) =
                 DesiredInputSidestep(input, _mouseLookActive);
@@ -1830,6 +1876,14 @@ public sealed class PlayerMovementController
                     : Vector3.Zero;
                 pmDelta.Orientation = _animationRootMotionScratch.Orientation;
             }
+            // A character with no cycles to play has no travel and no turn of
+            // its own, so the two branches below shove its body along by the
+            // speed it has declared and turn it at a fixed rate instead. That
+            // is not how a character moves and it is measurably not the same:
+            // it is only here for a body with no animation content behind it
+            // at all, which is every body built without the content files --
+            // most of the movement tests, and any session holding no lease on
+            // them. A body that has its cycles never reaches either branch.
             else if (_motion.InterpretedState.TurnCommand == MotionCommand.TurnRight)
             {
                 Yaw -= 1.5f
@@ -1877,8 +1931,8 @@ public sealed class PlayerMovementController
 
             var resolveResult = _physics.ResolveWithTransition(
                 preIntegratePos, postIntegratePos, CellId,
-                sphereRadius: 0.48f,
-                sphereHeight: 1.835f,
+                sphereRadius: DefaultPlayerBody.Radius,
+                sphereHeight: DefaultPlayerBody.Height,
                 stepUpHeight: StepUpHeight,
                 stepDownHeight: StepDownHeight,  // L.2.3a: from Setup.StepDownHeight
                 isOnGround: _body.OnWalkable,

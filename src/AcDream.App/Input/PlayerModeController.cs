@@ -33,16 +33,14 @@ internal sealed class PlayerModeController :
     private readonly object _datLock;
     private readonly LiveCollisionAssetPublisher _collisionAssets;
     private readonly LiveEntityAnimationRuntimeView<LiveEntityAnimationState> _animations;
-    private readonly LocalPlayerAnimationController _animation;
+    private readonly RuntimeLocalPlayerMotionArming _motionArming;
     private readonly LocalPlayerShadowSynchronizer _shadow;
-    private readonly IPlayerApproachCompletionLifetimeOwner _approachCompletions;
     private readonly ILocalPlayerTeleportInputLifetime _input;
     private readonly ILiveInWorldSource _session;
     private readonly MovementTruthDiagnosticController _movementDiagnostics;
     private readonly RuntimeMovementSkillState _skills;
     private readonly IViewportAspectSource _viewport;
     private PlayerModeAutoEntry? _autoEntry;
-    private IPlayerApproachCompletionSink? _approachLifetime;
 
     public PlayerModeController(
         LocalPlayerModeState mode,
@@ -59,9 +57,8 @@ internal sealed class PlayerModeController :
         object datLock,
         LiveCollisionAssetPublisher collisionAssets,
         LiveEntityAnimationRuntimeView<LiveEntityAnimationState> animations,
-        LocalPlayerAnimationController animation,
+        RuntimeLocalPlayerMotionArming motionArming,
         LocalPlayerShadowSynchronizer shadow,
-        IPlayerApproachCompletionLifetimeOwner approachCompletions,
         ILocalPlayerTeleportInputLifetime input,
         ILiveInWorldSource session,
         MovementTruthDiagnosticController movementDiagnostics,
@@ -83,10 +80,9 @@ internal sealed class PlayerModeController :
         _collisionAssets = collisionAssets ??
             throw new ArgumentNullException(nameof(collisionAssets));
         _animations = animations ?? throw new ArgumentNullException(nameof(animations));
-        _animation = animation ?? throw new ArgumentNullException(nameof(animation));
+        _motionArming = motionArming
+            ?? throw new ArgumentNullException(nameof(motionArming));
         _shadow = shadow ?? throw new ArgumentNullException(nameof(shadow));
-        _approachCompletions = approachCompletions
-            ?? throw new ArgumentNullException(nameof(approachCompletions));
         _input = input ?? throw new ArgumentNullException(nameof(input));
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _movementDiagnostics = movementDiagnostics
@@ -161,8 +157,6 @@ internal sealed class PlayerModeController :
         catch (Exception error) { failures.Add(error); }
         try { _camera.ExitChaseMode(); }
         catch (Exception error) { failures.Add(error); }
-        try { RetireApproachLifetime(); }
-        catch (Exception error) { failures.Add(error); }
         _mode.IsPlayerMode = false;
         _hostSlot.Host = null;
         _chase.Legacy = null;
@@ -196,8 +190,6 @@ internal sealed class PlayerModeController :
         _autoEntry?.Cancel();
         var failures = new List<Exception>();
         try { _camera.ExitChaseMode(); }
-        catch (Exception error) { failures.Add(error); }
-        try { RetireApproachLifetime(); }
         catch (Exception error) { failures.Add(error); }
         _mode.ResetSession();
         _hostSlot.Host = null;
@@ -270,47 +262,18 @@ internal sealed class PlayerModeController :
                 + "local physics host.");
         }
 
-        IPlayerApproachCompletionSink approachLifetime =
-            _approachCompletions.BeginControllerLifetime();
-        bool lifetimeCommitted = false;
         bool cameraAttempted = false;
         bool shadowAttempted = false;
         CameraController.CameraState priorCamera = _camera.CaptureState();
         LocalPlayerShadowState.Snapshot? priorShadow = _shadow.Capture();
         try
         {
-            if (controller.MoveTo is { } moveTo)
-            {
-                moveTo.MoveToComplete = error =>
-                {
-                    if (error == WeenieError.None)
-                        approachLifetime.PublishNaturalCompletion();
-                    else
-                        approachLifetime.PublishCancellation(error);
-                };
-                moveTo.MoveToCancelled = error =>
-                    approachLifetime.PublishCancellation(error);
-            }
-
-            if (_animations.TryGetValue(playerEntity.Id, out LiveEntityAnimationState? animation)
-                && animation.Sequencer is { } sequencer)
-            {
-                controller.AttachCycleVelocityAccessor(() => sequencer.CurrentVelocity);
-                controller.ObjectScale = animation.Scale;
-                controller.AttachAnimationRootMotionSource(
-                    _animation.AdvanceRoot,
-                    _animation.CaptureHooks);
-                controller.Motion.RemoveLinkAnimations =
-                    sequencer.Manager.HandleEnterWorld;
-                controller.Motion.InitializeMotionTables =
-                    sequencer.Manager.InitializeState;
-                controller.Motion.CheckForCompletedMotions =
-                    sequencer.Manager.CheckForCompletedMotions;
-                controller.Motion.DefaultSink =
-                    new MotionTableDispatchSink(sequencer);
-                sequencer.Manager.HandleEnterWorld();
-                controller.Motion.HandleExitWorld();
-            }
+            // Taking hold of the character's own body starts its locomotion
+            // afresh, outstanding motions and all. How that locomotion is set
+            // up is the character's own business and is decided in one place
+            // for every client; this only says when it happens here.
+            _motionArming.Rearm();
+            _motionArming.EnsureArmed(controller);
 
             var legacyCamera = new ChaseCamera { Aspect = _viewport.Aspect };
             var retailCamera = new RetailChaseCamera
@@ -334,8 +297,6 @@ internal sealed class PlayerModeController :
             _chase.Retail = retailCamera;
             _mode.IsPlayerMode = true;
             _mode.ChaseModeEverEntered = true;
-            _approachLifetime = approachLifetime;
-            lifetimeCommitted = true;
         }
         catch (Exception error)
         {
@@ -362,19 +323,5 @@ internal sealed class PlayerModeController :
                     failures);
             throw;
         }
-        finally
-        {
-            if (!lifetimeCommitted)
-                _approachCompletions.RetireControllerLifetime(approachLifetime);
-        }
     }
-
-    private void RetireApproachLifetime()
-    {
-        if (_approachLifetime is not { } lifetime)
-            return;
-        _approachLifetime = null;
-        _approachCompletions.RetireControllerLifetime(lifetime);
-    }
-
 }

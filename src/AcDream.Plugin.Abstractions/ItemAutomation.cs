@@ -175,6 +175,8 @@ public readonly record struct PluginInventoryItem(
 
     /// <summary>The weapon category the item belongs to; zero when it is not a weapon.</summary>
     public int WeaponType { get; init; }
+    /// <summary>The ammunition class a launcher takes, or an arrow or bolt belongs to; zero for anything else.</summary>
+    public uint AmmoType { get; init; }
 
     /// <summary>
     /// Which vital the item restores when used (health, stamina, mana); zero
@@ -254,6 +256,8 @@ public readonly record struct PluginInventoryItem(
     /// that has none or has not been appraised.
     /// </summary>
     public float Workmanship { get; init; }
+    /// <summary>How many times the item has been tinkered; zero when never or unknown.</summary>
+    public int NumTimesTinkered { get; init; }
 
     /// <summary>What the item is made of; zero when the client does not know.</summary>
     public uint MaterialType { get; init; }
@@ -270,6 +274,13 @@ public readonly record struct PluginInventoryItem(
 
     /// <summary>The item's icon, for a plugin that draws its own UI.</summary>
     public uint IconId { get; init; }
+
+    /// <summary>
+    /// The icon-highlight effect bits the server sends with the object
+    /// itself. Bit 0 is "magical", which is how a loot rule can tell that an
+    /// item is expected to carry spells before anything has appraised it.
+    /// </summary>
+    public uint Effects { get; init; }
 }
 
 /// <summary>
@@ -537,8 +548,16 @@ public interface IItemAutomation
     bool IsAvailable => false;
 
     /// <summary>
-    /// True while an inventory request is already in flight, so the next
-    /// command would come back <see cref="PluginItemCommandStatus.Busy"/>.
+    /// True while a use or an inventory request offered right now would come
+    /// back <see cref="PluginItemCommandStatus.Busy"/>. Two things put it
+    /// there: a request of your own already in flight, and the short pacing
+    /// the client keeps between one use and the next. Both mean "not yet"
+    /// rather than "no", so a command refused this way has not failed and
+    /// should not count against whatever attempt limit or back-off you pair
+    /// with a failure -- wait for this to read false and ask again. It never
+    /// reads false while a command would be refused as busy; it may read true
+    /// a moment longer than a move or a merge strictly needs, because those
+    /// do not take the use pacing.
     /// </summary>
     bool IsBusy => false;
 

@@ -149,7 +149,7 @@ public sealed class CombatUiController : IRetainedPanelController
     private void BindAttackButton(UiButton button, AttackHeight height)
     {
         button.OnPressed = () => _attacks.PressAttack(height);
-        button.OnReleased = _attacks.ReleaseAttack;
+        button.OnReleased = () => _attacks.ReleaseAttack();
     }
 
     private void OnCombatModeChanged(CombatMode mode)

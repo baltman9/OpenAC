@@ -119,7 +119,7 @@ public sealed class UiWindowDrawCaptureSweepTests
             new ChatWindowState(),
             null,
             null,
-            id => (id, 8, 8));
+            id => (id, 8, 8), new RuntimeChatEntryOwner());
         Assert.NotNull(controller);
 
         var root = new UiRoot { Width = 1600f, Height = 1200f };
@@ -160,7 +160,7 @@ public sealed class UiWindowDrawCaptureSweepTests
             });
 
         var objects = new ClientObjectTable();
-        var itemInteraction = new ItemInteractionController(
+        var itemInteraction = new RuntimeItemInteraction(
             objects,
             new RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
             new InteractionState(),

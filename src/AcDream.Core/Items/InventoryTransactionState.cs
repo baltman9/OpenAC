@@ -11,6 +11,7 @@ public enum InventoryRequestKind
     SplitToWorld,
     Wield,
     Give,
+    Shop,
 }
 
 public readonly record struct PendingInventoryRequest(
@@ -44,21 +45,28 @@ public sealed class ItemUseRequestReservation
 public sealed class InventoryTransactionState : IDisposable
 {
     private readonly ClientObjectTable _objects;
+    private readonly VendorState? _vendor;
     private ulong _nextRequestToken;
     private ulong _useReservationGeneration;
     private PendingInventoryRequest? _pendingRequest;
     private int _busyCount;
+    private int _appraisalCount;
     private long _dispatchFailureCount;
     private bool _disposed;
 
-    public InventoryTransactionState(ClientObjectTable objects)
+    public InventoryTransactionState(
+        ClientObjectTable objects,
+        VendorState? vendor = null)
     {
         _objects = objects ?? throw new ArgumentNullException(nameof(objects));
+        _vendor = vendor;
         _objects.ObjectMoved += OnObjectMoved;
         _objects.MoveRequestFailed += OnMoveFailed;
         _objects.ObjectRemoved += OnObjectRemoved;
         _objects.StackSizeUpdated += OnStackSizeUpdated;
         _objects.Cleared += OnObjectsCleared;
+        if (_vendor is not null)
+            _vendor.Changed += OnVendorChanged;
     }
 
     public event Action? StateChanged;
@@ -70,8 +78,24 @@ public sealed class InventoryTransactionState : IDisposable
 
     public ClientObjectTable Objects => _objects;
     public int BusyCount => _busyCount;
+
+    /// <summary>
+    /// How many appraisal requests are outstanding. Asking an object to
+    /// describe itself is counted on its own, apart from
+    /// <see cref="BusyCount"/>: it sends no item action and the server
+    /// answers it on a channel of its own, so a description in flight must
+    /// not make the next pick-up or container open report itself busy.
+    /// </summary>
+    public int AppraisalCount => _appraisalCount;
     public bool HasPendingRequest => _pendingRequest is not null;
     public bool CanBeginRequest => _busyCount == 0 && _pendingRequest is null;
+
+    /// <summary>
+    /// Whether another appraisal may be asked for. One at a time, and only
+    /// that: an item action in flight is no reason to refuse a description,
+    /// and a description in flight is no reason to refuse an item action.
+    /// </summary>
+    public bool CanBeginAppraisal => _appraisalCount == 0;
     public bool IsDisposed => _disposed;
     public long DispatchFailureCount =>
         Interlocked.Read(ref _dispatchFailureCount);
@@ -230,21 +254,42 @@ public sealed class InventoryTransactionState : IDisposable
         DispatchStateChanged();
     }
 
+    /// <summary>Takes a reference for one outstanding appraisal request.</summary>
+    public void IncrementAppraisalCount()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _appraisalCount++;
+        DispatchStateChanged();
+    }
+
+    /// <summary>Gives back the reference one appraisal request took.</summary>
+    public void CompleteAppraisal()
+    {
+        if (_appraisalCount == 0)
+            return;
+        _appraisalCount--;
+        DispatchStateChanged();
+    }
+
     public void ClearBusy()
     {
-        if (_busyCount == 0)
+        if (_busyCount == 0 && _appraisalCount == 0)
             return;
         _useReservationGeneration++;
         _busyCount = 0;
+        _appraisalCount = 0;
         DispatchStateChanged();
     }
 
     public void ResetSession()
     {
-        bool changed = _pendingRequest is not null || _busyCount != 0;
+        bool changed = _pendingRequest is not null
+            || _busyCount != 0
+            || _appraisalCount != 0;
         _pendingRequest = null;
         _useReservationGeneration++;
         _busyCount = 0;
+        _appraisalCount = 0;
         if (changed)
             DispatchStateChanged();
     }
@@ -255,6 +300,8 @@ public sealed class InventoryTransactionState : IDisposable
             return;
         _disposed = true;
         _objects.Cleared -= OnObjectsCleared;
+        if (_vendor is not null)
+            _vendor.Changed -= OnVendorChanged;
         _objects.StackSizeUpdated -= OnStackSizeUpdated;
         _objects.ObjectRemoved -= OnObjectRemoved;
         _objects.MoveRequestFailed -= OnMoveFailed;
@@ -262,6 +309,7 @@ public sealed class InventoryTransactionState : IDisposable
         _pendingRequest = null;
         _useReservationGeneration++;
         _busyCount = 0;
+        _appraisalCount = 0;
         StateChanged = null;
         RequestCompleted = null;
         RequestFailed = null;
@@ -297,8 +345,29 @@ public sealed class InventoryTransactionState : IDisposable
             CompleteInventoryResponse(move.ItemId, move.Item);
     }
 
+    private void OnVendorChanged(VendorTransition transition)
+    {
+        if (transition.Kind is not (VendorStateTransitionKind.Opened
+            or VendorStateTransitionKind.Refreshed)
+            || _pendingRequest is not { Kind: InventoryRequestKind.Shop } pending
+            || pending.ItemId != transition.VendorId)
+            return;
+
+        _pendingRequest = null;
+        Dispatch(RequestCompleted, pending);
+        DispatchStateChanged();
+    }
+
     private void OnMoveFailed(MoveRequestFailure failure)
     {
+        if (_pendingRequest is { Kind: InventoryRequestKind.Shop } shop)
+        {
+            _pendingRequest = null;
+            Dispatch(RequestFailed, shop, failure.WeenieError);
+            DispatchStateChanged();
+            return;
+        }
+
         uint itemId = failure.ItemId;
         // While a request is pending, a move failure is about that request
         // whatever guid the wire carries (the server may send none, or the
@@ -321,6 +390,7 @@ public sealed class InventoryTransactionState : IDisposable
         ClientObject? identity)
     {
         if (_pendingRequest is not { } request
+            || request.Kind == InventoryRequestKind.Shop
             || request.ItemId != itemId
             || !MatchesIdentity(request.ItemIdentity, itemId, identity))
         {

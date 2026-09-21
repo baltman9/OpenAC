@@ -229,12 +229,9 @@ public sealed class RuntimeForcePositionRenderCommitTests
             var sink = new RuntimePlacementPresentationSink(
                 Runtime,
                 new RuntimeWorldTransitState(),
-                WorldState,
-                new WorldEvents(),
                 new EntityEffectPoseRegistry(),
                 localShadowSynchronizer,
                 () => PlayerGuid,
-                _ => { },
                 [(_, _) => { }]);
             _ = new AcDream.Runtime.Physics.RuntimePlacementProjectionSubscription(
                 EntityObjects.Placements,

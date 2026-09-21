@@ -31,6 +31,12 @@ public interface IPluginHost
     IUiRegistry Ui { get; }
 
     /// <summary>
+    /// Lines a plugin draws in the world, such as a route. A host without a
+    /// window hands out no layer, and the plugin draws nothing.
+    /// </summary>
+    IPluginWorldLines WorldLines => NoOpPluginWorldLines.Instance;
+
+    /// <summary>
     /// Registers chat commands this plugin answers to. Inert on a host that
     /// has no command line.
     /// </summary>

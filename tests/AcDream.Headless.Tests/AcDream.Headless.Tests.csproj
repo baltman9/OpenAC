@@ -22,6 +22,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\AcDream.Headless\AcDream.Headless.csproj" />
     <ProjectReference Include="..\..\src\AcDream.Launcher.Core\AcDream.Launcher.Core.csproj" />
+    <ProjectReference Include="..\..\src\AcDream.PluginCheck\AcDream.PluginCheck.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -40,5 +41,15 @@
              Link="Fixtures\LauncherCoreSessionConfigFixture.cs" />
     <Compile Include="..\Fixtures\plugin-icons\PngTestData.cs"
              Link="Fixtures\PngTestData.cs" />
+    <!-- One plugin, two hosts: the same script runs in both host suites. -->
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The automation-session proof's own profile inputs, laid out the way
+         the plugin's profile storage expects them. -->
+    <Content Include="Fixtures\vt-proof\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>Fixtures\vt-proof\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Content>
   </ItemGroup>
 </Project>

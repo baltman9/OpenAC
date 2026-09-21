@@ -73,6 +73,12 @@ public readonly record struct PluginCombatTarget(
     public string SpeciesName { get; init; } = string.Empty;
 
     /// <summary>Spawn/appraisal maximum HP, or zero until the host knows it.</summary>
+    /// <summary>
+    /// A monster's maximum health in points, or zero when it is not known —
+    /// which is the usual answer. The server sends only the fraction of
+    /// health remaining, so a client that wants the absolute figure has to
+    /// bring a table of its own.
+    /// </summary>
     public int MaximumHealth { get; init; }
 
     /// <summary>True when the creature has something the client counts as armor equipped.</summary>
@@ -93,6 +99,14 @@ public readonly record struct PluginCombatTarget(
     /// </summary>
     public double SecondsSinceHealthUpdate { get; init; } =
         double.PositiveInfinity;
+
+    /// <summary>
+    /// True once the client has been told this creature died. Unlike a health
+    /// reading of zero this does not need the creature to be selected or its
+    /// health ever to have been asked for, so it is the dependable answer to
+    /// "is this thing still worth attacking".
+    /// </summary>
+    public bool IsDead { get; init; }
 }
 
 /// <summary>
@@ -142,6 +156,15 @@ public readonly record struct PluginCombatSnapshot(
     /// accepted.
     /// </summary>
     public uint CompletionWeenieError { get; init; }
+
+    /// <summary>
+    /// Revision of the last local character motion update with animation type
+    /// zero and an empty packed motion word.
+    /// </summary>
+    public long QualifiedSelfMotionRevision { get; init; }
+
+    /// <summary>Seconds since that receipt, or zero before any receipt.</summary>
+    public double QualifiedSelfMotionAgeSeconds { get; init; }
 }
 
 /// <summary>How the client answered a plugin's combat command.</summary>
@@ -208,6 +231,12 @@ public readonly record struct PluginCombatCommandResult(
 public interface ICombatAutomation
 {
     /// <summary>
+    /// Temporarily disables automatic target replacement and repeat attacks.
+    /// Dispose when the caller stops directing combat; saved options are unchanged.
+    /// </summary>
+    IDisposable? AcquireCombatControl() => null;
+
+    /// <summary>
     /// The current combat state. Reads as its default value when the session
     /// is not in the world.
     /// </summary>
@@ -246,7 +275,10 @@ public interface ICombatAutomation
     /// <see cref="PluginCombatCommandStatus.WrongMode"/> when the stance
     /// cannot make a targeted attack, and
     /// <see cref="PluginCombatCommandStatus.Busy"/> while an earlier attack
-    /// is still running. Finish it with <see cref="ReleasePhysicalAttack"/>.
+    /// is still running. A <see cref="PluginCombatCommandStatus.Refused"/>
+    /// result carries a short reason in
+    /// <see cref="PluginCombatCommandResult.Notice"/> when the host has one.
+    /// Finish it with <see cref="ReleasePhysicalAttack"/>.
     /// </summary>
     PluginCombatCommandResult BeginPhysicalAttack(
         uint targetObjectId,

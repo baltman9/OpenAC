@@ -15,8 +15,22 @@ using AcDream.Runtime.Gameplay;
 
 namespace AcDream.Runtime.Tests.Session;
 
-public sealed class LiveSessionEventRouterTests
+public sealed class LiveSessionEventRouterTests : IDisposable
 {
+    /// <summary>
+    /// The action states these tests hand the router. They own owners of
+    /// their own, so the class lets go of every one it made rather than
+    /// leaving them to a finalizer that will not come.
+    /// </summary>
+    private readonly List<RuntimeActionState> _actionStates = [];
+
+    public void Dispose()
+    {
+        foreach (RuntimeActionState actions in _actionStates)
+            actions.Dispose();
+        _actionStates.Clear();
+    }
+
     [Fact]
     public void CreatedRouterPublishesNoHandlersUntilExplicitAttach()
     {
@@ -31,7 +45,8 @@ public sealed class LiveSessionEventRouterTests
             new LiveEnvironmentSessionSink(_ => { }, _ => { }),
             NewInventoryBindings(),
             NewCharacterBindings(),
-            NewSocialBindings());
+            NewSocialBindings(),
+            NewActions());
 
         AssertSessionHandlerCounts(session, multiplier: 0);
         Assert.Equal(baselineGameEvents, session.GameEvents.RegisteredHandlerCount);
@@ -121,7 +136,8 @@ public sealed class LiveSessionEventRouterTests
             new LiveEnvironmentSessionSink(_ => { }, _ => { }),
             NewInventoryBindings(),
             NewCharacterBindings(),
-            social);
+            social,
+            NewActions());
         router.Attach();
 
         EventDelegate<Action<AcDream.Core.Net.Messages.ServerMessage.Parsed>>(
@@ -173,7 +189,8 @@ public sealed class LiveSessionEventRouterTests
             NoOpEnvironmentSink(),
             NewInventoryBindings(),
             NewCharacterBindings(),
-            social);
+            social,
+            NewActions());
         router.Attach();
 
         Action<PlayerKilled.Parsed> deliver =
@@ -234,7 +251,8 @@ public sealed class LiveSessionEventRouterTests
                     new FriendsState(),
                     new SquelchState(),
                     Fellowship: fellowship,
-                    Allegiance: allegiance));
+                    Allegiance: allegiance),
+                NewActions());
             router.Attach();
 
             // Someone ELSE quits -- removes exactly that one member.
@@ -377,7 +395,8 @@ public sealed class LiveSessionEventRouterTests
                 ClientTime: () => 0d,
                 OnCharacterOptionsChanged: (options1, options2) =>
                     observed.Add((options1, options2, character.Options.Options1))),
-            NewSocialBindings());
+            NewSocialBindings(),
+            NewActions());
         router.Attach();
 
         session.GameEvents.Dispatch(
@@ -416,7 +435,8 @@ public sealed class LiveSessionEventRouterTests
                 ClientTime: () => 0d,
                 OnCharacterOptionsChanged: (options1, options2) =>
                     observed.Add((options1, options2))),
-            NewSocialBindings());
+            NewSocialBindings(),
+            NewActions());
         router.Attach();
 
         session.GameEvents.Dispatch(
@@ -465,7 +485,8 @@ public sealed class LiveSessionEventRouterTests
                 ClientTime: () => 0d,
                 OnCharacterOptionsChanged: (options1, options2) =>
                     observed.Add((options1, options2))),
-            NewSocialBindings());
+            NewSocialBindings(),
+            NewActions());
         router.Attach();
 
         uint defaultOptions1 = character.Options.Options1;
@@ -623,7 +644,8 @@ public sealed class LiveSessionEventRouterTests
                 OnConfirmationDone: null,
                 ClientTime: () => 0d,
                 OnMovementStatsUpdated: () => movementStatsUpdated++),
-            NewSocialBindings());
+            NewSocialBindings(),
+            NewActions());
         router.Attach();
 
         for (uint i = 0; i < worldObjects; i++)
@@ -681,7 +703,8 @@ public sealed class LiveSessionEventRouterTests
                 OnConfirmationDone: null,
                 ClientTime: () => 0d,
                 OnMovementStatsUpdated: () => movementStatsUpdated++),
-            NewSocialBindings());
+            NewSocialBindings(),
+            NewActions());
 
         router.Attach();
 
@@ -732,7 +755,8 @@ public sealed class LiveSessionEventRouterTests
                 OnConfirmationDone: null,
                 ClientTime: () => 0d,
                 OnMovementStatsUpdated: () => movementStatsUpdated++),
-            NewSocialBindings());
+            NewSocialBindings(),
+            NewActions());
 
         router.Attach();
         character.LocalPlayer.OnAttributeUpdate(
@@ -808,7 +832,8 @@ public sealed class LiveSessionEventRouterTests
                 OnConfirmationRequest: null,
                 OnConfirmationDone: null,
                 ClientTime: () => 0d),
-            NewSocialBindings());
+            NewSocialBindings(),
+            NewActions());
         router.Attach();
 
         var properties = new PropertyBundle();
@@ -842,7 +867,8 @@ public sealed class LiveSessionEventRouterTests
                 OnConfirmationDone: null,
                 ClientTime: () => 0d,
                 OnMovementStatsUpdated: () => movementStatsUpdated++),
-            NewSocialBindings());
+            NewSocialBindings(),
+            NewActions());
 
         router.Attach();
         Assert.Equal(-1, character.MovementSkills.CurrentStamina);
@@ -872,7 +898,7 @@ public sealed class LiveSessionEventRouterTests
             new LiveCharacterSessionBindings(
                 new CombatState(),
                 character,
-                ResolveSkillFormulaBonus: (skillId, attrs) =>
+                ResolveSkillFormulaBonus: (skillId, status, attrs) =>
                     skillId == 24u && attrs.TryGetValue(3u, out uint quickness)
                         ? quickness / 2u
                         : 0u,
@@ -881,7 +907,8 @@ public sealed class LiveSessionEventRouterTests
                 OnConfirmationDone: null,
                 ClientTime: () => 0d,
                 OnMovementStatsUpdated: () => movementStatsUpdated++),
-            NewSocialBindings());
+            NewSocialBindings(),
+            NewActions());
         router.Attach();
 
         character.LocalPlayer.OnAttributeUpdate(
@@ -978,7 +1005,8 @@ public sealed class LiveSessionEventRouterTests
                 new TurbineChatState(),
                 new FriendsState(),
                 new SquelchState(),
-                House: house));
+                House: house),
+            NewActions());
         router.Attach();
 
         session.GameEvents.Dispatch(GameEventEnvelope.TryParse(
@@ -1007,11 +1035,24 @@ public sealed class LiveSessionEventRouterTests
         router.Dispose();
     }
 
+    /// <summary>
+    /// The action state the router now requires. Both hosts hand it their
+    /// own; a test only needs one that exists.
+    /// </summary>
+    private RuntimeActionState NewActions()
+    {
+        RuntimeActionState actions =
+            AcDream.Runtime.Tests.Gameplay.RuntimeActionTestFactory.Create(
+                new InventoryTransactionState(new ClientObjectTable()));
+        _actionStates.Add(actions);
+        return actions;
+    }
+
     private static LiveEnvironmentSessionSink NoOpEnvironmentSink() => new(
         EnvironChanged: _ => { },
         ServerTimeUpdated: _ => { });
 
-    private static LiveSessionEventRouter NewRouter(
+    private LiveSessionEventRouter NewRouter(
         WorldSession session,
         Counters counters,
         Action<int>? constructionCheckpoint = null,
@@ -1045,6 +1086,7 @@ public sealed class LiveSessionEventRouterTests
             NewInventoryBindings(),
             NewCharacterBindings(combat),
             NewSocialBindings(chat),
+            NewActions(),
             constructionCheckpoint);
         try
         {

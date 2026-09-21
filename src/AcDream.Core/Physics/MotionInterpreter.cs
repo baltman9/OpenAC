@@ -241,6 +241,20 @@ public sealed class MotionInterpreter : IMotionDoneSink
 
     public IEnumerable<MotionNode> PendingMotions => _pendingMotions;
 
+    /// <summary>
+    /// The motion at the head of the pending queue, or null when nothing is
+    /// outstanding. Reading it costs nothing, unlike walking
+    /// <see cref="PendingMotions"/>, so a per-frame caller can use it.
+    /// </summary>
+    public MotionNode? PendingMotionHead => _pendingMotions.First?.Value;
+
+    /// <summary>
+    /// How many motions are outstanding. Two queued motions can hold the same
+    /// values, so a caller draining the queue has to watch this rather than
+    /// compare heads: identical adjacent nodes are indistinguishable by value.
+    /// </summary>
+    public int PendingMotionCount => _pendingMotions.Count;
+
     public Action? UnstickFromObject { get; set; }
 
     public Action? InterruptCurrentMovement { get; set; }
@@ -966,6 +980,21 @@ public sealed class MotionInterpreter : IMotionDoneSink
         LeaveGround();
     }
 
+
+    /// <summary>
+    /// Records the run-hold key WITHOUT re-deriving the motion state from the
+    /// raw key state.
+    /// </summary>
+    /// <remarks>
+    /// This is for establishing the hold key that was already true before
+    /// anything was watching — a first observation, not a key edge. Going
+    /// through the edge path there would re-derive the interpreted state from
+    /// the raw keys, and the raw keys know nothing about a motion the move-to
+    /// layer owns: a turn already under way would be silently discarded while
+    /// the move-to went on believing it was turning.
+    /// </remarks>
+    public void SeedHoldRun(bool holdingRun) =>
+        RawState.CurrentHoldKey = holdingRun ? HoldKey.Run : HoldKey.None;
 
     public void set_hold_run(bool holdingRun, bool interrupt)
     {

@@ -212,8 +212,12 @@ public sealed class DirectGameRuntimeCommandAdapter
         {
             case RuntimeSelectionCommand.SelectClosestHostile:
             {
-                uint? closest =
-                    RuntimeHostileTargetQuery.FindClosest(_runtime);
+                // The key means "the nearest monster worth selecting", so a
+                // creature the player cannot see, or one already dead, is not
+                // a candidate for it.
+                uint? closest = RuntimeHostileTargetQuery.FindClosest(
+                    _runtime,
+                    HostileTargetScope.Selectable);
                 if (closest is { } objectId)
                 {
                     selection.Select(
@@ -1035,10 +1039,27 @@ public sealed class DirectGameRuntimeCommandAdapter
             Validate(expectedGeneration, out WorldSession? session);
         if (gate != RuntimeCommandStatus.Accepted)
             return Result(gate);
-        session!.SendFellowshipUpdateRequest(panelOpen);
+        if (_runtime.FellowshipOwner.SetPanelVisible(panelOpen, out bool subscribe))
+            session!.SendFellowshipUpdateRequest(subscribe);
         return EmitResult(
             RuntimeCommandDomain.Fellowship,
             operation: 6,
+            RuntimeCommandStatus.Accepted);
+    }
+
+    public RuntimeCommandResult RequestVitals(
+        RuntimeGenerationToken expectedGeneration,
+        bool requested)
+    {
+        RuntimeCommandStatus gate =
+            Validate(expectedGeneration, out WorldSession? session);
+        if (gate != RuntimeCommandStatus.Accepted)
+            return Result(gate);
+        if (_runtime.FellowshipOwner.SetVitalsRequested(requested, out bool subscribe))
+            session!.SendFellowshipUpdateRequest(subscribe);
+        return EmitResult(
+            RuntimeCommandDomain.Fellowship,
+            operation: 7,
             RuntimeCommandStatus.Accepted);
     }
 

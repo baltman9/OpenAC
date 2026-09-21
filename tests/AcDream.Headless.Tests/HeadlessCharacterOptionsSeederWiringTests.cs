@@ -10,6 +10,7 @@ using AcDream.Headless.Diagnostics;
 using AcDream.Headless.Hosting;
 using AcDream.Headless.Platform;
 using AcDream.Runtime;
+using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Session;
 
 namespace AcDream.Headless.Tests;

@@ -120,6 +120,7 @@ internal sealed class WorldSelectionQuery
     private readonly Func<uint, bool> _hasOpenedCorpse;
     private readonly Func<CombatMode> _combatMode;
     private readonly Func<uint, bool> _isFellow;
+    private readonly Func<RetailSelectionDirection, uint?, uint?> _findPlayer;
 
     public WorldSelectionQuery(
         LiveEntityRuntime liveEntities,
@@ -134,7 +135,8 @@ internal sealed class WorldSelectionQuery
         Func<uint, Matrix4x4?> childRootPose,
         Func<uint, bool>? hasOpenedCorpse = null,
         Func<CombatMode>? combatMode = null,
-        Func<uint, bool>? isFellow = null)
+        Func<uint, bool>? isFellow = null,
+        Func<RetailSelectionDirection, uint?, uint?>? findPlayer = null)
     {
         _liveEntities = liveEntities ?? throw new ArgumentNullException(nameof(liveEntities));
         _objects = objects ?? throw new ArgumentNullException(nameof(objects));
@@ -149,6 +151,7 @@ internal sealed class WorldSelectionQuery
         _hasOpenedCorpse = hasOpenedCorpse ?? (_ => false);
         _combatMode = combatMode ?? (() => CombatMode.NonCombat);
         _isFellow = isFellow ?? (_ => false);
+        _findPlayer = findPlayer ?? ((_, _) => null);
     }
 
     public uint PlayerGuid => _playerGuid();
@@ -291,6 +294,12 @@ internal sealed class WorldSelectionQuery
         uint? anchor,
         bool excludeOwnedByPlayer = false)
     {
+        // Stepping through the people nearby is one ordering over the entity
+        // directory, owned by the runtime, so a key press and a plugin call
+        // land on the same person.
+        if (kind == RetailSelectionKind.Player)
+            return _findPlayer(direction, anchor);
+
         uint playerGuid = _playerGuid();
         if (!_liveEntities.TryGetWorldEntity(playerGuid, out WorldEntity player))
             return null;

@@ -139,13 +139,15 @@ public sealed class RuntimeEntityObjectEventStream
 
     internal void PublishEntity(
         RuntimeEntityChange change,
-        RuntimeEntityRecord record)
+        RuntimeEntityRecord record,
+        bool replacedInPlace = false)
     {
         ArgumentNullException.ThrowIfNull(record);
         var delta = new RuntimeEntityDelta(
             NextStamp(),
             change,
-            RuntimeEntityObjectViews.Snapshot(record));
+            RuntimeEntityObjectViews.Snapshot(record),
+            replacedInPlace);
         EnqueueAndDrain(PendingDispatch.ForEntity(delta));
     }
 

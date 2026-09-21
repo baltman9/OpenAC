@@ -11,9 +11,12 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="AcDream.Headless.Tests" />
+    <InternalsVisibleTo Include="AcDream.HostParity.Tests" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\AcDream.Runtime\AcDream.Runtime.csproj" />
   </ItemGroup>
+
+  <Import Project="..\AcDream.Plugins.MossTank\BundledPlugin.targets" />
 </Project>

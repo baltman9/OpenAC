@@ -79,6 +79,42 @@ public sealed class InventoryPlacementSearchTests
         Assert.Equal(InventoryContainerPlacementRejection.None, refusal);
     }
 
+    /// <summary>
+    /// A spell focus carries the container-type field a pack carries, and
+    /// it takes a container slot rather than an item slot, so the slot
+    /// accounting counts it as a container. It holds nothing, though, so it
+    /// is never somewhere an item can go: a request naming one as the
+    /// destination is refused by the server, and every pull that picks it
+    /// is lost. Mutation: drop the focus guard from
+    /// <c>WillItemFitInContainer</c> and the focus is chosen over the
+    /// "everything is full" refusal.
+    /// </summary>
+    [Fact]
+    public void AFocusIsNeverChosenAsAPlacementDestination()
+    {
+        ClientObjectTable objects = PlayerWithPacks(mainCapacity: 1);
+        AddLoose(objects, 0x70000100u, Player);          // main pack full
+        AddLoose(objects, 0x70000101u, SidePackA);
+        AddLoose(objects, 0x70000102u, SidePackA);       // pack A full
+        AddLoose(objects, 0x70000103u, SidePackB);
+        AddLoose(objects, 0x70000104u, SidePackB);       // pack B full
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 0x60000020u,
+            Name = "Foci of Verdancy",
+            Type = ItemType.Misc,
+            ContainerTypeHint = 2u,
+        });
+        objects.MoveItem(0x60000020u, Player, 2);
+        uint loot = WorldItem(objects);
+
+        uint chosen = InventoryPlacementSearch.ChooseContainer(
+            objects, loot, rootId: Player, targetId: Player, Player, out var refusal);
+
+        Assert.Equal(0u, chosen);
+        Assert.Equal(InventoryContainerPlacementRejection.ItemCapacityFull, refusal);
+    }
+
     [Fact]
     public void NoTargetNamed_TriesTheMainPackFirst()
     {

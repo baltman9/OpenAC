@@ -764,10 +764,10 @@ internal sealed class NoWindowGameRuntimeHost : IDisposable
             _runtime = runtime
                 ?? throw new ArgumentNullException(nameof(runtime));
 
-        public bool CanStartAttack() => IsInWorld;
+        public bool CanStartAttack(bool allowAutoTarget) => IsInWorld;
         public void PrepareAttackRequest() =>
             Trace.Add("attack:prepare");
-        public bool SendAttack(AttackHeight height, float power)
+        public bool SendAttack(AttackHeight height, float power, bool allowAutoTarget)
         {
             Trace.Add(string.Create(
                 CultureInfo.InvariantCulture,

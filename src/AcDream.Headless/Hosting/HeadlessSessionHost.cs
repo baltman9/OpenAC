@@ -5,6 +5,8 @@ using AcDream.Headless.Plugins;
 using AcDream.Headless.Policies;
 using AcDream.Plugin.Abstractions;
 using AcDream.Content.CharGen;
+using AcDream.Content.Skills;
+using AcDream.Content.Vfx;
 using AcDream.Core.Chat;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
@@ -145,7 +147,7 @@ internal sealed class HeadlessSessionHost : IDisposable
     private RuntimeSessionStartStatus? _startOutcome;
     private bool _hasConnected;
     private readonly Dictionary<CharacterOptionId, bool> _declaredCharacterOptions;
-    private HeadlessCharacterOptionsSeeder? _optionsSeeder;
+    private RuntimeCharacterOptionsSeeder? _optionsSeeder;
     private readonly TimeSpan _reconnectQuiescence;
     private readonly TimeProvider _timeProvider;
     private readonly HeadlessGenerationResetHost _resetHost = new();
@@ -153,9 +155,12 @@ internal sealed class HeadlessSessionHost : IDisposable
     private readonly IHeadlessBotPolicy _policy;
     private readonly IDisposable _policySubscription;
     private readonly HeadlessPluginSession _pluginSession;
-    private readonly AutoWieldController _autoWield;
+    /// <summary>
+    /// Paces the plugin tick, which every client raises at a fixed rate
+    /// rather than once per turn of this one's own schedule.
+    /// </summary>
+    private readonly AcDream.Runtime.Plugins.RuntimePluginTickClock _pluginTick;
     private readonly HeadlessLogoutAutomation _logout;
-    private readonly AcDream.Core.Plugins.PluginCommandRegistry _pluginCommands;
     private readonly LiveChatCommandSurface _chatCommandSurface;
     private readonly LiveSessionHost _liveSession;
     private readonly RuntimeLocalPlayerFrameController _localPlayerFrame;
@@ -163,13 +168,20 @@ internal sealed class HeadlessSessionHost : IDisposable
     /// <summary>The session's walks, when it loaded the game data they plan over.</summary>
     private readonly NavigationWalkController? _navigationWalk;
 
-    /// <summary>The session's /nav and /motor commands.</summary>
-    private readonly NavigationChatCommands? _navigationCommands;
     private readonly HeadlessProcessContentOwner.HeadlessProcessContentLease?
         _contentLease;
     private readonly IRuntimePlacementProjectionSink? _placementSinkOverride;
     private RuntimeFirstEntryDriveController? _firstEntryDrive;
     private RuntimeAcceptedPositionDriveController? _acceptedPositionDrive;
+    private AcDream.Runtime.Physics.RuntimeRemoteArming? _remoteArming;
+
+    /// <summary>
+    /// What carries every other creature's body forward between the server's
+    /// updates. Absent when this session holds no lease on the installed data
+    /// files: with no animation content there is nothing to carry a body by,
+    /// and its bodies stand where the server put them.
+    /// </summary>
+    private AcDream.Runtime.Physics.RuntimeRemoteBodyDrive? _remoteBodies;
     private AcDream.Core.Net.WorldSession? _currentSession;
     private HeadlessSessionWorldProjection? _worldProjection;
     private RuntimeLiveEntitySessionController? _entities;
@@ -202,7 +214,8 @@ internal sealed class HeadlessSessionHost : IDisposable
         IEnumerable<string>? pluginRoots = null,
         IPluginStorage? storage = null,
         IPluginStorage? vtankProfiles = null,
-        Func<bool>? logoutConfirmedOverride = null)
+        Func<bool>? logoutConfirmedOverride = null,
+        string? dataDirectory = null)
     {
         _descriptor = descriptor
             ?? throw new ArgumentNullException(nameof(descriptor));
@@ -228,22 +241,16 @@ internal sealed class HeadlessSessionHost : IDisposable
         IHeadlessBotPolicy? policy = null;
         IDisposable? policySubscription = null;
         HeadlessPluginSession? pluginSession = null;
-        AutoWieldController? autoWield = null;
         try
         {
             var gameplay = new HeadlessGameplayOperations();
-            var runtime = new GameRuntime(new GameRuntimeDependencies(
-                gameplay,
-                gameplay,
-                gameplay,
-                gameplay,
-                TimeProvider: _timeProvider,
-                Log: message => diagnostics.Message(
-                    descriptor.Id,
-                    message),
-                SessionOperations: sessionOperations,
-                CombatTime: () =>
-                    runtimeRef?.Clock.SimulationTimeSeconds ?? 0d));
+            var runtime = new GameRuntime(
+                AcDream.Headless.Plugins.HeadlessAutomationCapabilities
+                    .BuildRuntimeDependencies(
+                        gameplay,
+                        _timeProvider,
+                        message => diagnostics.Message(descriptor.Id, message),
+                        sessionOperations));
             runtimeRef = runtime;
             if (contentLease is { } content)
             {
@@ -265,35 +272,18 @@ internal sealed class HeadlessSessionHost : IDisposable
             var commands = new DirectGameRuntimeCommandAdapter(
                 runtime,
                 bridge);
-            autoWield = new AutoWieldController(
-                runtime.InventoryOwner.Objects,
-                () => runtime.PlayerIdentity.ServerGuid,
-                commands.TrySendGetAndWieldItem,
-                commands.TrySendPutItemInContainer,
-                combatState: runtime.ActionOwner.Combat,
-                sendChangeCombatMode: gameplay.SendChangeCombatMode,
-                transactions: runtime.InventoryOwner.Transactions);
-            gameplay.BindAutoWield(autoWield);
-            var items = new HeadlessItemAutomation(
-                runtime,
-                commands,
-                commands.TrySendPutItemInContainer,
-                commands.TrySendStackableSplitToContainer,
-                commands.TrySendStackableMerge,
-                commands.TrySendUseWithTarget,
-                commands.TrySendDropItem,
-                commands.TrySendStackableSplitTo3D,
-                commands.TrySendGiveObject,
-                contentLease is { } lease ? lease.MagicCatalog.IsComponentPack : null,
-                autoWield);
-            var statusWriter = new SessionStatusWriter(descriptor.StatusFile);
-            var pluginCommands = new AcDream.Core.Plugins.PluginCommandRegistry(
-                (verb, error) => diagnostics.Failure(
+
+            var statusWriter = new SessionStatusWriter(
+                descriptor.StatusFile,
+                timeProvider: null,
+                diagnostic: message => diagnostics.Message(
                     descriptor.Id,
-                    $"plugin-command-{verb}",
-                    error));
+                    message));
+            // One registry, the plugin surface's own, and it does not exist
+            // until the plugin session below is built -- so the verb lookup is
+            // resolved when a line arrives rather than captured now.
             var chatCommandSurface = new LiveChatCommandSurface(
-                pluginCommands.TryHandle);
+                line => pluginSession?.Host.TryHandlePluginCommand(line) == true);
             var loginCommands = new LoginCommandSequence(
                 descriptor.LoginCommands,
                 TimeSpan.FromMilliseconds(descriptor.LoginCommandDelayMs),
@@ -326,7 +316,6 @@ internal sealed class HeadlessSessionHost : IDisposable
                 RespondToConfirmation(accept);
                 return true;
             }
-            NavigationChatCommands? navigationCommands = null;
             NavigationWalkController? navigationWalk = null;
             if (contentLease is { } navigationContent)
             {
@@ -346,6 +335,12 @@ internal sealed class HeadlessSessionHost : IDisposable
                         navigationContent.Dats,
                         navigationDatLock,
                         cellId));
+                // A dead grid is tens to hundreds of megabytes the runtime
+                // will not collect on its own while the bot idles; a headless
+                // session has nothing to lose by collecting the moment the
+                // controller lets one go. See the research note on navigation
+                // cost.
+                navigationWalk.GridReleased += static () => GC.Collect();
             }
             pluginSession = HeadlessPluginSession.Create(
                 runtime,
@@ -354,104 +349,71 @@ internal sealed class HeadlessSessionHost : IDisposable
                 descriptor.Id,
                 pluginRoots ?? [],
                 descriptor.Plugins,
-                pluginCommands,
                 storage,
                 vtankProfiles,
-                descriptor.PluginSettings,
+                AcDream.Headless.Configuration.HeadlessPluginSettingsOptions
+                    .Resolve(descriptor.PluginSettings),
                 SubmitChatText,
-                items,
                 contentLease?.MagicCatalog,
                 logout,
                 AnswerConfirmation,
-                RequestOwnGracefulStop);
-            // The shared surface owns the navigation plugins see; the host binds its
-            // walk controller and movement commands to that one instance.
-            RuntimeNavigationAutomation navigation = pluginSession.Host.NavigationAutomation;
-            navigation.BindCommands(commands.Movement, () => runtime.Generation);
-            if (navigationWalk is { } boundWalk)
-                navigation.BindWalk(boundWalk);
-            navigationCommands = new NavigationChatCommands(
-                    navigation,
-                    () => runtime.ActionOwner.Selection.SelectedObjectId,
-                    line => runtime.CommunicationOwner.AddText(
-                        line,
-                        RetailLogTextType.Default),
-                    narrate: navigationWalk is { } narrated
-                        ? listener => narrated.Narration = listener
-                        : null)
-                .Register(pluginCommands, pluginSession.Host.Events);
+                RequestOwnGracefulStop,
+                content: contentLease?.Dats,
+                sessionCommands: commands,
+                navigationWalk: navigationWalk,
+                dataDirectory: dataDirectory,
+                pluginTags: descriptor.PluginTags);
+            // /nav and /motor are registered by the one binding pass both
+            // hosts run, on the one registry the plugin surface owns, so
+            // nothing is built for them here.
             var liveSession = new LiveSessionHost(
                 runtime.Session,
-                new LiveSessionHostBindings(
-                    new LiveSessionRoutingFactories(
-                        CreateEventRoute,
-                        session => new SessionCommandRoute(
-                            gameplay.CreateRoute(session),
-                            commands.CreateRoute(session),
-                            chatCommandSurface.Attach(
-                                new LiveChatCommandRoute(
-                                    CreateChatCommandBindings(
-                                        session,
-                                        runtime))))),
-                    generation =>
-                        runtime.ResetGeneration(generation, _resetHost),
-                    new LiveSessionSelectionBindings(
-                        id => runtime.PlayerIdentity.ServerGuid = id,
-                        _ => { },
-                        runtime.CommunicationOwner.Chat.SetLocalPlayerGuid,
-                        _ => { },
-                        _ => { },
-                        runtime.ActionOwner.Combat.Clear),
-                    new LiveSessionEnteredWorldBindings(
-                        name =>
+                AcDream.Headless.Plugins.HeadlessAutomationCapabilities
+                    .BuildSessionHostBindings(
+                        new AcDream.Headless.Plugins.HeadlessSessionHostParts
                         {
-                            ActiveCharacterName = name;
-                            if (descriptor.Policy?.Role
-                                    == HeadlessBotPolicyRole.Recruit
-                                && gateCoordinator is not null)
+                            CreateEvents = CreateEventRoute,
+                            CreateCommands = session => new SessionCommandRoute(
+                                gameplay.CreateRoute(session),
+                                commands.CreateRoute(session),
+                                chatCommandSurface.Attach(
+                                    new LiveChatCommandRoute(
+                                        CreateChatCommandBindings(
+                                            session,
+                                            runtime)))),
+                            Reset = generation =>
+                                runtime.ResetGeneration(generation, _resetHost),
+                            Identity = runtime.PlayerIdentity,
+                            Communication = runtime.CommunicationOwner,
+                            Combat = runtime.ActionOwner.Combat,
+                            NoteActiveCharacter = name =>
                             {
-                                gateCoordinator.RecruitCharacterName = name;
-                            }
-                        },
-                        () => { },
-                        () => { },
-                        _ => { },
-                        () => { }),
-                    (host, port, user) =>
-                        diagnostics.Message(
-                            descriptor.Id,
-                            $"connecting:{host}:{port}:{user}",
-                            runtime.Generation.Value),
-                    () =>
-                    {
-                        diagnostics.Message(
-                            descriptor.Id,
-                            "connected",
-                            runtime.Generation.Value);
-                        statusWriter.Connected(descriptor.Id);
-                        _hasConnected = true;
-                    },
-                    roster => statusWriter.CharacterList(descriptor.Id, roster),
-                    selection => statusWriter.EnteredWorld(
-                        descriptor.Id,
-                        selection.CharacterId,
-                        selection.CharacterName),
-                    loginCommands,
-                    CharacterCreated: identity => statusWriter.CharacterCreated(
-                        descriptor.Id,
-                        identity.Guid,
-                        identity.Name),
-                    CreationFailed: rejection => statusWriter.CreationFailed(
-                        descriptor.Id,
-                        rejection.RawCode,
-                        rejection.Reason,
-                        rejection.AttemptedName)),
+                                ActiveCharacterName = name;
+                                if (descriptor.Policy?.Role
+                                        == HeadlessBotPolicyRole.Recruit
+                                    && gateCoordinator is not null)
+                                {
+                                    gateCoordinator.RecruitCharacterName = name;
+                                }
+                            },
+                            Diagnostic = message => diagnostics.Message(
+                                descriptor.Id,
+                                message,
+                                runtime.Generation.Value),
+                            StatusWriter = statusWriter,
+                            SessionId = descriptor.Id,
+                            NoteConnected = () => _hasConnected = true,
+                            LoginCommands = loginCommands,
+                            Warn = message => diagnostics.Message(
+                                descriptor.Id,
+                                message,
+                                runtime.Generation.Value),
+                        }),
                 runtime: runtime);
 
             Runtime = runtime;
             Commands = commands;
             _liveSession = liveSession;
-            _pluginCommands = pluginCommands;
             _chatCommandSurface = chatCommandSurface;
             _statusWriter = statusWriter;
             _localPlayerFrame =
@@ -463,7 +425,6 @@ internal sealed class HeadlessSessionHost : IDisposable
                         runtime.MovementOwner));
             _contentLease = contentLease;
             _navigationWalk = navigationWalk;
-            _navigationCommands = navigationCommands;
             bridge.Bind(this);
 
             hostLease = runtime.AcquireHostLease(
@@ -487,13 +448,14 @@ internal sealed class HeadlessSessionHost : IDisposable
             _policy = policy;
             _policySubscription = policySubscription;
             _pluginSession = pluginSession;
-            _autoWield = autoWield;
+            _pluginTick = new AcDream.Runtime.Plugins.RuntimePluginTickClock(
+                pluginSession.Host.FireTick,
+                () => runtime.Generation.Value);
             _logout = logout;
         }
         catch
         {
             pluginSession?.Dispose();
-            autoWield?.Dispose();
             policySubscription?.Dispose();
             policy?.Dispose();
             hostLease?.Dispose();
@@ -506,10 +468,10 @@ internal sealed class HeadlessSessionHost : IDisposable
 
     internal GameRuntime Runtime { get; }
     internal DirectGameRuntimeCommandAdapter Commands { get; }
-    internal HeadlessCharacterOptionsSeeder? OptionsSeeder => _optionsSeeder;
+    internal RuntimeCharacterOptionsSeeder? OptionsSeeder => _optionsSeeder;
     internal HeadlessPluginSession Plugins => _pluginSession;
-    internal AcDream.Core.Plugins.PluginCommandRegistry PluginCommands =>
-        _pluginCommands;
+    internal AcDream.Plugin.Abstractions.IPluginCommandRegistry PluginCommands =>
+        _pluginSession.PluginCommands;
     internal string SessionId => _descriptor.Id;
     internal Action? ConsolePump { get; set; }
     internal string ActiveCharacterName { get; private set; } =
@@ -560,12 +522,28 @@ internal sealed class HeadlessSessionHost : IDisposable
         }
     }
 
-    internal SubmitOutcome SubmitConsoleLine(string line) =>
-        ChatCommandRouter.Submit(
+    /// <summary>The chat entry every front end of this session types into.</summary>
+    internal RuntimeChatEntryOwner ChatEntry =>
+        Runtime.CommunicationOwner.ChatEntryOwner;
+
+    /// <summary>
+    /// Whether this session's one command registry already answers a verb, so
+    /// a front end with a verb of its own never shadows a plugin's.
+    /// </summary>
+    internal bool ClaimsPluginVerb(string verb) =>
+        _pluginSession.Host.ClaimsPluginVerb(verb);
+
+    /// <summary>
+    /// Sends a line the way the chat box sends it: through the one chat entry,
+    /// so the active channel, the reply target, the line history and the
+    /// staged draft are the same whichever front end typed it. A null line
+    /// sends the draft as it stands.
+    /// </summary>
+    internal SubmitOutcome SubmitConsoleLine(string? line) =>
+        ChatEntry.Submit(
             line,
             new RuntimeChatCommandFeedback(Runtime.CommunicationOwner),
-            _chatCommandSurface,
-            ChatChannelKind.Say);
+            _chatCommandSurface);
 
     internal RuntimeSessionStartResult Start()
     {
@@ -585,10 +563,18 @@ internal sealed class HeadlessSessionHost : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_reconnectPending)
             return;
-        _ = Runtime.Clock.Advance(deltaSeconds);
+        // The one frame step both clients take: the world's clock stands
+        // still while there is no world to simulate.
+        _ = Runtime.AdvanceFrameClock(deltaSeconds);
         _navigationWalk?.Tick(deltaSeconds);
         _localPlayerFrame.AdvanceBeforeNetwork(
             checked((float)deltaSeconds));
+        // The same place in the frame a client with a window carries them:
+        // after the character's own step and before anything the server has
+        // said this frame is read, so every body spends the same elapsed time
+        // on both clients.
+        _remoteBodies?.Tick(checked((float)deltaSeconds));
+        Runtime.FinishRemoteBodyPass();
         _liveSession.Tick();
         _worldProjection?.PumpFirstEntry();
         _entities?.PumpPortalCompletion();
@@ -597,7 +583,7 @@ internal sealed class HeadlessSessionHost : IDisposable
         _localPlayerFrame.RunPostNetworkCommandPhase();
         Runtime.ActionOwner.CombatAttack.Tick();
         _policy.Tick(Runtime, Commands);
-        _pluginSession.Host.FireTick(deltaSeconds);
+        _pluginTick.Feed(deltaSeconds);
         ConsolePump?.Invoke();
         switch (_logout.Tick())
         {
@@ -764,31 +750,26 @@ internal sealed class HeadlessSessionHost : IDisposable
                     _disposeStage++;
                     break;
                 case 4:
-                    _navigationCommands?.Dispose();
                     _pluginSession.Dispose();
                     _disposeStage++;
                     break;
                 case 5:
-                    _autoWield.Dispose();
-                    _disposeStage++;
-                    break;
-                case 6:
                     _hostLease.Dispose();
                     _disposeStage++;
                     break;
-                case 7:
+                case 6:
                     _credential.Dispose();
                     _disposeStage++;
                     break;
-                case 8:
+                case 7:
                     Runtime.Dispose();
                     _disposeStage++;
                     break;
-                case 9:
+                case 8:
                     _contentLease?.Dispose();
                     _disposeStage++;
                     break;
-                case 10:
+                case 9:
                     _diagnostics.Message(
                         _descriptor.Id,
                         "disposed",
@@ -799,6 +780,12 @@ internal sealed class HeadlessSessionHost : IDisposable
                         _descriptor.Id,
                         exitCode,
                         exitReason);
+                    _disposeStage++;
+                    break;
+                case 10:
+                    // Last of all: the status file's handle, so the file is
+                    // free the moment the session is gone.
+                    _statusWriter.Dispose();
                     _disposeStage++;
                     _disposed = true;
                     break;
@@ -915,270 +902,115 @@ internal sealed class HeadlessSessionHost : IDisposable
         }
     }
 
+    /// <summary>
+    /// What a typed line needs to become speech, a tell, a channel message,
+    /// a pose or a client command. It is the one runtime construction both
+    /// clients use; this client lends it no window and no chat-log file, and
+    /// the commands that need those say so.
+    /// </summary>
     private LiveChatCommandBindings CreateChatCommandBindings(
         AcDream.Core.Net.WorldSession session,
-        GameRuntime runtime) => new(
-        ExecuteClientCommand: command =>
-            ExecuteHeadlessClientCommand(session, runtime, command),
-        Communication: runtime.CommunicationOwner,
-        Chat: runtime.CommunicationOwner.Chat,
-        TurbineChat: runtime.CommunicationOwner.TurbineChat,
-        CharacterState: runtime.CharacterOwner,
-        PlayerGuid: () => runtime.PlayerIdentity.ServerGuid,
-        SendTalk: session.SendTalk,
-        SendTell: session.SendTell,
-        SendTalkDirect: session.SendTalkDirect,
-        SendChannel: session.SendChannel,
-        SendTurbineChat: session.SendTurbineChatTo,
-        Log: message => _diagnostics.Message(
-            _descriptor.Id,
-            message,
-            runtime.Generation.Value));
+        GameRuntime runtime) =>
+        RuntimeChatCommandBindings.Create(
+            runtime,
+            session,
+            log: message => _diagnostics.Message(
+                _descriptor.Id,
+                message,
+                runtime.Generation.Value));
 
-    private static void ExecuteHeadlessClientCommand(
-        AcDream.Core.Net.WorldSession session,
-        GameRuntime runtime,
-        ExecuteClientCommandCmd command)
+
+    /// <summary>The game-data file every host reads skill formulas from.</summary>
+    private const uint SkillTableFileId = 0x0E000004u;
+
+    /// <summary>
+    /// The one owner of a windowless session's skill arithmetic, built from
+    /// the same game data the graphical client reads.
+    /// </summary>
+    private Func<uint, uint, IReadOnlyDictionary<uint, uint>, uint>?
+        CreateSkillFormulaBonusResolver()
     {
-        switch (command.Command)
+        if (_contentLease is not { } content)
+            return null;
+        if (!content.Dats.TryGet<DatReaderWriter.DBObjs.SkillTable>(
+                SkillTableFileId,
+                out var skillTable))
         {
-            case ClientCommandId.LifestoneRecall:
-                session.SendTeleportToLifestone();
-                return;
-            case ClientCommandId.MarketplaceRecall:
-                session.SendTeleportToMarketplace();
-                return;
-            case ClientCommandId.PkArenaRecall:
-                session.SendTeleportToPkArena();
-                return;
-            case ClientCommandId.PkLiteArenaRecall:
-                session.SendTeleportToPkLiteArena();
-                return;
-            case ClientCommandId.EnterPkLite:
-                session.SendEnterPkLite();
-                return;
-            case ClientCommandId.HouseRecall:
-                session.SendTeleportToHouse();
-                return;
-            case ClientCommandId.MansionRecall:
-                session.SendTeleportToMansion();
-                return;
-            case ClientCommandId.QueryAge:
-                session.SendQueryAge();
-                return;
-            case ClientCommandId.QueryBirth:
-                session.SendQueryBirth();
-                return;
-            case ClientCommandId.TogglePersistentDaylight:
-            {
-                bool enabled = !runtime.CharacterOwner.Options.GetOptionBit(
-                    CharacterOptionId.PersistentAtDay);
-                _ = runtime.CharacterOwner.Options.TrySetOption(
-                    (uint)CharacterOptionId.PersistentAtDay,
-                    enabled,
-                    session.SendSetSingleCharacterOption);
-                return;
-            }
-            case ClientCommandId.Emote
-                when !string.IsNullOrWhiteSpace(command.Arguments):
-                session.SendEmote(command.Arguments.Trim());
-                return;
-            case ClientCommandId.ClearChat:
-                runtime.CommunicationOwner.Chat.Clear();
-                return;
-            case ClientCommandId.ChatToggle:
-                session.SendModifyGlobalSquelch(
-                    command.Arguments.Equals(
-                        "off",
-                        StringComparison.OrdinalIgnoreCase),
-                    2u);
-                return;
-            case ClientCommandId.NoTellToggle:
-                session.SendModifyGlobalSquelch(
-                    command.Arguments.Equals(
-                        "on",
-                        StringComparison.OrdinalIgnoreCase),
-                    3u);
-                return;
-            case ClientCommandId.IndexChannels:
-                session.SendIndexChannels();
-                return;
-            case ClientCommandId.ListChannel:
-                SendResolvedChannel(
-                    command.Arguments,
-                    session.SendListChannel);
-                return;
-            case ClientCommandId.OnChannel:
-                SendResolvedChannel(
-                    command.Arguments,
-                    session.SendOnChannel);
-                return;
-            case ClientCommandId.OffChannel:
-                SendResolvedChannel(
-                    command.Arguments,
-                    session.SendOffChannel);
-                return;
-            case ClientCommandId.AllegianceHometown:
-                session.SendRecallAllegianceHometown();
-                return;
-            case ClientCommandId.AllegianceInfo:
-            case ClientCommandId.AllegianceBoot:
-            case ClientCommandId.AllegianceBan:
-            case ClientCommandId.AllegianceChat:
-            case ClientCommandId.AllegianceBroadcast:
-            case ClientCommandId.AllegianceOfficer:
-            case ClientCommandId.AllegianceOfficerTitle:
-            case ClientCommandId.AllegianceName:
-            case ClientCommandId.AllegianceLock:
-            case ClientCommandId.AllegianceHouse:
-            case ClientCommandId.AllegianceMotd:
-            case ClientCommandId.AllegianceUnrecognizedSubcommand:
-            case ClientCommandId.HouseOpenStatus:
-            case ClientCommandId.HouseStorage:
-            case ClientCommandId.HouseBoot:
-            case ClientCommandId.HouseBootAll:
-            case ClientCommandId.HouseGuests:
-            case ClientCommandId.HouseHooks:
-            case ClientCommandId.HouseUnrecognizedSubcommand:
-                _ = CreateAdministrationDispatcher(session, runtime).TryExecute(
-                    command.Command,
-                    command.Arguments);
-                return;
-            case ClientCommandId.Permit:
-                ExecutePermit(session, command.Arguments);
-                return;
-            case ClientCommandId.HouseAvailableList
-                when RetailClientCommandCatalog.TryResolveHouseType(
-                    command.Arguments,
-                    out uint houseType):
-                session.SendListAvailableHouses(houseType);
-                return;
-            case ClientCommandId.JoinChannel
-                when RetailClientCommandCatalog.TryResolveJoinLeaveOption(
-                    command.Arguments,
-                    out uint joinOption):
-                _ = runtime.CharacterOwner.Options.TrySetOption(
-                    joinOption,
-                    true,
-                    session.SendSetSingleCharacterOption);
-                return;
-            case ClientCommandId.LeaveChannel
-                when RetailClientCommandCatalog.TryResolveJoinLeaveOption(
-                    command.Arguments,
-                    out uint leaveOption):
-                _ = runtime.CharacterOwner.Options.TrySetOption(
-                    leaveOption,
-                    false,
-                    session.SendSetSingleCharacterOption);
-                return;
-            default:
-                throw new NotSupportedException(
-                    $"Client command '{command.Command}' is not available "
-                    + "in the headless host.");
+            // Said out loud: without the table the resolver answers nothing
+            // for every skill, and a silent nothing looks exactly like a
+            // character whose skills the server never sent.
+            Console.Error.WriteLine(
+                $"warning: skill formulas are unavailable (game-data file "
+                + $"0x{SkillTableFileId:X8} could not be read); every skill "
+                + "total will be left unadjusted.");
+            skillTable = null;
         }
 
-        static void SendResolvedChannel(
-            string arguments,
-            Action<uint> send)
-        {
-            if (!RetailChannelTagTable.TryResolve(
-                    arguments.Trim(),
-                    out uint channelId))
-            {
-                throw new InvalidOperationException(
-                    $"Chat channel '{arguments.Trim()}' does not exist.");
-            }
-            send(channelId);
-        }
-
-        static void ExecutePermit(
-            AcDream.Core.Net.WorldSession activeSession,
-            string arguments)
-        {
-            string[] parts = arguments.Split(
-                (char[]?)null,
-                StringSplitOptions.RemoveEmptyEntries);
-            string name = string.Join(' ', parts, 1, parts.Length - 1);
-            if (parts[0].Equals(
-                    "add",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                activeSession.SendAddPlayerPermission(name);
-            }
-            else
-            {
-                activeSession.SendRemovePlayerPermission(name);
-            }
-        }
+        return new LiveSkillCreditResolver(skillTable).Resolve;
     }
 
-    private static RetailAdministrationCommandDispatcher
-        CreateAdministrationDispatcher(
-            AcDream.Core.Net.WorldSession session,
-            GameRuntime runtime) => new(
-            new RetailAdministrationCommandDispatcher.FeedbackBindings(
-                ShowSystemMessage: text => runtime.CommunicationOwner.AddText(
-                    text, RetailLogTextType.Default),
-                ShowClientLocalMessage: text => runtime.CommunicationOwner.AddText(
-                    text, RetailLogTextType.ClientLocal),
-                SetSingleCharacterOption: (optionId, enabled) =>
-                    _ = runtime.CharacterOwner.Options.TrySetOption(
-                        optionId,
-                        enabled,
-                        session.SendSetSingleCharacterOption),
-                RequestAllegianceInfo: session.SendAllegianceInfoRequest),
-            new RetailAdministrationCommandDispatcher.ActionBindings(
-                BreakAllegianceBoot: session.SendBreakAllegianceBoot,
-                AllegianceChatBoot: session.SendAllegianceChatBoot,
-                AllegianceChatGag: session.SendAllegianceChatGag,
-                AllegianceBroadcast: text => session.SendChannel(0x02000000u, text),
-                ListAllegianceBans: session.SendListAllegianceBans,
-                AddAllegianceBan: session.SendAddAllegianceBan,
-                RemoveAllegianceBan: session.SendRemoveAllegianceBan,
-                ListAllegianceOfficers: session.SendListAllegianceOfficers,
-                ClearAllegianceOfficers: session.SendClearAllegianceOfficers,
-                SetAllegianceOfficer: session.SendSetAllegianceOfficer,
-                RemoveAllegianceOfficer: session.SendRemoveAllegianceOfficer,
-                ListAllegianceOfficerTitles: session.SendListAllegianceOfficerTitles,
-                ClearAllegianceOfficerTitles: session.SendClearAllegianceOfficerTitles,
-                SetAllegianceOfficerTitle: session.SendSetAllegianceOfficerTitle,
-                QueryAllegianceName: session.SendQueryAllegianceName,
-                SetAllegianceName: session.SendSetAllegianceName,
-                ClearAllegianceName: session.SendClearAllegianceName,
-                AllegianceLockAction: session.SendAllegianceLockAction,
-                SetAllegianceApprovedVassal: session.SendSetAllegianceApprovedVassal,
-                AllegianceHouseAction: session.SendAllegianceHouseAction,
-                QueryMotd: session.SendQueryMotd,
-                SetMotd: session.SendSetMotd,
-                ClearMotd: session.SendClearMotd,
-                SetOpenHouseStatus: session.SendSetOpenHouseStatus,
-                AddPermanentGuest: session.SendAddPermanentGuest,
-                RemovePermanentGuest: session.SendRemovePermanentGuest,
-                RemoveAllPermanentGuests: session.SendRemoveAllPermanentGuests,
-                ChangeStoragePermission: session.SendChangeStoragePermission,
-                AddAllStoragePermission: session.SendAddAllStoragePermission,
-                RemoveAllStoragePermission: session.SendRemoveAllStoragePermission,
-                RequestFullGuestList: session.SendRequestFullGuestList,
-                BootSpecificHouseGuest: session.SendBootSpecificHouseGuest,
-                BootEveryone: session.SendBootEveryone,
-                SetHooksVisibility: session.SendSetHooksVisibility,
-                ModifyAllegianceGuestPermission:
-                    session.SendModifyAllegianceGuestPermission,
-                ModifyAllegianceStoragePermission:
-                    session.SendModifyAllegianceStoragePermission));
+    /// <summary>
+    /// The windowless half of the character bindings. The skill-formula
+    /// resolver is the load-bearing part: without it every skill the server
+    /// sends loses its attribute-derived term, so a bot reads its own skills
+    /// far below what the server credits it with.
+    /// </summary>
+    internal LiveCharacterSessionBindings CreateCharacterBindings() =>
+        AcDream.Headless.Plugins.HeadlessAutomationCapabilities
+            .BuildCharacterSessionBindings(
+                new AcDream.Headless.Plugins.HeadlessCharacterSessionParts
+                {
+                    Character = Runtime.CharacterOwner,
+                    Combat = Runtime.ActionOwner.Combat,
+                    ResolveSkillFormulaBonus =
+                        CreateSkillFormulaBonusResolver(),
+                    ClientTime = () => Runtime.Clock.SimulationTimeSeconds,
+                    OnConfirmationRequest = request =>
+                    {
+                        _pendingConfirmation = request;
+                        _pluginSession.Host.RaiseConfirmationRequested(
+                            new PluginConfirmation(
+                                request.ContextId,
+                                (int)request.Type,
+                                request.Message));
+                    },
+                    OnConfirmationDone = HandleConfirmationDone,
+                    MovementStats = Runtime.MovementStats,
+                    NoteOptionsSeeded = () =>
+                        _optionsSeeder?.NoteOptionsSeeded(),
+                    Warn = message => _diagnostics.Message(
+                        SessionId,
+                        message,
+                        Runtime.Generation.Value),
+                });
 
     private ILiveSessionEventRouting CreateEventRoute(
         AcDream.Core.Net.WorldSession session)
     {
         _currentSession = session;
         _pendingConfirmation = null;
-        _optionsSeeder = new HeadlessCharacterOptionsSeeder(
+        _optionsSeeder = new RuntimeCharacterOptionsSeeder(
             _declaredCharacterOptions,
             Runtime,
             Commands.Character);
         IRuntimeDirectWorldProjection? worldProjection = null;
         if (_contentLease is { } content)
         {
+            // Without a window there is no richer body maker, so the shared
+            // physics owner is told where authored cylinders come from: a walk
+            // ordered at a creature has to know how wide that creature is, or
+            // it measures to the line through its middle and can never finish.
+            Runtime.EntityObjects.Physics.BindSetupCollisionSource(
+                content.PreparedCollision);
+            // Animation content comes off the same lease, for the same reason:
+            // a body that is to move itself between the server's updates needs
+            // the table that names its cycles and the frames those cycles
+            // play. A session with no lease has no content and no bodies, and
+            // binds nothing.
+            Runtime.EntityObjects.Physics.BindMotionContentSource(
+                new RuntimeDatMotionContentSource(
+                    content.Dats,
+                    new RetailAnimationLoader(content.Dats)));
             _firstEntryDrive ??= new RuntimeFirstEntryDriveController(
                 Runtime.EntityObjects,
                 Runtime.Clock,
@@ -1186,8 +1018,8 @@ internal sealed class HeadlessSessionHost : IDisposable
                 () => PlayerMovementConstructionOptions.From(
                     Runtime.CharacterOwner.MovementSkills.Snapshot),
                 static _ => new RuntimeLocalPlayerPhysicsActivationPreparation(
-                    Radius: 0.48f,
-                    Height: 1.835f,
+                    Radius: DefaultPlayerBody.Radius,
+                    Height: DefaultPlayerBody.Height,
                     RuntimeLocalPlayerShadowDisposition.ProvenShapeless));
             PhysicsDiagnostics.LocalTeleportHostKind = "headless";
             _acceptedPositionDrive ??= new RuntimeAcceptedPositionDriveController(
@@ -1217,6 +1049,22 @@ internal sealed class HeadlessSessionHost : IDisposable
                     Runtime.Generation.Value));
             _worldProjection = projection;
             worldProjection = projection;
+            // Arming another creature's body is the runtime's, and this client
+            // arms the same bodies the same way; it simply draws none of
+            // them, so the arming answers its own questions off the record.
+            _remoteArming ??= AcDream.Runtime.Physics.RuntimeRemoteArming.Create(
+                Runtime.EntityObjects,
+                Runtime.Clock,
+                content.PreparedCollision,
+                projection.RemotePlacementServiceWindow);
+            // Carrying those bodies forward is the runtime's too. This client
+            // says when, and hands over the two things only a client knows:
+            // which body is the character's, and where the character is.
+            _remoteBodies ??= new AcDream.Runtime.Physics
+                .RuntimeRemoteBodyDrive(
+                    Runtime.EntityObjects,
+                    () => Runtime.PlayerIdentity.ServerGuid,
+                    () => Runtime.MovementOwner.Controller?.Position);
         }
         var entities = new RuntimeLiveEntitySessionController(
             Runtime,
@@ -1230,6 +1078,8 @@ internal sealed class HeadlessSessionHost : IDisposable
             // OP7: the first two of three production LoginComplete send
             // sites — see RuntimeLiveEntitySessionController's own doc.
             onLoginCompleteSent: () => _optionsSeeder?.NoteLoginCompleteSent());
+        if (_remoteArming is { } remoteArming)
+            entities.BindRemoteArming(remoteArming);
         _entities = entities;
         // The 25-second out-of-visibility destruction runs here too: the
         // server forgets an object on that schedule without a message and
@@ -1270,30 +1120,7 @@ internal sealed class HeadlessSessionHost : IDisposable
                     Runtime.InventoryOwner.Objects
                         .Get(Runtime.PlayerIdentity.ServerGuid)?.Name
                     ?? string.Empty),
-            new LiveCharacterSessionBindings(
-                Runtime.ActionOwner.Combat,
-                Runtime.CharacterOwner,
-                ResolveSkillFormulaBonus: null,
-                OnSkillsUpdated: null,
-                OnConfirmationRequest: request =>
-                {
-                    Console.WriteLine(
-                        $"[fa6-diag] OnConfirmationRequest received type="
-                        + $"{request.Type} context={request.ContextId} "
-                        + $"text='{request.Message}'");
-                    _pendingConfirmation = request;
-                    _pluginSession.Host.RaiseConfirmationRequested(
-                        new PluginConfirmation(
-                            request.ContextId,
-                            (int)request.Type,
-                            request.Message));
-                },
-                OnConfirmationDone: HandleConfirmationDone,
-                ClientTime: () =>
-                    Runtime.Clock.SimulationTimeSeconds,
-                OnMovementStatsUpdated: null,
-                OnCharacterOptionsChanged: (_, _) =>
-                    _optionsSeeder?.NoteOptionsSeeded()),
+            CreateCharacterBindings(),
             new LiveSocialSessionBindings(
                 Runtime.CommunicationOwner.Chat,
                 Runtime.CommunicationOwner.TurbineChat,
@@ -1307,7 +1134,8 @@ internal sealed class HeadlessSessionHost : IDisposable
                 Contracts: Runtime.ContractsOwner,
                 PlayerGuid: () => Runtime.PlayerIdentity.ServerGuid,
                 OnLocalPlayerDeath:
-                    Runtime.CommunicationOwner.ReportLocalPlayerDeath));
+                    Runtime.CommunicationOwner.ReportLocalPlayerDeath),
+            actions: Runtime.ActionOwner);
         var eventRoute = new HeadlessSessionEventRoute(
             route,
             Runtime,
@@ -1326,18 +1154,10 @@ internal sealed class HeadlessSessionHost : IDisposable
     }
 
     private static Dictionary<CharacterOptionId, bool> ParseDeclaredCharacterOptions(
-        HeadlessSessionDescriptor descriptor)
-    {
-        var declared = new Dictionary<CharacterOptionId, bool>();
-        if (descriptor.CharacterOptions is not { } options)
-            return declared;
-        foreach (KeyValuePair<string, bool> pair in options)
-        {
-            declared[Enum.Parse<CharacterOptionId>(pair.Key, ignoreCase: false)] =
-                pair.Value;
-        }
-        return declared;
-    }
+        HeadlessSessionDescriptor descriptor) =>
+        RuntimeDeclaredCharacterOptions.Parse(
+            descriptor.Id,
+            descriptor.CharacterOptions);
 
     private static LiveSessionCharacterSelector? MapCharacterSelector(
         HeadlessCharacterSelector? selector) =>

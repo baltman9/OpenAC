@@ -398,6 +398,13 @@ public sealed unsafe partial class WbDrawDispatcher
 
             PipelineBucket bucket = BucketFor(_orderedStream.Keys[drawFirst].Translucency);
             GroupKey key = _orderedStream.Keys[drawFirst];
+            if (BuildingDrawTrace.Matches(_orderedStream.CellIds[drawFirst])
+                && _orderedStream.Stages[drawFirst] == WalkDrawStage.BuildingShell)
+            {
+                Matrix4x4 transform = _orderedStream.Transforms[drawFirst];
+                Vector4 clip = Vector4.Transform(new Vector4(0f, 0f, 10f, 1f), transform * _orderedViewProjection);
+                BuildingDrawTrace.Write($"gpuDraw first={drawFirst} end={drawEnd} key={key} clipCenter={clip} alpha={_orderedStream.Alphas[drawFirst]} detail={detailEnabled}");
+            }
             bool hasDetail = detailEnabled
                 && _orderedStream.DetailCategories[drawFirst] != 0u;
             IGpuPipeline bucketPipeline = PipelineForBucket(pipelines, bucket);

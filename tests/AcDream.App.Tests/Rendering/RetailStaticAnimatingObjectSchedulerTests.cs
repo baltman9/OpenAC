@@ -6,6 +6,7 @@ using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 using AcDream.Core.World;
+using AcDream.Runtime.Physics;
 using DatReaderWriter.DBObjs;
 using DatReaderWriter.Types;
 using DRWMotionCommand = DatReaderWriter.Enums.MotionCommand;
@@ -1051,7 +1052,7 @@ public sealed class RetailStaticAnimatingObjectSchedulerTests
             LowFrame = 0,
             HighFrame = 0,
             Framerate = 0f,
-            Scale = entity.Scale,
+            Simulation = new RuntimeRemoteAnimationState { Scale = entity.Scale },
             PartTemplate = setup.Parts.Select(
                     part => new LiveAnimationPartTemplate((uint)part, null, true))
                 .ToArray(),

@@ -44,6 +44,54 @@ public sealed class AutoWieldGenerationTests
         Assert.False(controller.IsBusy);
     }
 
+    /// <summary>
+    /// Mutation pin: send the secondary wield before clearing an occupied
+    /// Shield slot. The blocker move is omitted and the server sees a clash.
+    /// </summary>
+    [Fact]
+    public void SecondaryMeleeIntentClearsShieldBlockerBeforeWield()
+    {
+        var objects = new ClientObjectTable();
+        const uint blockerId = 0x60000010u;
+        const uint swordId = 0x60000011u;
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = blockerId,
+            Type = ItemType.Armor,
+            WielderId = Player,
+            ValidLocations = EquipMask.Shield,
+        });
+        objects.MoveItem(blockerId, Player, -1, EquipMask.Shield);
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = swordId,
+            Type = ItemType.MeleeWeapon,
+            ContainerId = Player,
+            ValidLocations = EquipMask.MeleeWeapon,
+        });
+        var actions = new List<string>();
+        using var controller = new AutoWieldController(
+            objects,
+            () => Player,
+            (item, mask) =>
+            {
+                actions.Add($"wield:{item:X8}:{mask:X8}");
+                return true;
+            },
+            (item, _, _) =>
+            {
+                actions.Add($"move:{item:X8}");
+                return true;
+            });
+
+        Assert.True(controller.TryWieldSecondary(objects.Get(swordId)!));
+        Assert.Equal(["move:60000010"], actions);
+        Assert.True(objects.ApplyConfirmedServerMove(
+            blockerId, Player, newWielderId: 0u));
+        Assert.Equal(
+            ["move:60000010", "wield:60000011:00200000"], actions);
+    }
+
     private static WeenieData WorldReplacement(uint guid) => new(
         Guid: guid,
         Name: "replacement",

@@ -45,7 +45,7 @@ The motor described here is added beside the steering that was already there, an
 |---|---|---|
 | Calls | `SetMovementIntent`, `ClearMovementIntent`, `FaceHeading` | `Move`, `StopMoving`, `Jump`, `GoTo`, `StandOn`, `Follow`, `StopGoTo` |
 | How it moves | Holds movement the way keys are held; the caller steers every frame. | The client carries out a move, or plans and walks a whole route, and reports how it ended. |
-| Used by | MossTank's own route following, by default | `/nav`, `/motor`, MossTank with **Walk legs with client pathing** on |
+| Used by | MossTank's own route following, by default | `/nav`, `/motor`, MossTank when its straight walk is stuck, or with **Client pathing: Always** |
 
 A scripted move overrides a held intent while it lasts, and a walk waits while an intent is held. Mixing the two on purpose, such as a `/motor` move while a plugin steers, is not arbitrated.
 
@@ -95,7 +95,7 @@ Each layer knows only the one below it. The contract is plain .NET so plugins bu
 
 **Reports.** Every request gets a sequence number and a report the controller publishes under a lock, so plugins and chat commands read it from any thread. A newer request replaces the one under way, and its report carries the higher number.
 
-**Lifetimes.** A grid is kept for the next walk nearby and let go once what it was built over unloads. A walk ends on arrival, when it cannot finish, when something stops it, or when the player's own movement input takes the character. A follow never ends by itself.
+**Lifetimes.** A grid is kept for the next walk nearby and let go once what it was built over unloads, or once 30 seconds pass with no walk needing it (the debug view pins it while it is on); the next walk rebuilds one in well under a second. A walk ends on arrival, when it cannot finish, when something stops it, or when the player's own movement input takes the character. A follow never ends by itself.
 
 ## Design decisions
 
@@ -304,7 +304,7 @@ Reports are snapshots, safe to read on any plugin tick. Check that `Sequence` is
 | Creatures and players | Passed around where there is room, and through where going around would scrape walls. A walk looks ahead for one stepping onto its route and plans around it without stopping. One that stops the walk gets two chances to move aside before the walk plans around it. A hostile monster is planned around at once. |
 | Waiting | While a plugin's `PauseGoToWhile` names a need, an attack is under way, or a movement intent is held, the walk stops where it stands. Once nothing has needed the character for 1.5 s, it plans again from there. |
 | In the air | A walk asked for while the character is jumping or falling waits for it to land, then plans from where it came down. |
-| Memory | A grid is kept between walks so the next walk nearby reuses it, and let go once none of what it was built over is loaded, as when the character portals away. |
+| Memory | A grid is kept between walks so the next walk nearby reuses it, and let go once none of what it was built over is loaded, as when the character portals away, or after 30 seconds without a walk; a headless session collects the moment it is let go. |
 
 ## Arriving
 
@@ -391,7 +391,7 @@ The headless host hands plugins the same `RuntimeNavigationAutomation`, so moves
 
 ## MossTank
 
-MossTank's **Walk legs with client pathing** option, per profile and off by default, walks a loaded route one leg at a time with `GoTo` to each waypoint instead of steering there itself. It registers `PauseGoToWhile`, so walks wait while it fights, loots, buffs or waits on a corpse, and leaves doors to the walk. A leg that finds no route or is blocked is skipped with a chat line; a route with no leg that can be walked stops with a chat line; and a route that has not reached its next waypoint in 90 seconds says so in chat. A Follow route with the option on follows its target through `Follow`, within the Follow/Nav Min Distance: it asks again a second after the follow is ended by the player's keys or portal space, and says once in chat when the target cannot be followed, as one that is not a player.
+MossTank walks its routes the reference way: straight at each point with held keys, and its own corpse and monster walks the same. Its per-profile **Client pathing** choice on the Route tab says when the client's navigation walks a leg for it instead. **When stuck**, the default, hands a leg to `GoTo` once per visit to a waypoint when the straight walk has held the forward key for three seconds without covering three quarters of a metre; the clock runs only while MossTank's route rule has the character, so a fight or a corpse walk never counts. While the client walks, the route keeps its turn and watches the report: arriving advances the route; a walk that ends any other way returns the keys to the straight walk, and a second stall at the same waypoint is said once in chat. Losing the turn to combat or loot stops the client's walk with the rest of the movement. **Never** keeps the straight walk and only says in chat when it stalls. **Always** sends every leg to `GoTo`; a leg the client cannot walk pauses the route where it stands and says so once, until the route is reset or the choice changes. MossTank registers `PauseGoToWhile`, so a client walk it asked for waits while it buffs. A profile written with the older "walk legs with client pathing" checkbox on reads as Always.
 
 ## Seeing it in the client
 
@@ -422,7 +422,7 @@ The grid and the route line are hidden behind walls, floors and ceilings, as the
 | `tests/AcDream.Runtime.Tests/Navigation/` | The navigation API's projection and pauses, and every `/nav` and `/motor` command. |
 | `tests/AcDream.App.Tests/Navigation/NavigationWalkControllerTests.cs` | Walk requests against a simulated body and world: planning again and the recovery ladder, doors, creatures, waiting, player input in every state, grids let go, narration, place floors, object tops, and following: holding, replanning, portals, landings, sleeping and stepping off. |
 | `tests/AcDream.Headless.Tests/HeadlessSessionNavigationTests.cs` | A headless session's navigation, walk and console commands. |
-| `tests/AcDream.Plugins.MossTank.Tests/` | Client pathing: a loaded route with the option on is walked through the navigation API, and a Follow route follows through it, with pauses and chat lines. |
+| `tests/AcDream.Plugins.MossTank.Tests/` | Client pathing: a straight walk stuck for three seconds hands its leg to the navigation API once per waypoint and takes the keys back however that walk ends; a lost turn stops the walk; Always sends every leg and pauses on one it cannot walk; the choice round-trips through the profile. |
 | `NavigationWalkCorpusTests`, `RockJumpPuzzleInstalledDatTests` | Fixed walks through real dungeons, Holtburg and a staged walk across the 3x3 landblocks around it, over the collision the client loads and over the collision the headless host loads, and the rock jump puzzle, from the installed game files (`InstalledDat` lane). `ACDREAM_UPDATE_WALK_CORPUS=1` records the corpus again, from the client's walks. |
 | `HeadlessCollisionParityInstalledDatTests` | Grids over a town, dungeons and the example landblocks come out identical from the collision either host loads. |
 | `HoltburgRoofJumpInstalledDatTests` | A 26 m running jump from a Holtburg porch onto a roof over a room plans at jump skill 443. |

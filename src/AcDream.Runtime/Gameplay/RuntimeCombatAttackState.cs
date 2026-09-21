@@ -25,9 +25,16 @@ public readonly record struct RuntimeCombatAttackInput(
 
 public interface IRuntimeCombatAttackOperations
 {
-    bool CanStartAttack();
+    /// <summary>
+    /// Whether an attack can start now. With <paramref name="allowAutoTarget"/>
+    /// the host may pick the closest hostile when nothing attackable is
+    /// selected, as the player option allows; without it the selected
+    /// target is the only one an attack may go to. Automation names its own
+    /// targets, so it never gets the fallback.
+    /// </summary>
+    bool CanStartAttack(bool allowAutoTarget);
     void PrepareAttackRequest();
-    bool SendAttack(AttackHeight height, float power);
+    bool SendAttack(AttackHeight height, float power, bool allowAutoTarget);
     void SendCancelAttack();
     bool IsDualWield { get; }
     bool PlayerReadyForAttack { get; }
@@ -37,17 +44,17 @@ public interface IRuntimeCombatAttackOperations
 internal sealed class DelegateRuntimeCombatAttackOperations
     : IRuntimeCombatAttackOperations
 {
-    private readonly Func<bool> _canStartAttack;
+    private readonly Func<bool, bool> _canStartAttack;
     private readonly Action _prepareAttackRequest;
-    private readonly Func<AttackHeight, float, bool> _sendAttack;
+    private readonly Func<AttackHeight, float, bool, bool> _sendAttack;
     private readonly Action _sendCancelAttack;
     private readonly Func<bool> _isDualWield;
     private readonly Func<bool> _playerReadyForAttack;
     private readonly Func<bool> _autoRepeatAttack;
 
     public DelegateRuntimeCombatAttackOperations(
-        Func<bool> canStartAttack,
-        Func<AttackHeight, float, bool> sendAttack,
+        Func<bool, bool> canStartAttack,
+        Func<AttackHeight, float, bool, bool> sendAttack,
         Action? prepareAttackRequest,
         Action? sendCancelAttack,
         Func<bool>? isDualWield,
@@ -64,10 +71,10 @@ internal sealed class DelegateRuntimeCombatAttackOperations
         _autoRepeatAttack = autoRepeatAttack ?? (() => false);
     }
 
-    public bool CanStartAttack() => _canStartAttack();
+    public bool CanStartAttack(bool allowAutoTarget) => _canStartAttack(allowAutoTarget);
     public void PrepareAttackRequest() => _prepareAttackRequest();
-    public bool SendAttack(AttackHeight height, float power) =>
-        _sendAttack(height, power);
+    public bool SendAttack(AttackHeight height, float power, bool allowAutoTarget) =>
+        _sendAttack(height, power, allowAutoTarget);
     public void SendCancelAttack() => _sendCancelAttack();
     public bool IsDualWield => _isDualWield();
     public bool PlayerReadyForAttack => _playerReadyForAttack();
@@ -111,8 +118,8 @@ public sealed class RuntimeCombatAttackState : IDisposable
         : this(
             combat,
             new DelegateRuntimeCombatAttackOperations(
-                canStartAttack,
-                sendAttack,
+                _ => canStartAttack(),
+                (height, power, _) => sendAttack(height, power),
                 prepareAttackRequest,
                 sendCancelAttack,
                 isDualWield,
@@ -137,6 +144,14 @@ public sealed class RuntimeCombatAttackState : IDisposable
     }
 
     public AttackHeight RequestedHeight { get; private set; } = AttackHeight.Medium;
+    /// <summary>
+    /// True while a plugin drives combat. Such an owner names every target
+    /// itself: no automatic repeat, and no closest-hostile fallback when the
+    /// selection is gone, or a kill would end with the character locked onto
+    /// whatever stands nearest, in range or not.
+    /// </summary>
+    internal bool AutomationControlled { get; set; }
+    private bool AutoRepeatAllowed => !AutomationControlled && _operations.AutoRepeatAttack;
     public float DesiredPower { get; private set; } = InitialDesiredPower;
     public bool AttackRequestInProgress => _attackRequestInProgress;
     public bool AttackServerResponsePending => _attackServerResponsePending;
@@ -212,12 +227,17 @@ public sealed class RuntimeCombatAttackState : IDisposable
         StateChanged?.Invoke();
     }
 
-    public void ReleaseAttack() => EndAttackRequest(committedPower: null);
+    /// <summary>
+    /// Ends the request. The answer says whether the swing is on its way, so an
+    /// owner that names its own targets can tell a swing from a request that
+    /// never left the client instead of waiting on a result that is not coming.
+    /// </summary>
+    public bool ReleaseAttack() => EndAttackRequest(committedPower: null);
 
-    private void EndAttackRequest(float? committedPower)
+    private bool EndAttackRequest(float? committedPower)
     {
         if (!_attackRequestInProgress)
-            return;
+            return false;
 
         _attackRequestInProgress = false;
         float currentPower = GetPowerBarLevel();
@@ -225,44 +245,82 @@ public sealed class RuntimeCombatAttackState : IDisposable
         // far: an early release keeps loading to the setting, a late release
         // fires at the held level. A commit deferred over a busy server keeps
         // the level it was queued with.
+        //
+        // An owner that names its own power is the exception: it gets exactly
+        // the level it named. The bar runs on past the setting between one look
+        // at it and the next, so committing the level reached would send that
+        // overshoot, and then a second swing to bring the setting back.
         _requestedAttackPower = committedPower
-            ?? Math.Max(DesiredPower, currentPower);
+            ?? (AutomationControlled
+                ? DesiredPower
+                : Math.Max(DesiredPower, currentPower));
 
         if (_attackServerResponsePending)
         {
+            if (AutomationControlled)
+            {
+                // Such an owner paces its own swings and asks again within a
+                // fraction of a second. Parking this one would fire it
+                // whenever the server finally answered, by then at whatever
+                // the owner had moved on to.
+                ResetPowerBar();
+                StateChanged?.Invoke();
+                return false;
+            }
             _attackWhenResponseReceived = true;
             _attackWhenResponseReceivedPower = _requestedAttackPower;
+            StateChanged?.Invoke();
+            return true;
         }
-        else if (DesiredPower <= currentPower || _repeatAttacking)
+
+        bool sent;
+        if (DesiredPower <= currentPower || _repeatAttacking)
         {
-            ExecuteAttack(RequestedHeight, setServerPending: true);
+            sent = ExecuteAttack(RequestedHeight, setServerPending: true);
 
             // A charged swing is immediately followed by a second request at
             // the bar setting. The server consumes one requested level per
             // swing, so without this the swing after the charged one repeats
             // the charged level instead of returning to the setting.
-            if (_requestedAttackPower > DesiredPower)
+            if (sent && _requestedAttackPower > DesiredPower)
             {
                 _requestedAttackPower = DesiredPower;
                 ExecuteAttack(RequestedHeight, setServerPending: true);
             }
         }
+        else
+        {
+            // Released early: the bar goes on loading to the setting and the
+            // swing commits when it gets there.
+            sent = true;
+        }
 
         StateChanged?.Invoke();
+        return sent;
     }
 
     public void AbortAutomaticAttack()
     {
         if (!_attackServerResponsePending
             && !_attackRequestInProgress
-            && !_repeatAttacking)
+            && !_repeatAttacking
+            && !_attackWhenResponseReceived)
             return;
 
         _operations.SendCancelAttack();
         _repeatAttacking = false;
 
-        if (_buildInProgress)
-            ResetPowerBar();
+        // The cancel ends the whole attack, not only the part the server still
+        // holds. A request left in progress goes on loading the bar by itself
+        // and fires a swing nobody asked for, at whatever is selected by then,
+        // and until it does every fresh request is refused behind it. The
+        // answer the server still owes ends with it too: the cancel is what
+        // closes that swing, and a late answer must not reopen the wait.
+        _attackRequestInProgress = false;
+        _attackServerResponsePending = false;
+        _attackWhenResponseReceived = false;
+        _attackWhenResponseReceivedPower = 0f;
+        ResetPowerBar();
 
         StateChanged?.Invoke();
     }
@@ -316,7 +374,7 @@ public sealed class RuntimeCombatAttackState : IDisposable
     private void StartAttackRequest()
     {
         if (!CombatInputPlanner.SupportsTargetedAttack(_combat.CurrentMode)
-            || !_operations.CanStartAttack())
+            || !_operations.CanStartAttack(allowAutoTarget: !AutomationControlled))
             return;
 
         _attackRequestInProgress = true;
@@ -352,20 +410,22 @@ public sealed class RuntimeCombatAttackState : IDisposable
         return (float)Math.Clamp((_now() - _buildStartTime) / duration, 0d, 1d);
     }
 
-    private void ExecuteAttack(AttackHeight height, bool setServerPending)
+    private bool ExecuteAttack(AttackHeight height, bool setServerPending)
     {
         StopBuild();
         if (!_operations.SendAttack(
                 height,
-                Math.Clamp(_requestedAttackPower, 0f, 1f)))
+                Math.Clamp(_requestedAttackPower, 0f, 1f),
+                allowAutoTarget: !AutomationControlled))
         {
             ResetPowerBar();
-            return;
+            return false;
         }
 
-        if (_operations.AutoRepeatAttack)
+        if (AutoRepeatAllowed)
             _repeatAttacking = true;
         _attackServerResponsePending = setServerPending;
+        return true;
     }
 
     private void OnAttackCommenced()
@@ -392,7 +452,7 @@ public sealed class RuntimeCombatAttackState : IDisposable
         // matches the bar setting; the server keeps swinging at the level it
         // already holds.
         if (!_attackRequestInProgress
-            && _operations.AutoRepeatAttack
+            && AutoRepeatAllowed
             && _repeatAttacking
             && Math.Abs(_requestedAttackPower - DesiredPower) > 0.01f)
         {
@@ -400,10 +460,16 @@ public sealed class RuntimeCombatAttackState : IDisposable
             ExecuteAttack(RequestedHeight, setServerPending: false);
         }
 
-        if (!_operations.AutoRepeatAttack || !_repeatAttacking)
+        if (!AutoRepeatAllowed || !_repeatAttacking)
         {
             _repeatAttacking = false;
-            ResetPowerBar();
+            // A request still being charged owns the bar. The answer to a
+            // swing that is already over must not send it back to zero, or
+            // every swing pays for the one before it a second time.
+            if (_attackRequestInProgress)
+                AttemptStartBuildingAttack();
+            else
+                ResetPowerBar();
         }
         else if (_attackRequestInProgress)
         {

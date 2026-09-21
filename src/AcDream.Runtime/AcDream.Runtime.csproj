@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="AcDream.Runtime.Tests" />
+    <InternalsVisibleTo Include="AcDream.HostParity.Tests" />
     <InternalsVisibleTo Include="AcDream.App" />
     <InternalsVisibleTo Include="AcDream.App.Tests" />
     <InternalsVisibleTo Include="AcDream.Core.Tests" />

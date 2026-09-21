@@ -60,9 +60,9 @@ internal interface IExplicitCombatModeIntentSink
 }
 
 internal sealed class ItemInteractionCombatModeIntentSink(
-    ItemInteractionController items) : IExplicitCombatModeIntentSink
+    RuntimeItemInteraction items) : IExplicitCombatModeIntentSink
 {
-    private readonly ItemInteractionController _items = items
+    private readonly RuntimeItemInteraction _items = items
         ?? throw new ArgumentNullException(nameof(items));
 
     public void NotifyExplicitCombatModeRequest() =>
