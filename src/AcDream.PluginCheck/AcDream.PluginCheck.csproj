@@ -11,6 +11,9 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="AcDream.PluginCheck.Tests" />
+    <!-- The bundled example plugin's manifest is checked with this tool's own runner, beside
+         the client's and the launcher's readers, in the windowless host's suite. -->
+    <InternalsVisibleTo Include="AcDream.Headless.Tests" />
   </ItemGroup>
 
   <ItemGroup>

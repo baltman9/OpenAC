@@ -22,6 +22,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\AcDream.Headless\AcDream.Headless.csproj" />
     <ProjectReference Include="..\..\src\AcDream.Launcher.Core\AcDream.Launcher.Core.csproj" />
+    <ProjectReference Include="..\..\src\AcDream.PluginCheck\AcDream.PluginCheck.csproj" />
   </ItemGroup>
 
   <ItemGroup>
