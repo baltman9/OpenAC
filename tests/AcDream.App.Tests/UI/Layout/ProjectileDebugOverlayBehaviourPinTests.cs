@@ -204,10 +204,14 @@ public sealed class ProjectileDebugOverlayBehaviourPinTests
         fixture.Samples.Add(new PluginProjectileDebugSample(new Vector3(0f, 0f, -10f), true, 0.4f));
         fixture.Controller.Tick();
 
-        // A retail window is registered at the window floor and only ever
-        // raised from there, so the lowest one is the hardest case.
-        var window = new UiPanel { Name = "AWindow", ZOrder = UiOverlayZOrder.WindowFloor };
+        // Not the band's own floor constant, which would only say the band
+        // is where the band says it is: a window keeps the element default
+        // unless it sets a z-order, and registering it sets none, so this is
+        // the lowest a real window sits and the hardest case.
+        var window = new UiPanel { Name = "AWindow" };
         fixture.Root.AddChild(window);
+        fixture.Root.RegisterWindow("a-window", window);
+        Assert.Equal(new UiPanel().ZOrder, window.ZOrder);
 
         UiElement overlayBranch = TopLevelAncestorOf(fixture.Root, fixture.Overlay);
         Assert.True(

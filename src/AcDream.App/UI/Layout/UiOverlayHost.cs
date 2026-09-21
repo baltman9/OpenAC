@@ -8,16 +8,25 @@ namespace AcDream.App.UI.Layout;
 /// painter's order, and what it must stay clear of.
 ///
 /// <para>Siblings under the interface root are painted lowest z-order first,
-/// so a smaller number means further back. A retail window is registered at
+/// so a smaller number means further back. A window sits at
 /// <see cref="WindowFloor"/> and is only ever raised from there, so anything
-/// negative is guaranteed to stay behind the chat, the vitals and every other
-/// real window no matter how the player stacks them.</para>
+/// negative stays behind the chat, the vitals and every other real window no
+/// matter how the player stacks them.</para>
+///
+/// <para>That floor is a convention resting on a default, not a rule anything
+/// enforces. Registering a window does not set or check its z-order: a window
+/// built in code keeps the element default, which is the floor, and an
+/// imported layout root keeps whatever its authored level and read order
+/// computed to -- zero and upwards at the level window layouts use, but ten
+/// thousand BELOW the floor one level further back, which is under this whole
+/// band. A window authored at such a level would be painted over by the
+/// overlays, and no z-order arithmetic here can prevent it.</para>
 /// </summary>
 internal static class UiOverlayZOrder
 {
     /// <summary>
-    /// The lowest z-order a real window can hold. Nothing below this can ever
-    /// cover one.
+    /// Where a real window sits: the element default, which registration
+    /// leaves alone and the window manager only ever raises from.
     /// </summary>
     public const int WindowFloor = 0;
 

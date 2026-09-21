@@ -15,41 +15,123 @@ public sealed class UiOverlayHostTests
 {
     private static UiRoot Root() => new() { Width = 800f, Height = 600f };
 
+    /// <summary>
+    /// Where the band may sit, measured against the z-orders root children
+    /// really take. Measuring it against the band's own constants is
+    /// circular: it says the band is where the band says it is, and stays
+    /// green however far the band moves.
+    ///
+    /// <para>Two things put a z-order on a root child. An imported layout
+    /// root takes one computed from its authored level and read order, which
+    /// is a real number this reads out of the importer rather than
+    /// restating; and anything built in code keeps the element default
+    /// unless it sets one, which is what a window does -- registration sets
+    /// no z-order at all.</para>
+    /// </summary>
     [Fact]
-    public void TheBandSitsAboveTheDebugOverlaysAndUnderEveryWindow()
+    public void TheBandFitsBetweenTheZOrdersRealRootChildrenTake()
     {
+        // A window's outer frame, imported at the authored level everything
+        // in a window layout uses, and the same frame built in code.
+        int importedWindowRoot = ImportedZOrder(zLevel: 0, readOrder: 0);
+        int laterImportedWindowRoot = ImportedZOrder(zLevel: 0, readOrder: 40);
+        int codeBuiltWindow = new UiPanel().ZOrder;
+
+        // One authored level further back is where the click-through
+        // overlays that mount straight on the root sit, and the band has to
+        // be in front of those.
+        int oneLevelBack = ImportedZOrder(zLevel: 1, readOrder: 0);
+
+        foreach (int window in new[]
+            { importedWindowRoot, laterImportedWindowRoot, codeBuiltWindow })
+        {
+            Assert.True(
+                UiOverlayZOrder.BandCeiling < window,
+                $"the band's front {UiOverlayZOrder.BandCeiling} must stay "
+                + $"under a real window at {window}");
+        }
+
         Assert.True(
-            UiOverlayZOrder.DebugOverlayCeiling < UiOverlayZOrder.BandFloor,
-            "the band must start above the overlays that mount on the root");
-        Assert.True(UiOverlayZOrder.BandFloor <= UiOverlayZOrder.SharedHostRoot);
-        Assert.True(UiOverlayZOrder.SharedHostRoot <= UiOverlayZOrder.BandCeiling);
-        Assert.True(
-            UiOverlayZOrder.BandCeiling < UiOverlayZOrder.WindowFloor,
-            "nothing in the band may reach a real window's z-order");
+            oneLevelBack < UiOverlayZOrder.BandFloor,
+            $"the band's back {UiOverlayZOrder.BandFloor} must stay over the "
+            + $"click-through overlays at {oneLevelBack}");
+        Assert.InRange(
+            UiOverlayZOrder.SharedHostRoot,
+            UiOverlayZOrder.BandFloor,
+            UiOverlayZOrder.BandCeiling);
+    }
+
+    /// <summary>
+    /// The host root takes the very back of the band. All of the band's room
+    /// is then in front of the host, which is where hosted layers go, and the
+    /// host itself stays as far as the band allows from the z-orders real
+    /// windows take -- which nothing enforces, so the distance is the only
+    /// protection there is.
+    ///
+    /// Mutation check (2026-09-21): moving the shared host root up to the
+    /// band ceiling turned this red and left every other overlay test green.
+    /// </summary>
+    [Fact]
+    public void TheSharedHostRootSitsAtTheVeryBackOfTheBand()
+    {
+        Assert.Equal(UiOverlayZOrder.BandFloor, UiOverlayZOrder.SharedHostRoot);
+        Assert.True(UiOverlayZOrder.BandFloor < UiOverlayZOrder.BandCeiling);
     }
 
     [Fact]
-    public void TheHostIsPaintedBeforeAWindowAndAfterADebugOverlay()
+    public void TheHostIsPaintedBeforeRealWindowsAndAfterADebugOverlay()
     {
         UiRoot root = Root();
+        // The z-orders these take are the real ones: the overlay's is what
+        // the importer gives content one authored level back, the imported
+        // window's is what it gives a window's own root, and the code-built
+        // window never sets one -- registering it does not either.
         var debugOverlay = new UiPanel
         {
             Name = "ADebugOverlay",
-            ZOrder = UiOverlayZOrder.DebugOverlayCeiling,
+            ZOrder = ImportedZOrder(zLevel: 1, readOrder: 0),
+            ClickThrough = true,
         };
-        var window = new UiPanel { Name = "AWindow", ZOrder = UiOverlayZOrder.WindowFloor };
+        var importedWindow = new UiPanel
+        {
+            Name = "AnImportedWindow",
+            ZOrder = ImportedZOrder(zLevel: 0, readOrder: 0),
+        };
+        var codeBuiltWindow = new UiPanel { Name = "ACodeBuiltWindow" };
         root.AddChild(debugOverlay);
-        root.AddChild(window);
+        root.AddChild(importedWindow);
+        root.AddChild(codeBuiltWindow);
+        root.RegisterWindow("imported", importedWindow);
+        root.RegisterWindow("code-built", codeBuiltWindow);
 
         UiOverlayHost host = UiOverlayHost.Mount(root);
 
         UiElement[] backToFront = root.ChildrenBackToFrontSnapshot();
         int overlayIndex = Array.IndexOf(backToFront, debugOverlay);
         int hostIndex = Array.IndexOf(backToFront, host.Root);
-        int windowIndex = Array.IndexOf(backToFront, window);
         Assert.True(overlayIndex < hostIndex, "the host draws over the debug overlay");
-        Assert.True(hostIndex < windowIndex, "the host draws under the window");
+        Assert.True(
+            hostIndex < Array.IndexOf(backToFront, importedWindow),
+            "the host draws under an imported window root");
+        Assert.True(
+            hostIndex < Array.IndexOf(backToFront, codeBuiltWindow),
+            "the host draws under a window built in code");
+
+        // A window brought to the front only ever moves further up.
+        root.BringToFront(importedWindow);
+        Assert.True(host.Root.ZOrder < importedWindow.ZOrder);
     }
+
+    /// <summary>
+    /// What the importer gives an element authored at this level and read
+    /// order -- asked of the importer itself, so the band is pinned against
+    /// the rule that really runs and not against a number copied out of it.
+    /// </summary>
+    private static int ImportedZOrder(uint zLevel, uint readOrder) =>
+        DatWidgetFactory.Create(
+            new ElementInfo { Type = 3, ReadOrder = readOrder, ZLevel = zLevel },
+            static _ => (0u, 0, 0),
+            null)!.ZOrder;
 
     [Fact]
     public void TheRootTakesItsRectangleFromTheInterfaceRootAtMount()
