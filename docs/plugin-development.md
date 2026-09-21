@@ -80,7 +80,9 @@ rather than assumed: it takes the checkout reference by default and the package
 reference under `-p:UsePluginApiPackage=true`, with
 `-p:PluginApiPackageVersion=<version>` choosing the contract version. That
 switch is how a plugin still inside this repository is checked against the
-reference it will use once it leaves.
+reference it will use once it leaves;
+[extracting a plugin](plugins/extracting-a-plugin.md) is the rest of that
+checklist.
 
 Put a `plugin.json` next to your project and copy it to the output
 directory:
