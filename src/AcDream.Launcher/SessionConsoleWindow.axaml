@@ -8,19 +8,19 @@
         Width="860" Height="520" MinWidth="420" MinHeight="240"
         Background="#10171C">
   <Grid RowDefinitions="*,Auto,Auto" Margin="10" RowSpacing="8">
-    <TextBox x:Name="OutputBox"
-             Grid.Row="0"
-             Text="{Binding Output, Mode=OneWay}"
-             IsReadOnly="True"
-             AcceptsReturn="True"
-             TextWrapping="NoWrap"
-             FontFamily="Cascadia Mono,Consolas,Menlo,DejaVu Sans Mono,monospace"
-             FontSize="12"
-             Background="#0B1014"
-             BorderBrush="#35434B"
-             ScrollViewer.HorizontalScrollBarVisibility="Auto"
-             ScrollViewer.VerticalScrollBarVisibility="Auto"
-             AutomationProperties.Name="Session output" />
+    <Border Grid.Row="0" Background="#0B1014" BorderBrush="#35434B" BorderThickness="1" CornerRadius="3">
+      <ScrollViewer x:Name="OutputScroll"
+                    HorizontalScrollBarVisibility="Auto"
+                    VerticalScrollBarVisibility="Auto"
+                    Padding="8,6">
+        <SelectableTextBlock x:Name="OutputText"
+                             TextWrapping="NoWrap"
+                             FontFamily="Cascadia Mono,Consolas,Menlo,DejaVu Sans Mono,monospace"
+                             FontSize="12"
+                             Foreground="#C8D2D8"
+                             AutomationProperties.Name="Session output" />
+      </ScrollViewer>
+    </Border>
     <Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="8">
       <TextBox x:Name="InputBox"
                Text="{Binding Input, Mode=TwoWay}"
