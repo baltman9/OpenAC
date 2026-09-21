@@ -116,6 +116,10 @@ public sealed class UiRenderContext
 
     internal int ClipStackDepth => _clipStack.Count;
 
+    internal int TransformStackDepth => _stack.Count;
+
+    internal int AlphaStackDepth => _alphaStack.Count;
+
     public bool CurrentClipIsEmpty => _clip is { } c && c.IsEmpty;
 
     public void PushClipUnbounded()
@@ -123,6 +127,14 @@ public sealed class UiRenderContext
         _clipStack.Add(_clip);
         _clip = new UiClipRect(0f, 0f, ScreenSize.X, ScreenSize.Y);
     }
+
+    /// <summary>
+    /// Deepens the clip stack by one without changing what is clipped, the way
+    /// <c>PushTransform(0, 0)</c> and <c>PushAlpha(1)</c> deepen theirs. Only
+    /// use is putting the depth back after a drawing callback popped more than
+    /// it pushed and ate a level belonging to its caller.
+    /// </summary>
+    internal void PushClipUnchanged() => _clipStack.Add(_clip);
 
     public void BeginOverlayLayer() => TextRenderer.OverlayMode = true;
     public void EndOverlayLayer() => TextRenderer.OverlayMode = false;
