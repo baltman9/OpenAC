@@ -133,6 +133,41 @@ Close active sessions before installing. Long content preparation retains its
 progress and cancellation controls. Content and client compatibility checks
 continue to gate launching.
 
+## Testing a pre-release
+
+Pre-releases are development builds. The launcher never finds one by itself:
+it reads the update feed through GitHub's "latest release" link, and that link
+skips pre-releases, so an ordinary install is only ever offered releases meant
+for everyone. Two ways to run one are supported.
+
+**Point a launcher at it.** `--update-manifest-uri <https-uri>` replaces the
+update feed for that run, the same way `--plugin-list-uri` replaces the curated
+plugin list. Give it the `manifest.json` attached to the pre-release:
+
+```
+acdream-launcher --update-manifest-uri https://github.com/eriknihlen/OpenAC/releases/download/v0.1.13-dev.1/manifest.json
+```
+
+That launcher then offers the pre-release's client, and the pre-release's
+launcher as well when it is newer than the one running. The option is not
+saved: start the launcher without it and it is back on the ordinary feed. Add
+`--config-dir`, `--data-dir` and `--cache-dir` (all three together) to keep the
+test install away from your real one.
+
+**Build one from source.** `tools/run-launcher-trial.ps1` publishes the client
+and launcher from a checkout, installs the client into a scratch directory and
+starts the launcher against it, touching nothing you already have installed.
+
+A pre-release's `launcher-*.zip` can also be downloaded and unzipped by hand.
+
+Afterwards, a hand-installed pre-release launcher keeps polling the ordinary
+feed and offers an update only when what it finds there is strictly newer than
+what is installed. A pre-release sorts above the release before it and below
+the release of the same number, so a launcher on `0.1.13-dev.1` is not offered
+`0.1.12` and will not go back to it. It stays where it is until `0.1.13` is
+released, then updates to that like any other. The client it installed follows
+the same rule.
+
 ## Server status
 
 The launcher checks each configured endpoint every 30 seconds and on demand.
