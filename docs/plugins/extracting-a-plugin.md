@@ -70,6 +70,28 @@ the field-by-field rules.
   before the move: [CONTRIBUTING.md](https://github.com/eriknihlen/OpenAC/blob/main/CONTRIBUTING.md)
   has the rules for an API change.
 
+## Rehearse it
+
+`tools/plugin-extraction-dryrun.ps1` runs the move twice over, in scratch
+copies, without touching the checkout:
+
+```
+pwsh tools/plugin-extraction-dryrun.ps1 -Plugin <PluginProjectName>
+```
+
+The first half exports the current commit, deletes the plugin, its test
+project, their solution entries and every project element that named the
+plugin's folder, then builds the solution and runs the client's suites.
+Anything that breaks is either a tie the client should not have, or a test
+that is about the bundled plugin and has to go with it; decide which, one at a
+time.
+
+The second half packs the contract into a local folder feed, copies the plugin
+and its test project into an empty folder outside the repository with the few
+build files a repository of its own needs, builds against the package, and
+runs the plugin's tests. Whatever that half has to add is a file the new
+repository needs.
+
 ## Order that works
 
 1. Give the plugin its manifest and a test that all three readers accept it:
