@@ -192,7 +192,9 @@ public sealed class LocalPluginPeerRegistryTests
     /// Forty casts leave the last thirty-two.
     ///
     /// Mutation check (2026-09-21): removing the cap turned this red with
-    /// forty casts and a first sequence of one.
+    /// NONE of the forty read back, not forty. A note carrying more entries
+    /// than the ring holds is refused whole by the reader's length guard, so
+    /// a writer that let its ring grow would not be heard at all.
     /// </summary>
     [Fact]
     public void TheRingKeepsTheMostRecentCastsAndNoMore()
@@ -608,6 +610,88 @@ public sealed class LocalPluginPeerRegistryTests
             Delete(root);
             if (File.Exists(root))
                 File.Delete(root);
+        }
+    }
+
+    /// <summary>
+    /// Bytes that are not a note this client would ever write: a field left
+    /// out, a field of the wrong type, a file cut off mid-write. None of them
+    /// may cost the reader anything -- it takes what it can use and carries
+    /// on, and the honest peer beside them is still read.
+    /// </summary>
+    [Theory]
+    // A field the reader needs, left out entirely.
+    [InlineData("{\"InstanceId\":\"99999999-9999-9999-9999-999999999999\"}")]
+    // The right field, the wrong type.
+    [InlineData("{\"InstanceId\":\"99999999-9999-9999-9999-999999999999\","
+        + "\"UpdatedUnixMs\":\"very recently\",\"ClientId\":7,\"PlayerId\":10,"
+        + "\"Name\":\"Alpha\",\"WorldName\":\"Coldeve\",\"Casts\":[]}")]
+    // Caught mid-write by another process, or by the power going out.
+    [InlineData("{\"InstanceId\":\"99999999-9999-9999-9999-9999")]
+    // Not JSON at all.
+    [InlineData("hello")]
+    public void BytesThatAreNotANoteCostTheReaderNothing(string json)
+    {
+        string root = TemporaryRoot();
+        var now = new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);
+        var time = new ManualTimeProvider(now);
+        try
+        {
+            using var reader = Registry(root, time, 2);
+            WriteRawNote(root, HostileInstance, json);
+            using var honest = Registry(root, time, 1);
+            honest.RecordCast(Landed(10u, 0x50000012u, 42u));
+            honest.Publish(Client(honest.ClientId, 10u, "Alpha", []));
+
+            Assert.Single(reader.CaptureRemoteCasts(0L, "Coldeve", 20u));
+            Assert.Single(reader.CaptureRemoteClients());
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    /// <summary>
+    /// The two clauses of the well-formed rule that this client's own writer
+    /// can never break, so nothing going through it can exercise them: it
+    /// numbers its own casts from one upwards, and it settles the caster
+    /// before it records anything. A file another process wrote is under no
+    /// such discipline. Each note here carries a second, unremarkable cast
+    /// as well, because what the clause decides is whether the note is
+    /// believed at all -- a cast numbered zero or below would be skipped by
+    /// the cursor anyway, but the note it came in is not one an honest client
+    /// wrote, and nothing else in it is taken either.
+    ///
+    /// Mutation check (2026-09-21): deleting the positive-sequence clause
+    /// turned the first two rows red and deleting the non-zero-caster clause
+    /// turned the third red -- each let the note's companion cast through.
+    /// </summary>
+    [Theory]
+    [InlineData(0L, 10u)]
+    [InlineData(-1L, 10u)]
+    [InlineData(1L, 0u)]
+    public void ANoteClaimingACastWithNoNumberOrNoCasterIsNotBelievedAtAll(
+        long sequence,
+        uint casterObjectId)
+    {
+        string root = TemporaryRoot();
+        var now = new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);
+        var time = new ManualTimeProvider(now);
+        try
+        {
+            using var reader = Registry(root, time, 2);
+            JsonObject note = RawNote(now, HostileInstance);
+            note["Casts"] = new JsonArray(
+                RawCast(sequence, now.ToUnixTimeMilliseconds(), casterObjectId),
+                RawCast(5L, now.ToUnixTimeMilliseconds(), spellId: 43u));
+            WriteRawNote(root, HostileInstance, note);
+
+            Assert.Empty(reader.CaptureRemoteCasts(0L, "Coldeve", 20u));
+        }
+        finally
+        {
+            Delete(root);
         }
     }
 
