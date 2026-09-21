@@ -35,6 +35,9 @@ public readonly record struct PluginTrackedEnchantment(
 /// </summary>
 public interface IEnchantmentAutomation
 {
+    /// <summary>Forget locally inferred timers; zero clears every reported target.</summary>
+    void ForgetReported(uint targetObjectId = 0u) { }
+
     /// <summary>
     /// Lists the still-running effects tracked for one target, ordered by
     /// spell family and then spell id. Lapsed entries are discarded first.

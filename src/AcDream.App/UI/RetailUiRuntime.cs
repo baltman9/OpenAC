@@ -12,9 +12,11 @@ using AcDream.Core.Combat;
 using AcDream.Core.Items;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
+using AcDream.Core.Plugins;
 using AcDream.Core.Properties;
 using AcDream.Core.Selection;
 using AcDream.Core.Spells;
+using AcDream.Core.Textures;
 using AcDream.Runtime;
 using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Session;
@@ -48,6 +50,7 @@ public sealed record ChatRuntimeBindings(
     ChatVM ViewModel,
     Func<ICommandBus> CommandBus,
     ChatWindowState Windows,
+    AcDream.Runtime.Chat.RuntimeChatEntryOwner Entry,
     SettingsStore? Store = null);
 
 public sealed record RadarRuntimeBindings(
@@ -109,7 +112,7 @@ public sealed record ToolbarRuntimeBindings(
     CombatState Combat,
     ItemManaState ItemMana,
     Action ToggleCombat,
-    ItemInteractionController ItemInteraction,
+    RuntimeItemInteraction ItemInteraction,
     Action<ShortcutEntry>? SendAddShortcut,
     Action<uint>? SendRemoveShortcut,
     SelectionState Selection,
@@ -120,7 +123,6 @@ public sealed record ToolbarRuntimeBindings(
     Func<uint, float> HealthPercent,
     Func<uint, bool> HasHealth,
     Func<uint, uint> StackSize,
-    Action<uint> SendQueryHealth,
     Action<uint> SendQueryItemMana,
     Func<uint> PlayerGuid,
     Action<uint, uint, int>? SendPutItemInContainer,
@@ -206,7 +208,7 @@ public sealed record InventoryRuntimeBindings(
     Action<uint, uint, int>? SendPutItemInContainer,
     Action<uint, uint, uint, uint>? SendStackableSplitToContainer,
     Action<uint, uint, uint>? SendStackableMerge,
-    ItemInteractionController ItemInteraction,
+    RuntimeItemInteraction ItemInteraction,
     SelectionState Selection);
 
 public sealed record ExternalContainerRuntimeBindings(
@@ -214,7 +216,7 @@ public sealed record ExternalContainerRuntimeBindings(
     ClientObjectTable Objects,
     Func<ItemType, uint, uint, uint, uint, uint> ResolveIcon,
     Func<ItemType, uint, uint, uint, uint, uint> ResolveDragIcon,
-    ItemInteractionController ItemInteraction,
+    RuntimeItemInteraction ItemInteraction,
     SelectionState Selection,
     Action<uint> SendUse,
     Action<uint, uint, int> SendPutItemInContainer,
@@ -257,7 +259,7 @@ public sealed record AppraisalRuntimeBindings(
 public sealed record VendorRuntimeBindings(
     VendorState State,
     Func<ItemType, uint, uint, uint, uint, uint> ResolveIcon,
-    ItemInteractionController ItemInteraction,
+    RuntimeItemInteraction ItemInteraction,
     SelectionState Selection,
     Action<string>? DisplaySystemMessage = null);
 
@@ -384,6 +386,7 @@ public sealed class RetailUiRuntime : IDisposable
     private CreditsUiController? _creditsController;
     private CharacterCreationUiMountCoordinator? _characterCreationMount;
     private PluginSidePanel? _pluginSidePanel;
+    private readonly Dictionary<string, (uint Texture, int Width, int Height)?> _pluginIcons = [];
     private bool _pluginsMounted;
     private IDisposable? _characterSheetSubscription;
     private Layout.CharacterTitlesController? _characterTitlesController;
@@ -534,7 +537,7 @@ public sealed class RetailUiRuntime : IDisposable
 
     public RetailUiAssets Assets => _bindings.Assets;
 
-    public ItemInteractionController ItemInteraction => _bindings.Inventory.ItemInteraction;
+    public RuntimeItemInteraction ItemInteraction => _bindings.Inventory.ItemInteraction;
     public CharacterSheetProvider CharacterSheetProvider => _bindings.Character.Provider;
     public ToolbarController? ToolbarController { get; private set; }
     public ToolbarInputController? ToolbarInputController { get; private set; }
@@ -981,6 +984,10 @@ public sealed class RetailUiRuntime : IDisposable
         if (Host.Root.DefaultTextInput is { } input)
             Host.Root.SetKeyboardFocus(input);
     }
+
+    /// <summary>Stages text in the chat entry without sending it.</summary>
+    public bool ComposeChatText(string text) =>
+        _chatWindowController?.Entry.Compose(text) == true;
 
     public void LogOutCharacter() => EndCharacterSessionWithRetailGates();
 
@@ -1543,7 +1550,8 @@ public sealed class RetailUiRuntime : IDisposable
                 .Resolve(0x23000001u, DatStringResolver.ComputeHash(key)),
             resolveFont: _bindings.Assets.ResolveFont,
             stayInChatMode: () => _bindings.Options.CurrentCharacterOption(
-                (uint)CharacterOptionId.StayInChatMode));
+                (uint)CharacterOptionId.StayInChatMode),
+            entry: _bindings.Chat.Entry);
         if (controller is null)
         {
             Console.WriteLine("[UI] chat: required role elements missing in 0x2100006F.");
@@ -1729,7 +1737,6 @@ public sealed class RetailUiRuntime : IDisposable
             b.HealthPercent,
             b.HasHealth,
             b.StackSize,
-            b.SendQueryHealth,
             b.ItemMana.GetManaPercent,
             b.SendQueryItemMana,
             _bindings.Assets.DefaultFont,
@@ -4066,7 +4073,11 @@ public sealed class RetailUiRuntime : IDisposable
                             _pluginSidePanel,
                             controller: _pluginSidePanel);
                     }
-                    _pluginSidePanel.Add(panel.Owner, panel.Descriptor, handle);
+                    _pluginSidePanel.Add(
+                        panel.Owner,
+                        panel.Descriptor,
+                        handle,
+                        ResolvePluginFileIcon(panel.Owner.Id, panel.PluginDirectory));
                 }
 
                 Console.WriteLine(
@@ -4079,6 +4090,27 @@ public sealed class RetailUiRuntime : IDisposable
                 Console.WriteLine($"[UI] plugin UI panel '{panel.MarkupPath}' failed to load: {ex.Message}");
             }
         }
+    }
+
+    // Uploaded once per plugin id and cached, so a re-run of MountPlugins for a
+    // plugin with more than one panel never uploads the same icon.png twice.
+    private (uint Texture, int Width, int Height)? ResolvePluginFileIcon(
+        string pluginId,
+        string? pluginDirectory)
+    {
+        if (_pluginIcons.TryGetValue(pluginId, out var cached))
+            return cached;
+
+        (uint, int, int)? icon = null;
+        if (pluginDirectory is not null && PluginIconFile.TryLoad(pluginDirectory, out DecodedTexture? decoded))
+        {
+            uint texture = _bindings.Assets.TextureCache.UploadRgba8(
+                decoded.Rgba8, decoded.Width, decoded.Height);
+            icon = (texture, decoded.Width, decoded.Height);
+        }
+
+        _pluginIcons[pluginId] = icon;
+        return icon;
     }
 
     private void MountInventory()

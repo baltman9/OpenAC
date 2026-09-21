@@ -1144,10 +1144,12 @@ public static class ItemAppraisalTextFormatter
             if (properties.Floats.TryGetValue(5u, out double manaRate)
                 && Math.Abs(manaRate) > 0.000001d)
             {
-                int seconds = (int)Math.Round(1d / manaRate);
+                // The rate arrives negative for an item that drains, so the
+                // interval is its size: rounded half up, and worded the same
+                // way for one second as for any other count.
+                int seconds = (int)(Math.Abs(1d / manaRate) + 0.5d);
                 report.Line(
-                    $"Mana Cost: 1 point per {seconds.ToString(CultureInfo.InvariantCulture)} "
-                    + (seconds == 1 ? "second." : "seconds."));
+                    $"Mana Cost: 1 point per {seconds.ToString(CultureInfo.InvariantCulture)} seconds.");
             }
             else if (properties.Ints.TryGetValue(117u, out int manaCost))
             {

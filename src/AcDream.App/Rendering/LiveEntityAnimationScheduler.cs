@@ -7,6 +7,7 @@ using AcDream.Core.Physics;
 using AcDream.Core.Physics.Motion;
 using AcDream.Core.World;
 using AcDream.Runtime.Entities;
+using AcDream.Runtime.Physics;
 using DatReaderWriter.Types;
 using RemoteMotion = AcDream.Runtime.Physics.RemoteMotion;
 
@@ -16,7 +17,7 @@ internal sealed class LiveEntityAnimationScheduler
 {
     private readonly LiveEntityRuntime _liveEntities;
     private readonly ILocalPlayerIdentitySource _localPlayer;
-    private readonly RemotePhysicsUpdater _remotePhysics;
+    private readonly RuntimeRemoteBodyOwner _remoteBodies;
     private readonly LiveEntityOrdinaryPhysicsUpdater _ordinaryPhysics;
     private readonly ProjectileController _projectiles;
     private readonly IEntityRootPosePublisher _rootPoses;
@@ -25,12 +26,11 @@ internal sealed class LiveEntityAnimationScheduler
     private readonly Dictionary<RuntimeEntityKey, LiveEntityAnimationSchedule>
         _schedules = [];
     private readonly Frame _rootFrameScratch = new();
-    private readonly MotionDeltaFrame _rootDeltaScratch = new();
 
     public LiveEntityAnimationScheduler(
         LiveEntityRuntime liveEntities,
         ILocalPlayerIdentitySource localPlayer,
-        RemotePhysicsUpdater remotePhysics,
+        RuntimeRemoteBodyOwner remoteBodies,
         LiveEntityOrdinaryPhysicsUpdater ordinaryPhysics,
         ProjectileController projectiles,
         IEntityRootPosePublisher rootPoses,
@@ -40,8 +40,8 @@ internal sealed class LiveEntityAnimationScheduler
             ?? throw new ArgumentNullException(nameof(liveEntities));
         _localPlayer = localPlayer
             ?? throw new ArgumentNullException(nameof(localPlayer));
-        _remotePhysics = remotePhysics
-            ?? throw new ArgumentNullException(nameof(remotePhysics));
+        _remoteBodies = remoteBodies
+            ?? throw new ArgumentNullException(nameof(remoteBodies));
         _ordinaryPhysics = ordinaryPhysics
             ?? throw new ArgumentNullException(nameof(ordinaryPhysics));
         _projectiles = projectiles ?? throw new ArgumentNullException(nameof(projectiles));
@@ -213,6 +213,34 @@ internal sealed class LiveEntityAnimationScheduler
                 ComposeParts: advanced || composeHidden);
         }
 
+        ProjectileController projectileController = _projectiles;
+        bool projectileHandlesMovement = projectile is not null
+            && projectileController?.HandlesMovement(serverGuid) == true;
+        float objectScale =
+            LiveEntityObjectScale.Resolve(animation, record, entity);
+
+        // A thing that carries a body of its own is carried by the shared body
+        // owner, which decides for itself whether the body is running and how
+        // many steps this much elapsed time is worth. What is left here is the
+        // presentation the window hangs off those steps.
+        if (remote is not null && (hidden || !projectileHandlesMovement))
+        {
+            return AdvanceRemoteBody(
+                runtime,
+                record,
+                entity,
+                animation,
+                remote,
+                projectile,
+                hidden,
+                elapsedSeconds,
+                playerPosition,
+                objectScale,
+                liveCenterX,
+                liveCenterY,
+                objectClockEpoch);
+        }
+
         RetailObjectActivityResult activity = RetailObjectActivityGate.Evaluate(
             record.ObjectClock,
             remote?.Body ?? projectile?.Body ?? record.PhysicsBody,
@@ -233,11 +261,6 @@ internal sealed class LiveEntityAnimationScheduler
         IReadOnlyList<PartTransform>? frames = null;
         float legacyElapsed = 0f;
         bool completed = true;
-        ProjectileController projectileController = _projectiles;
-        bool projectileHandlesMovement = projectile is not null
-            && projectileController?.HandlesMovement(serverGuid) == true;
-        float objectScale =
-            LiveEntityObjectScale.Resolve(animation, record, entity);
 
         for (int qi = 0; qi < batch.Count; qi++)
         {
@@ -250,43 +273,23 @@ internal sealed class LiveEntityAnimationScheduler
             float quantum = batch.GetQuantum(qi);
             if (hidden)
             {
-                if (remote is not null)
+                if (sequencer is not null)
                 {
-                    if (!_remotePhysics.TickHidden(
-                        remote,
-                        entity,
-                        quantum,
-                        sequencer?.Manager,
-                        _animationHooks.CaptureCallback,
-                        sequencer,
-                        runtime,
-                        record,
-                        objectClockEpoch))
+                    _animationHooks.Capture(entity.Id, sequencer);
+                    if (!IsCurrent(
+                            runtime,
+                            record,
+                            entity,
+                            animation,
+                            remote,
+                            projectile,
+                            objectClockEpoch))
                     {
                         completed = false;
                         break;
                     }
                 }
-                else
-                {
-                    if (sequencer is not null)
-                    {
-                        _animationHooks.Capture(entity.Id, sequencer);
-                        if (!IsCurrent(
-                                runtime,
-                                record,
-                                entity,
-                                animation,
-                                remote,
-                                projectile,
-                                objectClockEpoch))
-                        {
-                            completed = false;
-                            break;
-                        }
-                    }
-                    RunManagerTail(remote, sequencer?.Manager);
-                }
+                RunManagerTail(remote, sequencer?.Manager);
 
                 if (!IsCurrent(runtime, record, entity, animation, remote, projectile, objectClockEpoch))
                 {
@@ -312,35 +315,22 @@ internal sealed class LiveEntityAnimationScheduler
                 break;
             }
 
-            if (remote is not null && !projectileHandlesMovement)
+            bool ordinaryBodyHandlesMovement = projectile is null
+                && record.PhysicsBody is not null;
+            if (ordinaryBodyHandlesMovement)
             {
-                if (animation is not null && quantum > 0f)
-                {
-                    float rootMotionSpeed = rootFrame.Origin.Length()
-                        * objectScale / quantum;
-                    remote.MaxRootMotionSpeedSinceLastUP = MathF.Max(
-                        remote.MaxRootMotionSpeedSinceLastUP,
-                        rootMotionSpeed);
-                }
-
-                MotionDeltaFrame rootDelta = animation?.RootMotionDeltaScratch
-                    ?? _rootDeltaScratch;
-                rootDelta.Origin = rootFrame.Origin;
-                rootDelta.Orientation = rootFrame.Orientation;
-                if (!_remotePhysics.Tick(
-                    remote,
-                    entity,
-                    objectScale,
-                    sequencer,
-                    animation,
-                    quantum,
-                    rootDelta,
-                    liveCenterX,
-                    liveCenterY,
-                    _animationHooks.CaptureCallback,
-                    runtime,
-                    record,
-                    objectClockEpoch))
+                if (!_ordinaryPhysics.Tick(
+                        runtime,
+                        record,
+                        entity,
+                        rootFrame,
+                        objectScale,
+                        quantum,
+                        liveCenterX,
+                        liveCenterY,
+                        objectClockEpoch,
+                        sequencer,
+                        _animationHooks.CaptureCallback))
                 {
                     completed = false;
                     break;
@@ -348,69 +338,45 @@ internal sealed class LiveEntityAnimationScheduler
             }
             else
             {
-                bool ordinaryBodyHandlesMovement = projectile is null
-                    && record.PhysicsBody is not null;
-                if (ordinaryBodyHandlesMovement)
-                {
-                    if (!_ordinaryPhysics.Tick(
-                            runtime,
-                            record,
-                            entity,
-                            rootFrame,
-                            objectScale,
-                            quantum,
-                            liveCenterX,
-                            liveCenterY,
-                            objectClockEpoch,
-                            sequencer,
-                            _animationHooks.CaptureCallback))
-                    {
-                        completed = false;
-                        break;
-                    }
-                }
-                else
-                {
-                    ApplyRootFrame(record, entity, rootFrame, objectScale);
-                }
-                if (!IsCurrent(runtime, record, entity, animation, remote, projectile, objectClockEpoch))
-                {
-                    completed = false;
-                    break;
-                }
-
-                ProjectileController.QuantumStep projectileStep = default;
-                bool beganProjectile = projectileHandlesMovement
-                    && projectileController?.TryBeginQuantum(
-                        record,
-                        quantum,
-                        out projectileStep) == true;
-
-                if (!ordinaryBodyHandlesMovement && sequencer is not null)
-                    _animationHooks.Capture(entity.Id, sequencer);
-                if (!IsCurrent(runtime, record, entity, animation, remote, projectile, objectClockEpoch))
-                {
-                    completed = false;
-                    break;
-                }
-
-                if (beganProjectile
-                    && !projectileController!.CompleteQuantum(
-                        projectileStep,
-                        liveCenterX,
-                        liveCenterY))
-                {
-                    completed = false;
-                    break;
-                }
-                if (!IsCurrent(runtime, record, entity, animation, remote, projectile, objectClockEpoch))
-                {
-                    completed = false;
-                    break;
-                }
-
-                RunManagerTail(remote, sequencer?.Manager);
+                ApplyRootFrame(record, entity, rootFrame, objectScale);
             }
+            if (!IsCurrent(runtime, record, entity, animation, remote, projectile, objectClockEpoch))
+            {
+                completed = false;
+                break;
+            }
+
+            ProjectileController.QuantumStep projectileStep = default;
+            bool beganProjectile = projectileHandlesMovement
+                && projectileController?.TryBeginQuantum(
+                    record,
+                    quantum,
+                    out projectileStep) == true;
+
+            if (!ordinaryBodyHandlesMovement && sequencer is not null)
+                _animationHooks.Capture(entity.Id, sequencer);
+            if (!IsCurrent(runtime, record, entity, animation, remote, projectile, objectClockEpoch))
+            {
+                completed = false;
+                break;
+            }
+
+            if (beganProjectile
+                && !projectileController!.CompleteQuantum(
+                    projectileStep,
+                    liveCenterX,
+                    liveCenterY))
+            {
+                completed = false;
+                break;
+            }
+            if (!IsCurrent(runtime, record, entity, animation, remote, projectile, objectClockEpoch))
+            {
+                completed = false;
+                break;
+            }
+
+            RunManagerTail(remote, sequencer?.Manager);
 
             if (!IsCurrent(runtime, record, entity, animation, remote, projectile, objectClockEpoch))
             {
@@ -442,6 +408,107 @@ internal sealed class LiveEntityAnimationScheduler
         return new LiveEntityAnimationSchedule(
             frames,
             legacyElapsed,
+            ComposeParts: animation is not null);
+    }
+
+    /// <summary>
+    /// Hands one body to the shared body owner and turns what it did into the
+    /// window's work: the root pose the effects read, and the part poses the
+    /// presenter composes.
+    /// </summary>
+    /// <remarks>
+    /// The two currency questions the owner asks are the window's two. The
+    /// wider one covers the whole projection — its body, its animation owner,
+    /// its drawn entity — and stops the run of steps when any of them has been
+    /// replaced under us. The narrower one is the one a single step asks
+    /// between its own stages, and is deliberately narrower: a step that has
+    /// already moved a body must still be able to finish writing where it put
+    /// it.
+    /// </remarks>
+    private LiveEntityAnimationSchedule AdvanceRemoteBody(
+        LiveEntityRuntime runtime,
+        LiveEntityRecord record,
+        WorldEntity entity,
+        LiveEntityAnimationState? animation,
+        RemoteMotion remote,
+        RuntimeProjectile? projectile,
+        bool hidden,
+        float elapsedSeconds,
+        Vector3? playerPosition,
+        float objectScale,
+        int liveCenterX,
+        int liveCenterY,
+        ulong objectClockEpoch)
+    {
+        AnimationSequencer? sequencer = animation?.Sequencer;
+
+        bool StillPresenting() => IsCurrent(
+            runtime,
+            record,
+            entity,
+            animation,
+            remote,
+            projectile,
+            objectClockEpoch);
+
+        bool StillOwned() =>
+            record.ObjectClockEpoch == objectClockEpoch
+            && runtime.IsCurrentSpatialRemoteMotion(record, remote)
+            && ReferenceEquals(record.WorldEntity, entity);
+
+        RuntimeRemoteBodyAdvance advance = _remoteBodies.Advance(
+            record.Canonical,
+            remote,
+            animation?.Simulation,
+            new RuntimeRemoteBodyFacts(
+                elapsedSeconds,
+                entity.Position,
+                playerPosition,
+                runtime.GetRootObjectClockDisposition(record.ServerGuid)
+                    is RetailObjectClockDisposition.Advance,
+                objectScale,
+                objectClockEpoch,
+                liveCenterX,
+                liveCenterY),
+            new RuntimeRemoteBodyPresentation(
+                StillPresenting,
+                StillOwned,
+                snapshot =>
+                {
+                    if (!StillOwned())
+                        return false;
+                    entity.SetPosition(snapshot.Position);
+                    entity.ParentCellId = snapshot.FullCellId;
+                    entity.Rotation = snapshot.Orientation;
+                    return StillOwned();
+                },
+                animation is null
+                    ? null
+                    : (stepSequencer, quantum, rootFrame) =>
+                        animation.CaptureSequenceFrames(
+                            stepSequencer.Advance(quantum, rootFrame)),
+                _animationHooks.CaptureCallback));
+
+        if (!advance.Advanced || !StillPresenting())
+            return default;
+
+        _rootPoses.UpdateRoot(entity);
+        if (!StillPresenting())
+            return default;
+
+        if (hidden)
+        {
+            return new LiveEntityAnimationSchedule(
+                sequencer is not null && animation is not null
+                    ? animation.CaptureSequenceFrames(sequencer.SampleCurrentPose())
+                    : null,
+                0f,
+                ComposeParts: animation is not null);
+        }
+
+        return new LiveEntityAnimationSchedule(
+            advance.PartPoses,
+            advance.UnsequencedSeconds,
             ComposeParts: animation is not null);
     }
 

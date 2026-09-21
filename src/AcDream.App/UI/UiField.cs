@@ -70,6 +70,39 @@ public sealed class UiField : UiElement
     public Action<string>? OnFocusLost { get; set; }
     public Action<string>? OnTextChanged { get; set; }
 
+    /// <summary>
+    /// Where the shown text comes from when the owner keeps the value. While
+    /// nobody is typing in the field it follows this: a value that changes
+    /// behind the field -- a profile loading after the panel was built -- is
+    /// shown, instead of the text the field happened to be built with. The
+    /// owner is not told about a change it made itself.
+    /// </summary>
+    public Func<string>? BoundText { get; set; }
+
+    private string? _lastBoundText;
+    private bool _followingBoundText;
+
+    private void FollowBoundText()
+    {
+        if (BoundText is null || _focused)
+            return;
+        string bound = BoundText() ?? string.Empty;
+        if (string.Equals(bound, _lastBoundText, StringComparison.Ordinal))
+            return;
+        _lastBoundText = bound;
+        if (string.Equals(bound, _text, StringComparison.Ordinal))
+            return;
+        _followingBoundText = true;
+        try
+        {
+            SetText(bound);
+        }
+        finally
+        {
+            _followingBoundText = false;
+        }
+    }
+
     private string _textValue = "";
 
     private string _text
@@ -81,7 +114,8 @@ public sealed class UiField : UiElement
                 return;
             _textValue = value;
             _textVersion++;
-            OnTextChanged?.Invoke(value);
+            if (!_followingBoundText)
+                OnTextChanged?.Invoke(value);
         }
     }
 
@@ -93,7 +127,15 @@ public sealed class UiField : UiElement
 
     private readonly List<string> _history = new();
     private int _historyIndex = -1;
-    public int HistoryCount => _history.Count;
+
+    /// <summary>
+    /// Where this field's recalled lines live when they are not its own. The
+    /// chat entry shares one set with every other front end that can be typed
+    /// into; every other field leaves this null and keeps its own.
+    /// </summary>
+    public AcDream.Runtime.Chat.IChatEntryHistory? SharedHistory { get; set; }
+
+    public int HistoryCount => SharedHistory?.Count ?? _history.Count;
 
     private bool _focused;
     private bool _selecting;   // mouse drag in progress
@@ -137,7 +179,7 @@ public sealed class UiField : UiElement
         if (_text.Length >= MaxCharacters) return;
         _text = _text.Insert(_caret, c.ToString());
         _caret++;
-        _historyIndex = -1;
+        ResetRecall();
 
         if (c == ' '
             && TextReplacer is { } replace
@@ -171,7 +213,7 @@ public sealed class UiField : UiElement
         if (shift) _selAnchor ??= _caret;
         else _selAnchor = null;
         _caret = target;
-        _historyIndex = -1;
+        ResetRecall();
     }
 
     public void MoveCaret(int delta) => MoveCaretTo(_caret + delta, false);
@@ -219,7 +261,7 @@ public sealed class UiField : UiElement
             _text = _text[..MaxCharacters];
         _caret = _text.Length;
         _selAnchor = null;
-        _historyIndex = -1;
+        ResetRecall();
     }
 
     private void CopySelection()
@@ -234,7 +276,7 @@ public sealed class UiField : UiElement
         if (!HasSelection) return;
         CopySelection();
         DeleteSelection();
-        _historyIndex = -1;
+        ResetRecall();
     }
 
     private void Paste()
@@ -272,7 +314,7 @@ public sealed class UiField : UiElement
         string ins = sb.Length > room ? sb.ToString(0, room) : sb.ToString();
         _text = _text.Insert(_caret, ins);
         _caret += ins.Length;
-        _historyIndex = -1;
+        ResetRecall();
     }
 
     // ── Submit + history ─────────────────────────────────────────────────
@@ -291,7 +333,20 @@ public sealed class UiField : UiElement
         if (ClearOnSubmit) Clear();
     }
 
-    private void Clear() { _text = ""; _caret = 0; _selAnchor = null; _historyIndex = -1; }
+    private void Clear()
+    {
+        _text = "";
+        _caret = 0;
+        _selAnchor = null;
+        ResetRecall();
+    }
+
+    /// <summary>Stops walking back through the lines that were sent before.</summary>
+    private void ResetRecall()
+    {
+        _historyIndex = -1;
+        SharedHistory?.ResetRecall();
+    }
 
     private void PushHistory(string t)
     {
@@ -302,22 +357,43 @@ public sealed class UiField : UiElement
 
     public void HistoryPrev()
     {
+        if (SharedHistory is { } shared)
+        {
+            if (shared.RecallPrevious() is { } recalled)
+                ShowText(recalled);
+            return;
+        }
         if (_history.Count == 0) return;
         _historyIndex = _historyIndex < 0 ? _history.Count - 1 : Math.Max(0, _historyIndex - 1);
-        SetTextFromHistory();
+        ShowText(_history[_historyIndex]);
     }
 
     public void HistoryNext()
     {
+        if (SharedHistory is { } shared)
+        {
+            if (!shared.IsRecalling) return;
+            if (shared.RecallNext() is { } recalled)
+                ShowText(recalled);
+            else
+                Clear();
+            return;
+        }
         if (_historyIndex < 0) return;
         _historyIndex++;
         if (_historyIndex >= _history.Count) { _historyIndex = -1; Clear(); return; }
-        SetTextFromHistory();
+        ShowText(_history[_historyIndex]);
     }
 
-    private void SetTextFromHistory()
+    /// <summary>
+    /// Shows text that came from somewhere other than this field -- a line
+    /// composed for the player, or one recalled from what was sent before --
+    /// without disturbing a walk back through those lines, which the arrow
+    /// keys may be in the middle of.
+    /// </summary>
+    public void ShowText(string line)
     {
-        _text = _history[_historyIndex];
+        _text = line;
         _caret = _text.Length;
         _selAnchor = null;
     }
@@ -655,6 +731,7 @@ public sealed class UiField : UiElement
 
     protected override void OnTick(double deltaSeconds)
     {
+        FollowBoundText();
         if (!Editable || _repeatKey is not { } k) return;
         _repeatTimer -= deltaSeconds;
         if (_repeatTimer > 0) return;
@@ -697,7 +774,7 @@ public sealed class UiField : UiElement
                 return true;
             case UiEventType.FocusLost:
                 OnFocusLost?.Invoke(_text);
-                _focused = false; _historyIndex = -1;
+                _focused = false; ResetRecall();
                 _selAnchor = null; _selecting = false; _repeatKey = null;
                 _preserveFocusSelectionOnMouseDown = false;
                 return true;

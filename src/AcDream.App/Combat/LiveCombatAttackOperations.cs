@@ -2,14 +2,19 @@ using AcDream.App.Input;
 using AcDream.App.Net;
 using AcDream.Core.Combat;
 using AcDream.Core.Net.Messages;
+using AcDream.Runtime;
 using AcDream.Runtime.Gameplay;
 
 namespace AcDream.App.Combat;
 
 internal interface ICombatAttackTargetSource
 {
-    uint? SelectedObjectId { get; }
-    uint? GetSelectedOrClosestCombatTarget(bool autoTarget);
+    /// <summary>
+    /// The creature this attack goes to: the selected one when it can be
+    /// attacked, else the nearest monster when the caller allows the
+    /// substitution and the character's option asks for it.
+    /// </summary>
+    uint? GetSelectedOrClosestCombatTarget(bool allowAutoTarget);
 }
 
 internal interface ICombatGameplaySettingsSource
@@ -112,10 +117,11 @@ internal sealed class CombatAttackOperationsSlot
             _owner = null;
     }
 
-    public bool CanStartAttack() => _owner?.CanStartAttack() == true;
+    public bool CanStartAttack(bool allowAutoTarget) =>
+        _owner?.CanStartAttack(allowAutoTarget) == true;
     public void PrepareAttackRequest() => _owner?.PrepareAttackRequest();
-    public bool SendAttack(AttackHeight height, float power) =>
-        _owner?.SendAttack(height, power) == true;
+    public bool SendAttack(AttackHeight height, float power, bool allowAutoTarget) =>
+        _owner?.SendAttack(height, power, allowAutoTarget) == true;
     public void SendCancelAttack() => _owner?.SendCancelAttack();
     public bool IsDualWield => _owner?.IsDualWield == true;
     public bool PlayerReadyForAttack => _owner?.PlayerReadyForAttack == true;
@@ -145,8 +151,7 @@ internal sealed class LiveCombatAttackOperations
     private readonly CombatState _combat;
     private readonly ICombatAttackTargetSource _targets;
     private readonly ICombatGameplaySettingsSource _settings;
-    private readonly IRuntimeLocalPlayerControllerSource _player;
-    private readonly LocalPlayerOutboundController _outbound;
+    private readonly GameRuntime _runtime;
     private readonly ILiveInWorldSource _inWorld;
     private readonly ILiveWorldSessionSource _session;
     private readonly ICombatFeedbackSink _feedback;
@@ -155,8 +160,7 @@ internal sealed class LiveCombatAttackOperations
         CombatState combat,
         ICombatAttackTargetSource targets,
         ICombatGameplaySettingsSource settings,
-        IRuntimeLocalPlayerControllerSource player,
-        LocalPlayerOutboundController outbound,
+        GameRuntime runtime,
         ILiveInWorldSource inWorld,
         ILiveWorldSessionSource session,
         ICombatFeedbackSink feedback)
@@ -164,60 +168,60 @@ internal sealed class LiveCombatAttackOperations
         _combat = combat ?? throw new ArgumentNullException(nameof(combat));
         _targets = targets ?? throw new ArgumentNullException(nameof(targets));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
-        _player = player ?? throw new ArgumentNullException(nameof(player));
-        _outbound = outbound ?? throw new ArgumentNullException(nameof(outbound));
+        _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _inWorld = inWorld ?? throw new ArgumentNullException(nameof(inWorld));
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _feedback = feedback ?? throw new ArgumentNullException(nameof(feedback));
     }
 
-    public bool IsDualWield =>
-        _player.Controller?.Motion.InterpretedState.CurrentStyle
-        == CombatInputPlanner.DualWieldCombatStyle;
+    // Whether the character is holding two weapons, and whether it is
+    // standing in a position it can swing from, are facts about the body --
+    // the movement owner answers them, for this client and for one with no
+    // window alike.
+    public bool IsDualWield => _runtime.MovementOwner.IsDualWield;
 
-    public bool PlayerReadyForAttack
-    {
-        get
-        {
-            if (_player.Controller is not { } controller)
-                return false;
-            var motion = controller.Motion.InterpretedState;
-            return CombatInputPlanner.PlayerInReadyPositionForAttack(
-                _combat.CurrentMode,
-                motion.CurrentStyle,
-                motion.ForwardCommand);
-        }
-    }
+    public bool PlayerReadyForAttack =>
+        _runtime.MovementOwner.IsReadyForAttack(_combat.CurrentMode);
 
     public bool AutoRepeatAttack => _settings.AutoRepeatAttack;
 
-    public bool CanStartAttack()
+    public bool CanStartAttack(bool allowAutoTarget) =>
+        ResolveAttackTarget(allowAutoTarget) is not null;
+
+    /// <summary>
+    /// The creature this attack goes to, with the refusals a player sees.
+    /// The swing is sent to what this returns rather than to whatever the
+    /// selection holds when the swing goes out: the two are the same thing
+    /// for a player, and they are not when something else moves the
+    /// selection between the request and the swing.
+    /// </summary>
+    private uint? ResolveAttackTarget(bool allowAutoTarget)
     {
         if (!_inWorld.IsInWorld)
-            return false;
+            return null;
 
         if (!CombatInputPlanner.SupportsTargetedAttack(_combat.CurrentMode))
         {
             Console.WriteLine(
                 "combat: attack ignored; not in melee/missile combat mode");
-            return false;
+            return null;
         }
 
-        if (_targets.GetSelectedOrClosestCombatTarget(_settings.AutoTarget) is null)
+        if (_targets.GetSelectedOrClosestCombatTarget(allowAutoTarget)
+            is not { } target)
         {
             _feedback.Show(AcDream.Core.Chat.ClientTextRefusals.MustSelectCombatTarget);
             Console.WriteLine("combat: attack ignored; no creature target found");
-            return false;
+            return null;
         }
 
-        return true;
+        return target;
     }
 
-    public bool SendAttack(AttackHeight height, float power)
+    public bool SendAttack(AttackHeight height, float power, bool allowAutoTarget)
     {
-        if (!CanStartAttack()
-            || _session.CurrentSession is not { } session
-            || _targets.SelectedObjectId is not { } target)
+        if (ResolveAttackTarget(allowAutoTarget) is not { } target
+            || _session.CurrentSession is not { } session)
         {
             return false;
         }
@@ -241,17 +245,6 @@ internal sealed class LiveCombatAttackOperations
     public void SendCancelAttack() =>
         _session.CurrentSession?.SendCancelAttack();
 
-    public void PrepareAttackRequest()
-    {
-        if (_player.Controller is not { } controller
-            || !controller.PrepareForAttackRequest())
-        {
-            return;
-        }
-
-        _outbound.TrySendMovement(
-            _session.CurrentSession,
-            controller,
-            controller.CaptureMovementResult(mouseLookEvent: false));
-    }
+    public void PrepareAttackRequest() =>
+        _runtime.PrepareLocalPlayerForAttackRequest();
 }

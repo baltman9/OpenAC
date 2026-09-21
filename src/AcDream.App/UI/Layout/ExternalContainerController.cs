@@ -22,7 +22,7 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
     private readonly ExternalContainerState _state;
     private readonly ClientObjectTable _objects;
     private readonly SelectionState _selection;
-    private readonly ItemInteractionController _itemInteraction;
+    private readonly RuntimeItemInteraction _itemInteraction;
     private readonly StackSplitQuantityState _stackSplitQuantity;
     private readonly Func<ItemType, uint, uint, uint, uint, uint> _resolveIcon;
     private readonly Func<ItemType, uint, uint, uint, uint, uint> _resolveDragIcon;
@@ -46,7 +46,7 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
         ExternalContainerState state,
         ClientObjectTable objects,
         SelectionState selection,
-        ItemInteractionController itemInteraction,
+        RuntimeItemInteraction itemInteraction,
         StackSplitQuantityState stackSplitQuantity,
         Func<ItemType, uint, uint, uint, uint, uint> resolveIcon,
         Func<ItemType, uint, uint, uint, uint, uint> resolveDragIcon,
@@ -119,7 +119,7 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
         ExternalContainerState state,
         ClientObjectTable objects,
         SelectionState selection,
-        ItemInteractionController itemInteraction,
+        RuntimeItemInteraction itemInteraction,
         StackSplitQuantityState stackSplitQuantity,
         Func<ItemType, uint, uint, uint, uint, uint> resolveIcon,
         Func<ItemType, uint, uint, uint, uint, uint> resolveDragIcon,

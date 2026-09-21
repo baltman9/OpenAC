@@ -21,6 +21,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\Fixtures\plugin-icons\PngTestData.cs"
+             Link="Fixtures\PngTestData.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\AcDream.Launcher\AcDream.Launcher.csproj" />
   </ItemGroup>
 </Project>

@@ -1,7 +1,7 @@
 using System.Numerics;
-using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 using AcDream.Runtime.Entities;
+using AcDream.Runtime.Physics;
 
 namespace AcDream.Runtime.Gameplay;
 
@@ -15,19 +15,22 @@ public static class RuntimeFriendlyTargetQuery
             || !runtime.EntityObjects.Entities.TryGetActive(
                 playerGuid,
                 out RuntimeEntityRecord playerRecord)
-            || playerRecord.Snapshot.Position is not { } playerPosition)
+            || !RuntimePhysicsState.TryGetAbsoluteWorldPosition(
+                playerRecord,
+                out Vector3 playerWorld))
         {
             return null;
         }
 
-        Vector3 playerWorld = AbsolutePosition(playerPosition);
         uint? closest = null;
         float closestDistanceSquared = float.PositiveInfinity;
         foreach (RuntimeEntityRecord record
             in runtime.EntityObjects.Entities.ActiveRecords)
         {
             if (record.ServerGuid == playerGuid
-                || record.Snapshot.Position is not { } position
+                || !RuntimePhysicsState.TryGetAbsoluteWorldPosition(
+                    record,
+                    out Vector3 position)
                 || (record.FinalPhysicsState
                     & (PhysicsStateFlags.Hidden
                         | PhysicsStateFlags.NoDraw)) != 0)
@@ -39,7 +42,7 @@ public static class RuntimeFriendlyTargetQuery
 
             float distanceSquared = Vector3.DistanceSquared(
                 playerWorld,
-                AbsolutePosition(position));
+                position);
             if (distanceSquared >= closestDistanceSquared)
                 continue;
             closestDistanceSquared = distanceSquared;
@@ -57,19 +60,22 @@ public static class RuntimeFriendlyTargetQuery
             || !runtime.EntityObjects.Entities.TryGetActive(
                 playerGuid,
                 out RuntimeEntityRecord playerRecord)
-            || playerRecord.Snapshot.Position is not { } playerPosition)
+            || !RuntimePhysicsState.TryGetAbsoluteWorldPosition(
+                playerRecord,
+                out Vector3 playerWorld))
         {
             return null;
         }
 
-        Vector3 playerWorld = AbsolutePosition(playerPosition);
         uint? closest = null;
         float closestDistanceSquared = float.PositiveInfinity;
         foreach (RuntimeEntityRecord record
             in runtime.EntityObjects.Entities.ActiveRecords)
         {
             if (record.ServerGuid == playerGuid
-                || record.Snapshot.Position is not { } position
+                || !RuntimePhysicsState.TryGetAbsoluteWorldPosition(
+                    record,
+                    out Vector3 position)
                 || (record.FinalPhysicsState
                     & (PhysicsStateFlags.Hidden
                         | PhysicsStateFlags.NoDraw)) != 0
@@ -84,7 +90,7 @@ public static class RuntimeFriendlyTargetQuery
 
             float distanceSquared = Vector3.DistanceSquared(
                 playerWorld,
-                AbsolutePosition(position));
+                position);
             if (distanceSquared >= closestDistanceSquared)
                 continue;
             closestDistanceSquared = distanceSquared;
@@ -103,7 +109,12 @@ public static class RuntimeFriendlyTargetQuery
             : null;
     }
 
-    /// <summary>Horizontal live-world distance from the local player.</summary>
+    /// <summary>
+    /// Straight-line live-world distance from the local player, centre to
+    /// centre, height included. Every plugin-facing distance measured between
+    /// two objects reads the same way, so a corpse or a fellow on the floor
+    /// above is not two metres off because it happens to be overhead.
+    /// </summary>
     public static bool TryGetDistance(
         GameRuntime runtime,
         uint guid,
@@ -115,11 +126,15 @@ public static class RuntimeFriendlyTargetQuery
             || !runtime.EntityObjects.Entities.TryGetActive(
                 playerGuid,
                 out RuntimeEntityRecord player)
-            || player.Snapshot.Position is not { } playerPosition
+            || !RuntimePhysicsState.TryGetAbsoluteWorldPosition(
+                player,
+                out Vector3 from)
             || !runtime.EntityObjects.Entities.TryGetActive(
                 guid,
                 out RuntimeEntityRecord target)
-            || target.Snapshot.Position is not { } targetPosition
+            || !RuntimePhysicsState.TryGetAbsoluteWorldPosition(
+                target,
+                out Vector3 to)
             || (target.FinalPhysicsState
                 & (PhysicsStateFlags.Hidden | PhysicsStateFlags.NoDraw)) != 0)
         {
@@ -127,11 +142,7 @@ public static class RuntimeFriendlyTargetQuery
             return false;
         }
 
-        Vector3 from = AbsolutePosition(playerPosition);
-        Vector3 to = AbsolutePosition(targetPosition);
-        distance = Vector2.Distance(
-            new Vector2(from.X, from.Y),
-            new Vector2(to.X, to.Y));
+        distance = Vector3.Distance(from, to);
         return true;
     }
 
@@ -139,17 +150,4 @@ public static class RuntimeFriendlyTargetQuery
         EntityCollisionFlagsExt
             .FromPwdBitfield(record.Snapshot.ObjectDescriptionFlags ?? 0u)
             .HasFlag(EntityCollisionFlags.IsPlayer);
-
-    private static Vector3 AbsolutePosition(
-        CreateObject.ServerPosition position)
-    {
-        int landblockX =
-            (int)((position.LandblockId >> 24) & 0xFFu);
-        int landblockY =
-            (int)((position.LandblockId >> 16) & 0xFFu);
-        return new Vector3(
-            position.PositionX + landblockX * 192f,
-            position.PositionY + landblockY * 192f,
-            position.PositionZ);
-    }
 }

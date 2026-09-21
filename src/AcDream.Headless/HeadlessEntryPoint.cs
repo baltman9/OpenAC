@@ -25,6 +25,13 @@ internal static class HeadlessEntryPoint
           --data-dir <path>
           --cache-dir <path>
 
+        Console options (run mode):
+          --console                      Read typed lines and print chat.
+          --console-stream <stdout|stderr>
+                                         Where the chat front end prints;
+                                         stderr by default, so the JSON
+                                         diagnostic lines keep stdout.
+
         Direct single-session credentials:
           -user <account> -password <password>
           --user <account> --password <password>
@@ -79,6 +86,12 @@ internal static class HeadlessEntryPoint
                 bool consoleEnabled = HeadlessConsoleOptions.Resolve(
                     commandLine.ConsoleEnabled,
                     standardInputIsTerminal);
+                HeadlessConsoleStream consoleStream =
+                    HeadlessConsoleOptions.ResolveStream(
+                        commandLine.ConsoleStream);
+                TextWriter consoleOutput =
+                    HeadlessConsoleOptions.SelectWriter(
+                        consoleStream, output, error);
                 using var host = new HeadlessProcessHost(
                     configuration,
                     paths,
@@ -87,7 +100,8 @@ internal static class HeadlessEntryPoint
                     directCredentials:
                         commandLine.DirectCredentials,
                     consoleEnabled: consoleEnabled,
-                    standardOutputIsTerminal: standardOutputIsTerminal);
+                    standardOutputIsTerminal: standardOutputIsTerminal,
+                    consoleOutput: consoleOutput);
                 return (int)host.RunAsync(cancellationToken)
                     .GetAwaiter()
                     .GetResult();

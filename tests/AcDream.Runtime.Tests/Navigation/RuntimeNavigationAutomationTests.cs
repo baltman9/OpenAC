@@ -160,14 +160,14 @@ public sealed class RuntimeNavigationAutomationTests
         var navigation = new RuntimeNavigationAutomation();
         var walk = new NavigationWalkController(new PhysicsEngine(), new NoWalkBody(), new NoWalkGoals());
         navigation.BindWalk(walk);
-        string? need = "MossTank is running Attack";
+        string? need = "a plugin is running Attack";
         IDisposable broken = navigation.PauseGoToWhile(() => throw new InvalidOperationException("a broken plugin"));
         IDisposable pause = navigation.PauseGoToWhile(() => need);
 
-        Assert.Equal("MossTank is running Attack", walk.PausedBy?.Invoke());
+        Assert.Equal("a plugin is running Attack", walk.PausedBy?.Invoke());
         need = null;
         Assert.Null(walk.PausedBy?.Invoke());
-        need = "MossTank is buffing";
+        need = "a plugin is buffing";
         pause.Dispose();
         pause.Dispose();
         Assert.Null(navigation.PauseReason());
@@ -186,6 +186,30 @@ public sealed class RuntimeNavigationAutomationTests
         Assert.Equal(expected, report.State);
     }
 
+    [Theory]
+    [InlineData((int)NavigationWalkState.NoRoute, PluginGoToState.NoRoute)]
+    [InlineData((int)NavigationWalkState.Blocked, PluginGoToState.Blocked)]
+    [InlineData((int)NavigationWalkState.Stopped, PluginGoToState.Stopped)]
+    [InlineData((int)NavigationWalkState.Interrupted, PluginGoToState.Interrupted)]
+    [InlineData((int)NavigationWalkState.Lost, PluginGoToState.Lost)]
+    public void TerminalWalkOutcomesRemainDistinctForPlugins(
+        int runtimeStateValue,
+        PluginGoToState pluginState)
+    {
+        PluginGoToReport report = RuntimeNavigationProjection.GoToReport(
+            new NavigationWalkReport(
+                12,
+                (NavigationWalkState)runtimeStateValue,
+                0x50000001u,
+                float.NaN,
+                3,
+                "terminal"));
+
+        Assert.Equal(pluginState, report.State);
+        Assert.Equal(12, report.Sequence);
+        Assert.Equal(3, report.Replans);
+    }
+
     [Fact]
     public void AWalkWaitingOnSomethingElseIsReportedToPluginsAsWaiting()
     {
@@ -195,11 +219,11 @@ public sealed class RuntimeNavigationAutomationTests
             0x50000001u,
             float.NaN,
             0,
-            "waiting: MossTank is running Attack",
+            "waiting: a plugin is running Attack",
             BlockedByObjectId: 0x70000002u));
 
         Assert.Equal(PluginGoToState.Waiting, report.State);
-        Assert.Equal("waiting: MossTank is running Attack", report.Reason);
+        Assert.Equal("waiting: a plugin is running Attack", report.Reason);
         Assert.Equal(0x70000002u, report.BlockedByObjectId);
     }
 

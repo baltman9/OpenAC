@@ -20,6 +20,7 @@ public sealed partial class App : Application
     private LauncherOrchestrator? _orchestrator;
     private LauncherWindowViewModel? _viewModel;
     private LauncherUpdateComposition? _updateComposition;
+    private LauncherPluginComposition? _pluginComposition;
     private readonly HttpClient _serverStatusClient = new();
 
     public App()
@@ -55,16 +56,23 @@ public sealed partial class App : Application
                     AppContext.BaseDirectory,
                     "acdream-bake" + executableSuffix));
 
+            LauncherVersion launcherVersion = GetLauncherVersion();
             LauncherUpdateComposition updates = LauncherUpdateComposition.Create(
                 paths,
                 rid,
-                GetLauncherVersion(),
+                launcherVersion,
                 layout.InstalledRoot,
                 () => _orchestrator?.GetSnapshot().Sessions.Any(session => session.IsActive)
                     == true,
                 updateManifestUri: startupOptions.UpdateManifestUri,
                 installationLayout: layout);
             _updateComposition = updates;
+
+            LauncherPluginComposition plugins = LauncherPluginComposition.Create(
+                paths,
+                startupOptions.PluginListUri);
+            plugins.Recover();
+            _pluginComposition = plugins;
 
             _orchestrator = new LauncherOrchestrator(
                 profiles,
@@ -99,7 +107,9 @@ public sealed partial class App : Application
             };
             desktop.MainWindow = mainWindow;
             _viewModel.UpdatePrompt.AutoOpenDiscoveredUpdates = false;
+            _viewModel.ConfigureVersions(launcherVersion.Value, () => updates.Versions.CachedResolution);
             _viewModel.ConfigureServerHealth(new ServerHealthService(_serverStatusClient, new UdpServerReachabilityProbe()));
+            _viewModel.ConfigurePlugins(plugins, () => updates.Versions.CachedResolution);
             _viewModel.Initialize();
             mainWindow.Opened += OnMainWindowOpened;
             desktop.Exit += OnDesktopExit;
@@ -118,6 +128,12 @@ public sealed partial class App : Application
         if (_viewModel is { } viewModel)
         {
             await viewModel.StartBackgroundInitializationAsync();
+
+            // Never awaited: the plugin Check pass (a list fetch, plus one request per
+            // launcher-managed plugin) must not hold up the window the update check already
+            // finished opening.
+            _ = viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
             if (ReferenceEquals(_viewModel, viewModel) && viewModel.IsFirstRunRequired)
             {
                 viewModel.FirstRunWizardShell.OpenCommand.Execute(null);
@@ -130,10 +146,12 @@ public sealed partial class App : Application
         _viewModel?.Dispose();
         _orchestrator?.Dispose();
         _updateComposition?.Dispose();
+        _pluginComposition?.Dispose();
         _serverStatusClient.Dispose();
         _viewModel = null;
         _orchestrator = null;
         _updateComposition = null;
+        _pluginComposition = null;
     }
 
     private static LauncherVersion GetLauncherVersion()

@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using AcDream.Launcher.Core.Launching;
+using AcDream.Launcher.Core.Plugins;
 using AcDream.Launcher.Core.Profiles;
 using AcDream.Platform;
 
@@ -192,8 +193,9 @@ public sealed class SessionConfigComposerTests
     }
 
     [Fact]
-    public void UnconfiguredPluginsOmitTheAllowListSoEveryPluginLoads()
+    public void UnconfiguredPluginsExplicitlyLoadNone()
     {
+        // A blank list means none, not "every plugin loads".
         CharacterProfile character = Character(LaunchMode.Gui);
         character.Plugins = [];
         character.LoginCommands = [];
@@ -207,8 +209,10 @@ public sealed class SessionConfigComposerTests
             sessionId: "session-empty-lists");
 
         JsonObject session = SingleSession(composed);
-        Assert.False(session.ContainsKey("plugins"));
+        Assert.True(session.ContainsKey("plugins"));
+        Assert.Empty(session["plugins"]!.AsArray());
         Assert.False(session.ContainsKey("loginCommands"));
+        Assert.Empty(composed.PluginStatusLines);
     }
 
     [Fact]
@@ -234,7 +238,7 @@ public sealed class SessionConfigComposerTests
     public void ConfiguredPluginIdsArePassedThroughUnchanged()
     {
         CharacterProfile character = Character(LaunchMode.Gui);
-        character.Plugins = ["acdream.mosstank"];
+        character.Plugins = ["edwards.tank"];
 
         ComposedSessionConfig composed = SessionConfigComposer.Compose(
             Server(),
@@ -246,8 +250,265 @@ public sealed class SessionConfigComposerTests
 
         JsonObject session = SingleSession(composed);
         Assert.Equal(
-            ["acdream.mosstank"],
+            ["edwards.tank"],
             session["plugins"]!.AsArray().Select(node => (string?)node));
+    }
+
+    [Fact]
+    public void ABlockedConfiguredPluginIsFilteredWithOneStatusLine()
+    {
+        CharacterProfile character = Character(LaunchMode.Gui);
+        character.Plugins = ["edwards.hello", "edwards.tank"];
+        PluginCatalog catalog = PluginCatalog.Parse("""
+            {
+              "schemaVersion": 1,
+              "plugins": [
+                { "id": "edwards.hello", "name": "Hello", "author": "Shane Edwards",
+                  "description": "Says hello.", "repo": "shaneedwards/openac-plugin-hello" }
+              ],
+              "blocked": [
+                { "id": "edwards.hello", "versions": ["*"], "reason": "test" }
+              ]
+            }
+            """);
+
+        ComposedSessionConfig composed = SessionConfigComposer.Compose(
+            Server(),
+            Account(),
+            character,
+            Install,
+            Paths,
+            sessionId: "session-blocked-plugin",
+            catalog: catalog);
+
+        JsonObject session = SingleSession(composed);
+        Assert.Equal(
+            ["edwards.tank"],
+            session["plugins"]!.AsArray().Select(node => (string?)node));
+        Assert.Equal(
+            ["Plugin 'edwards.hello' is blocked and was not loaded."],
+            composed.PluginStatusLines);
+    }
+
+    [Theory]
+    [InlineData("0.1.0", true)]
+    [InlineData("0.0.9", false)]
+    public void ABlockOnOneVersionFiltersOnlyThatInstalledVersion(string blockedVersion, bool filtered)
+    {
+        using var plugins = new TempPluginRoot();
+        plugins.WriteFolder("edwards.hello", writeEntryDll: true);   // installs version 0.1.0
+        CharacterProfile character = Character(LaunchMode.Gui);
+        character.Plugins = ["edwards.hello"];
+        PluginCatalog catalog = PluginCatalog.Parse($$"""
+            {
+              "schemaVersion": 1,
+              "plugins": [
+                { "id": "edwards.hello", "name": "Hello", "author": "Shane Edwards",
+                  "description": "Says hello.", "repo": "shaneedwards/openac-plugin-hello" }
+              ],
+              "blocked": [
+                { "id": "edwards.hello", "versions": ["{{blockedVersion}}"], "reason": "test" }
+              ]
+            }
+            """);
+
+        ComposedSessionConfig composed = SessionConfigComposer.Compose(
+            Server(),
+            Account(),
+            character,
+            Install,
+            plugins.Paths,
+            sessionId: "session-version-block",
+            catalog: catalog);
+
+        JsonObject session = SingleSession(composed);
+        Assert.Equal(
+            filtered ? [] : ["edwards.hello"],
+            session["plugins"]!.AsArray().Select(node => (string?)node));
+        Assert.Equal(filtered ? 1 : 0, composed.PluginStatusLines.Count);
+    }
+
+    [Fact]
+    public void WithNoCatalogAndNoCacheConfiguredPluginsAreNotFiltered()
+    {
+        CharacterProfile character = Character(LaunchMode.Gui);
+        character.Plugins = ["edwards.hello"];
+
+        ComposedSessionConfig composed = SessionConfigComposer.Compose(
+            Server(),
+            Account(),
+            character,
+            Install,
+            Paths,
+            sessionId: "session-no-catalog-no-cache");
+
+        JsonObject session = SingleSession(composed);
+        Assert.Equal(
+            ["edwards.hello"],
+            session["plugins"]!.AsArray().Select(node => (string?)node));
+        Assert.Empty(composed.PluginStatusLines);
+    }
+
+    [Fact]
+    public void WithNoCatalogTheCachedListStillFiltersBlockedIds()
+    {
+        string cacheDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "acdream-session-config-plugins-cache-tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(cacheDirectory);
+        try
+        {
+            File.WriteAllText(Path.Combine(cacheDirectory, "plugins.json"), """
+                {
+                  "schemaVersion": 1,
+                  "plugins": [
+                    { "id": "edwards.hello", "name": "Hello", "author": "Shane Edwards",
+                      "description": "Says hello.", "repo": "shaneedwards/openac-plugin-hello" }
+                  ],
+                  "blocked": [
+                    { "id": "edwards.hello", "versions": ["*"], "reason": "test" }
+                  ]
+                }
+                """);
+            var paths = Paths with { CacheDirectory = cacheDirectory };
+            CharacterProfile character = Character(LaunchMode.Gui);
+            character.Plugins = ["edwards.hello"];
+
+            ComposedSessionConfig composed = SessionConfigComposer.Compose(
+                Server(),
+                Account(),
+                character,
+                Install,
+                paths,
+                sessionId: "session-cached-catalog");
+
+            JsonObject session = SingleSession(composed);
+            Assert.Empty(session["plugins"]!.AsArray());
+            Assert.Equal(
+                ["Plugin 'edwards.hello' is blocked and was not loaded."],
+                composed.PluginStatusLines);
+        }
+        finally
+        {
+            Directory.Delete(cacheDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ARefusedDirectInstallIsExcludedWithAStatusLineAndNoCatalogOrCache()
+    {
+        using var plugins = new TempPluginRoot();
+        plugins.WriteFolder("edwards.broken", writeEntryDll: false);
+        CharacterProfile character = Character(LaunchMode.Gui);
+        character.Plugins = ["edwards.broken"];
+
+        ComposedSessionConfig composed = SessionConfigComposer.Compose(
+            Server(),
+            Account(),
+            character,
+            Install,
+            plugins.Paths,
+            sessionId: "session-refused-direct");
+
+        JsonObject session = SingleSession(composed);
+        Assert.Empty(session["plugins"]!.AsArray());
+        Assert.Equal(
+            ["Plugin 'edwards.broken' failed its install checks and was not loaded."],
+            composed.PluginStatusLines);
+    }
+
+    [Fact]
+    public void ADuplicatedInstallIsExcludedWithAStatusLineAndNoCatalogOrCache()
+    {
+        using var plugins = new TempPluginRoot();
+        plugins.WriteFolder("edwards.hello", writeEntryDll: true);
+        plugins.AddRecord("edwards.hello");
+        plugins.WriteFolder("aaa-stray", writeEntryDll: true, id: "edwards.hello");
+        CharacterProfile character = Character(LaunchMode.Gui);
+        character.Plugins = ["edwards.hello"];
+
+        ComposedSessionConfig composed = SessionConfigComposer.Compose(
+            Server(),
+            Account(),
+            character,
+            Install,
+            plugins.Paths,
+            sessionId: "session-duplicated-install");
+
+        JsonObject session = SingleSession(composed);
+        Assert.Empty(session["plugins"]!.AsArray());
+        Assert.Equal(
+            ["Plugin 'edwards.hello' has more than one copy installed and was not loaded."],
+            composed.PluginStatusLines);
+    }
+
+    /// <summary>A real <see cref="ApplicationPathSet"/> under a fresh temp directory, so a Direct
+    /// install's folder actually exists for <see cref="DirectInstallCheck"/> to walk, and no stray
+    /// <c>plugins.json</c> cache from another test can leak in.</summary>
+    private sealed class TempPluginRoot : IDisposable
+    {
+        private readonly string _root = Path.Combine(
+            Path.GetTempPath(),
+            "acdream-session-config-plugins-tests",
+            Guid.NewGuid().ToString("N"));
+
+        public TempPluginRoot()
+        {
+            Paths = new ApplicationPathSet(
+                Path.Combine(_root, "config"),
+                Path.Combine(_root, "data"),
+                Path.Combine(_root, "cache"),
+                LegacyConfigDirectory: null);
+        }
+
+        public ApplicationPathSet Paths { get; }
+
+        public void WriteFolder(string folderName, bool writeEntryDll, string? id = null)
+        {
+            string directory = Path.Combine(Paths.PluginsDirectory, folderName);
+            Directory.CreateDirectory(directory);
+            string pluginId = id ?? folderName;
+            File.WriteAllText(Path.Combine(directory, "plugin.json"), $$"""
+                {
+                  "id": "{{pluginId}}",
+                  "displayName": "{{pluginId}}",
+                  "version": "0.1.0",
+                  "entryDll": "{{pluginId}}.dll",
+                  "apiVersion": 1,
+                  "minHostVersion": "0.1.0",
+                  "hosts": ["headless", "graphical"]
+                }
+                """);
+            if (writeEntryDll)
+            {
+                File.WriteAllBytes(Path.Combine(directory, $"{pluginId}.dll"), []);
+            }
+        }
+
+        public void AddRecord(string id)
+        {
+            InstalledPluginRecordStore store = InstalledPluginRecordStore.ForApplicationPaths(Paths);
+            store.Load();
+            store.Records.Add(new InstalledPluginRecord(
+                id,
+                "shaneedwards/openac-plugin-hello",
+                PluginInstallSource.Listed,
+                "0.1.0",
+                "v0.1.0",
+                new string('a', 64),
+                DateTimeOffset.UtcNow,
+                null));
+            store.Save();
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(_root))
+            {
+                Directory.Delete(_root, recursive: true);
+            }
+        }
     }
 
     [Fact]

@@ -203,9 +203,11 @@ public sealed class RuntimeVendorAutomationTests
         vendor.AddToBuyList(0x50002000u, 1);
         Assert.Equal(PluginVendorCommandStatus.Busy, vendor.BuyAll().Status);
 
-        // The wire's generic use-completion for the first buy arrives.
+        // Generic use completion reports the transaction outcome, while the
+        // outstanding inventory operation waits for the vendor response.
         host.Runtime.ActionOwner.Transactions.CompleteUse(0u);
-
+        Assert.Equal(PluginVendorCommandStatus.Busy, vendor.BuyAll().Status);
+        host.Runtime.InventoryOwner.Vendor.Apply(0x40001000u, Profile, []);
         Assert.Equal(PluginVendorCommandStatus.Sent, vendor.BuyAll().Status);
     }
 
@@ -309,6 +311,41 @@ public sealed class RuntimeVendorAutomationTests
         host.Runtime.InventoryOwner.Vendor.Apply(0x40001000u, Profile, []);
 
         Assert.Equal(PluginVendorCommandStatus.InvalidItem, vendor.BuyAll().Status);
+    }
+
+    /// <summary>
+    /// Mutation pin: omit matching vendor-response completion in the shared
+    /// request owner; the final pending assertion fails.
+    /// </summary>
+    [Fact]
+    public void BuyAllUsesSharedPendingShopUntilMatchingRefresh()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+        const uint firstVendor = 0x40001000u;
+        host.Runtime.InventoryOwner.Vendor.Apply(firstVendor, Profile,
+        [
+            new VendorShopItem(0x50002000u, 1, 1234u, "Sword",
+                (uint)ItemType.Weapon, 0x06000001u, 100),
+        ]);
+        host.Runtime.Session.CurrentSession!.GameActionCapture = _ => { };
+        Assert.Equal(PluginVendorCommandStatus.Sent,
+            vendor.AddToBuyList(0x50002000u, 1).Status);
+
+        Assert.Equal(PluginVendorCommandStatus.Sent, vendor.BuyAll().Status);
+        Assert.True(host.Runtime.InventoryOwner.Transactions.TryGetPending(
+            out PendingInventoryRequest request));
+        Assert.Equal(InventoryRequestKind.Shop, request.Kind);
+        Assert.Equal(firstVendor, request.ItemId);
+        Assert.Equal(0, host.Runtime.InventoryOwner.Transactions.BusyCount);
+
+        host.Runtime.ActionOwner.Transactions.CompleteUse(0u);
+        Assert.True(host.Runtime.InventoryOwner.Transactions.HasPendingRequest);
+        host.Runtime.InventoryOwner.Vendor.Apply(0x40002000u, Profile, []);
+        Assert.True(host.Runtime.InventoryOwner.Transactions.HasPendingRequest);
+        host.Runtime.InventoryOwner.Vendor.Apply(firstVendor, Profile, []);
+        Assert.False(host.Runtime.InventoryOwner.Transactions.HasPendingRequest);
     }
 
     [Fact]
@@ -558,11 +595,9 @@ public sealed class RuntimeVendorAutomationTests
         vendor.AddToBuyList(0x50002000u, 1);
         vendor.BuyAll();
 
-        // The server rejects a vendor buy/sell (no pack space, over-burden,
-        // negative payout, ...) as an InventoryServerSaveFailed on the
-        // LOCAL PLAYER -- the same signal ClientObjectTable.MoveRequestFailed
-        // surfaces -- and still sends a UseDone with error == 0. Before the
-        // fix, that error-less UseDone alone was treated as success.
+        // A rejected vendor buy/sell (no pack space, over-burden, negative
+        // payout, ...) can arrive as InventoryServerSaveFailed followed by
+        // UseDone with error zero. The request failure decides the outcome.
         host.Runtime.InventoryOwner.Objects.RejectMove(
             host.Runtime.PlayerIdentity.ServerGuid, 0x0002u);
         host.Runtime.ActionOwner.Transactions.CompleteUse(0u);
@@ -619,12 +654,8 @@ public sealed class RuntimeVendorAutomationTests
     }
 
     [Fact]
-    public void AMoveRequestFailureOnTheItemRatherThanThePlayerDoesNotLatchAVendorFailure()
+    public void AFailureWithAnItemWireIdIsAttributedToThePendingShopRequest()
     {
-        // An ORDINARY (non-vendor) move rejection carries the moved item's
-        // own guid, not the player's -- e.g. another in-flight inventory
-        // action racing the vendor buy. That must not be mistaken for the
-        // vendor's own rejection signal.
         using var host = new NoWindowGameRuntimeHost();
         host.Start();
         host.Runtime.PlayerIdentity.ServerGuid = 0x50000001u;
@@ -656,7 +687,7 @@ public sealed class RuntimeVendorAutomationTests
 
         PluginVendorTransaction completion = Assert.Single(completions);
         Assert.Equal(PluginVendorTransactionKind.Buy, completion.Kind);
-        Assert.True(completion.Success);
+        Assert.False(completion.Success);
     }
 
     [Fact]

@@ -78,7 +78,7 @@ public sealed class ChatVMTests
         Assert.Equal("[Trade] Caith says, \"g'day\"", ChatVM.FormatEntry(named));
 
         var unnamed = new ChatEntry(ChatKind.Channel, "Caith", "g'day", 0x5000_0001u, 7u);
-        Assert.Equal("[ch 7] Caith says, \"g'day\"", ChatVM.FormatEntry(unnamed));
+        Assert.Equal("Caith says on the <unknown> channel, \"g'day\"", ChatVM.FormatEntry(unnamed));
     }
 
     [Fact]
@@ -180,11 +180,11 @@ public sealed class ChatVMTests
         var vm = new ChatVM(log, displayLimit: 50);
 
         log.OnSystemMessage(
-            "MossTank: buffs applied.",
+            "Tank: buffs applied.",
             chatType: (uint)RetailLogTextType.Default);
 
         Assert.Equal(
-            "MossTank: buffs applied.",
+            "Tank: buffs applied.",
             Assert.Single(vm.RecentLines()));
         Assert.Equal(
             (uint)RetailLogTextType.Default,

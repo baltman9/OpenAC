@@ -30,32 +30,33 @@ public static class RuntimeWorldObjectProjection
         ClientObject? item,
         uint playerId,
         ClientObjectTable objects,
-        Func<uint, IReadOnlyList<uint>>? activeSpellIdsForPlayer = null,
-        bool remoteBodiesUnsimulated = false)
+        Func<uint, IReadOnlyList<uint>>? activeSpellIdsForPlayer = null)
     {
         uint objectId = record?.ServerGuid ?? item!.ObjectId;
-        // A host that never moves a remote entity's physics body reads that
-        // entity's position from its latest snapshot instead.
+        // The body, on every client: every client carries another creature's
+        // body between the server's updates, so the body is where that
+        // creature is and the server's last word about it is already stale.
+        // A thing with no body yet has only that last word.
         Position? source = record is null
             ? null
-            : remoteBodiesUnsimulated && record.ServerGuid != playerId
-                ? ConvertPosition(record.Snapshot.Position)
-                : record.PhysicsBody?.CellPosition
-                    ?? ConvertPosition(record.Snapshot.Position);
+            : record.PhysicsBody?.CellPosition
+                ?? ConvertPosition(record.Snapshot.Position);
         bool owned = item is not null && IsPlayerOwned(item, playerId, objects);
         IReadOnlyList<uint> activeSpells = objectId == playerId
             ? activeSpellIdsForPlayer?.Invoke(playerId) ?? Array.Empty<uint>()
             : Array.Empty<uint>();
         uint publicFlags = item?.PublicWeenieBitfield ?? 0u;
+        PluginObjectClass objectClass = ClassifyObject(item);
         return new PluginWorldObject(
             objectId,
             item?.WeenieClassId ?? 0u,
             item?.Name ?? record?.Snapshot.Name ?? $"0x{objectId:X8}",
-            ClassifyObject(item),
+            objectClass,
             (uint)(item?.Type ?? ItemType.None),
             item?.ContainerId ?? 0u,
             item?.WielderId ?? 0u)
         {
+            Capabilities = PluginObjectClassifier.Capabilities(objectClass),
             IsOwned = owned,
             IsLandscape = source is not null
                 && !owned

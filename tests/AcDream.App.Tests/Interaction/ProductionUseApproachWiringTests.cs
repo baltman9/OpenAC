@@ -84,15 +84,15 @@ public sealed class ProductionUseApproachWiringTests
         public readonly RuntimeEntityObjectLifetime RuntimeLifetime = new();
         public readonly Query Query = new();
         public readonly Transport Transport = new();
-        public readonly PlayerApproachCompletionState Completions = new();
-        public readonly IPlayerApproachCompletionSink CompletionLifetime;
+        public readonly RuntimeApproachCompletionState Completions = new();
+        public readonly IRuntimeApproachCompletionSink CompletionLifetime;
         public readonly SelectionState Selection = new();
         public readonly CombatState Combat = new();
         public readonly RuntimeCombatTargetState CombatTarget;
         public readonly ClientObjectTable Objects = new();
         public readonly InventoryTransactionState Inventory;
         public readonly RuntimeInteractionTransactionState Transactions;
-        public readonly ItemInteractionController Items;
+        public readonly RuntimeItemInteraction Items;
         public readonly SelectionInteractionController Controller;
         public readonly PlayerMovementController MovementController;
         public readonly MoveToManager MoveTo;
@@ -194,7 +194,7 @@ public sealed class ProductionUseApproachWiringTests
             Inventory = new InventoryTransactionState(Objects);
             Transactions = new RuntimeInteractionTransactionState(Inventory);
             SelectionInteractionController? selectionController = null;
-            Items = new ItemInteractionController(
+            Items = new RuntimeItemInteraction(
                 Objects,
                 Transactions,
                 new InteractionState(),
@@ -209,17 +209,51 @@ public sealed class ProductionUseApproachWiringTests
                     selectionController!.SendPickup(item, container, placement),
                 requestUse: (guid, reservation) =>
                     selectionController!.RequestUse(guid, reservation));
+            var movementSink = new PlayerInteractionMovementSink(
+                () => MovementController,
+                Completions);
+            var approachSource = new SinkApproachSource(Query, movementSink);
+            WorldObjectUse = new RuntimeWorldObjectUse(
+                Items,
+                Transport,
+                approachSource,
+                guid => Query.IsUseable(guid) ? ItemUseability.Remote : null);
+            ArmedApproaches = new RuntimeInteractionApproachDriver(
+                Completions,
+                Transactions,
+                WorldObjectUse,
+                approachSource);
             Controller = selectionController = new SelectionInteractionController(
                 Selection,
                 Query,
                 Items,
                 Transport,
-                new PlayerInteractionMovementSink(
-                    () => MovementController,
-                    Completions),
+                movementSink,
                 CombatTarget,
+                WorldObjectUse,
+                ArmedApproaches,
                 toast: null,
-                Completions);
+                approachCompletions: Completions);
+            _ = ArmedApproaches.BindPresentationOwned(selectionController);
+        }
+
+        public readonly RuntimeWorldObjectUse WorldObjectUse;
+
+        /// <summary>
+        /// The shared per-frame step that ends an armed walk, which the
+        /// client that draws no longer takes itself.
+        /// </summary>
+        public readonly RuntimeInteractionApproachDriver ArmedApproaches;
+
+        /// <summary>
+        /// One frame's worth of interaction work, in the order a client does
+        /// it: the shared drive ends the walks that have ended, then this
+        /// client sends what its own clicks have queued.
+        /// </summary>
+        public void DriveFrame()
+        {
+            ArmedApproaches.DriveArmedApproaches();
+            Controller.DrainOutbound();
         }
 
         public void AddFarTarget(uint serverGuid, Vector3 position)
@@ -256,6 +290,53 @@ public sealed class ProductionUseApproachWiringTests
                 interruptCurrentMovement: static () => { });
         }
 
+        /// <summary>
+        /// Lets the shared walk-then-use route walk the real body this rig
+        /// builds, so the route under test is the production one.
+        /// </summary>
+        private sealed class SinkApproachSource(
+            IWorldSelectionQuery query,
+            IPlayerInteractionMovementSink sink)
+            : IRuntimeApproachSource
+        {
+            private InteractionApproach _planned;
+
+            public bool TryPlanApproach(
+                uint serverGuid,
+                out RuntimeApproachPlan plan)
+            {
+                if (!query.TryGetApproach(
+                        serverGuid,
+                        out InteractionApproach approach))
+                {
+                    plan = default;
+                    return false;
+                }
+                _planned = approach;
+                plan = new RuntimeApproachPlan(
+                    approach.Target.ServerGuid,
+                    approach.Target.LocalEntityId,
+                    approach.Target.Entity.Position,
+                    approach.Player.CellId,
+                    approach.UseRadius,
+                    approach.IsCloseRange,
+                    approach.CanCharge,
+                    approach.TargetRadius,
+                    approach.TargetHeight);
+                return true;
+            }
+
+            public bool BeginApproach(
+                in RuntimeApproachPlan plan,
+                Action<RuntimeInteractionApproachToken>? arm = null) =>
+                sink.BeginApproach(_planned, arm);
+
+            public uint? StalledTicks() =>
+                sink.CurrentApproachFailProgressCount();
+
+            public void CancelApproach() => sink.CancelApproach();
+        }
+
         public void Dispose()
         {
             CombatTarget.Dispose();
@@ -276,7 +357,7 @@ public sealed class ProductionUseApproachWiringTests
 
         Assert.Empty(h.Transport.Uses);
 
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(new[] { Vendor }, h.Transport.Uses);
         Assert.Equal(1, h.Inventory.BusyCount);
@@ -304,7 +385,7 @@ public sealed class ProductionUseApproachWiringTests
             WeenieError.ActionCancelled);
         Assert.Equal(1, h.Inventory.BusyCount);
 
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Empty(h.Transport.Uses);
         Assert.Equal(0, h.Inventory.BusyCount);
@@ -329,7 +410,7 @@ public sealed class ProductionUseApproachWiringTests
 
         Assert.Equal(1, h.Inventory.BusyCount);
 
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(new[] { OtherVendor }, h.Transport.Uses);
         Assert.Equal(1, h.Inventory.BusyCount);
@@ -346,7 +427,7 @@ public sealed class ProductionUseApproachWiringTests
             h.Transactions.BeginUseRequestReservation();
 
         h.Controller.RequestUse(Vendor, reservation);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         // Armed but inert — the live vendor-diag pathology.
         Assert.True(h.MoveTo.IsMovingTo());
@@ -357,7 +438,7 @@ public sealed class ProductionUseApproachWiringTests
 
         h.MovementController.Movement.CancelMoveTo(
             WeenieError.ActionCancelled);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Empty(h.Transport.Uses);
         Assert.Equal(0, h.Inventory.BusyCount);

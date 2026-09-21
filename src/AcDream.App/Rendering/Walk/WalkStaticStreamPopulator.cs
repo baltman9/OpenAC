@@ -52,6 +52,7 @@ internal sealed class WalkStaticStreamPopulator
         Matrix4x4 viewProjection,
         in WalkBuildingSelection selection,
         Matrix4x4 partZeroTransform,
+        Vector3 sortCenter,
         List<WbDrawDispatcher.WalkClassifiedBatch> alphaSubmissions)
     {
         ClassifyAndAppend(
@@ -64,7 +65,8 @@ internal sealed class WalkStaticStreamPopulator
             viewProjection,
             alphaSubmissions: alphaSubmissions,
             buildingSelection: selection,
-            buildingPartTransform: partZeroTransform);
+            buildingPartTransform: partZeroTransform,
+            buildingSortCenter: sortCenter);
     }
 
     internal void PopulateOutdoorStatics(
@@ -229,7 +231,8 @@ internal sealed class WalkStaticStreamPopulator
         int lookInRouteIndex = -1,
         List<WbDrawDispatcher.WalkClassifiedBatch>? alphaSubmissions = null,
         WalkBuildingSelection? buildingSelection = null,
-        Matrix4x4 buildingPartTransform = default)
+        Matrix4x4 buildingPartTransform = default,
+        Vector3 buildingSortCenter = default)
     {
         _batchScratch.Clear();
         _selectionScratch.Clear();
@@ -243,7 +246,16 @@ internal sealed class WalkStaticStreamPopulator
             lookInRouteIndex,
             cellId,
             buildingSelection: buildingSelection,
-            buildingPartTransform: buildingPartTransform);
+            buildingPartTransform: buildingPartTransform,
+            buildingViewerPosition: cameraWorldPosition,
+            buildingSortCenter: buildingSortCenter);
+
+        if (buildingSelection is not null && BuildingDrawTrace.Matches(cellId))
+        {
+            BuildingDrawTrace.Write($"entity=0x{record.Source.LocalEntityId:X8} flags={record.Flags} meshes={record.EntityPayload.MeshRefs?.Count ?? 0} batches={_batchScratch.Count} parts={_selectionScratch.Count} pending={_dispatcher.WalkClassificationPending}");
+            for (int i = 0; i < _batchScratch.Count; i++)
+                BuildingDrawTrace.Write($"batch={i} indices={_batchScratch[i].Key.IndexCount} opaque={_batchScratch[i].IsOpaque} transform={_batchScratch[i].Transform}");
+        }
 
         for (int i = 0; i < _batchScratch.Count; i++)
         {

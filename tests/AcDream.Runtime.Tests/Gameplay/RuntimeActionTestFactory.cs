@@ -21,9 +21,9 @@ internal static class RuntimeActionTestFactory
 
     private sealed class CombatOperations : IRuntimeCombatAttackOperations
     {
-        public bool CanStartAttack() => false;
+        public bool CanStartAttack(bool allowAutoTarget) => false;
         public void PrepareAttackRequest() { }
-        public bool SendAttack(AttackHeight height, float power) => false;
+        public bool SendAttack(AttackHeight height, float power, bool allowAutoTarget) => false;
         public void SendCancelAttack() { }
         public bool IsDualWield => false;
         public bool PlayerReadyForAttack => false;

@@ -554,7 +554,7 @@ public sealed class ExternalRenderPackPackageLifecycleTests
     }
 
     private static JsonElement[] ReadStatuses(string path) =>
-        File.ReadAllLines(path)
+        ReadSharedLines(path)
             .Select(static line => JsonDocument.Parse(line).RootElement.Clone())
             .ToArray();
 
@@ -668,4 +668,18 @@ public sealed class ExternalRenderPackPackageLifecycleTests
             }
         }
     }
-}
+
+    // A status file belongs to a session that may still be writing it, and a
+    // reader that does not share the file for writing is refused while it is.
+    private static string ReadSharedText(string path)
+    {
+        using var stream = new FileStream(
+            path, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    private static string[] ReadSharedLines(string path) =>
+        ReadSharedText(path).Split(
+            ["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries);}

@@ -16,32 +16,101 @@
     <Style Selector="Button">
       <Setter Property="Background" Value="#202C33" />
       <Setter Property="BorderBrush" Value="#405059" />
-      <Setter Property="Padding" Value="10,5" />
+      <Setter Property="Padding" Value="10,6,10,4" />
       <Setter Property="MinHeight" Value="28" />
       <Setter Property="CornerRadius" Value="3" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
     <Style Selector="Button.primary">
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.primary.ready /template/ ContentPresenter">
       <Setter Property="Background" Value="#DBB573" />
       <Setter Property="Foreground" Value="#181A1B" />
-      <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
     <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
       <Setter Property="Background" Value="#E6C68F" />
       <Setter Property="Foreground" Value="#181A1B" />
     </Style>
+    <Style Selector="Button.icon /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.icon:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#202C33" />
+      <Setter Property="BorderBrush" Value="#405059" />
+    </Style>
     <Style Selector="Button.danger"><Setter Property="Foreground" Value="#FFB0A0" /></Style>
+    <Style Selector="Button.destructive:pointerover /template/ ContentPresenter"><Setter Property="Background" Value="#4A2129" /><Setter Property="BorderBrush" Value="#FFB0A0" /><Setter Property="Foreground" Value="#FFB0A0" /></Style>
     <Style Selector="TextBlock.muted"><Setter Property="Foreground" Value="#A9BBC5" /></Style>
     <Style Selector="TextBlock.section"><Setter Property="FontSize" Value="16" /><Setter Property="FontWeight" Value="SemiBold" /></Style>
-    <Style Selector="ComboBox"><Setter Property="MinHeight" Value="28" /><Setter Property="Padding" Value="6,3" /><Setter Property="Background" Value="#131D23" /></Style>
+    <Style Selector="ComboBox"><Setter Property="MinHeight" Value="28" /><Setter Property="Padding" Value="6,4,6,3" /><Setter Property="Background" Value="#131D23" /><Setter Property="VerticalContentAlignment" Value="Center" /></Style>
     <Style Selector="CheckBox"><Setter Property="MinHeight" Value="24" /></Style>
     <Style Selector="Expander"><Setter Property="Padding" Value="0" /><Setter Property="HorizontalContentAlignment" Value="Stretch" /></Style>
+    <Style Selector="Border.chip">
+      <Setter Property="CornerRadius" Value="9" />
+      <Setter Property="Padding" Value="8,2" />
+      <Setter Property="Margin" Value="0,3,0,0" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Border.chip TextBlock"><Setter Property="FontSize" Value="11" /><Setter Property="FontWeight" Value="SemiBold" /></Style>
+    <Style Selector="Border.chip.update"><Setter Property="Background" Value="#3A2E17" /><Setter Property="BorderBrush" Value="#DBB573" /></Style>
+    <Style Selector="Border.chip.update TextBlock"><Setter Property="Foreground" Value="#DBB573" /></Style>
+    <Style Selector="Border.chip.blocked"><Setter Property="Background" Value="#4A2129" /><Setter Property="BorderBrush" Value="#FFB0A0" /></Style>
+    <Style Selector="Border.chip.blocked TextBlock"><Setter Property="Foreground" Value="#FFB0A0" /></Style>
+    <Style Selector="Border.chip.capability"><Setter Property="Background" Value="#16262E" /><Setter Property="BorderBrush" Value="#8FB8C9" /></Style>
+    <Style Selector="Border.chip.capability TextBlock"><Setter Property="Foreground" Value="#8FB8C9" /></Style>
+    <Style Selector="Border.chip.beta"><Setter Property="Background" Value="#262E33" /><Setter Property="BorderBrush" Value="#7C8F99" /></Style>
+    <Style Selector="Border.chip.beta TextBlock"><Setter Property="Foreground" Value="#A9BBC5" /></Style>
+    <Style Selector="ProgressBar.buttonspinner"><Setter Property="Width" Value="52" /><Setter Property="Height" Value="3" /><Setter Property="MinWidth" Value="52" /><Setter Property="MinHeight" Value="3" /></Style>
+    <Style Selector="Border.plugincard"><Setter Property="Background" Value="#141E24" /><Setter Property="BorderBrush" Value="#35434B" /><Setter Property="BorderThickness" Value="1" /><Setter Property="CornerRadius" Value="3" /><Setter Property="Margin" Value="0,0,0,6" /></Style>
+    <Style Selector="Border.plugintile"><Setter Property="Width" Value="32" /><Setter Property="Height" Value="32" /><Setter Property="CornerRadius" Value="4" /><Setter Property="Background" Value="#1F2C34" /><Setter Property="VerticalAlignment" Value="Center" /></Style>
+    <Style Selector="Border.plugintile TextBlock"><Setter Property="Foreground" Value="#A9BBC5" /><Setter Property="FontSize" Value="13" /><Setter Property="FontWeight" Value="SemiBold" /><Setter Property="HorizontalAlignment" Value="Center" /><Setter Property="VerticalAlignment" Value="Center" /></Style>
+    <Style Selector="Border.pluginfoot"><Setter Property="BorderBrush" Value="#26343C" /><Setter Property="BorderThickness" Value="0,1,0,0" /><Setter Property="Padding" Value="54,6,8,6" /></Style>
+    <Style Selector="Border.well">
+      <Setter Property="Background" Value="#0B1216" />
+      <Setter Property="BorderBrush" Value="#243139" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="10" />
+    </Style>
+    <!-- The tab sits ON the rule below it: no bottom border to inset the fill, square bottom
+         corners, and the strip aligned to the bottom of its row, so the filled tab meets the line
+         the way a tab does rather than floating over it like a button. -->
+    <Style Selector="ToggleButton.tab">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="CornerRadius" Value="4,4,0,0" />
+      <Setter Property="Padding" Value="14,8" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="Foreground" Value="#A9BBC5" />
+      <Setter Property="FontWeight" Value="Normal" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="ToggleButton.tab /template/ ContentPresenter">
+      <Setter Property="CornerRadius" Value="4,4,0,0" />
+    </Style>
+    <Style Selector="ToggleButton.tab:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#182027" />
+    </Style>
+    <Style Selector="ToggleButton.tab:checked /template/ ContentPresenter">
+      <Setter Property="Background" Value="#202C33" />
+    </Style>
+    <Style Selector="ToggleButton.tab:checked">
+      <Setter Property="Foreground" Value="#F0E4CD" />
+    </Style>
   </Window.Styles>
-  <Grid RowDefinitions="Auto,Auto,*,Auto">
+  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
     <Border Padding="18,10" Background="#152029">
+      <Grid ColumnDefinitions="*,Auto">
       <StackPanel Spacing="1">
         <TextBlock Text="OpenAC" FontFamily="Georgia,serif" FontSize="27" Foreground="#DBB573" />
         <TextBlock Text="Asheron's Call forever." FontFamily="Georgia,serif" FontSize="18" Foreground="#F0E4CD" />
       </StackPanel>
+      <TextBlock Grid.Column="1" Text="{Binding VersionText}" Foreground="#7C8F99" FontSize="12" TextAlignment="Right" VerticalAlignment="Top" AutomationProperties.Name="{Binding VersionText}" />
+      </Grid>
     </Border>
     <StackPanel Grid.Row="1" Spacing="4">
       <Border Background="#292820" Padding="14,8" IsVisible="{Binding ShowInstallationBanner}">
@@ -57,13 +126,28 @@
         </Grid>
       </Border>
     </StackPanel>
-    <Grid Grid.Row="2" Margin="14,10" RowDefinitions="Auto,Auto,*">
+    <Border Grid.Row="2" Margin="14,10,14,0" BorderBrush="#35434B" BorderThickness="0,0,0,1">
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Bottom">
+          <ToggleButton x:Name="AccountsTabButton" Classes="tab" Content="Accounts" IsChecked="{Binding IsAccountsTabSelected, Mode=OneWay}"
+                        Command="{Binding SelectAccountsTabCommand}" AutomationProperties.Name="Accounts tab" />
+          <ToggleButton x:Name="PluginsTabButton" Classes="tab" Content="Plugins" IsChecked="{Binding IsPluginsTabSelected, Mode=OneWay}"
+                        Command="{Binding SelectPluginsTabCommand}" AutomationProperties.Name="Plugins tab" />
+        </StackPanel>
+        <Button Grid.Column="1" x:Name="SettingsButton" Classes="icon" Padding="6" VerticalAlignment="Center" Margin="0,0,0,6"
+                Command="{Binding OpenSettingsCommand}" AutomationProperties.Name="Settings" ToolTip.Tip="Settings">
+          <Path Width="16" Height="16" Stretch="Uniform" Fill="#A9BBC5"
+                Data="M 8,1 L 9.91,3.38 L 12.95,3.05 L 12.62,6.09 L 15,8 L 12.62,9.91 L 12.95,12.95 L 9.91,12.62 L 8,15 L 6.09,12.62 L 3.05,12.95 L 3.38,9.91 L 1,8 L 3.38,6.09 L 3.05,3.05 L 6.09,3.38 Z M 8,5.7 L 9.15,6.01 L 9.99,6.85 L 10.3,8 L 9.99,9.15 L 9.15,9.99 L 8,10.3 L 6.85,9.99 L 6.01,9.15 L 5.7,8 L 6.01,6.85 L 6.85,6.01 Z" />
+        </Button>
+      </Grid>
+    </Border>
+    <Grid Grid.Row="3" Margin="14,10" RowDefinitions="Auto,Auto,*" IsVisible="{Binding IsAccountsTabSelected}">
       <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
         <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-          <TextBlock Text="Accounts" Classes="section" />
+          <Button x:Name="PlayCheckedButton" Content="Play selected" Classes="primary" Classes.ready="{Binding HasPlayableCheckedRows}" Command="{Binding LaunchCheckedCommand}" VerticalAlignment="Center" />
           <TextBlock Text="{Binding CheckedSelectionSummary}" Classes="muted" FontSize="12" VerticalAlignment="Center" />
         </StackPanel>
-        <Button Grid.Column="1" Content="Check servers" Command="{Binding CheckServersCommand}" />
+        <Button Grid.Column="1" Content="Check servers" Command="{Binding CheckServersCommand}" VerticalAlignment="Center" />
       </Grid>
       <Grid Grid.Row="1" ColumnDefinitions="26,*,160,112,85,64,34" Margin="22,0,14,5" ColumnSpacing="6">
         <TextBlock Grid.Column="1" Text="Server · status · players" Classes="muted" FontSize="12" />
@@ -77,25 +161,33 @@
           <ItemsControl ItemsSource="{Binding Accounts}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="vm:LauncherAccountGroupViewModel">
-                <Border Background="#141E24" BorderBrush="#35434B" BorderThickness="1" CornerRadius="3" Margin="0,0,0,5">
+                <Border Background="#141E24" BorderBrush="#35434B" BorderThickness="1" CornerRadius="3" Margin="0,0,0,9">
                   <StackPanel>
-                    <ToggleButton IsChecked="{Binding IsExpanded, Mode=TwoWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Background="#1D2931" Padding="10,4" MinHeight="30"><ToggleButton.Template><ControlTemplate><Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"><ContentPresenter Content="{TemplateBinding Content}" /></Border></ControlTemplate></ToggleButton.Template><StackPanel Orientation="Horizontal" Spacing="10"><TextBlock Text="▾" IsVisible="{Binding IsExpanded}" /><TextBlock Text="▸" IsVisible="{Binding !IsExpanded}" /><TextBlock Text="{Binding AccountName}" FontWeight="SemiBold" /></StackPanel></ToggleButton>
+                    <ToggleButton IsChecked="{Binding IsExpanded, Mode=TwoWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Background="#1D2931" Padding="10,5,10,4" MinHeight="30"><ToggleButton.Template><ControlTemplate><Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"><ContentPresenter Content="{TemplateBinding Content}" VerticalAlignment="Center" /></Border></ControlTemplate></ToggleButton.Template><StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center"><TextBlock Text="▾" IsVisible="{Binding IsExpanded}" /><TextBlock Text="▸" IsVisible="{Binding !IsExpanded}" /><TextBlock Text="{Binding AccountName}" FontWeight="SemiBold" /></StackPanel></ToggleButton>
                     <ItemsControl ItemsSource="{Binding Servers}" IsVisible="{Binding IsExpanded}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="vm:LauncherAccountServerRowViewModel">
                           <Border BorderBrush="#2B3941" BorderThickness="0,1,0,0" Padding="12,3,8,3">
                             <Grid ColumnDefinitions="26,*,160,112,85,64,34" RowDefinitions="Auto,Auto" ColumnSpacing="6">
                               <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}" IsEnabled="{Binding CanEditSelection}" AutomationProperties.Name="Select account and server for batch launch" />
-                              <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                              <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1" Margin="0,2,0,0">
                                 <Grid ColumnDefinitions="14,*"><Ellipse Width="7" Height="7" Fill="{Binding ServerDotColor}" ToolTip.Tip="{Binding ServerStatusText}" /><TextBlock Grid.Column="1" Text="{Binding ServerName}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold" ToolTip.Tip="{Binding Endpoint}" /></Grid>
-                                <TextBlock Text="{Binding ServerStatusText}" Classes="muted" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip.Tip="Status checks the game endpoint. Player counts are reported by TreeStats, matched by server name." />
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                  <TextBlock Text="{Binding ServerStatusText}" Classes="muted" FontSize="11" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" ToolTip.Tip="Status checks the game endpoint. Player counts are reported by TreeStats, matched by server name." />
+                                  <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center" IsVisible="{Binding HasLatency}" ToolTip.Tip="{Binding PingTooltip}">
+                                    <Rectangle Width="3" Height="4" RadiusX="1" RadiusY="1" VerticalAlignment="Bottom" Fill="{Binding PingBar1Color}" />
+                                    <Rectangle Width="3" Height="7" RadiusX="1" RadiusY="1" VerticalAlignment="Bottom" Fill="{Binding PingBar2Color}" />
+                                    <Rectangle Width="3" Height="10" RadiusX="1" RadiusY="1" VerticalAlignment="Bottom" Fill="{Binding PingBar3Color}" />
+                                  </StackPanel>
+                                  <TextBlock Text="{Binding LatencyText}" Classes="muted" FontSize="11" VerticalAlignment="Center" IsVisible="{Binding HasLatency}" ToolTip.Tip="{Binding PingTooltip}" />
+                                </StackPanel>
                               </StackPanel>
-                              <ComboBox Grid.Column="2" ItemsSource="{Binding CharacterChoices}" SelectedItem="{Binding SelectedCharacter, Mode=TwoWay}" HorizontalAlignment="Stretch" VerticalAlignment="Center" IsEnabled="{Binding CanEditSelection}" AutomationProperties.Name="Character" />
+                              <ComboBox Grid.Column="2" ItemsSource="{Binding CharacterChoices}" SelectedItem="{Binding DisplayedCharacter, Mode=TwoWay}" HorizontalAlignment="Stretch" VerticalAlignment="Center" IsEnabled="{Binding CanEditSelection}" AutomationProperties.Name="Character" />
                               <ComboBox Grid.Column="3" ItemsSource="{Binding LaunchModes}" SelectedItem="{Binding SelectedLaunchMode, Mode=TwoWay}" HorizontalAlignment="Stretch" VerticalAlignment="Center" IsEnabled="{Binding CanEditSelection}" AutomationProperties.Name="Launch mode" />
-                              <TextBlock Grid.Column="4" Text="{Binding Status}" VerticalAlignment="Center" Classes="muted" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Status}" />
-                              <Button Grid.Column="5" Content="Play" Classes="primary" Command="{Binding PlayCommand}" IsVisible="{Binding !IsActive}" VerticalAlignment="Center" HorizontalAlignment="Stretch" ToolTip.Tip="{Binding DisabledReason}" />
+                              <TextBlock Grid.Column="4" Text="{Binding Status}" VerticalAlignment="Center" Margin="0,2,0,0" Classes="muted" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Status}" />
+                              <Button Grid.Column="5" Content="Play" Classes="primary" Classes.ready="{Binding CanPlay}" Command="{Binding PlayCommand}" IsVisible="{Binding !IsActive}" VerticalAlignment="Center" HorizontalAlignment="Stretch" ToolTip.Tip="{Binding DisabledReason}" />
                               <Button Grid.Column="5" Content="Stop" Command="{Binding StopCommand}" IsVisible="{Binding IsActive}" VerticalAlignment="Center" HorizontalAlignment="Stretch" />
-                              <Button Grid.Column="6" Content="···" Padding="4" Command="{Binding OptionsCommand}" VerticalAlignment="Center" AutomationProperties.Name="Character options" />
+                              <Button Grid.Column="6" Content="···" Padding="4" Command="{Binding OptionsCommand}" VerticalAlignment="Center" AutomationProperties.Name="Plugins and logon commands" ToolTip.Tip="Plugins and logon commands" />
                               <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="6" Text="{Binding LaunchError}" IsVisible="{Binding HasLaunchError}" Foreground="#FFB0A0" TextWrapping="Wrap" FontSize="12" Margin="0,3,0,3" />
                             </Grid>
                           </Border>
@@ -110,19 +202,162 @@
         </StackPanel>
       </ScrollViewer>
     </Grid>
-    <Border Grid.Row="3" Background="#172128" Padding="14,8">
-      <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-          <WrapPanel Orientation="Horizontal">
-            <Button Content="Edit accounts" Command="{Binding EditUsersTextCommand}" Margin="0,0,6,3" />
-            <Button Content="Edit Servers" Command="{Binding EditServersTextCommand}" Margin="0,0,6,3" />
-            <Button Content="Logon commands" Command="{Binding EditLogonCommandsTextCommand}" Margin="0,0,6,3" />
-          </WrapPanel>
-          <Button Grid.Column="1" x:Name="PlayCheckedButton" Content="Play selected" Classes="primary" Command="{Binding LaunchCheckedCommand}" VerticalAlignment="Top" />
-        </Grid>
-        <Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="8">
-          <TextBlock Text="{Binding OperationStatus}" Classes="muted" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding OperationStatus}" VerticalAlignment="Center" />
-          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+    <Grid Grid.Row="3" Margin="14,10" RowDefinitions="Auto,Auto,*" IsVisible="{Binding IsPluginsTabSelected}">
+      <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,8" ColumnSpacing="8">
+        <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+          <TextBlock Text="{Binding Plugins.ListAgeText}" Classes="muted" FontSize="12" VerticalAlignment="Center" IsVisible="{Binding Plugins.IsUsingCachedList}" />
+        </StackPanel>
+        <TextBox Grid.Column="1" Width="280" Text="{Binding Plugins.AddFromUrlText, Mode=TwoWay}"
+                 PlaceholderText="https://github.com/owner/name" AutomationProperties.Name="Add plugin from URL" />
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
+          <Button Content="Add from URL" Command="{Binding Plugins.AddFromUrlCommand}" />
+          <Button Content="Refresh list" Command="{Binding Plugins.CheckNowCommand}" />
+        </StackPanel>
+      </Grid>
+      <StackPanel Grid.Row="1" Spacing="2" Margin="0,0,0,6">
+        <TextBlock Text="{Binding Plugins.Error}" Foreground="#FFB0A0" IsVisible="{Binding Plugins.HasError}" TextWrapping="Wrap" />
+        <TextBlock Text="{Binding Plugins.StatusText}" Classes="muted" IsVisible="{Binding Plugins.HasStatusText}" TextWrapping="Wrap" />
+      </StackPanel>
+      <Grid Grid.Row="2" x:Name="PluginsPanel" ColumnDefinitions="*,*" RowDefinitions="*,*" ColumnSpacing="12" RowSpacing="10" SizeChanged="OnPluginsPanelSizeChanged">
+        <Border Classes="well" Grid.Row="{Binding Plugins.InstalledRow}" Grid.Column="{Binding Plugins.InstalledColumn}" Grid.ColumnSpan="{Binding Plugins.InstalledColumnSpan}" Grid.RowSpan="{Binding Plugins.InstalledRowSpan}">
+          <Grid RowDefinitions="Auto,Auto,*" RowSpacing="6">
+            <TextBlock Text="Installed" FontWeight="SemiBold" />
+            <TextBox Grid.Row="1" Text="{Binding Plugins.InstalledFilter, Mode=TwoWay}" PlaceholderText="Search installed" AutomationProperties.Name="Search installed plugins" />
+            <ScrollViewer Grid.Row="2" x:Name="InstalledScroll" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+              <StackPanel Spacing="5" Margin="0,0,14,0">
+              <TextBlock Text="{Binding Plugins.InstalledEmptyText}" Classes="muted" IsVisible="{Binding !Plugins.HasInstalled}" />
+              <ItemsControl ItemsSource="{Binding Plugins.Installed}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:PluginInstalledRowViewModel">
+                  <Border Classes="plugincard">
+                    <StackPanel>
+                      <Grid ColumnDefinitions="32,*,Auto" ColumnSpacing="10" Margin="12,10,12,8">
+                        <Border Classes="plugintile"><Panel><TextBlock Text="{Binding Initials}" IsVisible="{Binding !HasIcon}" /><Image Source="{Binding Icon}" IsVisible="{Binding HasIcon}" Width="32" Height="32" RenderOptions.BitmapInterpolationMode="HighQuality" /></Panel></Border>
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                          <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="15" TextTrimming="CharacterEllipsis" />
+                          <SelectableTextBlock FontSize="12" Foreground="#A9BBC5"><Run Text="{Binding Id}" FontFamily="Menlo, Consolas, monospace" FontSize="11" /><Run Text=" · " /><Run Text="{Binding SourceBadge}" /></SelectableTextBlock>
+                        </StackPanel>
+                        <TextBlock Grid.Column="2" Text="Beta Channel" IsVisible="{Binding ShowBetaChannelLabel}" Foreground="#A9BBC5" FontSize="11" VerticalAlignment="Center" AutomationProperties.Name="Beta Channel" />
+                      </Grid>
+                      <StackPanel Margin="54,0,12,8" Spacing="2" IsVisible="{Binding HasNotes}">
+                        <TextBlock Text="{Binding UpdateCompatibilityNote}" IsVisible="{Binding ShowUpdateCompatibilityNote}" Foreground="#DBB573" FontSize="12" TextWrapping="Wrap" />
+                        <TextBlock Text="A newer client version bundles this plugin; it will replace this copy on update." IsVisible="{Binding Conflict}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding UpdateWithheldReason, StringFormat='Update withheld: {0}'}" IsVisible="{Binding HasUpdateWithheldReason}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                      </StackPanel>
+                      <Border Classes="pluginfoot">
+                        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
+                          <StackPanel VerticalAlignment="Center" Spacing="5">
+                            <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="8">
+                              <TextBlock Text="{Binding Version, StringFormat='v{0}'}" Foreground="#7C8F99" FontSize="12" VerticalAlignment="Center" />
+                              <Border Grid.Column="1" Classes="chip blocked" IsVisible="{Binding IsRefused}" VerticalAlignment="Center" AutomationProperties.Name="Refused">
+                                <TextBlock Text="Refused" />
+                              </Border>
+                              <TextBlock Grid.Column="2" Text="{Binding Refusal}" IsVisible="{Binding IsRefused}" Foreground="#FFB0A0" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
+                              <Border Grid.Column="1" Classes="chip blocked" IsVisible="{Binding ShowSkipped}" VerticalAlignment="Center" AutomationProperties.Name="Skipped">
+                                <TextBlock Text="Skipped" />
+                              </Border>
+                              <TextBlock Grid.Column="2" Text="{Binding CompatibilityText}" IsVisible="{Binding ShowSkipped}" Foreground="#FFB0A0" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
+                              <TextBlock Grid.Column="1" Grid.ColumnSpan="2" Text="{Binding CompatibilityText}" IsVisible="{Binding ShowCompatibilityInfoLine}" Classes="muted" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
+                            </Grid>
+                            <WrapPanel IsVisible="{Binding HasChips}">
+                              <Border Classes="chip beta" IsVisible="{Binding IsPrerelease}" Margin="0,0,6,0" AutomationProperties.Name="beta install">
+                                <TextBlock Text="beta install" />
+                              </Border>
+                              <Border Classes="chip capability" IsVisible="{Binding HasCapabilities}" Margin="0,0,6,0" AutomationProperties.Name="{Binding CapabilityCountText}">
+                                <TextBlock Text="{Binding CapabilityCountText}" />
+                              </Border>
+                              <Border Classes="chip update" IsVisible="{Binding HasUpdateChip}" Margin="0,0,6,0" AutomationProperties.Name="{Binding UpdateChipText}">
+                                <TextBlock Text="{Binding UpdateChipText}" />
+                              </Border>
+                              <Border Classes="chip blocked" IsVisible="{Binding HasDuplicate}" Margin="0,0,6,0" AutomationProperties.Name="Duplicate">
+                                <TextBlock Text="Duplicate" />
+                              </Border>
+                              <Border Classes="chip blocked" IsVisible="{Binding IsBlocked}" Margin="0,0,6,0" AutomationProperties.Name="{Binding BlockedText}">
+                                <TextBlock Text="{Binding BlockedText}" TextWrapping="Wrap" />
+                              </Border>
+                            </WrapPanel>
+                          </StackPanel>
+                          <Button Grid.Column="1" Content="Update" Classes="primary" FontWeight="Normal" IsVisible="{Binding UpdateAvailable}" Command="{Binding UpdateCommand}" AutomationProperties.Name="{Binding UpdateAutomationName}" VerticalAlignment="Center" />
+                          <Button Grid.Column="2" Content="Remove" Classes="destructive" IsVisible="{Binding CanRemove}" Command="{Binding RemoveCommand}" AutomationProperties.Name="{Binding RemoveAutomationName}" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              </StackPanel>
+            </ScrollViewer>
+          </Grid>
+        </Border>
+        <Border Classes="well" Grid.Row="{Binding Plugins.DiscoverRow}" Grid.Column="{Binding Plugins.DiscoverColumn}" Grid.ColumnSpan="{Binding Plugins.DiscoverColumnSpan}" Grid.RowSpan="{Binding Plugins.DiscoverRowSpan}">
+          <Grid RowDefinitions="Auto,Auto,*" RowSpacing="6">
+            <TextBlock Text="Discover" FontWeight="SemiBold" />
+            <TextBox Grid.Row="1" Text="{Binding Plugins.DiscoverFilter, Mode=TwoWay}" PlaceholderText="Search the plugin list" AutomationProperties.Name="Search listed plugins" />
+            <ScrollViewer Grid.Row="2" x:Name="DiscoverScroll" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+              <StackPanel Spacing="5" Margin="0,0,14,0">
+              <TextBlock Text="{Binding Plugins.DiscoverStatusLine}" Classes="muted" IsVisible="{Binding Plugins.HasDiscoverStatusLine}" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding Plugins.DiscoverCheckingText}" Classes="muted" IsVisible="{Binding Plugins.IsDiscoverChecking}" />
+              <Panel IsVisible="{Binding Plugins.ShowDiscoverEmptyText}">
+                <TextBlock Text="{Binding Plugins.DiscoverEmptyText}" Classes="muted" IsVisible="{Binding Plugins.DiscoverHasFilter}" TextWrapping="Wrap" />
+                <StackPanel IsVisible="{Binding !Plugins.DiscoverHasFilter}" HorizontalAlignment="Center" Spacing="7" Margin="12,48,12,32" MaxWidth="320">
+                  <TextBlock Text="No Plugins Available" FontSize="16" FontWeight="SemiBold" Foreground="#C3D0D6" TextAlignment="Center" TextWrapping="Wrap" />
+                  <TextBlock Text="Plugins are in active development, check back soon!" FontSize="13" Foreground="#7C8F99" TextAlignment="Center" TextWrapping="Wrap" />
+                </StackPanel>
+              </Panel>
+              <ItemsControl ItemsSource="{Binding Plugins.Discover}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:PluginDiscoverRowViewModel">
+                  <Border Classes="plugincard">
+                    <StackPanel>
+                      <Grid ColumnDefinitions="32,*" ColumnSpacing="10" Margin="12,10,12,8">
+                        <Border Classes="plugintile"><Panel><TextBlock Text="{Binding Initials}" IsVisible="{Binding !HasIcon}" /><Image Source="{Binding Icon}" IsVisible="{Binding HasIcon}" Width="32" Height="32" RenderOptions.BitmapInterpolationMode="HighQuality" /></Panel></Border>
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                          <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="15" TextTrimming="CharacterEllipsis" />
+                          <SelectableTextBlock FontSize="12" Foreground="#A9BBC5"><Run Text="{Binding Author}" /><Run Text=" · " /><Run Text="{Binding Repo}" FontFamily="Menlo, Consolas, monospace" FontSize="11" Foreground="#7C8F99" /></SelectableTextBlock>
+                        </StackPanel>
+                      </Grid>
+                      <TextBlock Text="{Binding Description}" Foreground="#C3D0D6" FontSize="13" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Description}" Margin="54,0,12,10" />
+                      <Border Classes="pluginfoot">
+                        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
+                          <StackPanel VerticalAlignment="Center" Spacing="5">
+                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                              <TextBlock Text="{Binding LatestVersion, StringFormat='v{0}'}" IsVisible="{Binding HasLatestVersion}" Foreground="#7C8F99" FontSize="12" />
+                              <TextBlock Grid.Column="1" Text="{Binding CompatibilityText}" IsVisible="{Binding ShowCompatibilityWarning}" Foreground="#DBB573" FontSize="12" TextWrapping="Wrap" />
+                              <TextBlock Grid.Column="1" Text="{Binding CompatibilityText}" IsVisible="{Binding ShowCompatibilityInfo}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                              <TextBlock Grid.Column="1" Text="{Binding ChannelUnavailableText}" IsVisible="{Binding HasChannelUnavailable}" Foreground="#DBB573" FontSize="12" TextWrapping="Wrap" />
+                            </Grid>
+                            <WrapPanel IsVisible="{Binding HasCapabilities}">
+                              <Border Classes="chip capability" AutomationProperties.Name="{Binding CapabilityCountText}">
+                                <TextBlock Text="{Binding CapabilityCountText}" />
+                              </Border>
+                            </WrapPanel>
+                          </StackPanel>
+                          <ComboBox Grid.Column="1" IsVisible="{Binding ShowChannelPicker}" ItemsSource="{Binding ChannelChoices}" SelectedItem="{Binding SelectedChannelLabel, Mode=TwoWay}" VerticalAlignment="Center" AutomationProperties.Name="{Binding ChannelPickerAutomationName}" />
+                          <Button Grid.Column="2" Content="Install" Classes="primary" Command="{Binding InstallCommand}" AutomationProperties.Name="{Binding InstallAutomationName}" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              </StackPanel>
+            </ScrollViewer>
+          </Grid>
+        </Border>
+      </Grid>
+    </Grid>
+    <Border Grid.Row="4" Background="#172128" Padding="14,8">
+      <Grid RowDefinitions="Auto,Auto" RowSpacing="6">
+        <Grid ColumnDefinitions="Auto,*,Auto">
+          <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,8,0" IsVisible="{Binding IsAccountsTabSelected}">
+            <Button Content="Edit accounts" Command="{Binding EditUsersTextCommand}" />
+            <Button Content="Edit Servers" Command="{Binding EditServersTextCommand}" />
+            <Button Content="Logon commands" Command="{Binding EditLogonCommandsTextCommand}" />
+          </StackPanel>
+          <TextBlock Grid.Column="1" Text="{Binding OperationStatus}" Classes="muted" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding OperationStatus}" VerticalAlignment="Center" />
+          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" Margin="8,0,0,0">
             <Button Content="Installation &amp; updates">
               <Button.Flyout><Flyout><StackPanel Spacing="8" Width="280">
                 <TextBlock Text="Installation &amp; updates" Classes="section" />
@@ -137,11 +372,11 @@
             <Button Content="Cancel" IsVisible="{Binding IsBusy}" Command="{Binding CancelOperationCommand}" />
           </StackPanel>
         </Grid>
-        <TextBlock Grid.Row="2" Text="{Binding LastError}" Foreground="#FFB0A0" IsVisible="{Binding HasError}" TextWrapping="Wrap" MaxHeight="56" />
+        <TextBlock Grid.Row="1" Text="{Binding LastError}" Foreground="#FFB0A0" IsVisible="{Binding HasError}" TextWrapping="Wrap" MaxHeight="56" />
       </Grid>
     </Border>
 
-    <Border Grid.RowSpan="4"
+    <Border Grid.RowSpan="5"
             ZIndex="20"
             Background="#C010151D"
             Focusable="True"
@@ -211,7 +446,7 @@
       </Border>
     </Border>
 
-    <Border Grid.RowSpan="4"
+    <Border Grid.RowSpan="5"
             ZIndex="30"
             Background="#C010151D"
             Focusable="True"
@@ -321,7 +556,7 @@
       </Border>
     </Border>
 
-    <Border Grid.RowSpan="4"
+    <Border Grid.RowSpan="5"
             ZIndex="30"
             Background="#C010151D"
             Focusable="True"
@@ -375,7 +610,7 @@
         </StackPanel>
       </Border>
     </Border>
-    <Border Grid.RowSpan="4" ZIndex="40" Background="#E010171C" IsVisible="{Binding TextEditor.IsOpen}"
+    <Border Grid.RowSpan="5" ZIndex="40" Background="#E010171C" IsVisible="{Binding TextEditor.IsOpen}"
             KeyboardNavigation.TabNavigation="Cycle" KeyDown="OnModalKeyDown" AutomationProperties.Name="Profile editor dialog">
       <Border Classes="card" Margin="24" MaxWidth="880" VerticalAlignment="Stretch">
         <Grid RowDefinitions="Auto,Auto,*,Auto,Auto" RowSpacing="10">
@@ -415,15 +650,24 @@
         </Grid>
       </Border>
     </Border>
-    <Border Grid.RowSpan="4" ZIndex="40" Background="#E010171C" IsVisible="{Binding IsCharacterOptionsOpen}"
+    <Border Grid.RowSpan="5" ZIndex="40" Background="#E010171C" IsVisible="{Binding IsCharacterOptionsOpen}"
             KeyboardNavigation.TabNavigation="Cycle" KeyDown="OnModalKeyDown" AutomationProperties.Name="Character options dialog">
       <Border Classes="card" Margin="24" MaxWidth="720" VerticalAlignment="Stretch">
         <Grid RowDefinitions="Auto,Auto,*,Auto,*,Auto,Auto" RowSpacing="8">
-          <TextBlock Text="{Binding SelectionTitle}" FontSize="22" />
-          <TextBlock Grid.Row="1" Text="Plugins · one id per line; blank loads all, none disables" Classes="muted" />
-          <TextBox Grid.Row="2" x:Name="CharacterPluginsTextBox" Text="{Binding CharacterPluginsText, Mode=TwoWay}" AcceptsReturn="True" ScrollViewer.VerticalScrollBarVisibility="Auto" />
-          <TextBlock Grid.Row="3" Text="Logon commands · one command per line" Classes="muted" />
-          <TextBox Grid.Row="4" Text="{Binding CharacterLoginCommandsText, Mode=TwoWay}" AcceptsReturn="True" ScrollViewer.VerticalScrollBarVisibility="Auto" />
+          <TextBlock Text="{Binding RowOptionsTitle}" FontSize="22" />
+          <TextBlock Grid.Row="1" Text="{Binding RowOptionsPluginsCaption}" Classes="muted" TextWrapping="Wrap" />
+          <ScrollViewer Grid.Row="2" x:Name="CharacterPluginsPanel" Focusable="True" ScrollViewer.VerticalScrollBarVisibility="Auto">
+            <ItemsControl ItemsSource="{Binding CharacterPluginChoices}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:CharacterPluginChoiceViewModel">
+                  <CheckBox Content="{Binding DisplayName}" IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                            AutomationProperties.Name="{Binding DisplayName}" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+          <TextBlock Grid.Row="3" Text="Logon commands · one command per line" Classes="muted" IsVisible="{Binding ShowRowLogonCommands}" />
+          <TextBox Grid.Row="4" Text="{Binding CharacterLoginCommandsText, Mode=TwoWay}" AcceptsReturn="True" IsVisible="{Binding ShowRowLogonCommands}" ScrollViewer.VerticalScrollBarVisibility="Auto" />
           <TextBlock Grid.Row="5" Text="{Binding LastError}" Foreground="#FFB0A0" TextWrapping="Wrap" />
           <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
             <Button Content="Cancel" Command="{Binding CloseDesktopDialogCommand}" />
@@ -432,7 +676,7 @@
         </Grid>
       </Border>
     </Border>
-    <Border Grid.RowSpan="4" ZIndex="40" Background="#E010171C" IsVisible="{Binding IsSessionLogOpen}"
+    <Border Grid.RowSpan="5" ZIndex="40" Background="#E010171C" IsVisible="{Binding IsSessionLogOpen}"
             KeyboardNavigation.TabNavigation="Cycle" KeyDown="OnModalKeyDown" AutomationProperties.Name="Session log dialog">
       <Border Classes="card" Margin="24" MaxWidth="960">
         <Grid RowDefinitions="Auto,*,Auto" RowSpacing="12">
@@ -440,11 +684,129 @@
           <ScrollViewer Grid.Row="1"><ItemsControl ItemsSource="{Binding Sessions}"><ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="vm:LauncherSessionRowViewModel"><Border Padding="6,8" BorderBrush="#35434B" BorderThickness="0,0,0,1">
               <Grid ColumnDefinitions="160,160,*" ColumnSpacing="10"><TextBlock Text="{Binding Account}" TextWrapping="Wrap" /><TextBlock Grid.Column="1" Text="{Binding Character}" TextWrapping="Wrap" />
-                <StackPanel Grid.Column="2"><TextBlock Text="{Binding Status}" TextWrapping="Wrap" /><TextBlock Text="{Binding Error}" TextWrapping="Wrap" Foreground="#FFB0A0" /></StackPanel>
+                <StackPanel Grid.Column="2"><TextBlock Text="{Binding Status}" TextWrapping="Wrap" /><TextBlock Text="{Binding Error}" TextWrapping="Wrap" Foreground="#FFB0A0" /><TextBlock Text="{Binding PluginNotice}" TextWrapping="Wrap" IsVisible="{Binding HasPluginNotice}" Classes="muted" /></StackPanel>
               </Grid></Border></DataTemplate>
           </ItemsControl.ItemTemplate></ItemsControl></ScrollViewer>
           <Button Grid.Row="2" x:Name="SessionLogCloseButton" Content="Close" Command="{Binding CloseDesktopDialogCommand}" HorizontalAlignment="Right" />
         </Grid>
+      </Border>
+    </Border>
+    <Border Grid.RowSpan="5" ZIndex="40" Background="#E010171C" IsVisible="{Binding IsSettingsOpen}"
+            KeyboardNavigation.TabNavigation="Cycle" KeyDown="OnModalKeyDown" AutomationProperties.Name="Launcher settings dialog">
+      <Border Classes="card" Margin="24" MaxWidth="480" VerticalAlignment="Center">
+        <StackPanel Spacing="14">
+          <TextBlock Text="Launcher settings" FontSize="22" FontWeight="Bold" />
+          <StackPanel Spacing="0">
+            <CheckBox Content="Show beta plugins" IsChecked="{Binding Plugins.ShowBetaPlugins, Mode=TwoWay}" AutomationProperties.Name="Show beta plugins" />
+            <TextBlock Text="Show development and testing versions of plugins for download. Beta plugins are more likely to contain bugs and could create issues for your characters. Use with caution."
+                       Classes="muted" FontSize="12" TextWrapping="Wrap" Margin="28,0,0,0" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="SettingsCloseButton" Content="Close" AutomationProperties.Name="Close launcher settings" Command="{Binding CloseDesktopDialogCommand}" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </Border>
+    <Border Grid.RowSpan="5" ZIndex="40" Background="#E010171C" IsVisible="{Binding Plugins.InstallDialog.IsOpen}"
+            KeyboardNavigation.TabNavigation="Cycle" KeyDown="OnModalKeyDown" AutomationProperties.Name="Install plugin dialog">
+      <Border Classes="card" Margin="24" MaxWidth="560" VerticalAlignment="Center">
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="10">
+          <TextBlock Text="{Binding Plugins.InstallDialog.DisplayName}" FontSize="22" FontWeight="Bold" />
+          <SelectableTextBlock Grid.Row="1" Text="{Binding Plugins.InstallDialog.Repo}" Classes="muted" TextWrapping="Wrap" />
+          <TextBlock Grid.Row="2" Text="{Binding Plugins.InstallDialog.WarningText}" TextWrapping="Wrap" />
+          <StackPanel Grid.Row="3" Spacing="4">
+            <TextBlock Text="{Binding Plugins.InstallDialog.LoadingCapabilitiesText}" Classes="muted"
+                       IsVisible="{Binding Plugins.InstallDialog.IsLoadingCapabilities}" />
+            <TextBlock Text="{Binding Plugins.InstallDialog.CapabilitiesLoadError}" Foreground="#FFB0A0"
+                       IsVisible="{Binding Plugins.InstallDialog.HasCapabilitiesLoadError}" TextWrapping="Wrap" />
+            <StackPanel Spacing="4" IsVisible="{Binding Plugins.InstallDialog.HasCapabilities}">
+              <TextBlock Text="{Binding Plugins.InstallDialog.CapabilitiesHeading}" FontWeight="SemiBold" />
+              <ItemsControl ItemsSource="{Binding Plugins.InstallDialog.Capabilities}" Grid.IsSharedSizeScope="True">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:PluginCapabilityChipViewModel">
+                    <Grid ColumnSpacing="8" Margin="0,0,0,3">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" SharedSizeGroup="CapabilityChip" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+                      <Border Classes="chip capability" HorizontalAlignment="Left" VerticalAlignment="Top"
+                              AutomationProperties.Name="{Binding AutomationName}">
+                        <TextBlock Text="{Binding Label}" />
+                      </Border>
+                      <TextBlock Grid.Column="1" Text="{Binding Note}" Classes="muted" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </StackPanel>
+          <StackPanel Grid.Row="4" Spacing="6">
+            <StackPanel Spacing="6" IsVisible="{Binding Plugins.InstallDialog.ShowEnableChoice}">
+              <TextBlock Text="Enable for" FontWeight="SemiBold" />
+              <RadioButton Content="None (enable later)" GroupName="PluginEnableChoice"
+                           IsChecked="{Binding Plugins.InstallDialog.EnableNone, Mode=TwoWay}"
+                           AutomationProperties.Name="Enable for no characters yet" />
+              <RadioButton Content="All characters" GroupName="PluginEnableChoice"
+                           IsChecked="{Binding Plugins.InstallDialog.EnableAll, Mode=TwoWay}"
+                           AutomationProperties.Name="Enable for all characters" />
+              <RadioButton Content="Choose characters" GroupName="PluginEnableChoice"
+                           IsChecked="{Binding Plugins.InstallDialog.EnableChoose, Mode=TwoWay}"
+                           AutomationProperties.Name="Choose characters to enable for" />
+              <ItemsControl ItemsSource="{Binding Plugins.InstallDialog.Characters}"
+                            IsVisible="{Binding Plugins.InstallDialog.IsChooseListVisible}" Margin="20,0,0,0">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:PluginCharacterChoiceViewModel">
+                    <CheckBox Content="{Binding DisplayName}" IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                              AutomationProperties.Name="{Binding DisplayName}" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+            <StackPanel Spacing="6" IsVisible="{Binding Plugins.InstallDialog.ShowKeepEnabledChoice}">
+              <TextBlock Text="New capabilities" FontWeight="SemiBold" />
+              <TextBlock Text="{Binding Plugins.InstallDialog.AffectedCharactersText}" TextWrapping="Wrap" />
+              <CheckBox Content="Keep enabled" IsChecked="{Binding Plugins.InstallDialog.KeepEnabled, Mode=TwoWay}"
+                        AutomationProperties.Name="Keep the plugin enabled for the characters it is already enabled for" />
+            </StackPanel>
+          </StackPanel>
+          <TextBlock Grid.Row="5" Text="{Binding Plugins.InstallDialog.Error}" Foreground="#FFB0A0"
+                     IsVisible="{Binding Plugins.InstallDialog.HasError}" TextWrapping="Wrap" />
+          <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button x:Name="InstallCancelButton" Content="Cancel" IsCancel="True" Command="{Binding Plugins.InstallDialog.CancelCommand}" />
+            <Button x:Name="InstallConfirmButton" Classes="primary" IsDefault="True"
+                    Command="{Binding Plugins.InstallDialog.ConfirmCommand}"
+                    AutomationProperties.Name="Confirm plugin install">
+              <Panel>
+                <TextBlock Text="{Binding Plugins.InstallDialog.ConfirmLabel}"
+                           IsVisible="{Binding !Plugins.InstallDialog.IsBusy}" VerticalAlignment="Center" />
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
+                            IsVisible="{Binding Plugins.InstallDialog.IsBusy}">
+                  <ProgressBar Classes="buttonspinner" IsIndeterminate="True" />
+                  <TextBlock Text="{Binding Plugins.InstallDialog.BusyLabel}" VerticalAlignment="Center" />
+                </StackPanel>
+              </Panel>
+            </Button>
+          </StackPanel>
+        </Grid>
+      </Border>
+    </Border>
+    <Border Grid.RowSpan="5" ZIndex="40" Background="#E010171C" IsVisible="{Binding Plugins.IsRemoveDialogOpen}"
+            KeyboardNavigation.TabNavigation="Cycle" KeyDown="OnModalKeyDown" AutomationProperties.Name="Remove plugin dialog">
+      <Border Classes="card" Margin="24" MaxWidth="480" VerticalAlignment="Center">
+        <StackPanel Spacing="10">
+          <TextBlock Text="{Binding Plugins.RemoveDisplayName}" FontSize="22" FontWeight="Bold" />
+          <TextBlock Text="This removes the plugin's files. Vtank profiles are kept; they live outside any plugin's scope." TextWrapping="Wrap" Classes="muted" />
+          <CheckBox Content="Also delete this plugin's saved settings"
+                    IsChecked="{Binding Plugins.RemoveDeleteStorage, Mode=TwoWay}"
+                    AutomationProperties.Name="Also delete this plugin's saved settings" />
+          <TextBlock Text="{Binding Plugins.Error}" Foreground="#FFB0A0" IsVisible="{Binding Plugins.HasError}" TextWrapping="Wrap" />
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button x:Name="RemoveCancelButton" Content="Cancel" IsCancel="True" Command="{Binding Plugins.CancelRemoveCommand}" />
+            <Button x:Name="RemoveConfirmButton" Content="Remove" Classes="danger" IsDefault="True"
+                    Command="{Binding Plugins.ConfirmRemoveCommand}"
+                    AutomationProperties.Name="Confirm plugin removal" />
+          </StackPanel>
+        </StackPanel>
       </Border>
     </Border>
   </Grid>

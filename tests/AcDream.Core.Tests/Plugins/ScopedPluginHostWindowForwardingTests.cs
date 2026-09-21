@@ -38,6 +38,7 @@ public sealed class ScopedPluginHostWindowForwardingTests
         nameof(IPluginHost.Hotkeys),
         nameof(IPluginHost.Automation),
         nameof(IPluginHost.SessionSettings),
+        nameof(IPluginHost.WorldLines), // layers are let go with the plugin
     ];
 
     [Fact]

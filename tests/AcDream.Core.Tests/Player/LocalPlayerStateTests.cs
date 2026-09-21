@@ -485,7 +485,7 @@ public sealed class LocalPlayerStateTests
                 | EnchantmentMath.EnchantmentTypeFlag.MultipleStat),
             StatModKey: 0u, StatModValue: 9f, Bucket: 2u));   // Society Knight's Blessing
         var s = new LocalPlayerState(book);
-        s.SkillFormulaBonusResolver = (skillId, attrs) => attrs[2u];   // Endurance, unscaled
+        s.SkillFormulaBonusResolver = (skillId, status, attrs) => attrs[2u];   // Endurance, unscaled
         s.OnAttributeUpdate(atType: 1u, ranks: 0u, start: 300u, xp: 0u);   // Strength base 300
         s.OnAttributeUpdate(atType: 2u, ranks: 0u, start: 200u, xp: 0u);   // Endurance base 200
         s.OnVitalUpdate(vitalId: 7u, ranks: 0u, start: 0u, xp: 0u, current: 0u);
@@ -567,7 +567,7 @@ public sealed class LocalPlayerStateTests
             StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Skill,
             StatModKey: 0x1Fu, StatModValue: 50f, Bucket: 2u));
         var s = new LocalPlayerState(book);
-        s.SkillFormulaBonusResolver = (skillId, attrs) => skillId == 0x1Fu
+        s.SkillFormulaBonusResolver = (skillId, status, attrs) => skillId == 0x1Fu
             ? (uint)Math.Floor((attrs[5u] + attrs[6u]) / 4d + 0.5d)
             : 0u;
         s.OnAttributeUpdate(atType: 5u, ranks: 0u, start: 251u, xp: 0u);
@@ -594,7 +594,7 @@ public sealed class LocalPlayerStateTests
 
         Assert.Equal(0, s.AttributeEnchantmentSkillDelta(24u));
 
-        s.SkillFormulaBonusResolver = (skillId, attrs) => attrs[3u];
+        s.SkillFormulaBonusResolver = (skillId, status, attrs) => attrs[3u];
         Assert.Equal(0, s.AttributeEnchantmentSkillDelta(24u));
         Assert.Equal(150, s.GetEffectiveSkill(24u));
 
@@ -662,7 +662,7 @@ public sealed class LocalPlayerStateTests
     {
         var s = new LocalPlayerState
         {
-            SkillFormulaBonusResolver = (skillId, attrs) =>
+            SkillFormulaBonusResolver = (skillId, status, attrs) =>
                 skillId == 33u && attrs.TryGetValue(4u, out uint coordination)
                     ? coordination / 4u
                     : 0u,

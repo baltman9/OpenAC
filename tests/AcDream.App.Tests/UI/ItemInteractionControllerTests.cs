@@ -46,6 +46,7 @@ public sealed class ItemInteractionControllerTests
         public readonly CombatState Combat = new();
         public readonly StackSplitQuantityState SplitQuantity = new();
         public readonly InventoryTransactionState SharedTransactions;
+        public readonly VendorState Vendor = new();
         public readonly RuntimeInteractionTransactionState RuntimeTransactions;
         public uint SelectedObject;
         public bool NonCombatMode;
@@ -73,11 +74,11 @@ public sealed class ItemInteractionControllerTests
                 ItemsCapacity = 24,
             });
             Objects.MoveItem(Pack, Player, 0);
-            SharedTransactions = new InventoryTransactionState(Objects);
+            SharedTransactions = new InventoryTransactionState(Objects, Vendor);
             RuntimeTransactions = new RuntimeInteractionTransactionState(
                 SharedTransactions);
 
-            Controller = new ItemInteractionController(
+            Controller = new RuntimeItemInteraction(
                 Objects,
                 RuntimeTransactions,
                 new InteractionState(),
@@ -145,7 +146,7 @@ public sealed class ItemInteractionControllerTests
                 });
         }
 
-        public ItemInteractionController Controller { get; }
+        public RuntimeItemInteraction Controller { get; }
 
         public ClientObject AddContained(uint id, Action<ClientObject>? configure = null)
         {
@@ -365,7 +366,9 @@ public sealed class ItemInteractionControllerTests
 
         Assert.Equal(new[] { item }, h.Examines);
         Assert.False(h.Controller.IsAnyTargetModeActive);
-        Assert.Equal(1, h.Controller.BusyCount);
+        Assert.Equal(1, h.Controller.AppraisalCount);
+        // The description holds no item action: a pick-up may still begin.
+        Assert.Equal(0, h.Controller.BusyCount);
     }
 
     [Fact]
@@ -376,7 +379,7 @@ public sealed class ItemInteractionControllerTests
         h.AddContained(item);
 
         Assert.True(h.Controller.TryAppraiseForAutomation(item));
-        ItemInteractionController.AppraisalResponseAcceptance acceptance =
+        RuntimeItemInteraction.AppraisalResponseAcceptance acceptance =
             h.Controller.AcceptAppraisalResponse(item);
 
         Assert.True(acceptance.Accepted);
@@ -562,14 +565,14 @@ public sealed class ItemInteractionControllerTests
 
         Assert.True(h.Controller.ExamineSelectedOrEnterMode(Player));
         Assert.Equal(new[] { Player }, h.Examines);
-        Assert.Equal(1, h.Controller.BusyCount);
+        Assert.Equal(1, h.Controller.AppraisalCount);
 
         Assert.True(h.Controller.ExamineSelectedOrEnterMode(0u));
         Assert.Equal(InteractionModeKind.Examine, h.Controller.InteractionState.Current.Kind);
         Assert.Equal(ItemPrimaryClickResult.ConsumedSuccess,
             h.Controller.OfferPrimaryClick(Pack));
         Assert.Equal(new[] { Player, Pack }, h.Examines);
-        Assert.Equal(1, h.Controller.BusyCount);
+        Assert.Equal(1, h.Controller.AppraisalCount);
         Assert.False(h.Controller.IsAnyTargetModeActive);
     }
 
@@ -598,7 +601,7 @@ public sealed class ItemInteractionControllerTests
         using var runtimeTransactions =
             new RuntimeInteractionTransactionState(transactions);
 
-        Assert.Throws<ArgumentException>(() => new ItemInteractionController(
+        Assert.Throws<ArgumentException>(() => new RuntimeItemInteraction(
             objects,
             runtimeTransactions,
             new InteractionState(),
@@ -610,31 +613,31 @@ public sealed class ItemInteractionControllerTests
     }
 
     [Fact]
-    public void AppraisalResponse_releasesOneBusyReferenceAndAcceptsCurrentRefresh()
+    public void AppraisalResponse_releasesOneAppraisalReferenceAndAcceptsCurrentRefresh()
     {
         var h = new Harness();
 
         Assert.True(h.Controller.ExamineSelectedOrEnterMode(Player));
         Assert.True(h.Controller.ExamineSelectedOrEnterMode(Pack));
-        Assert.Equal(1, h.Controller.BusyCount);
+        Assert.Equal(1, h.Controller.AppraisalCount);
 
         Assert.False(h.Controller.AcceptAppraisalResponse(Player).Accepted);
-        Assert.Equal(1, h.Controller.BusyCount);
+        Assert.Equal(1, h.Controller.AppraisalCount);
 
         var first = h.Controller.AcceptAppraisalResponse(Pack);
         Assert.True(first.Accepted);
         Assert.True(first.FirstResponse);
-        Assert.Equal(0, h.Controller.BusyCount);
+        Assert.Equal(0, h.Controller.AppraisalCount);
         Assert.Equal(Pack, h.Controller.CurrentAppraisalId);
 
         var refresh = h.Controller.AcceptAppraisalResponse(Pack);
         Assert.True(refresh.Accepted);
         Assert.False(refresh.FirstResponse);
-        Assert.Equal(0, h.Controller.BusyCount);
+        Assert.Equal(0, h.Controller.AppraisalCount);
     }
 
     [Fact]
-    public void RefreshCurrentAppraisal_sendsWithoutAcquiringBusyReference()
+    public void RefreshCurrentAppraisal_sendsWithoutAcquiringAReference()
     {
         var h = new Harness();
         Assert.True(h.Controller.ExamineSelectedOrEnterMode(Pack));
@@ -643,7 +646,7 @@ public sealed class ItemInteractionControllerTests
         Assert.True(h.Controller.RefreshCurrentAppraisal());
 
         Assert.Equal(new[] { Pack, Pack }, h.Examines);
-        Assert.Equal(0, h.Controller.BusyCount);
+        Assert.Equal(0, h.Controller.AppraisalCount);
     }
 
     [Fact]
@@ -2153,7 +2156,7 @@ public sealed class ItemInteractionControllerTests
         Assert.Empty(h.BackpackPlacements);
         Assert.False(h.Controller.TryGetPendingBackpackPlacement(item, out _));
         Assert.Equal(
-            new[] { ItemInteractionController.InventoryRequestBusyMessage },
+            new[] { RuntimeItemInteraction.InventoryRequestBusyMessage },
             h.SystemMessages);
     }
 
@@ -2172,7 +2175,7 @@ public sealed class ItemInteractionControllerTests
         Assert.Empty(h.Uses);
         Assert.True(h.Controller.TryGetPendingBackpackPlacement(pickup, out _));
         Assert.Equal(
-            new[] { ItemInteractionController.InventoryRequestBusyMessage },
+            new[] { RuntimeItemInteraction.InventoryRequestBusyMessage },
             h.SystemMessages);
     }
 
@@ -2190,7 +2193,7 @@ public sealed class ItemInteractionControllerTests
         Assert.Empty(h.Wields);
         Assert.Equal(EquipMask.None, h.Objects.Get(helm)!.CurrentlyEquippedLocation);
         Assert.Equal(
-            new[] { ItemInteractionController.InventoryRequestBusyMessage },
+            new[] { RuntimeItemInteraction.InventoryRequestBusyMessage },
             h.SystemMessages);
     }
 
@@ -2208,7 +2211,7 @@ public sealed class ItemInteractionControllerTests
         Assert.Empty(h.Uses);
         Assert.Equal(0, h.Controller.BusyCount);
         Assert.Equal(
-            new[] { ItemInteractionController.InventoryRequestBusyMessage },
+            new[] { RuntimeItemInteraction.InventoryRequestBusyMessage },
             h.SystemMessages);
     }
 
@@ -2232,7 +2235,7 @@ public sealed class ItemInteractionControllerTests
         Assert.True(h.Controller.TryGetPendingInventoryRequest(out var pending));
         Assert.Equal(moving, pending.ItemId);
         Assert.Equal(
-            new[] { ItemInteractionController.InventoryRequestBusyMessage },
+            new[] { RuntimeItemInteraction.InventoryRequestBusyMessage },
             h.SystemMessages);
 
         h.Objects.ApplyConfirmedServerMove(unrelated, Pack, 0u, 0);
@@ -2574,7 +2577,7 @@ public sealed class ItemInteractionControllerTests
         Assert.Equal(first, pending.ItemId);
         Assert.True(pending.Dispatched);
         Assert.Equal(
-            new[] { ItemInteractionController.InventoryRequestBusyMessage },
+            new[] { RuntimeItemInteraction.InventoryRequestBusyMessage },
             h.SystemMessages);
     }
 
@@ -2939,7 +2942,7 @@ public sealed class ItemInteractionControllerTests
     }
 
     [Fact]
-    public void TryBuy_CompleteUse_ReleasesTheReservationAndReenablesFurtherRequests()
+    public void TryBuy_OnlyMatchingVendorResponseReenablesFurtherRequests()
     {
         var h = new Harness();
         Assert.True(h.Controller.TryBuy(0x40001000u, 0x50002000u, 1, 0u));
@@ -2948,7 +2951,10 @@ public sealed class ItemInteractionControllerTests
         h.Controller.CompleteUse(0);
 
         Assert.Equal(0, h.Controller.BusyCount);
-        // The gate is free again -- a second Buy can now proceed.
+        Assert.True(h.SharedTransactions.HasPendingRequest);
+        Assert.False(h.Controller.TryBuy(0x40001000u, 0x50002001u, 1, 0u));
+        h.Vendor.Apply(0x40001000u, default, []);
+        Assert.False(h.SharedTransactions.HasPendingRequest);
         Assert.True(h.Controller.TryBuy(0x40001000u, 0x50002001u, 1, 0u));
         Assert.Equal(2, h.Buys.Count);
     }
@@ -3126,7 +3132,7 @@ public sealed class ItemInteractionControllerTests
     }
 
     [Fact]
-    public void TrySell_CompleteUse_ReleasesTheReservationAndReenablesFurtherRequests()
+    public void TrySell_MatchingVendorResponseReenablesFurtherRequests()
     {
         var h = new Harness();
         Assert.True(h.Controller.TrySell(
@@ -3136,6 +3142,9 @@ public sealed class ItemInteractionControllerTests
         h.Controller.CompleteUse(0);
 
         Assert.Equal(0, h.Controller.BusyCount);
+        Assert.False(h.Controller.TrySell(
+            0x40001000u, new (int Amount, uint ItemGuid)[] { (1, 0x50003001u) }));
+        h.Vendor.Apply(0x40001000u, default, []);
         Assert.True(h.Controller.TrySell(
             0x40001000u, new (int Amount, uint ItemGuid)[] { (1, 0x50003001u) }));
         Assert.Equal(2, h.Sells.Count);

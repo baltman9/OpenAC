@@ -13,12 +13,12 @@ public sealed class RetailItemConfirmationController : IDisposable
         "Are you sure you want to use this rare item?";
 
     private readonly RetailDialogFactory _dialogs;
-    private readonly ItemInteractionController _items;
+    private readonly RuntimeItemInteraction _items;
     private bool _disposed;
 
     public RetailItemConfirmationController(
         RetailDialogFactory dialogs,
-        ItemInteractionController items)
+        RuntimeItemInteraction items)
     {
         _dialogs = dialogs ?? throw new ArgumentNullException(nameof(dialogs));
         _items = items ?? throw new ArgumentNullException(nameof(items));

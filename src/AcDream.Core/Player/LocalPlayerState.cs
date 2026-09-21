@@ -167,7 +167,8 @@ public sealed class LocalPlayerState
         {
             return 0;
         }
-        uint enchanted = resolver(skillId, EnchantedAttributeCurrentsById());
+        uint enchanted = resolver(
+            skillId, snap.Status, EnchantedAttributeCurrentsById());
         return checked((int)Math.Min(int.MaxValue, enchanted))
             - checked((int)Math.Min(int.MaxValue, snap.FormulaBonus));
     }
@@ -383,7 +384,7 @@ public sealed class LocalPlayerState
         double lastUsed)
     {
         uint formulaBonus = SkillFormulaBonusResolver is { } resolver
-            ? resolver(skillId, AttributeCurrentsById())
+            ? resolver(skillId, status, AttributeCurrentsById())
             : _skills.TryGetValue(skillId, out var prev)
                 ? prev.FormulaBonus
                 : 0u;
@@ -392,7 +393,8 @@ public sealed class LocalPlayerState
         CharacterChanged?.Invoke();
     }
 
-    public Func<uint /*skillId*/, IReadOnlyDictionary<uint, uint> /*attrCurrents*/, uint>?
+    public Func<uint /*skillId*/, uint /*advancementClass*/,
+        IReadOnlyDictionary<uint, uint> /*attrCurrents*/, uint>?
         SkillFormulaBonusResolver { get; set; }
 
     public void RecomputeSkillFormulaBonuses()
@@ -403,7 +405,7 @@ public sealed class LocalPlayerState
         foreach (uint skillId in _skills.Keys.ToArray())
         {
             SkillSnapshot snap = _skills[skillId];
-            uint bonus = resolver(skillId, currents);
+            uint bonus = resolver(skillId, snap.Status, currents);
             if (bonus != snap.FormulaBonus)
                 _skills[skillId] = snap with { FormulaBonus = bonus };
         }

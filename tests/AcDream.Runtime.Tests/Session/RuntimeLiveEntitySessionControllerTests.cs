@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Net;
 using AcDream.Core.Combat;
 using AcDream.Core.Items;
@@ -5,8 +6,10 @@ using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 using AcDream.Core.Spells;
+using AcDream.Plugin.Abstractions;
 using AcDream.Runtime.Entities;
 using AcDream.Runtime.Gameplay;
+using AcDream.Runtime.Plugins;
 using AcDream.Runtime.Session;
 using AcDream.Runtime.World;
 
@@ -14,6 +17,145 @@ namespace AcDream.Runtime.Tests.Session;
 
 public sealed class RuntimeLiveEntitySessionControllerTests
 {
+    /// <summary>
+    /// Mutation pin: compare the header flag byte to zero instead of the
+    /// packed motion word. The first accepted receipt is lost, and a packed
+    /// nonzero receipt may be accepted.
+    /// Mutation executed: <c>update.PackedMotionFlags == 0u was replaced with update.TypeFlags == 0u</c>.
+    /// </summary>
+    /// <summary>
+    /// Mutation executed: the <c>RuntimeInventoryChange.Added</c> initial
+    /// placement forwarding block was removed; an equipped object arriving
+    /// after the surface had bound then never reached the equipment tracker.
+    /// </summary>
+    [Fact]
+    public void SelfMotionReceiptUsesParsedTypeAndPackedWord()
+    {
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        const uint playerId = 0x50000005u;
+        runtime.PlayerIdentity.ServerGuid = playerId;
+        using var session = new WorldSession(
+            new IPEndPoint(IPAddress.Loopback, 9000),
+            new FixtureTransport());
+        var controller = new RuntimeLiveEntitySessionController(runtime, session);
+        LiveEntitySessionSink sink = controller.CreateSink();
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+
+        SendMotion(sink, playerId, type: 0, headerFlags: 4, packed: 0);
+        Assert.Equal(1, runtime.ActionOwner.CombatMode.QualifiedSelfMotionRevision);
+        SendMotion(sink, playerId, type: 0, headerFlags: 0, packed: 1);
+        SendMotion(sink, playerId, type: 6, headerFlags: 0, packed: 0);
+        SendMotion(sink, playerId + 1, type: 0, headerFlags: 0, packed: 0);
+        Assert.Equal(1, runtime.ActionOwner.CombatMode.QualifiedSelfMotionRevision);
+        Assert.True(surface.IsAvailable);
+        ICombatAutomation combat = surface.Combat;
+        Assert.Equal(1, combat.Snapshot.QualifiedSelfMotionRevision);
+    }
+
+    private static void SendMotion(
+        LiveEntitySessionSink sink, uint objectId,
+        byte type, byte headerFlags, uint packed)
+    {
+        var body = new byte[24];
+        BinaryPrimitives.WriteUInt32LittleEndian(body, UpdateMotion.Opcode);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(4), objectId);
+        body[16] = type;
+        body[17] = headerFlags;
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(20), packed);
+        UpdateMotion.Parsed parsed = Assert.IsType<UpdateMotion.Parsed>(
+            UpdateMotion.TryParse(body));
+        sink.MotionUpdated(new WorldSession.EntityMotionUpdate(
+            parsed.Guid,
+            parsed.MotionState,
+            parsed.InstanceSequence,
+            parsed.MovementSequence,
+            parsed.ServerControlSequence,
+            parsed.IsAutonomous)
+        {
+            TypeFlags = parsed.TypeFlags,
+            PackedMotionFlags = parsed.PackedMotionFlags,
+        });
+    }
+
+    /// <summary>
+    /// Mutation pin: forward every object move as equipment. The optimistic
+    /// movement adds an extra receipt before the server-confirmed wield.
+    /// Mutation executed: <c>the OnEquipmentObjectMoved origin comparison was inverted from != to ==</c>.
+    /// Mutation executed: the <c>RuntimeInventoryChange.Added</c> initial
+    /// placement forwarding block was removed; an equipped object arriving
+    /// after the surface had bound then never reached the equipment tracker.
+    /// </summary>
+    [Fact]
+    public void EquipmentSurfacePublishesInitialEquippedAndAuthoritativePlacementsInArrivalOrder()
+    {
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        const uint playerId = 0x50000005u;
+        const uint itemId = 0x50000010u;
+        runtime.PlayerIdentity.ServerGuid = playerId;
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        Assert.True(surface.IsAvailable);
+        IEquipmentAutomation equipment = surface.Equipment;
+        ClientObjectTable objects = runtime.InventoryOwner.Objects;
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = itemId,
+            Name = "Sword",
+            ContainerId = playerId,
+            ValidLocations = EquipMask.MeleeWeapon,
+        });
+        Assert.Equal(
+            objects.Objects.Select(static item => item.ObjectId),
+            equipment.CaptureWorldPlacementsInOrder()
+                .Select(static placement => placement.ObjectId));
+        var received = new List<PluginEquipmentObservation>();
+        equipment.PlacementObserved += received.Add;
+
+        const uint initialId = 0x50000011u;
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = initialId,
+            Name = "Held Sword",
+            ContainerId = playerId,
+            WielderId = playerId,
+            ValidLocations = EquipMask.MeleeWeapon,
+            CurrentlyEquippedLocation = EquipMask.MeleeWeapon,
+        });
+        Assert.Equal(
+            [new PluginEquipmentObservation(
+                initialId, (uint)EquipMask.MeleeWeapon, false)
+            {
+                IsInitialPlacement = true,
+            }],
+            received);
+
+        Assert.True(objects.MoveItemOptimistic(itemId, playerId, 0));
+        Assert.Single(received);
+        Assert.True(objects.ApplyConfirmedServerWield(
+            itemId, playerId, EquipMask.MeleeWeapon));
+        Assert.True(objects.ApplyConfirmedServerMove(
+            itemId, playerId, newWielderId: 0u));
+
+        Assert.Equal(
+            [
+                new PluginEquipmentObservation(
+                    initialId, (uint)EquipMask.MeleeWeapon, false)
+                {
+                    IsInitialPlacement = true,
+                },
+                new PluginEquipmentObservation(
+                    itemId, (uint)EquipMask.MeleeWeapon, false),
+                new PluginEquipmentObservation(itemId, 0u, true),
+            ],
+            received);
+        surface.Unbind();
+        objects.ApplyConfirmedServerWield(itemId, playerId, EquipMask.MeleeWeapon);
+        Assert.Equal(3, received.Count);
+    }
+
     [Fact]
     public void DirectSinkOwnsCanonicalCreateUpdateDeleteWithoutProjection()
     {
@@ -788,6 +930,92 @@ public sealed class RuntimeLiveEntitySessionControllerTests
         Assert.Equal(movedCell, unbound.FullCellId);
     }
 
+    /// <summary>
+    /// Mutation pin: remove the step that writes down the server's word about
+    /// where another creature is. The creature then looks newly sighted on
+    /// every update, so a client with no window puts its body where the server
+    /// said instead of letting it walk there, and never knows its speed.
+    /// </summary>
+    [Fact]
+    public void AcceptedRemotePosition_RemembersTheServersWordAndTheCreaturesSpeed()
+    {
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        CommitLandblockCollision(runtime, 0x01010000u);
+        RuntimeFirstEntryDriveController drive = CreateDrive(runtime);
+        using var session = new WorldSession(
+            new IPEndPoint(IPAddress.Loopback, 9000),
+            new FixtureTransport());
+        var controller = new RuntimeLiveEntitySessionController(
+            runtime,
+            session,
+            worldProjection: new FixtureWorldProjection());
+        controller.BindRemoteArming(
+            AcDream.Runtime.Physics.RuntimeRemoteArming.Create(
+                runtime.EntityObjects,
+                runtime.Clock,
+                new UnusedCollisionSource(),
+                new EveryDestination()));
+        LiveEntitySessionSink sink = controller.CreateSink();
+        WorldSession.EntitySpawn spawn =
+            SpawnAt(0x70000060u, incarnation: 1, 0x01010001u);
+
+        sink.Spawned(spawn);
+        DrainFirstEntry(runtime, drive);
+        Assert.True(runtime.EntityObjects.Entities.TryGetActive(
+            spawn.Guid,
+            out RuntimeEntityRecord remote));
+
+        const uint movedCell = 0x01010011u;
+        sink.PositionUpdated(PositionUpdate(
+            spawn.Guid,
+            movedCell,
+            positionX: 40f,
+            positionSequence: 2));
+
+        var body = Assert.IsType<AcDream.Runtime.Physics.RemoteMotion>(
+            remote.RemoteMotion);
+        Assert.True(
+            body.LastServerPosTime > 0d,
+            "The arrival of the server's word was never written down.");
+        Assert.Equal(
+            runtime.EntityObjects.Physics.WireOriginToWorldFrame(
+                movedCell, 40f, 10f, 5f),
+            body.LastServerPos);
+        // A body whose last word was written down is no longer a first
+        // sighting, so the next word near it is something to catch up to.
+        Assert.False(
+            AcDream.Runtime.Physics.RuntimeRemoteSteadyStatePosition.WouldSnap(
+                body,
+                body.Body.Position,
+                willBeDrTicked: true));
+
+        sink.PositionUpdated(PositionUpdate(
+            spawn.Guid,
+            movedCell,
+            positionX: 41f,
+            positionSequence: 3) with
+        {
+            Velocity = new System.Numerics.Vector3(1f, 0f, 0f),
+        });
+
+        Assert.True(body.HasServerVelocity);
+        Assert.Equal(
+            new System.Numerics.Vector3(1f, 0f, 0f),
+            body.ServerVelocity);
+        Assert.Equal(
+            runtime.EntityObjects.Physics.WireOriginToWorldFrame(
+                movedCell, 41f, 10f, 5f),
+            body.LastServerPos);
+    }
+
+    /// <summary>Any landblock is serviceable; the fixture has one.</summary>
+    private sealed class EveryDestination
+        : IRuntimeRemotePlacementServiceWindow
+    {
+        public bool IsWithinServiceWindow(uint landblockId) => true;
+    }
+
     private static WorldSession.EntityPositionUpdate PositionUpdate(
         uint guid,
         uint cellId,
@@ -1223,12 +1451,12 @@ public sealed class RuntimeLiveEntitySessionControllerTests
         private GameRuntime? _runtime;
 
         public void Bind(GameRuntime runtime) => _runtime = runtime;
-        public bool CanStartAttack() => false;
+        public bool CanStartAttack(bool allowAutoTarget) => false;
         public void PrepareAttackRequest()
         {
         }
 
-        public bool SendAttack(AttackHeight height, float power) => false;
+        public bool SendAttack(AttackHeight height, float power, bool allowAutoTarget) => false;
         public void SendCancelAttack()
         {
         }

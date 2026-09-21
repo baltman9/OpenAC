@@ -74,16 +74,8 @@ internal sealed class RuntimeFirstEntryDriveController
         };
     }
 
-    private long _driveAllCalls;
-
     internal void DriveAll()
     {
-        if (Core.Physics.PhysicsDiagnostics.ProbeParkEnabled
-            && (++_driveAllCalls <= 5 || _driveAllCalls % 300 == 0))
-        {
-            Console.WriteLine(FormattableString.Invariant(
-                $"[pump] DriveAll #{_driveAllCalls} pending={_pending.Count}"));
-        }
         if (_driving || _pending.Count == 0)
             return;
         _driving = true;

@@ -9,6 +9,37 @@ public sealed class InventoryTransactionStateTests
     private const uint First = 0x60000001u;
     private const uint Second = 0x60000002u;
 
+    /// <summary>
+    /// Mutation pin: omit matching vendor-response completion by forcing the
+    /// Shop transition guard true; the final pending assertion fails.
+    /// </summary>
+    [Fact]
+    public void ShopRequestWaitsForMatchingVendorResponseOrFailure()
+    {
+        var objects = CreateTable();
+        var vendor = new VendorState();
+        using var state = new InventoryTransactionState(objects, vendor);
+        const uint firstVendor = 0x40001000u;
+        const uint secondVendor = 0x40002000u;
+
+        Assert.True(state.TryDispatch(InventoryRequestKind.Shop, firstVendor,
+            static () => true));
+        Assert.Equal(0, state.BusyCount);
+        Assert.True(state.HasPendingRequest);
+        state.CompleteUse(0u);
+        Assert.True(objects.ApplyConfirmedServerMove(First, Player, 0u, 0));
+        vendor.Apply(secondVendor, default, []);
+        Assert.True(state.HasPendingRequest);
+
+        vendor.Apply(firstVendor, default, []);
+        Assert.False(state.HasPendingRequest);
+
+        Assert.True(state.TryDispatch(InventoryRequestKind.Shop, firstVendor,
+            static () => true));
+        objects.RejectMove(First, 3u);
+        Assert.False(state.HasPendingRequest);
+    }
+
     [Fact]
     public void ReserveClosesReentrantDispatchWindowAndSuccessfulSendCommits()
     {

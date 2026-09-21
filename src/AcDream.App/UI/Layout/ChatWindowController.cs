@@ -65,7 +65,17 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
 
     // ── Private state ──────────────────────────────────────────────────────
 
-    private ChatChannelKind _activeChannel = ChatChannelKind.Say;
+    /// <summary>
+    /// The chat entry itself: the draft, where a line goes when it is sent,
+    /// and what was sent before. Shared with every other front end that can be
+    /// typed into, so this window is one view of it rather than its owner.
+    /// Every caller supplies it: a window that made its own would look like a
+    /// chat box that forgets what was typed into the client elsewhere.
+    /// </summary>
+    private RuntimeChatEntryOwner _entry = null!;
+
+    /// <summary>The chat entry this window is a view of.</summary>
+    internal RuntimeChatEntryOwner Entry => _entry;
 
     private ChatWindowState _windowFilters = null!;
 
@@ -102,9 +112,6 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
         Squelch,
         TellToSelected,
     }
-
-    private string? _tellTarget;
-    private uint _tellTargetGuid;
 
     private Func<string, string?>? _chatStrings;
     internal Action<PluginChatLinkClicked>? ChatLinkClicked { get; set; }
@@ -186,6 +193,7 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
         UiDatFont? datFont,
         BitmapFont? debugFont,
         Func<uint, (uint tex, int w, int h)> resolve,
+        RuntimeChatEntryOwner entry,
         Func<string?>? selectedTargetName = null,
         Func<uint>? selectedTargetGuid = null,
         Func<string, string?>? chatStrings = null,
@@ -193,6 +201,7 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
         Func<bool>? stayInChatMode = null)
     {
         ArgumentNullException.ThrowIfNull(windowFilters);
+        ArgumentNullException.ThrowIfNull(entry);
 
         // Their parent panels must exist as real widgets in the layout tree.
         var transcriptPanel = layout.FindElement(TranscriptPanelId);
@@ -216,6 +225,7 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
             DatWindowInfo = FindInfo(rootInfo, RootId) ?? rootInfo,
             _windowFilters = windowFilters,
             _chatStrings = chatStrings,
+            _entry = entry,
         };
 
         foreach (uint id in LockedTwinIds)
@@ -262,13 +272,25 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
         c.Input.SpriteResolve = resolve;
         c.Input.TextReplacer = text =>
             ChatTextReplacements.Expand(text, vm.LastIncomingTellSender);
-        c.Input.OnSubmit = text => ChatCommandRouter.Submit(
-            text,
-            vm,
-            busProvider(),
-            c._activeChannel,
-            c._tellTarget,
-            c._tellTargetGuid);
+        // The entry owner sends the line, remembers it and clears the draft;
+        // the field keeps the caret, the selection and the drawing.
+        c.Input.RecordHistory = false;
+        c.Input.SharedHistory = c._entry;
+        c.Input.OnSubmit = text => c._entry.Submit(text, vm, busProvider());
+        c.Input.OnTextChanged = text => c._entry.SetDraft(text);
+        c._entry.DraftChanged += text =>
+        {
+            if (!string.Equals(c.Input.Text, text, StringComparison.Ordinal))
+                c.Input.ShowText(text);
+        };
+        c._entry.BindEntryFocus(() =>
+        {
+            UiRoot? root = FindRootOf(c.Input);
+            if (root is null)
+                return false;
+            root.SetKeyboardFocus(c.Input);
+            return true;
+        });
         c.Input.StayFocusedAfterSubmit = stayInChatMode;
 
         if (c.Input.LayoutPolicy is { } inputPolicy)
@@ -333,32 +355,29 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
             }
 
             RebuildItems();
-            menu.Selected = (object?)c._activeChannel;
+            menu.Selected = (object?)c._entry.ActiveChannel;
             menu.EnabledProvider = p => p switch
             {
                 ChatChannelKind ch => ChannelAvailable(ch),
                 TalkFocusSpecial => SelectedName() is not null,
                 _ => true,
             };
-            menu.ButtonLabelProvider = () => c.ChannelButtonLabel(c._activeChannel);
+            menu.ButtonLabelProvider = () => c.ChannelButtonLabel(c._entry.ActiveChannel);
             menu.OnOpen = RebuildItems;
             menu.OnSelect = p =>
             {
                 switch (p)
                 {
                     case ChatChannelKind ch:
-                        c._activeChannel = ch;
-                        c._tellTarget = null;
-                        c._tellTargetGuid = 0u;
+                        c._entry.SetChannel(ch);
                         menu.Selected = p;
                         break;
 
                     case TalkFocusSpecial.TellToSelected when SelectedName() is { } name:
-                        c._activeChannel = ChatChannelKind.Tell;
-                        c._tellTarget = name;
                         // Keep the picked object's id: speaking to whoever is
                         // selected aims at the object, not at its name.
-                        c._tellTargetGuid = selectedTargetGuid?.Invoke() ?? 0u;
+                        c._entry.SetTellTarget(
+                            name, selectedTargetGuid?.Invoke() ?? 0u);
                         menu.Selected = p;
                         break;
 

@@ -1,4 +1,5 @@
 using AcDream.Launcher.Core.Launching;
+using AcDream.Launcher.Core.Plugins;
 using AcDream.Launcher.Core.Profiles;
 
 namespace AcDream.Launcher.Core.Orchestration;
@@ -32,6 +33,17 @@ public interface ILauncherOrchestrator : IDisposable
         LauncherInstallRecord? installRecord,
         string installationStatus) =>
         SetInstallRecord(installRecord);
+
+    /// <summary>The catalog the next launched session filters blocked ids against. A
+    /// no-op default, since most fakes never exercise a launched session's plugin allow-list.</summary>
+    void SetPluginCatalog(PluginCatalog? catalog)
+    {
+    }
+
+    /// <summary>Launcher-wide: offers a beta-only plugin in Discover and Add from URL when true. A no-op default, since most fakes never exercise it.</summary>
+    void SetShowBetaPlugins(bool value)
+    {
+    }
 
     void AddServer(string name, string host, int port);
 
@@ -69,6 +81,13 @@ public interface ILauncherOrchestrator : IDisposable
         LaunchMode launchMode,
         IReadOnlyList<string> plugins,
         IReadOnlyList<string> loginCommands);
+
+    /// <summary>Remembers the character and launch mode an account's row is set to.</summary>
+    void UpdateAccountSelection(
+        string serverName,
+        string accountName,
+        string? selectedCharacter,
+        LaunchMode selectedLaunchMode);
 
     void RemoveCharacter(
         string serverName,

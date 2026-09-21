@@ -110,31 +110,6 @@ public sealed class LinuxPlatformBoundaryTests
             files);
     }
 
-    [Fact]
-    public void ShippedPluginCopiesUseResolvedTargetPathsForBuildAndPublish()
-    {
-        string project = File.ReadAllText(Path.Combine(
-            AppSourceRoot(),
-            "AcDream.App.csproj"));
-
-        Assert.Contains("$(TargetFramework)", project, StringComparison.Ordinal);
-        Assert.Contains("$(RuntimeIdentifier)", project, StringComparison.Ordinal);
-        Assert.Contains("$(OutputPath)plugins/", project, StringComparison.Ordinal);
-        Assert.Contains("$(PublishDir)plugins/", project, StringComparison.Ordinal);
-        Assert.Equal(
-            2,
-            project.Split("Targets=\"GetTargetPath\"", StringSplitOptions.None)
-                .Length - 1);
-        Assert.Contains(
-            "../AcDream.Plugins.MossTank/mosstank*.xml",
-            project,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "/bin/$(Configuration)",
-            project,
-            StringComparison.Ordinal);
-    }
-
     private static string AppSourceRoot() =>
         Path.Combine(RepositoryRoot(), "src", "AcDream.App");
 

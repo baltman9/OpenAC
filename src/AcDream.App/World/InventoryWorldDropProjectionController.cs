@@ -8,7 +8,7 @@ namespace AcDream.App.World;
 
 internal sealed class InventoryWorldDropProjectionController : IDisposable
 {
-    private readonly ItemInteractionController _interaction;
+    private readonly RuntimeItemInteraction _interaction;
     private readonly ClientObjectTable _objects;
     private readonly LiveEntityRuntime _runtime;
     private readonly LiveEntityHydrationController _hydration;
@@ -18,7 +18,7 @@ internal sealed class InventoryWorldDropProjectionController : IDisposable
     private bool _disposed;
 
     public InventoryWorldDropProjectionController(
-        ItemInteractionController interaction,
+        RuntimeItemInteraction interaction,
         ClientObjectTable objects,
         LiveEntityRuntime runtime,
         LiveEntityHydrationController hydration,

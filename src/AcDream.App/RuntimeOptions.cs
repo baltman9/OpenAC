@@ -64,7 +64,41 @@ public sealed record RuntimeOptions(
 
     public IReadOnlyList<string> PluginTags { get; init; } = [];
 
+    /// <summary>
+    /// The character options this session was told to arrive with, read from
+    /// the session document. They belong to the character on the server, so
+    /// the client seeds them once, on login, and only where they differ from
+    /// what the server says the character already has. Empty when the client
+    /// was started without a session document, which is every ordinary launch:
+    /// a player who sets an option in the panels is never overruled by this.
+    /// </summary>
+    public IReadOnlyDictionary<
+        AcDream.Core.Net.Messages.CharacterOptionId,
+        bool> DeclaredCharacterOptions { get; init; } =
+        new Dictionary<AcDream.Core.Net.Messages.CharacterOptionId, bool>();
+
     public string? VtankProfileDirectoryOverride { get; init; }
+
+    /// <summary>
+    /// Path to a JSON file holding the startup settings this client was
+    /// started with for each plugin: one object of settings per plugin id.
+    /// Unset means none. The file is the same map a session configuration
+    /// names under <c>pluginSettings</c>, so a plugin reads the same settings
+    /// whichever client is running.
+    /// </summary>
+    public string? PluginSettingsFile { get; init; }
+
+    /// <summary>
+    /// The per-plugin startup settings the session configuration itself
+    /// named, or null when it named none. A session configuration is the
+    /// more specific instruction, so when it carries these the client uses
+    /// them and leaves <see cref="PluginSettingsFile"/> unread.
+    /// </summary>
+    public AcDream.Runtime.Plugins.PluginSessionSettings? SessionPluginSettings
+    {
+        get;
+        init;
+    }
 
     /// <summary>
     /// Build options from the process environment. Used by
@@ -147,6 +181,8 @@ public sealed record RuntimeOptions(
         {
             PluginTags = ParsePluginTags(env("ACDREAM_PLUGIN_TAGS")),
             VtankProfileDirectoryOverride = NullIfEmpty(env("ACDREAM_VTANK_PROFILE_DIR")),
+            PluginSettingsFile =
+                NullIfEmpty(env("ACDREAM_PLUGIN_SETTINGS_FILE")),
         };
     }
 
@@ -186,6 +222,20 @@ public sealed record RuntimeOptions(
             Plugins = session.Plugins,
             LoginCommands = (IReadOnlyList<string>?)session.LoginCommands ?? [],
             LoginCommandDelayMs = session.LoginCommandDelayMs,
+            // A session configuration is the more specific instruction, so
+            // what it names outranks the launch options for the same thing;
+            // what it leaves out still falls back to them.
+            PluginTags = session.PluginTags is { } tags
+                ? tags
+                : baseOptions.PluginTags,
+            SessionPluginSettings = session.PluginSettings is { } declared
+                ? AcDream.Runtime.Plugins.PluginSessionSettings.FromDeclared(
+                    declared)
+                : null,
+            DeclaredCharacterOptions =
+                AcDream.Runtime.Gameplay.RuntimeDeclaredCharacterOptions.Parse(
+                    session.Id,
+                    session.CharacterOptions),
         };
     }
 

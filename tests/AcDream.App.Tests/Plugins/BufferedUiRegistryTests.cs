@@ -70,22 +70,22 @@ public class BufferedUiRegistryTests
     public void FirstClassPanelCarriesManifestOwnerAndStableWindowIdentity()
     {
         var registry = new BufferedUiRegistry();
-        var descriptor = new PluginPanelDescriptor("main", "MossTank")
+        var descriptor = new PluginPanelDescriptor("main", "Tank")
         {
             IconText = "MT",
             StartVisible = false,
         };
 
         registry.RegisterPanel(
-            new PluginUiOwner("acdream.mosstank", "MossTank"),
+            new PluginUiOwner("edwards.tank", "Tank"),
             descriptor,
-            "mosstank.xml",
+            "tank.xml",
             new object());
 
         BufferedUiRegistry.Pending pending = Assert.Single(registry.Drain());
-        Assert.Equal("acdream.mosstank", pending.Owner.Id);
+        Assert.Equal("edwards.tank", pending.Owner.Id);
         Assert.Same(descriptor, pending.Descriptor);
-        Assert.Equal("plugin:acdream.mosstank:main", pending.WindowName);
+        Assert.Equal("plugin:edwards.tank:main", pending.WindowName);
         Assert.False(pending.Descriptor.StartVisible);
     }
 
@@ -94,14 +94,14 @@ public class BufferedUiRegistryTests
     {
         var registry = new BufferedUiRegistry();
         IDisposable token = registry.RegisterPanelContent(
-            new PluginUiOwner("acdream.mosstank", "MossTank"),
+            new PluginUiOwner("edwards.tank", "Tank"),
             new PluginPanelDescriptor("meta-status", "Status"),
             "<panel w=\"100\" h=\"50\" />",
             new object());
 
         BufferedUiRegistry.Pending pending = Assert.Single(registry.Drain());
         Assert.Equal("<panel w=\"100\" h=\"50\" />", pending.MarkupContent);
-        Assert.Equal("plugin:acdream.mosstank:meta-status", pending.WindowName);
+        Assert.Equal("plugin:edwards.tank:meta-status", pending.WindowName);
 
         token.Dispose();
         Assert.Equal(0, registry.RegistrationCount);
@@ -126,7 +126,7 @@ public class BufferedUiRegistryTests
     public void ScopedViewsExposeOnlyTheirOwnNamedControls()
     {
         var registry = new BufferedUiRegistry();
-        var owner = new PluginUiOwner("acdream.mosstank", "MossTank");
+        var owner = new PluginUiOwner("edwards.tank", "Tank");
         registry.RegisterPanelContent(
             owner,
             new PluginPanelDescriptor("meta", "Status View"),

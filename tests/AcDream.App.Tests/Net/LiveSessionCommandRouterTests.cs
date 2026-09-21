@@ -19,7 +19,7 @@ public sealed class LiveSessionCommandRouterTests
     {
         using var communication = new RuntimeCommunicationState();
         var calls = new List<string>();
-        ClientCommandController.Bindings client = NewClientBindings() with
+        RuntimeClientCommandDispatcher.Bindings client = NewClientBindings() with
         {
             QueryAge = () => calls.Add("client:age"),
         };
@@ -58,7 +58,7 @@ public sealed class LiveSessionCommandRouterTests
     public void GraphicalRouteKeepsWireOnlyClientCommandParityWithHeadless()
     {
         var calls = new List<string>();
-        ClientCommandController.Bindings client = NewClientBindings() with
+        RuntimeClientCommandDispatcher.Bindings client = NewClientBindings() with
         {
             AddPlayerPermission = name =>
                 calls.Add($"permit:add:{name}"),
@@ -105,7 +105,7 @@ public sealed class LiveSessionCommandRouterTests
     public void AdministrationBindings_UseTheSameActivationAndDisposalGuard()
     {
         var calls = new List<string>();
-        ClientCommandController.Bindings client = NewClientBindings() with
+        RuntimeClientCommandDispatcher.Bindings client = NewClientBindings() with
         {
             Administration = NewAdministrationBindings() with
             {
@@ -636,7 +636,7 @@ public sealed class LiveSessionCommandRouterTests
     public void ShowWeenieErrorFriendsFull_ResolvesThroughAddText_AndLandsInSpewBoxNotChat()
     {
         var communication = new RuntimeCommunicationState();
-        ClientCommandController.Bindings bindings = NewClientBindings() with
+        RuntimeClientCommandDispatcher.Bindings bindings = NewClientBindings() with
         {
             Friends = communication.Friends,
             ShowWeenieError = code =>
@@ -676,7 +676,7 @@ public sealed class LiveSessionCommandRouterTests
         Action<uint, uint, uint, uint, string, uint>? sendTurbine = null,
         Action<ShortcutEntry>? addShortcut = null,
         Action<string>? log = null,
-        ClientCommandController.Bindings? clientBindings = null,
+        RuntimeClientCommandDispatcher.Bindings? clientBindings = null,
         RuntimeCommunicationState? communication = null,
         RuntimeCharacterState? characterState = null,
         Action<uint, bool>? sendSingleCharacterOption = null,
@@ -734,6 +734,9 @@ public sealed class LiveSessionCommandRouterTests
             SendAllegianceKick: _ => { },
             SendAllegianceInfoRequest: _ => { },
             SendAllegianceUpdateRequest: _ => { },
+            ResolvePose: _ => null,
+            ExecuteMotion: _ => { },
+            SendSoulEmote: _ => { },
             Log: log));
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -753,7 +756,7 @@ public sealed class LiveSessionCommandRouterTests
         object transport = new object();
         var weak = new WeakReference<object>(transport);
         Action<bool>? callback = null;
-        ClientCommandController.Bindings bindings = NewClientBindings() with
+        RuntimeClientCommandDispatcher.Bindings bindings = NewClientBindings() with
         {
             ShowConfirmation = (_, completion) => callback = completion,
             Suicide = () => GC.KeepAlive(transport),
@@ -772,7 +775,7 @@ public sealed class LiveSessionCommandRouterTests
         GC.Collect();
     }
 
-    private static ClientCommandController.Bindings NewClientBindings() => new(
+    private static RuntimeClientCommandDispatcher.Bindings NewClientBindings() => new(
         TeleportToLifestone: () => { },
         TeleportToMarketplace: () => { },
         TeleportToPkArena: () => { },
@@ -840,7 +843,7 @@ public sealed class LiveSessionCommandRouterTests
         SetLandscapeRadius: _ => { },
         SetFieldOfView: _ => { });
 
-    private static ClientCommandController.AdministrationBindings
+    private static RuntimeClientCommandDispatcher.AdministrationBindings
         NewAdministrationBindings() => new(
             BreakAllegianceBoot: (_, _) => { },
             AllegianceChatBoot: (_, _) => { },

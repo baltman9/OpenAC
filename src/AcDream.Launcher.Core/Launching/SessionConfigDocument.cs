@@ -62,6 +62,30 @@ public sealed class SessionDescriptor
 
     public List<string>? Plugins { get; init; }
 
+    /// <summary>
+    /// The words this session wants to be found by. Plugins on the clients
+    /// running on one machine can see one another's tags and filter on them.
+    /// Omitted leaves the client falling back to its own startup option.
+    /// </summary>
+    public List<string>? PluginTags { get; init; }
+
+    /// <summary>
+    /// The startup settings each plugin is given, keyed by plugin id and then
+    /// by setting name. Omitted leaves the client falling back to the settings
+    /// file its startup options name.
+    /// </summary>
+    public Dictionary<string, Dictionary<string, string>>? PluginSettings
+    {
+        get; init;
+    }
+
+    /// <summary>
+    /// The character options this session should arrive with, keyed by option
+    /// name. Both clients check them against the same declarable list and seed
+    /// the difference on login.
+    /// </summary>
+    public Dictionary<string, bool>? CharacterOptions { get; init; }
+
     public List<string>? LoginCommands { get; init; }
 
     public int? LoginCommandDelayMs { get; init; }

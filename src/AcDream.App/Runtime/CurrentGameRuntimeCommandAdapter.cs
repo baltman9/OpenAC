@@ -35,7 +35,7 @@ internal sealed class CurrentGameRuntimeCommandAdapter
     private readonly RuntimeActionState _actions;
     private readonly RuntimeLocalPlayerMovementState _movement;
     private readonly RuntimeFellowshipState _fellowship;
-    private readonly SelectionInteractionController _selection;
+    private readonly ISelectionInputActions? _selection;
     private readonly IGameRuntimeEventSink _events;
     private readonly GameRuntime _runtime;
 
@@ -49,7 +49,7 @@ internal sealed class CurrentGameRuntimeCommandAdapter
         RuntimeActionState actions,
         RuntimeLocalPlayerMovementState movement,
         RuntimeFellowshipState fellowship,
-        SelectionInteractionController selection,
+        ISelectionInputActions? selection,
         IGameRuntimeEventSink events,
         GameRuntime runtime)
     {
@@ -65,7 +65,10 @@ internal sealed class CurrentGameRuntimeCommandAdapter
             ?? throw new ArgumentNullException(nameof(movement));
         _fellowship = fellowship
             ?? throw new ArgumentNullException(nameof(fellowship));
-        _selection = selection ?? throw new ArgumentNullException(nameof(selection));
+        // A client with nothing drawn has nothing to act on a selection key
+        // with; the request is answered as unsupported rather than refused
+        // for want of a window.
+        _selection = selection;
         _events = events ?? throw new ArgumentNullException(nameof(events));
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
     }
@@ -155,7 +158,7 @@ internal sealed class CurrentGameRuntimeCommandAdapter
             _ => InputAction.None,
         };
         RuntimeCommandStatus status = action != InputAction.None
-            && _selection.HandleInputAction(action)
+            && _selection?.HandleInputAction(action) == true
                 ? RuntimeCommandStatus.Accepted
                 : RuntimeCommandStatus.Unsupported;
         uint selected = _actions.Selection.SelectedObjectId ?? 0u;
@@ -508,6 +511,8 @@ internal sealed class CurrentGameRuntimeCommandAdapter
                 ClientCommandId.HouseRecall,
             RuntimePortalCommand.RecallMansion =>
                 ClientCommandId.MansionRecall,
+            RuntimePortalCommand.RecallAllegiance =>
+                ClientCommandId.AllegianceHometown,
             _ => null,
         };
         if (commandId is null)
@@ -1047,10 +1052,26 @@ internal sealed class CurrentGameRuntimeCommandAdapter
         RuntimeCommandStatus gate = Validate(expectedGeneration, requireWorld: true);
         if (gate != RuntimeCommandStatus.Accepted)
             return Result(gate);
-        _commands.Publish(new FellowshipUpdateRequestRuntimeCmd(panelOpen));
+        if (_fellowship.SetPanelVisible(panelOpen, out bool subscribe))
+            _commands.Publish(new FellowshipUpdateRequestRuntimeCmd(subscribe));
         return EmitResult(
             RuntimeCommandDomain.Fellowship,
             operation: 6,
+            RuntimeCommandStatus.Accepted);
+    }
+
+    public RuntimeCommandResult RequestVitals(
+        RuntimeGenerationToken expectedGeneration,
+        bool requested)
+    {
+        RuntimeCommandStatus gate = Validate(expectedGeneration, requireWorld: true);
+        if (gate != RuntimeCommandStatus.Accepted)
+            return Result(gate);
+        if (_fellowship.SetVitalsRequested(requested, out bool subscribe))
+            _commands.Publish(new FellowshipUpdateRequestRuntimeCmd(subscribe));
+        return EmitResult(
+            RuntimeCommandDomain.Fellowship,
+            operation: 7,
             RuntimeCommandStatus.Accepted);
     }
 

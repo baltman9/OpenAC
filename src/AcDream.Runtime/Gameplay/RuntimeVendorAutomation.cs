@@ -7,14 +7,10 @@ namespace AcDream.Runtime.Gameplay;
 // Projects VendorState (RuntimeInventoryState.Vendor) onto the plugin
 // vendor contract. Buy/sell staging lives entirely on this adapter; BuyAll
 // and SellAll commit the staged lists through the same WorldSession
-// builders the retail-look vendor window's own Buy All / Sell All buttons
-// use. Unlike a normal item use, a vendor transaction's outcome does not
-// flow through the interaction-transaction "awaiting use" ledger (nothing
-// here ever calls TryDispatchUse), so this adapter tracks its own
-// in-flight buy/sell and correlates it against the same generic use-
-// completion signal the retail-look window observes. Shared by the
-// graphical and headless hosts: both bind one instance over the same
-// GameRuntime.
+// builders as the vendor window. The shared inventory request owner tracks
+// the outstanding shop operation until a matching vendor response, while
+// this adapter correlates transaction outcomes with the generic use
+// completion signal. Both hosts bind it over the same GameRuntime.
 public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
 {
     private readonly GameRuntime _runtime;
@@ -36,7 +32,7 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _runtime.InventoryOwner.Vendor.Changed += OnVendorChanged;
         _runtime.ActionOwner.Transactions.UseCompleted += OnUseCompleted;
-        _runtime.InventoryOwner.Objects.MoveRequestFailed += OnMoveRequestFailed;
+        _runtime.InventoryOwner.Transactions.RequestFailed += OnShopRequestFailed;
     }
 
     public bool IsAvailable =>
@@ -59,12 +55,8 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
         }
     }
 
-    // A buy/sell is in flight exactly while this adapter is awaiting its
-    // own vendor-local response -- not the client-wide inventory busy
-    // gate, which BuyAll/SellAll never touch (retail vendor transactions
-    // do not produce the generic use-completion the busy-count reservation
-    // expects, so holding that reservation open would wedge every other
-    // item command until the client reconnected).
+    // Transaction outcome reporting is independent of the shared pending
+    // shop request; a generic use completion may arrive before vendor refresh.
     public bool IsBusy
     {
         get { lock (_gate) return _pendingKind is not null; }
@@ -244,13 +236,30 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
         for (int index = 0; index < items.Length; index++)
             wireItems[index] = (items[index].Count, items[index].TemplateObjectId);
 
-        lock (_gate)
-        {
-            if (_pendingKind is not null)
-                return new(PluginVendorCommandStatus.Busy);
-            _pendingKind = PluginVendorTransactionKind.Buy;
-        }
-        session.SendBuy(Vendor.VendorId, wireItems, Vendor.Profile.AlternateCurrencyWcid);
+        uint vendorId = Vendor.VendorId;
+        bool sent = _runtime.InventoryOwner.Transactions.TryDispatch(
+            InventoryRequestKind.Shop, vendorId, () =>
+            {
+                lock (_gate)
+                {
+                    if (_pendingKind is not null)
+                        return false;
+                    _pendingKind = PluginVendorTransactionKind.Buy;
+                }
+                try
+                {
+                    session.SendBuy(vendorId, wireItems, Vendor.Profile.AlternateCurrencyWcid);
+                    return true;
+                }
+                catch
+                {
+                    lock (_gate)
+                        _pendingKind = null;
+                    throw;
+                }
+            });
+        if (!sent)
+            return new(PluginVendorCommandStatus.Busy);
         lock (_gate)
             _buyList.Clear();
         return new(PluginVendorCommandStatus.Sent);
@@ -280,13 +289,30 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
             wireItems[index] = (Math.Max(1, amount), items[index]);
         }
 
-        lock (_gate)
-        {
-            if (_pendingKind is not null)
-                return new(PluginVendorCommandStatus.Busy);
-            _pendingKind = PluginVendorTransactionKind.Sell;
-        }
-        session.SendSell(Vendor.VendorId, wireItems);
+        uint vendorId = Vendor.VendorId;
+        bool sent = _runtime.InventoryOwner.Transactions.TryDispatch(
+            InventoryRequestKind.Shop, vendorId, () =>
+            {
+                lock (_gate)
+                {
+                    if (_pendingKind is not null)
+                        return false;
+                    _pendingKind = PluginVendorTransactionKind.Sell;
+                }
+                try
+                {
+                    session.SendSell(vendorId, wireItems);
+                    return true;
+                }
+                catch
+                {
+                    lock (_gate)
+                        _pendingKind = null;
+                    throw;
+                }
+            });
+        if (!sent)
+            return new(PluginVendorCommandStatus.Busy);
         lock (_gate)
             _sellList.Clear();
         return new(PluginVendorCommandStatus.Sent);
@@ -354,23 +380,17 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
         }
     }
 
-    // Latches a failure while a buy/sell is in flight -- the server signals
-    // a rejected vendor transaction as an inventory-save failure on the
-    // *local player*, not as a UseDone error code (UseDone often still
-    // arrives with error == 0 for these rejections). An ordinary (non-
-    // vendor) move rejection instead carries the moved item's own guid, so
-    // gate on the player guid to avoid latching an unrelated failure onto
-    // an in-flight vendor transaction.
-    private void OnMoveRequestFailed(MoveRequestFailure failure)
+    // A failed inventory response belongs to the outstanding request even
+    // when the wire carries another object id. Correlate through that
+    // request before the generic use completion reports an outcome.
+    private void OnShopRequestFailed(PendingInventoryRequest request, uint error)
     {
         lock (_gate)
         {
-            if (_pendingKind is null)
-                return;
-            if (failure.ItemId != _runtime.PlayerIdentity.ServerGuid)
+            if (_pendingKind is null || request.Kind != InventoryRequestKind.Shop)
                 return;
             _hasLatchedFailure = true;
-            _latchedFailureError = failure.WeenieError;
+            _latchedFailureError = error;
         }
     }
 
@@ -459,6 +479,6 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
         }
         _runtime.InventoryOwner.Vendor.Changed -= OnVendorChanged;
         _runtime.ActionOwner.Transactions.UseCompleted -= OnUseCompleted;
-        _runtime.InventoryOwner.Objects.MoveRequestFailed -= OnMoveRequestFailed;
+        _runtime.InventoryOwner.Transactions.RequestFailed -= OnShopRequestFailed;
     }
 }

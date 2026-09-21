@@ -23,7 +23,7 @@ public sealed class GraphicalPluginSessionTests
     {
         using var temporary = new TemporaryDirectory();
         ApplicationPathSet paths = Paths(temporary.Path);
-        InstallFixture(paths.PluginsDirectory, FixtureId);
+        string pluginDirectory = InstallFixture(paths.PluginsDirectory, FixtureId);
         string statusPath = Path.Combine(temporary.Path, "status.jsonl");
         var logger = new CapturingLogger();
         var state = new WorldGameState();
@@ -43,7 +43,7 @@ public sealed class GraphicalPluginSessionTests
 
         Assert.Equal(1, plugins.LoadedCount);
         Assert.True(host.HasUi);
-        AssertPanelWasRegisteredAndReleaseBinding(ui);
+        AssertPanelWasRegisteredAndReleaseBinding(ui, pluginDirectory);
         Assert.Contains(
             logger.Messages,
             message => message.Contains("fixture-enabled:hasUi=True", StringComparison.Ordinal));
@@ -118,6 +118,8 @@ public sealed class GraphicalPluginSessionTests
             string.Empty);
         string statusPath = Path.Combine(temporary.Path, "status.jsonl");
         var events = new WorldEvents();
+        var worldEntities = new RaisableWorldEntities();
+        events.BindWorldEntities(worldEntities);
         var selection = new SelectionState();
         var ui = new BufferedUiRegistry();
         var host = new AppPluginHost(
@@ -139,7 +141,7 @@ public sealed class GraphicalPluginSessionTests
         Assert.Equal(0, plugins.LoadedCount);
         Assert.Empty(ui.Drain());
         Assert.Equal(0, ui.RegistrationCount);
-        events.FireEntitySpawned(new WorldEntitySnapshot(
+        worldEntities.Raise(new WorldEntitySnapshot(
             1u,
             2u,
             default,
@@ -172,6 +174,8 @@ public sealed class GraphicalPluginSessionTests
             string.Empty);
         string statusPath = Path.Combine(temporary.Path, "status.jsonl");
         var events = new WorldEvents();
+        var worldEntities = new RaisableWorldEntities();
+        events.BindWorldEntities(worldEntities);
         var selection = new SelectionState();
         var ui = new BufferedUiRegistry();
         var host = new AppPluginHost(
@@ -195,10 +199,10 @@ public sealed class GraphicalPluginSessionTests
         Assert.Equal(0, ui.RegistrationCount);
         Assert.Equal(
             "ui=True;events=True;selection=True",
-            File.ReadAllText(Path.Combine(
+            ReadSharedText(Path.Combine(
                 pluginDirectory,
                 "unload-observation")));
-        events.FireEntitySpawned(new WorldEntitySnapshot(
+        worldEntities.Raise(new WorldEntitySnapshot(
             1u,
             2u,
             default,
@@ -217,6 +221,40 @@ public sealed class GraphicalPluginSessionTests
         Assert.False(context.IsAlive);
     }
 
+    [Fact]
+    public void HeadlessOnlyPluginRequestedOnGraphicalHostReportsPluginFailed()
+    {
+        using var temporary = new TemporaryDirectory();
+        ApplicationPathSet paths = Paths(temporary.Path);
+        const string headlessOnlyId = "acdream.test.headless-only";
+        InstallFixture(paths.PluginsDirectory, headlessOnlyId, hosts: ["headless"]);
+        string statusPath = Path.Combine(temporary.Path, "status.jsonl");
+        var ui = new BufferedUiRegistry();
+        var host = new AppPluginHost(
+            new CapturingLogger(),
+            new WorldGameState(),
+            new WorldEvents(),
+            new SelectionState(),
+            ui,
+            NoOpAutomationSurface.Instance);
+
+        using GraphicalPluginSession plugins = GraphicalPluginSession.Create(
+            paths,
+            [headlessOnlyId],
+            "gui-session",
+            host,
+            new SessionStatusWriter(statusPath));
+        plugins.Start();
+
+        Assert.Equal(0, plugins.LoadedCount);
+        JsonElement[] statuses = ReadStatuses(statusPath);
+        Assert.Equal(["started", "pluginFailed"], EventNames(statuses));
+        Assert.Equal(headlessOnlyId, statuses[1].GetProperty("plugin").GetString());
+        Assert.Contains(
+            "runs only on the headless host",
+            statuses[1].GetProperty("error").GetString());
+    }
+
     private static ApplicationPathSet Paths(string root) => new(
         Path.Combine(root, "config"),
         Path.Combine(root, "data"),
@@ -225,7 +263,8 @@ public sealed class GraphicalPluginSessionTests
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void AssertPanelWasRegisteredAndReleaseBinding(
-        BufferedUiRegistry ui)
+        BufferedUiRegistry ui,
+        string pluginDirectory)
     {
         BufferedUiRegistry.Pending panel = Assert.Single(ui.Drain());
         Assert.EndsWith(
@@ -239,10 +278,11 @@ public sealed class GraphicalPluginSessionTests
         Assert.Equal(
             "AcDream.Plugin.Tests.Fixtures.HostPlugin",
             panel.Binding.GetType().Assembly.GetName().Name);
+        Assert.Equal(pluginDirectory, panel.PluginDirectory);
     }
 
     private static JsonElement[] ReadStatuses(string path) =>
-        File.ReadAllLines(path)
+        ReadSharedLines(path)
             .Select(static line => JsonDocument.Parse(line).RootElement.Clone())
             .ToArray();
 
@@ -252,7 +292,8 @@ public sealed class GraphicalPluginSessionTests
     private static string InstallFixture(
         string root,
         string id,
-        string directoryName = "host-fixture")
+        string directoryName = "host-fixture",
+        IReadOnlyList<string>? hosts = null)
     {
         string source = FixtureAssemblyPath();
         Assert.True(File.Exists(source), $"fixture DLL not found: {source}");
@@ -269,6 +310,7 @@ public sealed class GraphicalPluginSessionTests
                 version = "1.0.0",
                 entryDll = fileName,
                 apiVersion = 1,
+                hosts,
             }));
         return pluginDirectory;
     }
@@ -315,6 +357,30 @@ public sealed class GraphicalPluginSessionTests
         }
     }
 
+    /// <summary>
+    /// A stand-in for the client's world-object producer, so a test can make
+    /// an object appear the way the running client does.
+    /// </summary>
+    private sealed class RaisableWorldEntities
+        : AcDream.Core.Plugins.IPluginWorldEntities
+    {
+        private readonly List<Action<WorldEntitySnapshot>> _handlers = [];
+
+        public IReadOnlyList<WorldEntitySnapshot> Entities => [];
+
+        public void Subscribe(Action<WorldEntitySnapshot> handler) =>
+            _handlers.Add(handler);
+
+        public void Unsubscribe(Action<WorldEntitySnapshot> handler) =>
+            _handlers.Remove(handler);
+
+        internal void Raise(WorldEntitySnapshot snapshot)
+        {
+            foreach (Action<WorldEntitySnapshot> handler in _handlers.ToArray())
+                handler(snapshot);
+        }
+    }
+
     private sealed class CapturingLogger : IPluginLogger
     {
         internal List<string> Messages { get; } = [];
@@ -357,4 +423,18 @@ public sealed class GraphicalPluginSessionTests
             }
         }
     }
-}
+
+    // A status file belongs to a session that may still be writing it, and a
+    // reader that does not share the file for writing is refused while it is.
+    private static string ReadSharedText(string path)
+    {
+        using var stream = new FileStream(
+            path, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    private static string[] ReadSharedLines(string path) =>
+        ReadSharedText(path).Split(
+            ["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries);}

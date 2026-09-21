@@ -19,11 +19,24 @@ public readonly record struct PluginRecoveryResult(
     string Message = "");
 
 /// <summary>
+/// What the client is still waiting on: the busy count, a pending inventory
+/// request, the appraisal awaited, the last use sent and whether its
+/// completion is still owed. A recovery tool reads this before it clears
+/// anything.
+/// </summary>
+public readonly record struct PluginBusyState(
+    int BusyCount, bool PendingInventory, uint AwaitingAppraisal,
+    uint UseSource, uint UseTarget, bool AwaitingUseCompletion);
+
+/// <summary>
 /// Manual escape hatches for a session that has got stuck, meant to be driven
 /// by a person watching the client rather than automatically.
 /// </summary>
 public interface IRecoveryAutomation
 {
+    /// <summary>The busy references the client still holds; default when no session is bound.</summary>
+    PluginBusyState CaptureBusyState() => default;
+
     /// <summary>
     /// Release one of the references that mark the character as busy with an
     /// action. The client counts the actions it is still waiting on and refuses

@@ -1,3 +1,4 @@
+using AcDream.Content;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -71,7 +72,7 @@ public class SelectedObjectControllerTests
         public Action<uint, float>? HealthHandler;
         public Action<uint, float, bool>? ItemManaHandler;
         public Action<ClientObject>? ObjectUpdatedHandler;
-        public readonly List<uint> QueryHealthCalls = new();
+
         public readonly List<uint> QueryItemManaCalls = new();
 
         public readonly Dictionary<uint, bool>   HealthTargetMap = new();
@@ -118,7 +119,7 @@ public class SelectedObjectControllerTests
                 healthPercent:   g => HealthMap.TryGetValue(g, out var v) ? v : 1f,
                 hasHealth:       g => HasHealthMap.TryGetValue(g, out var v) && v,
                 stackSize:       g => StackMap.TryGetValue(g, out var v) ? v : 0u,
-                sendQueryHealth: g => QueryHealthCalls.Add(g),
+
                 manaPercent:     g => ManaMap.TryGetValue(g, out var v) ? v : 0f,
                 sendQueryItemMana: g => QueryItemManaCalls.Add(g),
                 datFont:         datFont,
@@ -266,8 +267,6 @@ public class SelectedObjectControllerTests
 
         Assert.False(healthMeterEl.Visible,
             "meter must stay hidden on select when no health is known yet");
-        Assert.Single(h.QueryHealthCalls);
-        Assert.Equal(Guid, h.QueryHealthCalls[0]);
         Assert.Equal("ObjectSelected", overlayEl.ActiveState);
 
         var lines = nameEl.Children.OfType<UiText>().First().LinesProvider();
@@ -439,7 +438,6 @@ public class SelectedObjectControllerTests
         h.FireSelection(Guid);
 
         Assert.False(healthMeterEl.Visible, "meter must stay hidden for a non-health target");
-        Assert.Empty(h.QueryHealthCalls);
         Assert.Equal("ObjectSelected", overlayEl.ActiveState);
 
         var lines = nameEl.Children.OfType<UiText>().First().LinesProvider();
@@ -469,7 +467,6 @@ public class SelectedObjectControllerTests
         Assert.False(healthMeterEl.Visible, "meter must be hidden after deselect");
         Assert.Equal("", overlayEl.ActiveState);
         Assert.Empty(nameEl.Children.OfType<UiText>().First().LinesProvider());
-        Assert.Equal(new[] { Guid, 0u }, h.QueryHealthCalls);
     }
 
     // ── H5: Re-select a different guid ───────────────────────────────────────
@@ -489,13 +486,11 @@ public class SelectedObjectControllerTests
 
         h.FireSelection(GuidA);
         Assert.True(healthMeterEl.Visible);
-        Assert.Single(h.QueryHealthCalls);
 
         h.FireSelection(GuidB);
 
         Assert.False(healthMeterEl.Visible, "meter must clear when switching to a non-health target");
         Assert.Equal("ObjectSelected", overlayEl.ActiveState);
-        Assert.Equal(new[] { GuidA, 0u }, h.QueryHealthCalls);
 
         var lines = nameEl.Children.OfType<UiText>().First().LinesProvider();
         Assert.Single(lines);
@@ -544,9 +539,6 @@ public class SelectedObjectControllerTests
         Assert.Null(Record.Exception(() => h.FireHealth(0x12345678u, 0.5f)));
         Assert.Null(Record.Exception(() => c.Tick(0.5)));
         Assert.Null(Record.Exception(() => h.FireSelection(null)));
-
-        Assert.Single(h.QueryHealthCalls);
-        Assert.Equal(0x12345678u, h.QueryHealthCalls[0]);
     }
 
     // ── H8: Fill reflects live health; returns 0 when nothing selected ──────
@@ -679,7 +671,6 @@ public class SelectedObjectControllerTests
         Assert.Null(h.HealthHandler);
         Assert.Null(h.ItemManaHandler);
         Assert.False(healthMeterEl.Visible);
-        Assert.Empty(h.QueryHealthCalls);
     }
 
 
@@ -710,7 +701,7 @@ public class SelectedObjectControllerTests
             healthPercent: _ => 0f,
             hasHealth: _ => false,
             stackSize: guid => (uint)(objects.Get(guid)?.StackSize ?? 0),
-            sendQueryHealth: _ => { },
+
             manaPercent: _ => 0f,
             sendQueryItemMana: _ => { },
             datFont: null,
@@ -774,7 +765,7 @@ public class SelectedObjectControllerTests
             healthPercent: _ => 0f,
             hasHealth: _ => false,
             stackSize: guid => (uint)(objects.Get(guid)?.StackSize ?? 0),
-            sendQueryHealth: _ => { },
+
             manaPercent: _ => 0f,
             sendQueryItemMana: _ => { },
             datFont: null,
@@ -859,7 +850,7 @@ public class SelectedObjectControllerTests
             hasHealth: _ => false,
             // Production's EXACT stackSize resolver (InteractionRetainedUiComposition.cs:679-680).
             stackSize: guid => (uint)(objects.Get(guid)?.StackSize ?? 0),
-            sendQueryHealth: _ => { },
+
             manaPercent: _ => 0f,
             sendQueryItemMana: _ => { },
             datFont: null,

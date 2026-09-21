@@ -19,11 +19,43 @@ internal static class LiveEntityRuntimeFixture
     public static LiveEntityRuntime Create(
         GpuWorldState spatial,
         ILiveEntityResourceLifecycle resources,
-        uint firstLocalEntityId = RuntimeEntityDirectory.FirstLocalEntityId)
+        uint firstLocalEntityId = RuntimeEntityDirectory.FirstLocalEntityId) =>
+        CreateWithLifetime(spatial, resources, firstLocalEntityId).Runtime;
+
+    /// <summary>
+    /// The drawn-world runtime and the shared owner underneath it, for a test
+    /// that has to reach the shared owner directly.
+    /// </summary>
+    public static (LiveEntityRuntime Runtime,
+        RuntimeEntityObjectLifetime Lifetime) CreateWithLifetime(
+            GpuWorldState spatial,
+            ILiveEntityResourceLifecycle resources,
+            uint firstLocalEntityId =
+                RuntimeEntityDirectory.FirstLocalEntityId)
     {
         var lifetime = WithGeneration(
             new RuntimeEntityObjectLifetime(firstLocalEntityId));
-        return new LiveEntityRuntime(spatial, resources, lifetime);
+        return (new LiveEntityRuntime(spatial, resources, lifetime), lifetime);
+    }
+
+    /// <summary>
+    /// The one owner that arms another creature's body, wired to the facts a
+    /// caller supplies and to a world where any destination is serviceable.
+    /// </summary>
+    internal static AcDream.Runtime.Physics.RuntimeRemoteArming CreateArming(
+        RuntimeEntityObjectLifetime lifetime,
+        AcDream.Runtime.Physics.RuntimeRemoteArmingHostFacts facts) =>
+        AcDream.Runtime.Physics.RuntimeRemoteArming.Create(
+            lifetime,
+            new AcDream.Runtime.GameRuntimeClock(),
+            new SphereCollisionSource(),
+            new AnyDestinationServiceWindow(),
+            facts);
+
+    private sealed class AnyDestinationServiceWindow
+        : AcDream.Runtime.Session.IRuntimeRemotePlacementServiceWindow
+    {
+        public bool IsWithinServiceWindow(uint landblockId) => true;
     }
 
     internal sealed class DrivenLiveEntityRuntime
@@ -127,7 +159,7 @@ internal static class LiveEntityRuntimeFixture
         }
     }
 
-    private sealed class SphereCollisionSource
+    internal sealed class SphereCollisionSource
         : AcDream.Content.IPreparedCollisionSource
     {
         public AcDream.Content.PreparedAssetPresence ProbeCollision(

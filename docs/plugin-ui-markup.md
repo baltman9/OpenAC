@@ -12,7 +12,7 @@ depend on `AcDream.App`.
 host.Ui.AddPanel(
     new PluginPanelDescriptor("main", "My Plugin")
     {
-        IconText = "MP",             // shelf button initials, used when IconSurfaceId is 0
+        IconText = "MP",             // shelf button initials, the last resort
         IconSurfaceId = 0x06002C41,  // an icon id (see "Icon ids")
         StartVisible = true,
         ShowInSidePanel = true,      // default: a button in the plugin shelf
@@ -26,6 +26,10 @@ host.Ui.AddPanel(
 - `RegisterPanel` has the same signature and returns an `IDisposable` that
   removes the window on its own.
 - `RegisterPanelContent` takes the markup as a string instead of a file path.
+
+The plugin shelf picks a button's icon in order: the plugin's own `icon.png`
+(one per plugin, at the root of its install folder), else `IconSurfaceId`,
+else the initials from `IconText`.
 
 Every window gets drag, an optional resize, the global UI lock, and a
 persisted position keyed `plugin:{pluginId}:{windowId}`. Hiding a window never
@@ -86,6 +90,12 @@ Unknown or miscased element names throw at build time.
 Every element except the root also accepts `name` (or `id`), `visible`,
 `enabled`, `tooltip`, and `anchor`. The root `panel` accepts `visible` only as
 a binding.
+
+A `field` shows its bound `text` and goes on following it: while nobody is
+typing in the field, a value that changes behind it -- a profile loaded after
+the panel was built -- replaces what the field shows. `onchange` reports what
+the player types; it is not called for the field's own value being shown, at
+build time or later.
 
 `menu style` and `slider style` are `plain` (default: flat fill, one-pixel
 border, no sprite art) or `retail` (the game's own pushbutton or scrollbar

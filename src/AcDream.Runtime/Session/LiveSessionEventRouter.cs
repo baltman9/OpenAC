@@ -46,7 +46,7 @@ public sealed record LiveInventorySessionBindings(
 public sealed record LiveCharacterSessionBindings(
     CombatState Combat,
     RuntimeCharacterState Character,
-    Func<uint, IReadOnlyDictionary<uint, uint>, uint>? ResolveSkillFormulaBonus,
+    Func<uint, uint, IReadOnlyDictionary<uint, uint>, uint>? ResolveSkillFormulaBonus,
     Action<int, int>? OnSkillsUpdated,
     Action<GameEvents.CharacterConfirmationRequest>? OnConfirmationRequest,
     Action<GameEvents.CharacterConfirmationDone>? OnConfirmationDone,
@@ -78,10 +78,17 @@ public sealed class LiveSessionEventRouter : ILiveSessionEventRouting
     private readonly LiveInventorySessionBindings _inventory;
     private readonly LiveCharacterSessionBindings _character;
     private readonly LiveSocialSessionBindings _social;
+    private readonly RuntimeActionState _actions;
     private int _constructionStep;
     private int _accepting;
     private int _lifecycleState;
 
+    /// <summary>
+    /// The action state is required rather than optional. Both hosts have
+    /// always supplied it, and an optional parameter let a host route a
+    /// session without the combat and death signals plugins observe without
+    /// anything saying so. The compiler now refuses that shape.
+    /// </summary>
     public LiveSessionEventRouter(
         WorldSession session,
         LiveEntitySessionSink entities,
@@ -89,9 +96,11 @@ public sealed class LiveSessionEventRouter : ILiveSessionEventRouting
         LiveInventorySessionBindings inventory,
         LiveCharacterSessionBindings character,
         LiveSocialSessionBindings social,
+        RuntimeActionState actions,
         Action<int>? constructionCheckpoint = null)
     {
         ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(actions);
         Validate(entities, environment, inventory, character, social);
         _session = session;
         _entities = entities;
@@ -99,6 +108,7 @@ public sealed class LiveSessionEventRouter : ILiveSessionEventRouting
         _inventory = inventory;
         _character = character;
         _social = social;
+        _actions = actions;
         _constructionCheckpoint = constructionCheckpoint;
     }
 
@@ -153,10 +163,37 @@ public sealed class LiveSessionEventRouter : ILiveSessionEventRouting
                 IsAccepting));
             ConstructionCheckpoint();
 
-            Subscribe(h => session.EntitySpawned += h, h => session.EntitySpawned -= h, entities.Spawned);
+            // The death fact is read off the wire before either host's own
+            // entity sink sees the packet, so a host that draws nothing knows
+            // a creature has died at the same moment a host that draws it
+            // does.
+            RuntimeCreatureDeathState creatureDeath = _actions.CreatureDeath;
+            Action<WorldSession.EntitySpawn> spawned = spawn =>
+            {
+                creatureDeath.ObserveSpawn(spawn);
+                entities.Spawned(spawn);
+            };
+            Action<WorldSession.EntityMotionUpdate> motionUpdated = update =>
+            {
+                creatureDeath.ObserveMotion(update);
+                entities.MotionUpdated(update);
+            };
+            Subscribe(h => session.EntitySpawned += h, h => session.EntitySpawned -= h, spawned);
             Subscribe(h => session.EntityDeleted += h, h => session.EntityDeleted -= h, entities.Deleted);
             Subscribe(h => session.EntityPickedUp += h, h => session.EntityPickedUp -= h, entities.PickedUp);
-            Subscribe(h => session.MotionUpdated += h, h => session.MotionUpdated -= h, entities.MotionUpdated);
+            Subscribe(h => session.MotionUpdated += h, h => session.MotionUpdated -= h, motionUpdated);
+            {
+                RuntimeActionState actions = _actions;
+                // Streaming the selected creature's health is a question the
+                // client asks the server, not a thing a window draws, so it
+                // is asked here for every host rather than by the one host
+                // that has a health meter to fill.
+                _subscriptions.Add(new RuntimeSelectedObjectHealthQuery(
+                    actions.Selection,
+                    inventory.Objects,
+                    inventory.PlayerGuid,
+                    session.SendQueryHealth));
+            }
             Subscribe(h => session.PositionUpdated += h, h => session.PositionUpdated -= h, entities.PositionUpdated);
             Subscribe(h => session.VectorUpdated += h, h => session.VectorUpdated -= h, entities.VectorUpdated);
             Subscribe(h => session.StateUpdated += h, h => session.StateUpdated -= h, entities.StateUpdated);

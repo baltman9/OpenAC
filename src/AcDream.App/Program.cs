@@ -103,6 +103,14 @@ if (sessionConfigFlagPath is not null)
         Log.Error("--session-config credential unavailable: {Error}", error.Message);
         return 2;
     }
+    // A settings map written into the document is refused here in the same
+    // words a settings file is refused below, rather than ending the client
+    // with a stack trace.
+    catch (AcDream.Runtime.Plugins.PluginSessionSettingsException error)
+    {
+        Log.Error("--session-config plugin settings invalid: {Error}", error.Message);
+        return 2;
+    }
     finally
     {
         secret?.Dispose();
@@ -126,6 +134,27 @@ else
     runtimeOptions = RuntimeOptions.FromEnvironment(datDir);
 }
 
+// The startup settings each plugin was given. A session-config document that
+// names them is the more specific instruction and outranks the launch option
+// pointing at a file. A named file that cannot be read is a startup fault and
+// says so: a plugin whose settings silently came out empty would behave
+// differently here than it does on the client with no window, which is the
+// one thing these settings exist to prevent.
+AcDream.Runtime.Plugins.PluginSessionSettings pluginSessionSettings;
+try
+{
+    pluginSessionSettings =
+        runtimeOptions.SessionPluginSettings
+        ?? (runtimeOptions.PluginSettingsFile is { } settingsPath
+            ? AcDream.Runtime.Plugins.PluginSessionSettings.ReadFile(settingsPath)
+            : AcDream.Runtime.Plugins.PluginSessionSettings.Empty);
+}
+catch (AcDream.Runtime.Plugins.PluginSessionSettingsException error)
+{
+    Log.Error("ACDREAM_PLUGIN_SETTINGS_FILE invalid: {Error}", error.Message);
+    return 2;
+}
+
 if (runtimeOptions.DevTools)
 {
     Log.Information(
@@ -134,7 +163,11 @@ if (runtimeOptions.DevTools)
 }
 
 var worldGameState = new AcDream.Core.Plugins.WorldGameState();
-var worldEvents = new AcDream.Core.Plugins.WorldEvents();
+// A plugin handler that throws is skipped, not hidden: a plugin author
+// whose handler stopped running needs to be told why, in the same words
+// whichever client is running.
+var worldEvents = new AcDream.Core.Plugins.WorldEvents(
+    line => Log.Warning("{Line}", line));
 var uiRegistry = new AcDream.App.Plugins.BufferedUiRegistry();
 using var renderPackRegistry = new AcDream.App.Plugins.BufferedRenderPackRegistry();
 using IDisposable atmosphericPackRegistration = renderPackRegistry.Register(
@@ -145,12 +178,18 @@ using IDisposable atmosphericPackRegistration = renderPackRegistry.Register(
             "Rendering",
             "Shaders",
             "spv")));
-using var automation = new AcDream.Runtime.Plugins.RuntimeAutomationSurface(
-    worldEvents,
-    new AcDream.Runtime.Plugins.LocalPluginPeerRegistry(Path.Combine(
-        applicationPaths.DataDirectory,
-        "plugin-peers")),
-    runtimeOptions.PluginTags);
+// One factory, shared with the windowless host: what the surface needs
+// before a plugin can reach it cannot be present on one client and quietly
+// absent on the other.
+using var automation = AcDream.Runtime.Plugins.RuntimeAutomationBindings
+    .CreateSurface(
+        AcDream.App.Plugins.GraphicalAutomationCapabilities.BuildSurfaceInputs(
+            new AcDream.App.Plugins.GraphicalSurfaceInputParts
+            {
+                Events = worldEvents,
+                DataDirectory = applicationPaths.DataDirectory,
+                PluginTags = runtimeOptions.PluginTags,
+            }));
 var lootClassifiers = new AcDream.Core.Plugins.PluginLootClassifierRegistry();
 var hotkeyRegistry = new AcDream.App.Input.AppHotkeyRegistry(
     Path.Combine(applicationPaths.ConfigDirectory, "plugin-hotkeys.json"));
@@ -184,7 +223,9 @@ var host = new AppPluginHost(
     new AcDream.App.Plugins.WindowPluginHostWindow(
         () => window.PluginWindowHandle,
         () => window.PluginWindowIsMinimized,
-        () => window.ClipboardDispatch));
+        () => window.ClipboardDispatch),
+    window.WorldLines,
+    pluginSessionSettings);
 GraphicalPluginSession pluginSession = GraphicalPluginSession.Create(
     applicationPaths,
     runtimeOptions.Plugins,

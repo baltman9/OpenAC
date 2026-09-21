@@ -54,7 +54,7 @@ public sealed class PaperdollMaskInstalledDatTests
 
         var selection = new SelectionState();
         var examines = new List<uint>();
-        var interaction = new ItemInteractionController(
+        var interaction = new AcDream.Runtime.Gameplay.RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(
                 new InventoryTransactionState(objects)),

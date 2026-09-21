@@ -25,7 +25,7 @@ internal interface IDebugVmRenderFactsSource
 
 internal sealed class DebugVmRenderFactsPublisher : IDebugVmRenderFactsSource
 {
-    internal const float PlayerCollisionRadius = 0.48f;
+    internal const float PlayerCollisionRadius = DefaultPlayerBody.Radius;
     internal const float ContactThreshold = 0.05f;
 
     public DebugVmRenderFacts DebugVmFacts { get; private set; } =

@@ -39,12 +39,15 @@ public sealed class C3cF2AutoEntryWiringTests
     [Fact]
     public void PlayerPresentationAttach_DrainsMatchedAnimationsBeforeStartupMotionSuffix()
     {
-        MethodInfo enter = typeof(PlayerModeController).GetMethod(
-            "BuildControllerAndCamera",
-            BindingFlags.Instance | BindingFlags.NonPublic)
+        // The character's locomotion is set up in one place for every
+        // client, so that is where the order lives.
+        MethodInfo enter =
+            typeof(AcDream.Runtime.Gameplay.RuntimeLocalPlayerMotionArming)
+                .GetMethod("Arm", BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new MissingMethodException(
-                typeof(PlayerModeController).FullName,
-                "BuildControllerAndCamera");
+                typeof(AcDream.Runtime.Gameplay.RuntimeLocalPlayerMotionArming)
+                    .FullName,
+                "Arm");
         IReadOnlyList<CompiledCall> calls = CompiledCallGraph.Read(enter);
         int attach = CompiledCallGraph.IndexOf(
             calls,

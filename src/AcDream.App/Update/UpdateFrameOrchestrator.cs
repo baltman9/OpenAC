@@ -14,29 +14,28 @@ internal sealed class UpdateFrameClock
     : IPhysicsScriptTimeSource,
       IGameRuntimeClock
 {
-    private readonly GameRuntimeClock _runtime;
+    private readonly GameRuntime _runtime;
 
-    public UpdateFrameClock()
-        : this(new GameRuntimeClock())
-    {
-    }
-
-    public UpdateFrameClock(GameRuntimeClock runtime)
+    public UpdateFrameClock(GameRuntime runtime)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
     }
 
-    public ulong FrameNumber => _runtime.FrameNumber;
-    public double SimulationTimeSeconds => _runtime.SimulationTimeSeconds;
-    public double CurrentScriptTime => _runtime.SimulationTimeSeconds;
+    public ulong FrameNumber => _runtime.Clock.FrameNumber;
+    public double SimulationTimeSeconds =>
+        _runtime.Clock.SimulationTimeSeconds;
+    public double CurrentScriptTime =>
+        _runtime.Clock.SimulationTimeSeconds;
 
-    public UpdateFrameTiming Advance(
-        UpdateFrameInput input,
-        bool advanceScriptClock = true)
+    /// <summary>
+    /// One host frame, taken where both clients take it. Whether the
+    /// world's clock moves with it is the runtime's call, not this
+    /// client's.
+    /// </summary>
+    public UpdateFrameTiming Advance(UpdateFrameInput input)
     {
-        RuntimeFrameTime frame = _runtime.Advance(
-            input.HostDeltaSeconds,
-            advanceScriptClock);
+        RuntimeFrameTime frame =
+            _runtime.AdvanceFrameClock(input.HostDeltaSeconds);
         return new UpdateFrameTiming(
             frame.DeltaSeconds,
             (float)frame.DeltaSeconds,
@@ -166,9 +165,7 @@ internal sealed class UpdateFrameOrchestrator : AcDream.App.Rendering.IGameUpdat
             _failureSink.ReportTeardownFailure(error);
         }
 
-        UpdateFrameTiming timing = _clock.Advance(
-            input,
-            advanceScriptClock: _availability.IsWorldAvailable);
+        UpdateFrameTiming timing = _clock.Advance(input);
         _scriptClockPublisher.PublishTime(timing.ScriptTime);
         _streaming.Tick();
         _input.Tick(timing);

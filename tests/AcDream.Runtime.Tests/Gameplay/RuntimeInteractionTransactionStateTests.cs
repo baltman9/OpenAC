@@ -193,8 +193,12 @@ public sealed class RuntimeInteractionTransactionStateTests
         Assert.Equal(0u, snapshot.LastUseTargetId);
     }
 
+    /// <summary>
+    /// Mutation pin: omit the first appraisal's reference increment; the
+    /// replacement request no longer retains one reference.
+    /// </summary>
     [Fact]
-    public void AppraisalReplacementKeepsOneBusyReferenceAndExactCurrentId()
+    public void AppraisalReplacementKeepsOneAppraisalReferenceAndExactCurrentId()
     {
         using var inventory = NewInventory(out _);
         using var state = new RuntimeInteractionTransactionState(inventory);
@@ -202,7 +206,7 @@ public sealed class RuntimeInteractionTransactionStateTests
 
         Assert.True(state.TryRequestAppraisal(Item, sent.Add));
         Assert.True(state.TryRequestAppraisal(Container, sent.Add));
-        Assert.Equal(1, inventory.BusyCount);
+        Assert.Equal(1, inventory.AppraisalCount);
         Assert.False(state.AcceptAppraisalResponse(Item).Accepted);
 
         RuntimeAppraisalResponseAcceptance first =
@@ -210,7 +214,7 @@ public sealed class RuntimeInteractionTransactionStateTests
         Assert.True(first.Accepted);
         Assert.True(first.FirstResponse);
         Assert.Equal(Container, state.CurrentAppraisalId);
-        Assert.Equal(0, inventory.BusyCount);
+        Assert.Equal(0, inventory.AppraisalCount);
 
         Assert.True(state.RefreshCurrentAppraisal(sent.Add));
         Assert.Equal(new[] { Item, Container, Container }, sent);
@@ -352,7 +356,7 @@ public sealed class RuntimeInteractionTransactionStateTests
         // LastCompletedAppraisalId (the plugin-facing completion signal
         // mapped by AppAutomationSurface into
         // ILootAutomation.Appraisal.CurrentObjectId) are two different
-        // things. Before this split, MossTank's corpse-identify wait
+        // things. Before this split, a plugin's corpse-identify wait
         // polled CurrentAppraisalId and never observed it change for a
         // corpse the window was not showing, so corpse looting stalled
         // forever. LastCompletedAppraisalId must advance for every
@@ -475,7 +479,7 @@ public sealed class RuntimeInteractionTransactionStateTests
         Assert.Equal(
             AppraisalRequestOrigin.User,
             state.AwaitingAppraisalOrigin);
-        Assert.Equal(1, inventory.BusyCount);
+        Assert.Equal(1, inventory.AppraisalCount);
 
         // The user's own assess still completes normally -- it was never
         // touched by the refused Automation request.
@@ -485,7 +489,7 @@ public sealed class RuntimeInteractionTransactionStateTests
         Assert.True(userResponse.PresentInUi);
         Assert.Equal(AppraisalRequestOrigin.User, userResponse.Origin);
         Assert.Equal(Item, state.CurrentAppraisalId);
-        Assert.Equal(0, inventory.BusyCount);
+        Assert.Equal(0, inventory.AppraisalCount);
     }
 
     [Fact]
@@ -936,6 +940,71 @@ public sealed class RuntimeInteractionTransactionStateTests
         Assert.Equal(0, snapshot.OutboundCount);
         Assert.Equal(0, secondInventory.BusyCount);
         Assert.True(second.TryConsumeUseThrottle(100));
+    }
+
+    /// <summary>
+    /// A description in flight must not make the next pick-up or container
+    /// open report itself busy: the two are separate channels, and counting
+    /// them together made a looter that describes what it is about to take
+    /// refuse its own next step.
+    /// </summary>
+    [Fact]
+    public void AnOutstandingAppraisalLeavesItemActionsFree()
+    {
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+        var asked = new List<uint>();
+
+        Assert.True(state.TryRequestAppraisal(
+            Item,
+            asked.Add,
+            AppraisalRequestOrigin.Automation));
+
+        Assert.Equal(new[] { Item }, asked);
+        Assert.Equal(1, inventory.AppraisalCount);
+        Assert.Equal(0, inventory.BusyCount);
+        Assert.True(inventory.CanBeginRequest);
+        Assert.False(inventory.CanBeginAppraisal);
+
+        Assert.True(state.AcceptAppraisalResponse(Item).FirstResponse);
+        Assert.Equal(0, inventory.AppraisalCount);
+        Assert.True(inventory.CanBeginAppraisal);
+    }
+
+    /// <summary>The reverse: an item action in flight does not refuse a description.</summary>
+    [Fact]
+    public void AnItemActionInFlightLeavesDescriptionsFree()
+    {
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+        ItemUseRequestReservation reservation =
+            state.BeginUseRequestReservation();
+
+        Assert.Equal(1, inventory.BusyCount);
+        Assert.False(inventory.CanBeginRequest);
+        Assert.True(inventory.CanBeginAppraisal);
+
+        reservation.CancelBeforeDispatch();
+    }
+
+    /// <summary>
+    /// A description the server never answered holds the one awaiting slot,
+    /// so there is a way to give it up; nothing else is disturbed.
+    /// </summary>
+    [Fact]
+    public void AnUnansweredAppraisalCanBeAbandoned()
+    {
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+
+        Assert.False(state.AbandonAwaitingAppraisal());
+        Assert.True(state.TryRequestAppraisal(Item, _ => { }));
+        Assert.False(inventory.CanBeginAppraisal);
+
+        Assert.True(state.AbandonAwaitingAppraisal());
+        Assert.Equal(0, inventory.AppraisalCount);
+        Assert.True(inventory.CanBeginAppraisal);
+        Assert.Equal(0u, state.AwaitingAppraisalId);
     }
 
     private static InventoryTransactionState NewInventory(

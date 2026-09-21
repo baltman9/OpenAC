@@ -58,7 +58,8 @@ breaks. Today it does the following:
   allegiance panels, radar, dialogs, and floating windows.
 - A headless host that runs the same game runtime without a window, for bots
   and automated testing, on Windows and Linux.
-- Plugins, with a bundled example that reproduces a familiar automation tool.
+- Plugins, installed from the launcher, with a plugin manager that finds and
+  updates them.
 
 **Found a bug or missing feature?** Please report it in
 [Discord](https://discord.gg/mBWtvgmuF) or open a
@@ -138,18 +139,26 @@ Every public member of the contract carries a summary that your IDE shows,
 and the same summaries make up the [API reference site](https://eriknihlen.github.io/OpenAC/).
 
 Plugins live in their own repositories and install into the client's plugins
-folder; [OpenAC-MagTools](https://github.com/eriknihlen/OpenAC-MagTools) is
-an external plugin built that way. The same plugin runs unchanged in the
-headless host for bots and tests.
+folder; [OpenAC-MagTools](https://github.com/eriknihlen/OpenAC-MagTools) and
+[openac-mosstank](https://github.com/eriknihlen/openac-mosstank) are external
+plugins built that way. The same plugin runs unchanged in the headless host
+for bots and tests.
 
-**MossTank** is the bundled plugin: a re-implementation of VirindiTank, the
-automation plugin most Asheron's Call players ran for years. It reads
-VirindiTank's own profile and navigation files so existing setups carry over,
-and it aims at the same tabs, the same behavior, and the same vocabulary.
-Full credit to Virindi for the original; MossTank exists because that design
-was right. **What ships here is a proof of concept. It is not working yet
-and is not expected to;** most of the real work lives on another branch and
-lands when it is ready.
+Shipping one to other players goes through the launcher: publish a GitHub
+release it can install, check it first with the bundled validator so you know
+it meets the current rules, and ask for a listing so it shows up in the
+launcher's Discover panel. [docs/plugin-development.md](docs/plugin-development.md)
+walks the whole path and [docs/plugin-manifest.md](docs/plugin-manifest.md)
+is the field-by-field contract, including the icon rules, the size caps, beta
+releases, and the capabilities a plugin declares before a player installs it.
+
+**MossTank** is a re-implementation of VirindiTank, the automation plugin
+most Asheron's Call players ran for years. It reads VirindiTank's own profile
+and navigation files so existing setups carry over, and it aims at the same
+tabs, the same behavior, and the same vocabulary. Full credit to Virindi for
+the original; MossTank exists because that design was right. It lives in
+[its own repository](https://github.com/eriknihlen/openac-mosstank) and
+installs from the launcher's plugin manager like any other plugin.
 
 **Custom shader packs** are an experiment. The render packs under `samples/`
 are plugins that swap in their own shader stages (an atmospheric tier, a

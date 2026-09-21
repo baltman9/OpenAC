@@ -6,7 +6,9 @@ using AcDream.Launcher.Core.Orchestration;
 using AcDream.Launcher.Core.Profiles;
 using AcDream.Launcher.ViewModels;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Headless.XUnit;
 using Avalonia.Headless;
 using Avalonia.Threading;
@@ -19,10 +21,17 @@ public sealed class MainWindowViewTests
     private static readonly (string Name, Type Type)[] ExpectedNamedControls =
     [
         ("AccountsScroll", typeof(ScrollViewer)),
+        ("AccountsTabButton", typeof(ToggleButton)),
+        ("PluginsTabButton", typeof(ToggleButton)),
+        ("PluginsPanel", typeof(Grid)),
+        ("InstalledScroll", typeof(ScrollViewer)),
+        ("DiscoverScroll", typeof(ScrollViewer)),
         ("PlayCheckedButton", typeof(Button)),
         ("ProfileTextBox", typeof(TextBox)),
-        ("CharacterPluginsTextBox", typeof(TextBox)),
+        ("CharacterPluginsPanel", typeof(ScrollViewer)),
         ("SessionLogCloseButton", typeof(Button)),
+        ("SettingsButton", typeof(Button)),
+        ("SettingsCloseButton", typeof(Button)),
         ("ServerNameTextBox", typeof(TextBox)),
         ("AccountNameTextBox", typeof(TextBox)),
         ("CharacterNameTextBox", typeof(TextBox)),
@@ -44,6 +53,8 @@ public sealed class MainWindowViewTests
         ClosingAModalRestoresThePreviouslyFocusedControlWithoutThrowing();
         ResizingKeepsBatchActionsVisibleWhileManyAccountsScroll();
         ProfileEditorsExposeTwoFieldsAndMaskPasswords();
+        TabsRenderAndSwitchBetweenAccountsAndPlugins();
+        TheGearOpensSettingsAndTheBetaCheckboxRoundTripsThroughThePlugins();
     }
 
     private static void EveryExplicitlyNamedControlIsAssignedAfterConstruction()
@@ -323,6 +334,91 @@ public sealed class MainWindowViewTests
         finally { CloseTestWindow(window); }
     }
 
+    private static void TabsRenderAndSwitchBetweenAccountsAndPlugins()
+    {
+        using LauncherWindowViewModel viewModel = CreateViewModel();
+        var window = new MainWindow { DataContext = viewModel };
+        try
+        {
+            window.Show();
+
+            var accountsTab = (ToggleButton)GetNamedField(window, "AccountsTabButton")!;
+            var pluginsTab = (ToggleButton)GetNamedField(window, "PluginsTabButton")!;
+            var accountsScroll = window.FindControl<ScrollViewer>("AccountsScroll")!;
+            var pluginsScroll = window.FindControl<Grid>("PluginsPanel")!;
+
+            Assert.True(viewModel.IsAccountsTabSelected);
+            Assert.True(accountsTab.IsChecked);
+            Assert.False(pluginsTab.IsChecked);
+            Assert.True(accountsScroll.IsEffectivelyVisible);
+            Assert.False(pluginsScroll.IsEffectivelyVisible);
+
+            pluginsTab.Command?.Execute(null);
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(viewModel.IsPluginsTabSelected);
+            Assert.True(pluginsTab.IsChecked);
+            Assert.False(accountsTab.IsChecked);
+            Assert.False(accountsScroll.IsEffectivelyVisible);
+            Assert.True(pluginsScroll.IsEffectivelyVisible);
+            Assert.DoesNotContain(
+                window.GetVisualDescendants().OfType<CheckBox>(),
+                checkBox => Equals(AutomationProperties.GetName(checkBox), "Show beta plugins")
+                    && checkBox.IsEffectivelyVisible);
+
+            accountsTab.Command?.Execute(null);
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(viewModel.IsAccountsTabSelected);
+            Assert.True(accountsScroll.IsEffectivelyVisible);
+            Assert.False(pluginsScroll.IsEffectivelyVisible);
+        }
+        finally
+        {
+            CloseTestWindow(window);
+        }
+    }
+
+    private static void TheGearOpensSettingsAndTheBetaCheckboxRoundTripsThroughThePlugins()
+    {
+        using LauncherWindowViewModel viewModel = CreateViewModel();
+        var window = new MainWindow { DataContext = viewModel };
+        try
+        {
+            window.Show();
+
+            var settingsButton = (Button)GetNamedField(window, "SettingsButton")!;
+            var closeButton = (Button)GetNamedField(window, "SettingsCloseButton")!;
+            Assert.False(viewModel.IsSettingsOpen);
+
+            settingsButton.Command?.Execute(null);
+            Assert.True(viewModel.IsSettingsOpen);
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            Assert.Same(closeButton, CurrentFocus(window));
+
+            var betaCheckBox = window
+                .GetVisualDescendants()
+                .OfType<CheckBox>()
+                .First(checkBox => Equals(AutomationProperties.GetName(checkBox), "Show beta plugins"));
+            Assert.False(viewModel.Plugins.ShowBetaPlugins);
+            betaCheckBox.IsChecked = true;
+            Assert.True(viewModel.Plugins.ShowBetaPlugins);
+
+            closeButton.Command?.Execute(null);
+            Assert.False(viewModel.IsSettingsOpen);
+            Dispatcher.UIThread.RunJobs();
+            Assert.NotSame(closeButton, CurrentFocus(window));
+            Assert.True(viewModel.Plugins.ShowBetaPlugins);
+        }
+        finally
+        {
+            CloseTestWindow(window);
+        }
+    }
+
     private static Control? CurrentFocus(MainWindow window) =>
         Avalonia.Controls.TopLevel.GetTopLevel(window)?.FocusManager?.GetFocusedElement()
             as Control;
@@ -578,6 +674,14 @@ public sealed class MainWindowViewTests
             LaunchMode launchMode,
             IReadOnlyList<string> plugins,
             IReadOnlyList<string> loginCommands)
+        {
+        }
+
+        public void UpdateAccountSelection(
+            string serverName,
+            string accountName,
+            string? selectedCharacter,
+            LaunchMode selectedLaunchMode)
         {
         }
 

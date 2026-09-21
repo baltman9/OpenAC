@@ -27,6 +27,8 @@ public sealed class RuntimeCombatModeState
 {
     private readonly CombatState _combat;
     private readonly IRuntimeCombatModeOperations _operations;
+    private long _qualifiedSelfMotionRevision;
+    private double _qualifiedSelfMotionAt;
 
     public RuntimeCombatModeState(
         CombatState combat,
@@ -35,6 +37,19 @@ public sealed class RuntimeCombatModeState
         _combat = combat ?? throw new ArgumentNullException(nameof(combat));
         _operations = operations
             ?? throw new ArgumentNullException(nameof(operations));
+    }
+
+    public long QualifiedSelfMotionRevision => _qualifiedSelfMotionRevision;
+
+    public double QualifiedSelfMotionAgeSeconds(double now) =>
+        _qualifiedSelfMotionRevision == 0
+            ? 0d
+            : Math.Max(0d, now - _qualifiedSelfMotionAt);
+
+    public void RecordQualifiedSelfMotion(double now)
+    {
+        _qualifiedSelfMotionAt = now;
+        _qualifiedSelfMotionRevision++;
     }
 
     public RuntimeCombatModeRequestResult Toggle()

@@ -22,7 +22,7 @@ public sealed class LandblockStaticPresentationPublisherTests
     private static readonly float[] HeightTable = new float[256];
 
     [Fact]
-    public void Reapply_ReplacesLightsAndRefreshesPluginWithoutSpawnReplay()
+    public void Reapply_ReplacesLightsAndRefreshesTheSceneryList()
     {
         var fixture = Fixture();
         int spawnCount = 0;
@@ -32,8 +32,10 @@ public sealed class LandblockStaticPresentationPublisherTests
 
         Publish(fixture, Build(LandblockId, [first], BundleWithLight()));
         Assert.Equal(1, fixture.Lights.RegisteredCount);
-        Assert.Equal(1, spawnCount);
-        Assert.Equal(first.Position, Assert.Single(fixture.World.Entities).Position);
+        Assert.Equal(0, spawnCount);
+        Assert.Equal(
+            first.Position,
+            Assert.Single(fixture.World.SceneryObjects).Position);
 
         fixture.Lighting.SetOwnerLighting(first.Id, enabled: false);
         fixture.Translucency.StartPartFade(first.Id, 0u, 0f, 0.6f, 0f);
@@ -46,8 +48,10 @@ public sealed class LandblockStaticPresentationPublisherTests
         Publish(fixture, Build(LandblockId, [moved], BundleWithLight()));
 
         Assert.Equal(1, fixture.Lights.RegisteredCount);
-        Assert.Equal(1, spawnCount);
-        Assert.Equal(moved.Position, Assert.Single(fixture.World.Entities).Position);
+        Assert.Equal(0, spawnCount);
+        Assert.Equal(
+            moved.Position,
+            Assert.Single(fixture.World.SceneryObjects).Position);
         Assert.False(Assert.Single(fixture.Lighting.GetOwnedLights(first.Id)!).IsLit);
         Assert.Equal(1, fixture.Lighting.RetainedOwnerStateCount);
         Assert.True(fixture.Translucency.TryGetCurrentValue(
@@ -66,7 +70,7 @@ public sealed class LandblockStaticPresentationPublisherTests
     }
 
     [Fact]
-    public void Reapply_OmittedStaticRemovesLightTranslucencyAndPluginProjection()
+    public void Reapply_OmittedStaticRemovesLightTranslucencyAndSceneryEntry()
     {
         var fixture = Fixture();
         WorldEntity entity = Entity(0x80A9B401u, new Vector3(12f, 12f, 0f));
@@ -81,14 +85,14 @@ public sealed class LandblockStaticPresentationPublisherTests
         Assert.Equal(0, fixture.Lights.RegisteredCount);
         Assert.Equal(0, fixture.Lighting.RetainedOwnerStateCount);
         Assert.False(fixture.Translucency.TryGetCurrentValue(entity.Id, 0u, out _));
-        Assert.Empty(fixture.World.Entities);
+        Assert.Empty(fixture.World.SceneryObjects);
         Assert.Equal(1, fixture.Publisher.Diagnostics.PluginRemovalCount);
         Assert.Equal(0, fixture.Publisher.Diagnostics.ActiveLandblockCount);
         Assert.Equal(0, fixture.Publisher.Diagnostics.ActiveEntityCount);
     }
 
     [Fact]
-    public void RetirementThenReload_EmitsNewLogicalPluginSpawn()
+    public void RetirementThenReload_RepublishesSceneryAndStillFiresNoObjectSpawn()
     {
         var fixture = Fixture();
         int spawnCount = 0;
@@ -103,7 +107,9 @@ public sealed class LandblockStaticPresentationPublisherTests
 
         Publish(fixture, Build(LandblockId, [entity], BundleWithLight()));
 
-        Assert.Equal(2, spawnCount);
+        Assert.Equal(0, spawnCount);
+        Assert.Equal(2, fixture.Publisher.Diagnostics.PluginSpawnCount);
+        Assert.Single(fixture.World.SceneryObjects);
         Assert.Equal(1, fixture.Lights.RegisteredCount);
         Assert.Equal(1, fixture.Publisher.Diagnostics.ActiveEntityCount);
     }
@@ -119,7 +125,7 @@ public sealed class LandblockStaticPresentationPublisherTests
 
         Assert.Throws<InvalidOperationException>(() =>
             fixture.Publisher.PreparePublication(duplicatePhysics));
-        Assert.Empty(fixture.World.Entities);
+        Assert.Empty(fixture.World.SceneryObjects);
         Assert.Equal(0, fixture.Lights.RegisteredCount);
 
         Publish(fixture, Build(LandblockId, [first]));
@@ -128,7 +134,7 @@ public sealed class LandblockStaticPresentationPublisherTests
             Build(AdjacentLandblockId, [Entity(first.Id, new Vector3(192f, 0f, 0f))]));
         Assert.Throws<InvalidOperationException>(() =>
             fixture.Publisher.PreparePublication(adjacentPhysics));
-        Assert.Single(fixture.World.Entities);
+        Assert.Single(fixture.World.SceneryObjects);
     }
 
     [Fact]
@@ -139,9 +145,34 @@ public sealed class LandblockStaticPresentationPublisherTests
 
         Publish(fixture, Build(LandblockId, [live], BundleWithLight()));
 
-        Assert.Empty(fixture.World.Entities);
+        Assert.Empty(fixture.World.SceneryObjects);
         Assert.Equal(0, fixture.Lights.RegisteredCount);
         Assert.Equal(0, fixture.Publisher.Diagnostics.ActiveEntityCount);
+    }
+
+    /// <summary>
+    /// Scenery is a drawn-world fact, not an object: it goes in its own list
+    /// and a plugin watching for objects to appear never hears about it.
+    /// </summary>
+    [Fact]
+    public void ScenerysOwnListIsTheOnlyPlaceItAppears()
+    {
+        var fixture = Fixture();
+        var spawned = new List<uint>();
+        fixture.Events.EntitySpawned += snapshot => spawned.Add(snapshot.Id);
+        WorldEntity entity = Entity(0x80A9B401u, new Vector3(12f, 12f, 0f));
+
+        Publish(fixture, Build(LandblockId, [entity], BundleWithLight()));
+
+        Assert.Equal(entity.Id, Assert.Single(fixture.World.SceneryObjects).Id);
+        Assert.Empty(fixture.World.Entities);
+        Assert.Empty(spawned);
+
+        fixture.Publisher.RemovePluginProjection(entity);
+
+        Assert.Empty(fixture.World.SceneryObjects);
+        Assert.Empty(fixture.World.Entities);
+        Assert.Empty(spawned);
     }
 
     [Fact]
@@ -216,8 +247,7 @@ public sealed class LandblockStaticPresentationPublisherTests
             new LandblockStaticPresentationPublisher(
                 lighting,
                 translucency,
-                world,
-                events),
+                world),
             lights,
             lighting,
             translucency,
@@ -294,8 +324,8 @@ public sealed class LandblockStaticPresentationPublisherTests
 
     /// <summary>
     /// What the publisher remembers per landblock is the source id, not the
-    /// whole plugin snapshot: a republication that moves a static still
-    /// refreshes it, and the plugin world state carries the new position.
+    /// whole snapshot: a republication that moves a static still refreshes
+    /// it, and the scenery store carries the new position.
     /// </summary>
     [Fact]
     public void Reapply_RememberedSourceDoesNotStandInForThePluginSnapshot()
@@ -307,7 +337,9 @@ public sealed class LandblockStaticPresentationPublisherTests
         Publish(fixture, Build(LandblockId, [first], BundleWithLight()));
         Publish(fixture, Build(LandblockId, [moved], BundleWithLight()));
 
-        Assert.Equal(moved.Position, Assert.Single(fixture.World.Entities).Position);
+        Assert.Equal(
+            moved.Position,
+            Assert.Single(fixture.World.SceneryObjects).Position);
         Assert.Equal(1, fixture.Publisher.Diagnostics.PluginSpawnCount);
         Assert.Equal(1, fixture.Publisher.Diagnostics.PluginRefreshCount);
     }

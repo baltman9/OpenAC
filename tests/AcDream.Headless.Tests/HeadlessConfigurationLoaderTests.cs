@@ -475,6 +475,41 @@ public sealed class HeadlessConfigurationLoaderTests
             () => HeadlessConfigurationLoader.Load(blankPolicy.Path));
     }
 
+    /// <summary>
+    /// The words a session wants to be found by. They are how a plugin tells
+    /// one bot apart from another on a machine running several, so a config
+    /// that names a blank one is rejected rather than quietly dropped.
+    /// </summary>
+    [Fact]
+    public void PluginTagsParseAndRoundTrip()
+    {
+        using TemporaryConfiguration file = TemporaryConfiguration.Create(
+            ConfigurationWith(Session(
+                "bot",
+                "BOT_PASSWORD",
+                "\"pluginTags\":[\"tank\",\"group-a\"]")));
+
+        HeadlessConfiguration configuration =
+            HeadlessConfigurationLoader.Load(file.Path);
+
+        List<string>? tags = Assert.Single(configuration.Sessions)!.PluginTags;
+        Assert.NotNull(tags);
+        Assert.Equal(["tank", "group-a"], tags!);
+    }
+
+    [Fact]
+    public void ABlankPluginTagIsRejected()
+    {
+        using TemporaryConfiguration file = TemporaryConfiguration.Create(
+            ConfigurationWith(Session(
+                "bot",
+                "BOT_PASSWORD",
+                "\"pluginTags\":[\"tank\",\" \"]")));
+
+        Assert.Throws<HeadlessConfigurationException>(
+            () => HeadlessConfigurationLoader.Load(file.Path));
+    }
+
     [Fact]
     public void PluginSettingsWithAllSixKeysParsesAndRoundTrips()
     {
@@ -484,7 +519,7 @@ public sealed class HeadlessConfigurationLoaderTests
                 "BOT_PASSWORD",
                 """
                 "pluginSettings":{
-                    "acdream.mosstank":{
+                    "edwards.tank":{
                         "settingsProfile":"myprofile",
                         "metaProfile":"myMeta",
                         "navProfile":"myNav",
@@ -524,7 +559,7 @@ public sealed class HeadlessConfigurationLoaderTests
             ConfigurationWith(Session(
                 "bot",
                 "BOT_PASSWORD",
-                "\"pluginSettings\":{\"acdream.mosstank\":{\"startMacro\":\"true\"}}")));
+                "\"pluginSettings\":{\"edwards.tank\":{\"startMacro\":\"true\"}}")));
 
         HeadlessConfiguration configuration =
             HeadlessConfigurationLoader.Load(file.Path);
@@ -534,7 +569,7 @@ public sealed class HeadlessConfigurationLoaderTests
         Assert.NotNull(byPlugin);
         KeyValuePair<string, Dictionary<string, string>> onlyPlugin =
             Assert.Single(byPlugin!);
-        Assert.Equal("acdream.mosstank", onlyPlugin.Key);
+        Assert.Equal("edwards.tank", onlyPlugin.Key);
         string only = Assert.Single(onlyPlugin.Value).Key;
         Assert.Equal("startMacro", only);
     }
@@ -548,7 +583,7 @@ public sealed class HeadlessConfigurationLoaderTests
                 "BOT_PASSWORD",
                 """
                 "pluginSettings":{
-                    "acdream.mosstank":{"startMacro":"true"},
+                    "edwards.tank":{"startMacro":"true"},
                     "acdream.other":{"startMacro":"false"}
                 }
                 """)));
@@ -560,7 +595,7 @@ public sealed class HeadlessConfigurationLoaderTests
             Assert.Single(configuration.Sessions)!.PluginSettings;
         Assert.NotNull(byPlugin);
         Assert.Equal(2, byPlugin!.Count);
-        Assert.Equal("true", byPlugin["acdream.mosstank"]["startMacro"]);
+        Assert.Equal("true", byPlugin["edwards.tank"]["startMacro"]);
         Assert.Equal("false", byPlugin["acdream.other"]["startMacro"]);
     }
 
@@ -583,7 +618,7 @@ public sealed class HeadlessConfigurationLoaderTests
             ConfigurationWith(Session(
                 "bot",
                 "BOT_PASSWORD",
-                "\"pluginSetting\":{\"acdream.mosstank\":{\"startMacro\":\"true\"}}")));
+                "\"pluginSetting\":{\"edwards.tank\":{\"startMacro\":\"true\"}}")));
 
         Assert.Throws<JsonException>(
             () => HeadlessConfigurationLoader.Load(file.Path));
@@ -596,7 +631,7 @@ public sealed class HeadlessConfigurationLoaderTests
             ConfigurationWith(Session(
                 "bot",
                 "BOT_PASSWORD",
-                "\"pluginSettings\":{\"acdream.mosstank\":{\"startMacro\":null}}")));
+                "\"pluginSettings\":{\"edwards.tank\":{\"startMacro\":null}}")));
 
         HeadlessConfigurationException exception = Assert.Throws<
             HeadlessConfigurationException>(
@@ -612,14 +647,14 @@ public sealed class HeadlessConfigurationLoaderTests
             ConfigurationWith(Session(
                 "bot",
                 "BOT_PASSWORD",
-                "\"pluginSettings\":{\"acdream.mosstank\":null}")));
+                "\"pluginSettings\":{\"edwards.tank\":null}")));
 
         HeadlessConfigurationException exception = Assert.Throws<
             HeadlessConfigurationException>(
                 () => HeadlessConfigurationLoader.Load(file.Path));
 
         Assert.Contains(
-            "acdream.mosstank",
+            "edwards.tank",
             exception.Message,
             StringComparison.Ordinal);
     }

@@ -710,7 +710,14 @@ public sealed class RuntimeEntityObjectLifetime : IDisposable
             Entities.RetainTeardown(prior);
             try
             {
-                PublishEntity(RuntimeEntityChange.Deleted, prior);
+                // The object is not leaving the world: this incarnation is
+                // handing over to the replacement registered just below,
+                // under the same id. Observers that let go of a departed
+                // object are told so they do not let go of this one.
+                PublishEntity(
+                    RuntimeEntityChange.Deleted,
+                    prior,
+                    replacedInPlace: true);
             }
             catch (Exception error)
             {
@@ -1910,8 +1917,9 @@ public sealed class RuntimeEntityObjectLifetime : IDisposable
 
     private void PublishEntity(
         RuntimeEntityChange change,
-        RuntimeEntityRecord canonical) =>
-        Events.PublishEntity(change, canonical);
+        RuntimeEntityRecord canonical,
+        bool replacedInPlace = false) =>
+        Events.PublishEntity(change, canonical, replacedInPlace);
 
     private bool AcknowledgeProjectionAndPublish(
         RuntimeEntityRecord canonical,

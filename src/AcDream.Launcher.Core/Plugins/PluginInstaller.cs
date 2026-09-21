@@ -1,0 +1,726 @@
+using System.Text;
+using AcDream.Launcher.Core.Updates;
+using AcDream.Platform;
+
+namespace AcDream.Launcher.Core.Plugins;
+
+public sealed record PluginInstallResult(string Id, string Version, bool WasUpdate);
+
+/// <summary>Install, update, remove and recovery for launcher-managed plugins, following the plan's
+/// Install/update, Remove and Recovery pipelines. Every
+/// write under <see cref="ApplicationPathSet.PluginsDirectory"/> happens under
+/// <see cref="UpdateSessionBarrier.TryAcquireExclusive"/>. Install never writes a character's plugin
+/// list; that write goes through <see cref="AcDream.Launcher.Core.Orchestration.ILauncherOrchestrator.UpdateCharacterSettings"/>
+/// instead.</summary>
+public sealed class PluginInstaller
+{
+    /// <summary>The refusal shown when a running session (or another update) holds the barrier.</summary>
+    public const string SessionLeaseRefusal =
+        "Close all OpenAC sessions to install or update plugins.";
+
+    /// <summary>The refusal shown when a manifest declares a capability vocabulary newer than this
+    /// launcher knows. Says the launcher needs updating rather than that the manifest is invalid,
+    /// since the player can act on the former.</summary>
+    public const string CapabilityVocabularyRefusal =
+        "This plugin needs a newer launcher than the one installed. Update the launcher, then try again.";
+
+    /// <summary>The refusal shown when the caller supplies the capabilities the player reviewed and
+    /// the release manifest declares a different set: the release changed between the install
+    /// dialog opening and the install running.</summary>
+    public const string CapabilitiesChangedRefusal =
+        "This plugin changed since you reviewed it. Check it again before installing.";
+
+    /// <summary>The install-time caps from the plan's shared contract (Release contract, "Caps").
+    /// The one place they're set, so the zip download cap and the extraction limits it feeds can't
+    /// drift apart; <see cref="DirectInstallCheck"/> reuses the same extraction limits.</summary>
+    internal static class ContractLimits
+    {
+        public const long MaximumZipBytes = 64L * 1024 * 1024;
+
+        public static readonly SafeZipExtractionLimits Extraction = new(
+            MaximumEntries: 2_000,
+            MaximumEntryBytes: 64L * 1024 * 1024,
+            MaximumTotalBytes: 256L * 1024 * 1024,
+            MaximumCompressionRatio: 200,
+            MaximumRelativePathLength: 512);
+    }
+
+    private readonly ApplicationPathSet _paths;
+    private readonly PluginReleaseClient _releaseClient;
+    private readonly VerifiedArtifactDownloader _downloader;
+    private readonly SafeZipExtractor _extractor;
+    private readonly InstalledPluginRecordStore _recordStore;
+    private readonly PluginInventory _inventory;
+    private readonly UpdateSessionBarrier _barrier;
+
+    public PluginInstaller(
+        ApplicationPathSet paths,
+        HttpClient httpClient,
+        InstalledPluginRecordStore recordStore,
+        PluginInventory inventory)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(httpClient);
+        _paths = paths;
+        _releaseClient = new PluginReleaseClient(httpClient);
+        _downloader = new VerifiedArtifactDownloader(httpClient);
+        _extractor = new SafeZipExtractor(ContractLimits.Extraction, ignoreDeclaredModes: true);
+        _recordStore = recordStore ?? throw new ArgumentNullException(nameof(recordStore));
+        _inventory = inventory ?? throw new ArgumentNullException(nameof(inventory));
+        _barrier = new UpdateSessionBarrier(paths.DataDirectory);
+    }
+
+    /// <summary>Install a new plugin or update an already-managed one from the same repo, at the
+    /// exact <paramref name="tag"/> the caller already resolved (the update check, Discover's
+    /// details, or Add from URL): what was offered is what installs, so this never re-resolves
+    /// latest itself. The caller resolves <paramref name="repo"/> itself, from the catalog or a
+    /// typed <c>github.com/owner/name</c> URL. <paramref name="displayedCapabilities"/>, when
+    /// supplied, must match the release manifest's own capabilities (name and note,
+    /// order-insensitive) or the install is refused: it is the consent the player actually saw,
+    /// and the release can change under them between the dialog opening and this call
+    /// running. <paramref name="channel"/>, when supplied, is the channel the player chose for this
+    /// install (Discover's per-row picker) and wins over the version-inferred default below; omitted,
+    /// every existing caller keeps today's inference unchanged.</summary>
+    public async Task<PluginInstallResult> InstallOrUpdateAsync(
+        string repo,
+        string tag,
+        PluginCatalog? catalog,
+        ClientVersionResolution? clientResolution,
+        IReadOnlyList<LauncherPluginCapabilityDeclaration>? displayedCapabilities = null,
+        PluginReleaseChannel? channel = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repo);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tag);
+
+        PluginReleaseFetchResult manifestFetch = await _releaseClient.FetchDocumentAsync(
+                GitHubReleaseLocator.TaggedAsset(repo, tag, "plugin.json"),
+                cancellationToken)
+            .ConfigureAwait(false);
+        RequireSuccess(manifestFetch);
+        PluginReleaseDocument manifestDocument = manifestFetch.Document!;
+
+        LauncherPluginManifest manifest;
+        try
+        {
+            // Every read of an installed plugin.json drops a byte-order mark, so the published
+            // copy is read the same way; otherwise a file the checker accepts fails to install.
+            ReadOnlySpan<byte> manifestBytes = manifestDocument.Content;
+            if (manifestBytes.StartsWith(Encoding.UTF8.Preamble))
+                manifestBytes = manifestBytes[Encoding.UTF8.Preamble.Length..];
+
+            manifest = LauncherPluginManifest.Parse(Encoding.UTF8.GetString(manifestBytes));
+            manifest.ValidateForInstall();
+        }
+        catch (LauncherPluginCapabilityVersionException ex)
+        {
+            throw new LauncherUpdateException(CapabilityVocabularyRefusal, ex);
+        }
+        catch (LauncherPluginManifestException ex)
+        {
+            throw new LauncherUpdateException($"The plugin manifest is invalid: {ex.Message}", ex);
+        }
+
+        if (displayedCapabilities is not null
+            && !CapabilitiesMatch(displayedCapabilities, manifest.Capabilities))
+        {
+            throw new LauncherUpdateException(CapabilitiesChangedRefusal);
+        }
+
+        if (!manifest.MatchesTag(tag))
+        {
+            throw new LauncherUpdateException(
+                $"The release tag does not match plugin version {manifest.Version}.");
+        }
+
+        LauncherVersion pluginVersion = LauncherVersion.Parse(manifest.Version);
+        string? blockReason = PluginInventory.FindBlockReason(catalog, manifest.Id, pluginVersion);
+        if (blockReason is not null)
+        {
+            throw new LauncherUpdateException($"'{manifest.Id}' is blocked: {blockReason}");
+        }
+
+        string? incompatibility = PluginInventory.EvaluateVersionCompatibility(
+            manifest,
+            clientResolution?.Version);
+        // "Client not installed" is informational, not a refusal: nothing can run yet
+        // to be incompatible with, so blocking here would only stop the very first install.
+        if (incompatibility is not null
+            && !string.Equals(
+                incompatibility,
+                LauncherPluginCompatibility.ClientNotInstalled,
+                StringComparison.Ordinal))
+        {
+            throw new LauncherUpdateException($"'{manifest.Id}' {incompatibility}.");
+        }
+
+        InstalledPluginRecord? existingRecord = _recordStore.Find(manifest.Id);
+        bool isUpdate = existingRecord is not null
+            && string.Equals(existingRecord.Repo, repo, StringComparison.OrdinalIgnoreCase);
+
+        if (existingRecord is not null && !isUpdate)
+        {
+            throw new LauncherUpdateException(
+                $"'{manifest.Id}' is already installed from '{existingRecord.Repo}'.");
+        }
+
+        if (!isUpdate)
+        {
+            InstalledPluginInfo? otherSource = _inventory.Find(
+                manifest.Id,
+                clientResolution,
+                catalog);
+            if (otherSource is not null)
+            {
+                throw new LauncherUpdateException(
+                    $"'{manifest.Id}' is already present as a "
+                    + $"{DescribeSource(otherSource.Source)} plugin.");
+            }
+        }
+
+        string targetDirectory = Path.Combine(_paths.PluginsDirectory, manifest.Id);
+        RefuseUnmanagedFolder(existingRecord, manifest.Id, targetDirectory);
+
+        if (isUpdate)
+        {
+            LauncherVersion currentVersion = existingRecord!.Version is { } current
+                ? LauncherVersion.Parse(current)
+                : throw new LauncherUpdateException(
+                    $"'{manifest.Id}' has no confirmed installed version to update. "
+                    + "Restart the launcher to recover it first.");
+            if (pluginVersion <= currentVersion)
+            {
+                throw new LauncherUpdateException(
+                    $"'{manifest.Id}' {pluginVersion} is not newer than the installed "
+                    + $"{currentVersion}.");
+            }
+        }
+
+        string zipName = $"{manifest.Id}-{manifest.Version}.zip";
+        PluginReleaseFetchResult shaFetch = await _releaseClient.FetchDocumentAsync(
+                GitHubReleaseLocator.TaggedAsset(repo, tag, zipName + ".sha256"),
+                cancellationToken)
+            .ConfigureAwait(false);
+        RequireSuccess(shaFetch);
+        PluginSha256File shaFile = PluginSha256File.Parse(
+            Encoding.UTF8.GetString(shaFetch.Document!.Content));
+        shaFile.RequireMatches(zipName);
+
+        string zipPath = Path.Combine(
+            _paths.CacheDirectory,
+            "plugin-downloads",
+            $"{manifest.Id}-{Guid.NewGuid():N}.zip");
+        string stagingDirectory = Path.Combine(
+            _paths.PluginsDirectory,
+            ".staging",
+            $"{manifest.Id}-{Guid.NewGuid():N}");
+        try
+        {
+            _ = await _downloader.DownloadAsync(
+                    GitHubReleaseLocator.TaggedAsset(repo, tag, zipName),
+                    shaFile.Sha256,
+                    ContractLimits.MaximumZipBytes,
+                    zipPath,
+                    progress: null,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            IReadOnlyList<ExtractedFileRecord> extracted = await _extractor.ExtractAsync(
+                    zipPath,
+                    stagingDirectory,
+                    executableNames: null,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            PluginContentPolicy.Validate(extracted, manifest.EntryDll);
+
+            byte[] zipManifestBytes = await File.ReadAllBytesAsync(
+                    Path.Combine(stagingDirectory, "plugin.json"),
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (!zipManifestBytes.AsSpan().SequenceEqual(manifestDocument.Content))
+            {
+                throw new LauncherUpdateException(
+                    "The plugin archive's plugin.json does not match the published release.");
+            }
+
+            string zipIconPath = Path.Combine(stagingDirectory, LauncherPluginIcon.FileName);
+            if (File.Exists(zipIconPath))
+            {
+                byte[] zipIconBytes = await File.ReadAllBytesAsync(zipIconPath, cancellationToken)
+                    .ConfigureAwait(false);
+                LauncherPluginIcon.Validate(zipIconBytes);
+
+                PluginReleaseFetchResult iconFetch = await _releaseClient.FetchDocumentAsync(
+                        GitHubReleaseLocator.TaggedAsset(repo, tag, LauncherPluginIcon.FileName),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                RequireSuccess(iconFetch, "The release is missing its icon.png asset.");
+
+                if (!zipIconBytes.AsSpan().SequenceEqual(iconFetch.Document!.Content))
+                {
+                    throw new LauncherUpdateException(
+                        "The plugin archive's icon.png does not match the published release.");
+                }
+            }
+
+            if (!_barrier.TryAcquireExclusive(out UpdateSessionBarrier.ExclusiveLease? lease))
+            {
+                throw new LauncherUpdateException(SessionLeaseRefusal);
+            }
+
+            using (lease)
+            {
+                // Asked again now that nothing else can change the folder: a copy placed by hand
+                // while the download ran must not be swapped out as if it were the old version.
+                RefuseUnmanagedFolder(existingRecord, manifest.Id, targetDirectory);
+
+                SwapIntoPlace(
+                    manifest.Id,
+                    repo,
+                    catalog,
+                    manifest.Version,
+                    tag,
+                    shaFile.Sha256,
+                    pluginVersion.IsPreRelease,
+                    existingRecord,
+                    stagingDirectory,
+                    targetDirectory,
+                    channel);
+            }
+
+            return new PluginInstallResult(manifest.Id, manifest.Version, isUpdate);
+        }
+        finally
+        {
+            VerifiedArtifactDownloader.TryDelete(zipPath);
+            SafeZipExtractor.TryDeleteDirectory(stagingDirectory);
+            TryDeleteIfEmpty(Path.Combine(_paths.PluginsDirectory, ".staging"));
+        }
+    }
+
+    /// <summary>Sets a launcher-managed plugin's channel, under the same exclusive lease as
+    /// every other record write. Returns the updated record so the toggle can reflect it without
+    /// waiting for the next Check pass.</summary>
+    public InstalledPluginRecord SetChannel(string id, PluginReleaseChannel channel)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        InstalledPluginRecord record = _recordStore.Find(id)
+            ?? throw new LauncherUpdateException($"'{id}' is not a launcher-managed plugin.");
+
+        if (!_barrier.TryAcquireExclusive(out UpdateSessionBarrier.ExclusiveLease? lease))
+        {
+            throw new LauncherUpdateException(SessionLeaseRefusal);
+        }
+
+        using (lease)
+        {
+            InstalledPluginRecord updated = record with { Channel = channel };
+            Upsert(updated);
+            _recordStore.Save();
+            return updated;
+        }
+    }
+
+    /// <summary>Removes a launcher-managed plugin. <paramref name="deleteStorage"/> also deletes the
+    /// plugin's own subtree under <c>ConfigDirectory/plugins/&lt;id&gt;</c>
+    /// (<c>ScopedPluginHost</c>'s scope), never the shared root and never Vtank's own profile
+    /// directory.</summary>
+    public void Remove(string id, bool deleteStorage)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        _ = _recordStore.Find(id)
+            ?? throw new LauncherUpdateException($"'{id}' is not a launcher-managed plugin.");
+
+        if (!_barrier.TryAcquireExclusive(out UpdateSessionBarrier.ExclusiveLease? lease))
+        {
+            throw new LauncherUpdateException(SessionLeaseRefusal);
+        }
+
+        using (lease)
+        {
+            string targetDirectory = Path.Combine(_paths.PluginsDirectory, id);
+            if (Directory.Exists(targetDirectory))
+            {
+                string trashDirectory = CreateTrashPath(id);
+                Directory.Move(targetDirectory, trashDirectory);
+                SafeZipExtractor.TryDeleteDirectory(trashDirectory);
+            }
+
+            TryDeleteIfEmpty(Path.Combine(_paths.PluginsDirectory, ".trash"));
+
+            _recordStore.Records.RemoveAll(record =>
+                string.Equals(record.Id, id, StringComparison.OrdinalIgnoreCase));
+            _recordStore.Save();
+
+            if (deleteStorage)
+            {
+                SafeZipExtractor.TryDeleteDirectory(
+                    Path.Combine(_paths.ConfigDirectory, "plugins", id));
+            }
+        }
+    }
+
+    /// <summary>Removes a Direct install by its folder rather than its manifest id, which
+    /// <see cref="LauncherPluginManifest.Parse"/> never validates and so could name anything. Never touches a launcher-managed or bundled plugin.</summary>
+    public void RemoveDirect(string directory, bool deleteStorage)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+
+        if (!_barrier.TryAcquireExclusive(out UpdateSessionBarrier.ExclusiveLease? lease))
+        {
+            throw new LauncherUpdateException(SessionLeaseRefusal);
+        }
+
+        using (lease)
+        {
+            InstalledPluginInfo row = _inventory.Build(clientResolution: null, catalog: null)
+                .FirstOrDefault(info => LauncherPathIdentity.Equals(info.Directory, directory))
+                ?? throw new LauncherUpdateException("That plugin is no longer installed.");
+
+            if (row.Source != InstalledPluginSource.Direct)
+            {
+                throw new LauncherUpdateException(
+                    "Only a directly installed plugin can be removed this way.");
+            }
+
+            string? parent = Path.GetDirectoryName(row.Directory);
+            if (parent is null || !LauncherPathIdentity.Equals(parent, _paths.PluginsDirectory))
+            {
+                throw new LauncherUpdateException("That plugin is not under the plugins folder.");
+            }
+
+            string folderName = Path.GetFileName(row.Directory);
+            if (folderName.StartsWith('.'))
+            {
+                throw new LauncherUpdateException("That folder is not a plugin install.");
+            }
+
+            string trashDirectory = CreateTrashPath(folderName);
+            Directory.Move(row.Directory, trashDirectory);
+            SafeZipExtractor.TryDeleteDirectory(trashDirectory);
+            TryDeleteIfEmpty(Path.Combine(_paths.PluginsDirectory, ".trash"));
+
+            if (deleteStorage && LauncherPluginManifest.HasValidInstallId(row.Id))
+            {
+                SafeZipExtractor.TryDeleteDirectory(
+                    Path.Combine(_paths.ConfigDirectory, "plugins", row.Id));
+            }
+        }
+    }
+
+    /// <summary>The launch-time Recovery pipeline: reclaims staging/downloads, restores or discards
+    /// <c>.trash</c>, and reconciles every <c>pending</c> record. Skips this launch (does nothing) if
+    /// the exclusive lease is already held.</summary>
+    public void Recover()
+    {
+        if (!_barrier.TryAcquireExclusive(out UpdateSessionBarrier.ExclusiveLease? lease))
+        {
+            return;
+        }
+
+        using (lease)
+        {
+            string stagingRoot = Path.Combine(_paths.PluginsDirectory, ".staging");
+            if (Directory.Exists(stagingRoot))
+            {
+                foreach (string directory in Directory.EnumerateDirectories(stagingRoot))
+                {
+                    SafeZipExtractor.TryDeleteDirectory(directory);
+                }
+
+                TryDeleteIfEmpty(stagingRoot);
+            }
+
+            string downloadsRoot = Path.Combine(_paths.CacheDirectory, "plugin-downloads");
+            if (Directory.Exists(downloadsRoot))
+            {
+                foreach (string file in Directory.EnumerateFiles(downloadsRoot))
+                {
+                    VerifiedArtifactDownloader.TryDelete(file);
+                }
+            }
+
+            string trashRoot = Path.Combine(_paths.PluginsDirectory, ".trash");
+            if (Directory.Exists(trashRoot))
+            {
+                foreach (string trashDirectory in Directory.EnumerateDirectories(trashRoot))
+                {
+                    string id = IdFromTrashPath(trashDirectory);
+                    string original = Path.Combine(_paths.PluginsDirectory, id);
+                    // Record-less trash is a Direct removal, never a managed one; resurrecting it
+                    // would undo a removal that already succeeded.
+                    if (!Directory.Exists(original) && _recordStore.Find(id) is not null)
+                    {
+                        Directory.Move(trashDirectory, original);
+                    }
+                    else
+                    {
+                        SafeZipExtractor.TryDeleteDirectory(trashDirectory);
+                    }
+                }
+
+                TryDeleteIfEmpty(trashRoot);
+            }
+
+            bool changed = ReconcilePendingRecords();
+            changed |= DropRecordsWithMissingFolders();
+            if (changed)
+            {
+                _recordStore.Save();
+            }
+        }
+    }
+
+    private bool ReconcilePendingRecords()
+    {
+        bool changed = false;
+        foreach (InstalledPluginRecord record in _recordStore.Records.ToArray())
+        {
+            if (record.Pending is not { } pending)
+            {
+                continue;
+            }
+
+            string manifestPath = Path.Combine(_paths.PluginsDirectory, record.Id, "plugin.json");
+            string? actualVersion = TryReadManifestVersion(manifestPath);
+            if (actualVersion is not null
+                && string.Equals(actualVersion, pending.Version, StringComparison.Ordinal))
+            {
+                Upsert(record with
+                {
+                    Version = pending.Version,
+                    Tag = pending.Tag,
+                    ZipSha256 = pending.ZipSha256,
+                    Pending = null,
+                });
+            }
+            else if (record.Version is not null)
+            {
+                Upsert(record with { Pending = null });
+            }
+            else
+            {
+                _recordStore.Records.Remove(record);
+            }
+
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private bool DropRecordsWithMissingFolders()
+    {
+        bool changed = false;
+        foreach (InstalledPluginRecord record in _recordStore.Records.ToArray())
+        {
+            if (record.Pending is null
+                && !Directory.Exists(Path.Combine(_paths.PluginsDirectory, record.Id)))
+            {
+                _recordStore.Records.Remove(record);
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
+    private void SwapIntoPlace(
+        string id,
+        string repo,
+        PluginCatalog? catalog,
+        string newVersion,
+        string newTag,
+        string newZipSha256,
+        bool newVersionIsPreRelease,
+        InstalledPluginRecord? existingRecord,
+        string stagingDirectory,
+        string targetDirectory,
+        PluginReleaseChannel? explicitChannel)
+    {
+        var pending = new PendingPluginInstall(newVersion, newTag, newZipSha256);
+        // The channel follows the version just fetched: a prerelease always lands
+        // on beta; a stable release keeps whatever channel an existing record already carries, so a
+        // beta player's update to stable never downgrades them off the channel. A caller-supplied
+        // channel (Discover's per-row picker) wins over both: picking Beta on a plugin whose newest
+        // release is stable must still land on Beta, not be silently discarded.
+        PluginReleaseChannel channel = explicitChannel ?? (newVersionIsPreRelease
+            ? PluginReleaseChannel.Beta
+            : existingRecord?.Channel ?? PluginReleaseChannel.Stable);
+        InstalledPluginRecord pendingRecord = existingRecord is null
+            ? new InstalledPluginRecord(
+                id,
+                repo,
+                DetermineSource(catalog, id, repo),
+                Version: null,
+                Tag: null,
+                ZipSha256: null,
+                InstalledAt: DateTimeOffset.UtcNow,
+                Pending: pending)
+            {
+                Channel = channel,
+            }
+            : existingRecord with { Pending = pending, Channel = channel };
+
+        Upsert(pendingRecord);
+        _recordStore.Save();
+
+        Directory.CreateDirectory(_paths.PluginsDirectory);
+        bool hadExistingFolder = Directory.Exists(targetDirectory);
+        string trashDirectory = CreateTrashPath(id);
+        if (hadExistingFolder)
+        {
+            Directory.Move(targetDirectory, trashDirectory);
+        }
+
+        try
+        {
+            Directory.Move(stagingDirectory, targetDirectory);
+        }
+        catch
+        {
+            if (hadExistingFolder)
+            {
+                Directory.Move(trashDirectory, targetDirectory);
+            }
+
+            throw;
+        }
+
+        Upsert(pendingRecord with
+        {
+            Version = newVersion,
+            Tag = newTag,
+            ZipSha256 = newZipSha256,
+            Pending = null,
+        });
+        _recordStore.Save();
+
+        if (hadExistingFolder)
+        {
+            SafeZipExtractor.TryDeleteDirectory(trashDirectory);
+        }
+
+        TryDeleteIfEmpty(Path.Combine(_paths.PluginsDirectory, ".trash"));
+    }
+
+    private static void RefuseUnmanagedFolder(
+        InstalledPluginRecord? existingRecord,
+        string id,
+        string targetDirectory)
+    {
+        if (existingRecord is not null || !Directory.Exists(targetDirectory))
+            return;
+
+        // The full path stays out of the player-facing message; the inner exception keeps it
+        // for diagnostics.
+        throw new LauncherUpdateException(
+            $"A folder named {id} is already in your plugins folder, and the "
+            + "launcher didn't install it. Move or delete that folder, then try again.",
+            new LauncherUpdateException(
+                $"'{targetDirectory}' already exists and is not a launcher-managed plugin."));
+    }
+
+    private void Upsert(InstalledPluginRecord record)
+    {
+        int index = _recordStore.Records.FindIndex(
+            candidate => string.Equals(candidate.Id, record.Id, StringComparison.OrdinalIgnoreCase));
+        if (index >= 0)
+        {
+            _recordStore.Records[index] = record;
+        }
+        else
+        {
+            _recordStore.Records.Add(record);
+        }
+    }
+
+    private string CreateTrashPath(string id)
+    {
+        string trashRoot = Path.Combine(_paths.PluginsDirectory, ".trash");
+        Directory.CreateDirectory(trashRoot);
+        return Path.Combine(trashRoot, $"{id}-{Guid.NewGuid():N}");
+    }
+
+    /// <summary>Reclaims <c>.staging</c>/<c>.trash</c> once their last entry is gone, never a
+    /// directory something else still has files in.</summary>
+    private static void TryDeleteIfEmpty(string directory)
+    {
+        if (Directory.Exists(directory) && !Directory.EnumerateFileSystemEntries(directory).Any())
+        {
+            SafeZipExtractor.TryDeleteDirectory(directory);
+        }
+    }
+
+    private static string IdFromTrashPath(string trashDirectory)
+    {
+        string name = Path.GetFileName(trashDirectory);
+        int lastDash = name.LastIndexOf('-');
+        return lastDash > 0 ? name[..lastDash] : name;
+    }
+
+    private static PluginInstallSource DetermineSource(PluginCatalog? catalog, string id, string repo) =>
+        catalog is not null
+        && catalog.Plugins.Any(entry =>
+            string.Equals(entry.Id, id, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(entry.Repo, repo, StringComparison.OrdinalIgnoreCase))
+            ? PluginInstallSource.Listed
+            : PluginInstallSource.Unlisted;
+
+    private static string? TryReadManifestVersion(string manifestPath)
+    {
+        if (!File.Exists(manifestPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            return LauncherPluginManifest.Parse(File.ReadAllText(manifestPath)).Version;
+        }
+        catch (LauncherPluginManifestException)
+        {
+            return null;
+        }
+    }
+
+    private static void RequireSuccess(
+        PluginReleaseFetchResult result,
+        string unavailableMessage = "The plugin release is unavailable.")
+    {
+        switch (result.Status)
+        {
+            case PluginReleaseFetchStatus.RateLimited:
+                throw new LauncherUpdateException("GitHub is rate limiting; try later.");
+            case PluginReleaseFetchStatus.Unavailable:
+                throw new LauncherUpdateException(unavailableMessage);
+        }
+    }
+
+    /// <summary>Same declarations regardless of order: an author cannot dodge the comparison by
+    /// reordering an otherwise-unchanged list. Public so the launcher can use the same yardstick to
+    /// decide whether an update needs fresh consent.</summary>
+    public static bool CapabilitiesMatch(
+        IReadOnlyList<LauncherPluginCapabilityDeclaration> displayed,
+        IReadOnlyList<LauncherPluginCapabilityDeclaration> actual)
+    {
+        if (displayed.Count != actual.Count)
+            return false;
+
+        return Sorted(displayed).SequenceEqual(Sorted(actual));
+
+        static IEnumerable<(LauncherPluginCapability Name, string Note)> Sorted(
+            IReadOnlyList<LauncherPluginCapabilityDeclaration> declarations) => declarations
+            .Select(declaration => (declaration.Name, declaration.Note))
+            .OrderBy(entry => entry.Name)
+            .ThenBy(entry => entry.Note, StringComparer.Ordinal);
+    }
+
+    private static string DescribeSource(InstalledPluginSource source) => source switch
+    {
+        InstalledPluginSource.Managed => "launcher-installed",
+        InstalledPluginSource.Direct => "directly installed",
+        InstalledPluginSource.Bundled => "client-bundled",
+        _ => source.ToString(),
+    };
+}

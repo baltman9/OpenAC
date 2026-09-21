@@ -80,12 +80,13 @@ internal sealed record LiveShutdownRoots(
     CameraPointerInputController? CameraPointer,
     RetailUiRuntimeLease RetailUi,
     MagicRuntime? Magic,
-    ItemInteractionController? ItemInteraction,
+
     ExternalContainerLifecycleController? ExternalContainers,
     LandblockStreamer? Streamer,
     EquippedChildRenderController? EquippedChildren,
     LiveEntityRuntime? LiveEntities,
     GameRuntime Runtime,
+    AcDream.Runtime.Plugins.RuntimeWorldEntityProjection PluginWorldEntities,
     IDisposable RuntimeHostLease,
     RenderSceneShadowRuntime? RenderSceneShadow,
     LivePresentationRuntimeBindings? PresentationBindings,
@@ -408,7 +409,6 @@ internal static class GameWindowShutdownManifest
                 Hard("mouse capture", () => live.CameraPointer?.ReleaseMouseLookAfterSessionRetirement()),
                 Hard("retail UI", () => DisposeRetailUi(live.RetailUi)),
                 Hard("magic runtime", () => live.Magic?.Dispose()),
-                Hard("item interaction", () => live.ItemInteraction?.Dispose()),
                 Hard("external containers", () => live.ExternalContainers?.Dispose()),
                 Hard("streamer", () => live.Streamer?.Dispose()),
                 Hard("equipped children", () => live.EquippedChildren?.Dispose()),
@@ -471,6 +471,9 @@ internal static class GameWindowShutdownManifest
             ]),
             new ResourceShutdownStage("game runtime root",
             [
+                Hard(
+                    "plugin world objects",
+                    live.PluginWorldEntities.Dispose),
                 Hard("graphical runtime host lease", live.RuntimeHostLease.Dispose),
                 Hard("game runtime", () => DisposeGameRuntime(live.Runtime)),
             ]),

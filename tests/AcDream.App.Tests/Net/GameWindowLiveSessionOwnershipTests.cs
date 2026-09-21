@@ -121,8 +121,10 @@ public sealed class GameWindowLiveSessionOwnershipTests
     [Fact]
     public void LiveSessionRuntimeFactoryBindsCharacterCreatedAndCreationFailedToTheStatusWriter()
     {
-        MethodInfo create = typeof(LiveSessionRuntimeFactory).GetMethod(
-            nameof(LiveSessionRuntimeFactory.Create))!;
+        MethodInfo create = typeof(AcDream.App.Plugins
+            .GraphicalAutomationCapabilities).GetMethod(
+                "BuildSessionHostBindings",
+                BindingFlags.Static | BindingFlags.NonPublic)!;
         MethodBase[] targets = CompiledCallGraph.ReadMethodReferences(create)
             .Select(call => call.Target)
             .Where(method => method.GetMethodBody() is not null)

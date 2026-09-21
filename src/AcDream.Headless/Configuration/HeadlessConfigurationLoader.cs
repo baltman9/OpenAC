@@ -8,43 +8,6 @@ internal static class HeadlessConfigurationLoader
 {
     private const int CurrentVersion = 1;
 
-    private static readonly HashSet<CharacterOptionId> AllowedCharacterOptions =
-    [
-        // Tier 1 (22).
-        CharacterOptionId.IgnoreAllegianceRequests,
-        CharacterOptionId.IgnoreFellowshipRequests,
-        CharacterOptionId.IgnoreTradeRequests,
-        CharacterOptionId.AllowGive,
-        CharacterOptionId.FellowshipShareXP,
-        CharacterOptionId.AcceptLootPermits,
-        CharacterOptionId.FellowshipShareLoot,
-        CharacterOptionId.FellowshipAutoAcceptRequests,
-        CharacterOptionId.DisplayAllegianceLogonNotifications,
-        CharacterOptionId.UseChargeAttack,
-        CharacterOptionId.UseCraftSuccessDialog,
-        CharacterOptionId.AutoRepeatAttack,
-        CharacterOptionId.LeadMissileTargets,
-        CharacterOptionId.UseFastMissiles,
-        CharacterOptionId.ConfirmVolatileRareUse,
-        CharacterOptionId.AppearOffline,
-        CharacterOptionId.ListenToAllegianceChat,
-        CharacterOptionId.ListenToGeneralChat,
-        CharacterOptionId.ListenToTradeChat,
-        CharacterOptionId.ListenToLFGChat,
-        CharacterOptionId.ListenToRoleplayChat,
-        CharacterOptionId.ListenToSocietyChat,
-        // Tier 2 (4).
-        CharacterOptionId.MainPackPreferred,
-        CharacterOptionId.ToggleRun,
-        CharacterOptionId.AutoTarget,
-        CharacterOptionId.SalvageMultiple,
-    ];
-
-    private static readonly HashSet<string> AllowedCharacterOptionNames =
-        new(
-            AllowedCharacterOptions.Select(static id => id.ToString()),
-            StringComparer.Ordinal);
-
     private static readonly JsonSerializerOptions Options = new()
     {
         AllowTrailingCommas = false,
@@ -287,6 +250,18 @@ internal static class HeadlessConfigurationLoader
             }
         }
 
+        if (session.PluginTags is { } pluginTags)
+        {
+            foreach (string? tag in pluginTags)
+            {
+                if (string.IsNullOrWhiteSpace(tag))
+                {
+                    throw new HeadlessConfigurationException(
+                        $"Session '{session.Id}' pluginTags entries must be non-empty strings.");
+                }
+            }
+        }
+
         if (session.LoginCommandDelayMs < 0)
         {
             throw new HeadlessConfigurationException(
@@ -301,60 +276,28 @@ internal static class HeadlessConfigurationLoader
         }
     }
 
+    // The same check both clients make of the same map, in the same words:
+    // a session file naming a plugin with nothing behind it and a launch
+    // option naming one are the same mistake, so they read the same.
     private static void ValidatePluginSettings(HeadlessSessionDescriptor session)
     {
-        if (session.PluginSettings is not { } declared)
-            return;
-
-        foreach ((string pluginId, Dictionary<string, string>? perPlugin) in declared)
+        if (AcDream.Runtime.Plugins.PluginSessionSettings.DescribeFault(
+                session.PluginSettings) is { } fault)
         {
-            if (perPlugin is null)
-            {
-                throw new HeadlessConfigurationException(
-                    $"Session '{session.Id}' pluginSettings['{pluginId}'] cannot be null.");
-            }
-
-            foreach ((string key, string? value) in perPlugin)
-            {
-                if (value is null)
-                {
-                    throw new HeadlessConfigurationException(
-                        $"Session '{session.Id}' pluginSettings['{pluginId}']['{key}'] cannot be null.");
-                }
-            }
+            throw new HeadlessConfigurationException(
+                $"Session '{session.Id}' {fault}");
         }
     }
 
     private static void ValidateCharacterOptions(HeadlessSessionDescriptor session)
     {
-        if (session.CharacterOptions is not { } declared)
-            return;
-
-        foreach (string name in declared.Keys)
+        // The declarable set and the rules about it are the runtime's, so
+        // both clients refuse the same document for the same reason.
+        if (AcDream.Runtime.Gameplay.RuntimeDeclaredCharacterOptions.Describe(
+                session.Id,
+                session.CharacterOptions) is { } complaint)
         {
-            if (!AllowedCharacterOptionNames.Contains(name))
-            {
-                throw new HeadlessConfigurationException(
-                    $"Session '{session.Id}' characterOptions declares "
-                    + $"'{name}', which is not a bot-declarable character "
-                    + "option name.");
-            }
-        }
-
-        if (declared.TryGetValue(
-                nameof(CharacterOptionId.IgnoreFellowshipRequests), out bool ignoreFellowship)
-            && ignoreFellowship
-            && declared.TryGetValue(
-                nameof(CharacterOptionId.FellowshipAutoAcceptRequests), out bool autoAcceptFellowship)
-            && autoAcceptFellowship)
-        {
-            throw new HeadlessConfigurationException(
-                $"Session '{session.Id}' characterOptions declares both "
-                + $"'{nameof(CharacterOptionId.IgnoreFellowshipRequests)}' and "
-                + $"'{nameof(CharacterOptionId.FellowshipAutoAcceptRequests)}' "
-                + "as true; retail's own mutual exclusion makes that "
-                + "combination unsatisfiable — turning one on always clears "
-                + "the other.");
+            throw new HeadlessConfigurationException(complaint);
         }
     }
 }

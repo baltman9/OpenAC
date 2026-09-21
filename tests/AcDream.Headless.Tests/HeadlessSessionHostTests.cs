@@ -116,6 +116,34 @@ public sealed class HeadlessSessionHostTests
             BinaryPrimitives.ReadUInt32LittleEndian(captured[3].AsSpan(12)));
     }
 
+    /// <summary>
+    /// A login command may be one the server carries out, and the server
+    /// takes nothing from a character whose login is not complete. The list
+    /// waits for that rather than losing its first entry.
+    /// </summary>
+    [Fact]
+    public void LoginCommandsWaitUntilTheServerIsListening()
+    {
+        var captured = new List<byte[]>();
+        var operations = new FixtureSessionOperations
+        {
+            GameActionCapture = body => captured.Add(body),
+            ServerListensFromTheStart = false,
+        };
+        using var diagnosticsOutput = new StringWriter();
+        using var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(loginCommands: ["hello"], loginCommandDelayMs: 0),
+            credential,
+            new HeadlessDiagnosticWriter(diagnosticsOutput),
+            operations);
+
+        Assert.Equal(RuntimeSessionStartStatus.Connected, host.Start().Status);
+        host.Tick(0.015d);
+
+        Assert.DoesNotContain(ChatRequests.TalkOpcode, captured.Select(ActionOpcode));
+    }
+
     [Fact]
     public void PluginDrivenLogoutRoutesThroughTheHostsOwnStopAndClearsTheSession()
     {
@@ -162,7 +190,7 @@ public sealed class HeadlessSessionHostTests
             Assert.False(host.IsFaulted);
 
             host.Dispose();
-            JsonElement[] events = File.ReadAllLines(statusPath)
+            JsonElement[] events = LiveStatusFile.ReadAllLines(statusPath)
                 .Select(static line =>
                     JsonDocument.Parse(line).RootElement.Clone())
                 .ToArray();
@@ -458,7 +486,7 @@ public sealed class HeadlessSessionHostTests
                 Assert.Single(
                     host.Runtime.CommunicationOwner.SpewBox.Snapshot()).Text);
 
-            JsonElement[] events = File.ReadAllLines(statusPath)
+            JsonElement[] events = LiveStatusFile.ReadAllLines(statusPath)
                 .Select(static line =>
                     JsonDocument.Parse(line).RootElement.Clone())
                 .ToArray();
@@ -508,14 +536,19 @@ public sealed class HeadlessSessionHostTests
             Assert.Single(captured);
             Assert.Equal(ChatRequests.TalkOpcode, ActionOpcode(captured[0]));
 
-            JsonElement[] events = File.ReadAllLines(statusPath)
+            JsonElement[] events = LiveStatusFile.ReadAllLines(statusPath)
                 .Select(static line =>
                     JsonDocument.Parse(line).RootElement.Clone())
                 .ToArray();
+            // "/version" used to be a second failure here: a client with no
+            // window carried its own shorter list of client commands and threw
+            // on the ones it had never implemented. There is one dispatcher
+            // now, so the only failure left is the one that is a failure in a
+            // chat box too -- "/" is not a command on either.
             Assert.Equal(
                 [
                     "started", "connected", "characterList", "enteredWorld",
-                    "loginCommandFailed", "loginCommandFailed",
+                    "loginCommandFailed",
                 ],
                 events.Select(static item =>
                     item.GetProperty("e").GetString()));
@@ -530,13 +563,6 @@ public sealed class HeadlessSessionHostTests
             Assert.Equal(
                 "Chat command routing returned UnknownCommand.",
                 failures[0].GetProperty("error").GetString());
-            Assert.Equal(1, failures[1].GetProperty("commandIndex").GetInt32());
-            Assert.Equal(
-                "/version",
-                failures[1].GetProperty("command").GetString());
-            Assert.Contains(
-                "not available in the headless host",
-                failures[1].GetProperty("error").GetString());
         }
         finally
         {
@@ -768,7 +794,7 @@ public sealed class HeadlessSessionHostTests
             Assert.True(host.IsPolicyComplete);
 
             host.Dispose();
-            string exitedLine = File.ReadAllLines(statusPath)
+            string exitedLine = LiveStatusFile.ReadAllLines(statusPath)
                 .Single(static line =>
                     JsonDocument.Parse(line).RootElement.GetProperty("e").GetString()
                         == "exited");
@@ -820,7 +846,7 @@ public sealed class HeadlessSessionHostTests
             Assert.Equal(0, operations.ReturnToCharacterSelectCount);
 
             host.Dispose();
-            string exitedLine = File.ReadAllLines(statusPath)
+            string exitedLine = LiveStatusFile.ReadAllLines(statusPath)
                 .Single(static line =>
                     JsonDocument.Parse(line).RootElement.GetProperty("e").GetString()
                         == "exited");
@@ -899,7 +925,7 @@ public sealed class HeadlessSessionHostTests
                 host.Reconnect().Status);
             host.Dispose();
 
-            JsonElement[] events = File.ReadAllLines(statusPath)
+            JsonElement[] events = LiveStatusFile.ReadAllLines(statusPath)
                 .Select(static line => JsonDocument.Parse(line).RootElement.Clone())
                 .ToArray();
             Assert.Equal(
@@ -981,7 +1007,7 @@ public sealed class HeadlessSessionHostTests
                 host.Plugins.Host.Window.RequestClose();
             Assert.Equal(HostWindowStatus.Done, secondResult.Status);
 
-            JsonElement[] events = File.ReadAllLines(statusPath)
+            JsonElement[] events = LiveStatusFile.ReadAllLines(statusPath)
                 .Select(static line => JsonDocument.Parse(line).RootElement.Clone())
                 .ToArray();
             JsonElement exited = Assert.Single(
@@ -1045,7 +1071,7 @@ public sealed class HeadlessSessionHostTests
 
             if (File.Exists(statusPath))
             {
-                JsonElement[] events = File.ReadAllLines(statusPath)
+                JsonElement[] events = LiveStatusFile.ReadAllLines(statusPath)
                     .Select(static line =>
                         JsonDocument.Parse(line).RootElement.Clone())
                     .ToArray();
@@ -1093,7 +1119,7 @@ public sealed class HeadlessSessionHostTests
             Assert.Equal(RuntimeSessionStartStatus.Connected, started.Status);
             host.Dispose();
 
-            string[] lines = File.ReadAllLines(statusPath);
+            string[] lines = LiveStatusFile.ReadAllLines(statusPath);
             string[] eventNames = lines
                 .Select(line => JsonDocument.Parse(line)
                     .RootElement.GetProperty("e").GetString()!)
@@ -1121,7 +1147,7 @@ public sealed class HeadlessSessionHostTests
                 lines[Array.IndexOf(eventNames, "exited")]);
             Assert.Equal(0, exitedDoc.RootElement.GetProperty("code").GetInt32());
 
-            string contents = File.ReadAllText(statusPath);
+            string contents = LiveStatusFile.ReadAllText(statusPath);
             Assert.DoesNotContain("password", contents, StringComparison.Ordinal);
         }
         finally
@@ -1177,7 +1203,7 @@ public sealed class HeadlessSessionHostTests
             Assert.Equal(0, operations.EnterWorldCallCount);
             Assert.True(host.Runtime.CaptureOwnership().IsConverged);
 
-            string[] lines = File.ReadAllLines(statusPath);
+            string[] lines = LiveStatusFile.ReadAllLines(statusPath);
             string[] eventNames = lines
                 .Select(line => JsonDocument.Parse(line)
                     .RootElement.GetProperty("e").GetString()!)
@@ -1197,7 +1223,7 @@ public sealed class HeadlessSessionHostTests
                 "probe",
                 exitedDoc.RootElement.GetProperty("reason").GetString());
 
-            string contents = File.ReadAllText(statusPath);
+            string contents = LiveStatusFile.ReadAllText(statusPath);
             Assert.DoesNotContain("password", contents, StringComparison.Ordinal);
         }
         finally
@@ -1282,7 +1308,7 @@ public sealed class HeadlessSessionHostTests
             host.Dispose();
             host.Dispose();
 
-            string[] lines = File.ReadAllLines(statusPath);
+            string[] lines = LiveStatusFile.ReadAllLines(statusPath);
             JsonElement[] events = lines
                 .Select(static line =>
                     JsonDocument.Parse(line).RootElement.Clone())
@@ -1427,7 +1453,7 @@ public sealed class HeadlessSessionHostTests
 
             Assert.True(host.Session.Runtime.CaptureOwnership().IsConverged);
             Assert.Equal(1, operations.DisposedSessionCount);
-            string[] lines = File.ReadAllLines(statusPath);
+            string[] lines = LiveStatusFile.ReadAllLines(statusPath);
             string[] eventNames = ReadStatusEventNames(statusPath);
             Assert.Equal(
                 [
@@ -1452,7 +1478,7 @@ public sealed class HeadlessSessionHostTests
             Assert.NotEqual("probe", exitReason);
             Assert.DoesNotContain(
                 "process-password",
-                File.ReadAllText(statusPath),
+                LiveStatusFile.ReadAllText(statusPath),
                 StringComparison.Ordinal);
             Assert.DoesNotContain(
                 "process-password",
@@ -2916,6 +2942,111 @@ public sealed class HeadlessSessionHostTests
         Assert.Equal(0, firstEntry.PendingCount);
     }
 
+    /// <summary>
+    /// A host that plays no animations still has to finish the motions it
+    /// dispatches, otherwise a motion stays outstanding forever and suspends
+    /// the whole move-to layer - a turn-to-heading is accepted and then never
+    /// starts, so a route that turns before it walks stands still. See the
+    /// research note on the headless navigation slice.
+    /// </summary>
+    [Fact]
+    public void PublishedHeadlessPlayer_TurnToHeadingReachesTheRequestedHeading()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        GameRuntime runtime = host.Runtime;
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+
+        PlayerMovementController controller = PublishFlatGroundPlayer(
+            host,
+            runtime,
+            0x50000015u);
+        Assert.Equal(0f, Heading(controller), 1);
+
+        // Driven by hand because the fixture session has no socket to send the
+        // movement event on.
+        var frame = new RuntimeLocalPlayerFrameController(
+            new HeadlessLocalPlayerFrameHost(
+                runtime,
+                CreateInertLiveSessionHost()),
+            new HeadlessMovementInputSource(runtime.MovementOwner));
+
+        Assert.True(host.Commands.Movement.TurnToHeading(
+            runtime.Generation,
+            90f).Accepted);
+        for (int tick = 0; tick < 120 && Heading(controller) < 89.5f; tick++)
+        {
+            frame.AdvanceBeforeNetwork(0.05f);
+        }
+
+        Assert.Equal(90f, Heading(controller), 1);
+        Assert.False(
+            controller.Motion.MotionsPending(),
+            "the turn finished but a dispatched motion is still outstanding, "
+                + "so the next move-to operation would never start.");
+
+        static float Heading(PlayerMovementController controller) =>
+            AcDream.Core.Physics.Motion.MoveToMath.GetHeading(
+                controller.CurrentCellPosition.Frame.Orientation);
+    }
+
+    private static PlayerMovementController PublishFlatGroundPlayer(
+        HeadlessSessionHost host,
+        GameRuntime runtime,
+        uint player)
+    {
+        runtime.PlayerIdentity.ServerGuid = player;
+        runtime.EntityObjects.Physics.SetPosition.BeginCollisionGeneration(
+            0xA9B40000u,
+            1UL);
+        AddFlatLandblock(runtime.EntityObjects.Physics.Engine);
+        runtime.EntityObjects.Physics.SetPosition.CommitCollisionGeneration(
+            0xA9B40000u,
+            1UL,
+            ready: true);
+        RuntimeFirstEntryDriveController firstEntry =
+            CreateFirstEntryDrive(runtime);
+        RuntimeEntityRecord record = runtime.EntityObjects
+            .RegisterEntityWithInitialResidence(
+                Spawn(player),
+                isLocalPlayer: true)
+            .Canonical!;
+        Assert.True(runtime.EntityObjects.ApplyAcceptedSpawn(
+            record,
+            record.CreateIntegrationVersion,
+            record.Snapshot,
+            replaceGeneration: false));
+
+        var projection = new HeadlessSessionWorldProjection(
+            runtime,
+            new GateControllableCollisionNeighborhood
+            {
+                QuiescentOverride = true,
+            },
+            firstEntry);
+        projection.ProjectSpawn(record, isLocalPlayer: true);
+        for (int tick = 0;
+             tick < 200
+             && runtime.MovementOwner.Controller is not
+                 { IsRuntimePublished: true };
+             tick++)
+        {
+            projection.PumpFirstEntry();
+        }
+
+        return Assert.IsType<PlayerMovementController>(
+            runtime.MovementOwner.Controller);
+    }
+
     [Fact]
     public void PublishedHeadlessPlayer_ChargedCommandJumpBecomesAirborne()
     {
@@ -3057,6 +3188,103 @@ public sealed class HeadlessSessionHostTests
         Assert.NotNull(runtime.MovementOwner.Controller);
     }
 
+    /// <summary>
+    /// The spawn that opens the local player's initial-Create placement is the
+    /// same spawn that asks the neighbourhood to publish collision for the
+    /// landblock that placement targets. A publication takes quiescence over
+    /// that prefix by cancelling every placement still waiting for its mover,
+    /// and the residence that owns such a placement cannot come back from the
+    /// cancellation - so the conductor has to reach its preparation before the
+    /// publication runs. This pins that a spawn followed by a real publication
+    /// still ends with a published local player.
+    /// </summary>
+    [Fact]
+    public void ASpawnFollowedByItsOwnLandblockPublicationStillHydratesThePlayer()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        GameRuntime runtime = host.Runtime;
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+        const uint player = 0x50000014u;
+        runtime.PlayerIdentity.ServerGuid = player;
+        AcDream.Runtime.Session.RuntimeFirstEntryDriveController firstEntry =
+            CreateFirstEntryDrive(runtime);
+        RuntimeEntityRecord record = runtime.EntityObjects
+            .RegisterEntityWithInitialResidence(Spawn(player), isLocalPlayer: true)
+            .Canonical!;
+        Assert.True(runtime.EntityObjects.ApplyAcceptedSpawn(
+            record,
+            record.CreateIntegrationVersion,
+            record.Snapshot,
+            replaceGeneration: false));
+
+        var collision = new PublishOnCenterCollisionNeighborhood(
+            runtime.EntityObjects.Physics);
+        var projection = new HeadlessSessionWorldProjection(
+            runtime,
+            collision,
+            firstEntry);
+
+        projection.ProjectSpawn(record, isLocalPlayer: true);
+        Assert.Equal(1, collision.PublicationCount);
+
+        bool published = false;
+        for (int tick = 0; tick < 200 && !published; tick++)
+        {
+            projection.PumpFirstEntry();
+            published = runtime.MovementOwner.Controller
+                is { IsRuntimePublished: true };
+        }
+
+        Assert.True(
+            published,
+            "the local player never hydrated after its own landblock "
+                + "published: residence="
+                + runtime.EntityObjects.TryGetInitialCreateResidence(
+                    record,
+                    out _)
+                + $" body={record.PhysicsBody is not null}"
+                + $" pending={firstEntry.PendingCount}");
+    }
+
+    private sealed class PublishOnCenterCollisionNeighborhood(
+        RuntimePhysicsState physics) : IHeadlessCollisionNeighborhood
+    {
+        private const uint PublishedLandblockId = 0xA9B4FFFFu;
+
+        internal int PublicationCount { get; private set; }
+
+        public void CenterOn(uint fullCellId)
+        {
+            PublicationCount++;
+            CompleteCollisionGeneration(
+                physics,
+                PublishedLandblockId,
+                afterAdmission: null,
+                (admission, prepared) => physics.StageCollisionAssets(
+                    admission,
+                    prepared,
+                    CollisionAssets(PublishedLandblockId, 50f)));
+        }
+
+        public bool IsReady(uint fullCellId) => PublicationCount > 0;
+
+        public bool IsWithinServiceWindow(uint fullCellId) => true;
+
+        public bool IsCollisionPublished(uint fullCellId) => true;
+
+        public bool IsQuiescent => true;
+    }
+
     [Fact]
     public void ProjectSpawnCommittingCollisionGenerationDoesNotCancelTheLocalPlayersOwnFreshPlacement()
     {
@@ -3145,7 +3373,7 @@ public sealed class HeadlessSessionHostTests
         Assert.NotNull(runtime.MovementOwner.Controller);
     }
 
-    private sealed class CollisionGenerationCommittingNeighborhood(
+    internal sealed class CollisionGenerationCommittingNeighborhood(
         GameRuntime runtime) : IHeadlessCollisionNeighborhood
     {
         public void CenterOn(uint fullCellId) =>
@@ -3157,10 +3385,12 @@ public sealed class HeadlessSessionHostTests
 
         public bool IsWithinServiceWindow(uint fullCellId) => true;
 
+        public bool IsCollisionPublished(uint fullCellId) => true;
+
         public bool IsQuiescent => true;
     }
 
-    private static void CommitSyntheticCollisionGeneration(
+    internal static void CommitSyntheticCollisionGeneration(
         GameRuntime runtime,
         uint landblockId)
     {
@@ -3246,7 +3476,7 @@ public sealed class HeadlessSessionHostTests
         Assert.Equal(command, movement.CommandInput);
     }
 
-    private static LiveSessionHost CreateInertLiveSessionHost()
+    internal static LiveSessionHost CreateInertLiveSessionHost()
     {
         var controller = new LiveSessionController(
             new ThrowingLiveSessionOperations());
@@ -3358,7 +3588,7 @@ public sealed class HeadlessSessionHostTests
     };
 
     private static string[] ReadStatusEventNames(string path) =>
-        File.ReadAllLines(path)
+        LiveStatusFile.ReadAllLines(path)
             .Select(static line =>
             {
                 using JsonDocument document = JsonDocument.Parse(line);
@@ -3655,7 +3885,7 @@ public sealed class HeadlessSessionHostTests
         }
     }
 
-    private static AcDream.Runtime.Session.RuntimeFirstEntryDriveController
+    internal static AcDream.Runtime.Session.RuntimeFirstEntryDriveController
         CreateFirstEntryDrive(GameRuntime runtime) => new(
             runtime.EntityObjects,
             runtime.Clock,
@@ -3679,7 +3909,7 @@ public sealed class HeadlessSessionHostTests
             () => runtime.CharacterOwner.UsePositionFromServer,
             () => null);
 
-    private sealed class LoadedSetupCollisionSource
+    internal sealed class LoadedSetupCollisionSource
         : AcDream.Content.IPreparedCollisionSource
     {
         public AcDream.Content.PreparedAssetPresence ProbeCollision(
@@ -3821,6 +4051,210 @@ public sealed class HeadlessSessionHostTests
             Assert.Equal(wireCell, record.FullCellId);
             Assert.Equal(0xA9B4FFFFu, record.CanonicalLandblockId);
         }
+    }
+
+    /// <summary>
+    /// A movement the server drives at this character is an order to walk, and
+    /// it is the only answer a use issued from beyond the server's reach ever
+    /// gets: obey it or the use is answered, seconds later, as done with
+    /// nothing done. The character's own movement, echoed back, is not an
+    /// order.
+    /// <para>
+    /// This pins the seam, not the decode: the whole of the defect was a
+    /// missing call on this route, so a test that stops at the decode cannot
+    /// tell the fixed host from the broken one.
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public void AServerDrivenMovementAtTheLocalPlayerStartsTheWalk(
+        bool autonomous,
+        bool expectWalk)
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        GameRuntime runtime = host.Runtime;
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+        const uint player = 0x50000005u;
+        const uint corpse = 0x80000ABCu;
+        runtime.PlayerIdentity.ServerGuid = player;
+        runtime.EntityObjects.Physics.SetPosition.BeginCollisionGeneration(
+            0xA9B40000u, 1UL);
+        AddFlatLandblock(runtime.EntityObjects.Physics.Engine);
+        runtime.EntityObjects.Physics.SetPosition.CommitCollisionGeneration(
+            0xA9B40000u, 1UL, ready: true);
+        RuntimeFirstEntryDriveController firstEntry =
+            CreateFirstEntryDrive(runtime);
+        RuntimeEntityRecord record = runtime.EntityObjects
+            .RegisterEntityWithInitialResidence(
+                Spawn(player),
+                isLocalPlayer: true)
+            .Canonical!;
+        Assert.True(runtime.EntityObjects.ApplyAcceptedSpawn(
+            record,
+            record.CreateIntegrationVersion,
+            record.Snapshot,
+            replaceGeneration: false));
+        var collision = new FixtureCollisionNeighborhood();
+        var projection = new HeadlessSessionWorldProjection(
+            runtime,
+            collision,
+            firstEntry);
+        projection.ProjectSpawn(record, isLocalPlayer: true);
+        PlayerMovementController controller =
+            Assert.IsType<PlayerMovementController>(
+                runtime.MovementOwner.Controller);
+        controller.SeedPlacementForTest(
+            new Vector3(48f, 49f, 50f),
+            0xA9B40001u,
+            new Vector3(48f, 49f, 50f));
+
+        using var session = new WorldSession(
+            new IPEndPoint(IPAddress.Loopback, 9000));
+        var entities = new RuntimeLiveEntitySessionController(
+            runtime,
+            session,
+            log: null,
+            projection);
+        LiveEntitySessionSink sink = entities.CreateSink();
+        Assert.False(controller.MoveTo!.IsMovingTo());
+        // Every movement so far has been the character's own.
+        Assert.True(controller.PhysicsBody.LastMoveWasAutonomous);
+
+        sink.MotionUpdated(new WorldSession.EntityMotionUpdate(
+            player,
+            new CreateObject.ServerMotionState(
+                Stance: (ushort)0x3Fu,
+                ForwardCommand: null,
+                MovementType: 6,
+                MoveToSpeed: 1f,
+                MoveToRunRate: 1.75f,
+                MoveToPath: new CreateObject.MoveToPathData(
+                    TargetGuid: corpse,
+                    OriginCellId: 0xA9B40001u,
+                    OriginX: 60f,
+                    OriginY: 61f,
+                    OriginZ: 50f,
+                    DistanceToObject: 1.8f,
+                    MinDistance: 0f,
+                    FailDistance: 0f,
+                    WalkRunThreshold: 15f,
+                    DesiredHeading: 0f,
+                    Bitfield: 0x403u)),
+            InstanceSequence: 1,
+            MovementSequence: 2,
+            ServerControlSequence: 2,
+            IsAutonomous: autonomous));
+
+        Assert.Equal(expectWalk, controller.MoveTo!.IsMovingTo());
+        if (!expectWalk)
+        {
+            // An echo is not an order, so nothing about who is steering
+            // changes either.
+            Assert.True(controller.PhysicsBody.LastMoveWasAutonomous);
+            return;
+        }
+
+        // Nothing in this world has a body to follow, so the walk is to the
+        // place the order named — the original's own fallback.
+        Assert.Equal(
+            MovementType.MoveToPosition,
+            controller.MoveTo!.MovementTypeState);
+        Assert.Equal(1.75f, controller.Movement.Minterp.MyRunRate);
+        // The movement owner has to know this move was not the character's
+        // own, or the next key press cannot take control back from it.
+        Assert.False(controller.PhysicsBody.LastMoveWasAutonomous);
+        // And the stance the order was written in is applied before the
+        // movement it asks for, which is the step the original takes ahead of
+        // every kind of movement it unpacks.
+        Assert.Equal(
+            0x8000003Fu,
+            controller.Movement.Minterp.InterpretedState.CurrentStyle);
+    }
+
+    /// <summary>
+    /// An ordinary motion — the kind that says which animation is playing —
+    /// is not an order to go anywhere, and must not start a walk on a route
+    /// that now acts on movements.
+    /// </summary>
+    [Fact]
+    public void AnOrdinaryMotionAtTheLocalPlayerStartsNoWalk()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        GameRuntime runtime = host.Runtime;
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+        const uint player = 0x50000006u;
+        runtime.PlayerIdentity.ServerGuid = player;
+        runtime.EntityObjects.Physics.SetPosition.BeginCollisionGeneration(
+            0xA9B40000u, 1UL);
+        AddFlatLandblock(runtime.EntityObjects.Physics.Engine);
+        runtime.EntityObjects.Physics.SetPosition.CommitCollisionGeneration(
+            0xA9B40000u, 1UL, ready: true);
+        RuntimeFirstEntryDriveController firstEntry =
+            CreateFirstEntryDrive(runtime);
+        RuntimeEntityRecord record = runtime.EntityObjects
+            .RegisterEntityWithInitialResidence(
+                Spawn(player),
+                isLocalPlayer: true)
+            .Canonical!;
+        Assert.True(runtime.EntityObjects.ApplyAcceptedSpawn(
+            record,
+            record.CreateIntegrationVersion,
+            record.Snapshot,
+            replaceGeneration: false));
+        var projection = new HeadlessSessionWorldProjection(
+            runtime,
+            new FixtureCollisionNeighborhood(),
+            firstEntry);
+        projection.ProjectSpawn(record, isLocalPlayer: true);
+        PlayerMovementController controller =
+            Assert.IsType<PlayerMovementController>(
+                runtime.MovementOwner.Controller);
+        controller.SeedPlacementForTest(
+            new Vector3(48f, 49f, 50f),
+            0xA9B40001u,
+            new Vector3(48f, 49f, 50f));
+
+        using var session = new WorldSession(
+            new IPEndPoint(IPAddress.Loopback, 9000));
+        LiveEntitySessionSink sink = new RuntimeLiveEntitySessionController(
+            runtime,
+            session,
+            log: null,
+            projection).CreateSink();
+
+        sink.MotionUpdated(new WorldSession.EntityMotionUpdate(
+            player,
+            new CreateObject.ServerMotionState(
+                Stance: (ushort)0x3Du,
+                ForwardCommand: (ushort)0x45,
+                MovementType: 0),
+            InstanceSequence: 1,
+            MovementSequence: 2,
+            ServerControlSequence: 2,
+            IsAutonomous: false));
+
+        Assert.False(controller.MoveTo!.IsMovingTo());
     }
 
     private static void AddFlatLandblock(PhysicsEngine engine)
@@ -4041,6 +4475,7 @@ public sealed class HeadlessSessionHostTests
         public string? LastUser { get; private set; }
         public string? LastPassword { get; private set; }
         public Action<byte[]>? GameActionCapture { get; init; }
+        public bool ServerListensFromTheStart { get; init; } = true;
         public bool ThrowOnDisposeSession { get; set; }
         public int EnterWorldCallCount =>
             Volatile.Read(ref _enterWorldCallCount);
@@ -4071,6 +4506,11 @@ public sealed class HeadlessSessionHostTests
             CreatedSessionCount++;
             var session = new WorldSession(endpoint);
             session.GameActionCapture = GameActionCapture;
+            // This scripted server never sends the character's own object, so
+            // the client is never prompted to complete its login. A test that
+            // is about that wait turns this off.
+            if (ServerListensFromTheStart)
+                session.AssumeLoginCompleteForTesting();
             Sessions.Add(session);
             return session;
         }
@@ -4152,6 +4592,9 @@ public sealed class HeadlessSessionHostTests
 
         public bool IsQuiescent => true;
 
+        public bool IsCollisionPublished(uint fullCellId) =>
+            IsWithinServiceWindow(fullCellId);
+
         public bool IsWithinServiceWindow(uint fullCellId)
         {
             if (LastCell == 0u)
@@ -4202,6 +4645,8 @@ public sealed class HeadlessSessionHostTests
         public bool IsReady(uint fullCellId) => true;
 
         public bool IsWithinServiceWindow(uint fullCellId) => true;
+
+        public bool IsCollisionPublished(uint fullCellId) => true;
     }
 
     private sealed class GateControllableCollisionNeighborhood
@@ -4216,6 +4661,8 @@ public sealed class HeadlessSessionHostTests
         public bool IsReady(uint fullCellId) => fullCellId == _lastCell;
 
         public bool IsWithinServiceWindow(uint fullCellId) => true;
+
+        public bool IsCollisionPublished(uint fullCellId) => true;
 
         public bool IsQuiescent => QuiescentOverride;
     }

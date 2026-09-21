@@ -166,11 +166,10 @@ public sealed class InteractionRetainedUiCompositionTests
     private static string[] ExpectedRollback(
         InteractionRetainedUiCompositionPoint point)
     {
+        // The item owner is the runtime's; a rollback here never retires it.
         var acquired = new List<string> { "late bindings" };
         if (point >= InteractionRetainedUiCompositionPoint.ExternalContainerLifecycleCreated)
             acquired.Add("external container");
-        if (point >= InteractionRetainedUiCompositionPoint.ItemInteractionCreated)
-            acquired.Add("item interaction");
         if (point >= InteractionRetainedUiCompositionPoint.MagicRuntimeCreated)
             acquired.Add("magic runtime");
         if (point >= InteractionRetainedUiCompositionPoint.UiHostAcquired)
@@ -192,10 +191,11 @@ public sealed class InteractionRetainedUiCompositionTests
         [
             "retained UI lease",
             "magic runtime",
-            "item interaction",
             "external container",
             "late bindings",
         ], fixture.Factory.Releases);
+        Assert.False(
+            fixture.Dependencies.Runtime.ItemInteractionOwner.IsDisposed);
     }
 
     [Fact]
@@ -231,7 +231,7 @@ public sealed class InteractionRetainedUiCompositionTests
         Assert.DoesNotContain(
             calls,
             call => call.Target.DeclaringType
-                    == typeof(ItemInteractionController)
+                    == typeof(RuntimeItemInteraction)
                 && call.Target.IsConstructor);
         Assert.DoesNotContain(
             calls,
@@ -352,15 +352,15 @@ public sealed class InteractionRetainedUiCompositionTests
             DeferredLiveSessionUiAuthority session) =>
             Resource<ExternalContainerLifecycleController>("external container");
 
-        public ItemInteractionController CreateItemInteraction(
+        public RuntimeItemInteraction CreateItemInteraction(
             InteractionRetainedUiDependencies dependencies,
             InteractionUiLateBindings lateBindings) =>
-            Resource<ItemInteractionController>("item interaction");
+            Resource<RuntimeItemInteraction>("item interaction");
 
         public MagicRuntime CreateMagicRuntime(
             InteractionRetainedUiDependencies dependencies,
             InteractionUiLateBindings lateBindings,
-            ItemInteractionController itemInteraction) =>
+            RuntimeItemInteraction itemInteraction) =>
             Resource<MagicRuntime>("magic runtime");
 
         public RetainedUiComposition CreateRetainedUi(
@@ -368,7 +368,7 @@ public sealed class InteractionRetainedUiCompositionTests
             InteractionUiLateBindings lateBindings,
             RetailUiRuntimeLease lease,
             RuntimeCombatAttackState combatAttack,
-            ItemInteractionController itemInteraction,
+            RuntimeItemInteraction itemInteraction,
             MagicRuntime magic,
             Action<InteractionRetainedUiCompositionPoint> checkpoint)
         {
@@ -410,9 +410,9 @@ public sealed class InteractionRetainedUiCompositionTests
     private sealed class NoopCombatOperations
         : IRuntimeCombatAttackOperations
     {
-        public bool CanStartAttack() => false;
+        public bool CanStartAttack(bool allowAutoTarget) => false;
         public void PrepareAttackRequest() { }
-        public bool SendAttack(AttackHeight height, float power) => false;
+        public bool SendAttack(AttackHeight height, float power, bool allowAutoTarget) => false;
         public void SendCancelAttack() { }
         public bool IsDualWield => false;
         public bool PlayerReadyForAttack => false;

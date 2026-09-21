@@ -27,8 +27,15 @@ public sealed class RuntimeActionOwnershipTests
             "private readonly GameRuntime _runtime;",
             gameWindow,
             StringComparison.Ordinal);
+        // The window still constructs the one runtime; it now names its
+        // dependencies through the host's own builder, so the census can
+        // read what it really supplies.
         Assert.Contains(
-            "_runtime = new GameRuntime(new GameRuntimeDependencies(",
+            "_runtime = new GameRuntime(",
+            gameWindow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ".BuildRuntimeDependencies(",
             gameWindow,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -94,11 +101,20 @@ public sealed class RuntimeActionOwnershipTests
             CompiledCallGraph.ReadOwned(typeof(RetailInteractionRetainedUiCompositionFactory));
         AssertActionChildren(
             ui,
-            "get_Interaction",
-            "get_Transactions",
             "get_Selection",
             "get_Combat",
             "get_SpellCast");
+        // The interaction mode and transaction children reach the graphical
+        // host only through the runtime's own item owner, which it borrows
+        // rather than builds.
+        Assert.Contains(
+            ui,
+            call => call.Target.DeclaringType == typeof(GameRuntime)
+                && call.Target.Name == "get_ItemInteractionOwner");
+        Assert.DoesNotContain(
+            ui,
+            call => call.Target.DeclaringType == typeof(RuntimeItemInteraction)
+                && call.Target.IsConstructor);
         AssertActionChildren(
             CompiledCallGraph.ReadOwned(typeof(InteractionRetainedUiCompositionPhase)),
             "get_CombatAttack");
@@ -124,12 +140,12 @@ public sealed class RuntimeActionOwnershipTests
                 && call.Target.Name == "get_Selection");
 
         FieldInfo transactions = Assert.Single(
-            typeof(ItemInteractionController).GetFields(
+            typeof(RuntimeItemInteraction).GetFields(
                 BindingFlags.Instance | BindingFlags.NonPublic),
             field => field.Name == "_runtimeTransactions");
         Assert.Equal(typeof(RuntimeInteractionTransactionState), transactions.FieldType);
         Assert.DoesNotContain(
-            CompiledCallGraph.ReadDeclared(typeof(ItemInteractionController)),
+            CompiledCallGraph.ReadDeclared(typeof(RuntimeItemInteraction)),
             call => call.Target.DeclaringType == typeof(InteractionState)
                 && call.Target.IsConstructor);
 

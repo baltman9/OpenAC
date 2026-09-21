@@ -13,7 +13,7 @@ namespace AcDream.App.Tests.UI;
 [Trait("Lane", "InstalledDat")]
 public sealed class KeyedIconInstalledDatTests
 {
-    private const uint MossTankShelfIconId = 0x06002C41u;
+    private const uint ShelfIconId = 0x06002C41u;
 
     [Fact]
     public void KeyedIcon_ReplacesTheArtsPureWhiteKey_AndResolveDidUsesIt()
@@ -32,18 +32,18 @@ public sealed class KeyedIconInstalledDatTests
         using var cache = new TextureCache(device, adapter);
         var icons = new IconComposer(adapter, cache);
 
-        Assert.True(icons.TryDecodeRaw(MossTankShelfIconId, out byte[] raw, out int rw, out int rh));
+        Assert.True(icons.TryDecodeRaw(ShelfIconId, out byte[] raw, out int rw, out int rh));
         Assert.True(
             CountPureWhite(raw) > 0,
             "the raw art must carry pure-white keyed pixels, or this pin proves nothing");
 
-        Assert.True(icons.TryGetKeyedIconRgba(MossTankShelfIconId, out byte[] keyed, out int kw, out int kh));
+        Assert.True(icons.TryGetKeyedIconRgba(ShelfIconId, out byte[] keyed, out int kw, out int kh));
         Assert.Equal((rw, rh), (kw, kh));
         Assert.Equal(0, CountPureWhite(keyed));
 
         var resolver = new RetailMarkupIconResolver(adapter, icons, new ClientObjectTable());
-        (uint tex, int w, int h) = resolver.ResolveDid(MossTankShelfIconId);
-        Assert.Equal(icons.GetKeyedIcon(MossTankShelfIconId), (tex, w, h));
+        (uint tex, int w, int h) = resolver.ResolveDid(ShelfIconId);
+        Assert.Equal(icons.GetKeyedIcon(ShelfIconId), (tex, w, h));
         Assert.NotEqual(0u, tex);
     }
 

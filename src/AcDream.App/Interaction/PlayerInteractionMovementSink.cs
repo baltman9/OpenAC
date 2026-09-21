@@ -9,7 +9,7 @@ internal interface IPlayerInteractionMovementSink
 {
     bool BeginApproach(
         InteractionApproach approach,
-        Action<PlayerApproachToken>? armAfterCancel = null);
+        Action<RuntimeInteractionApproachToken>? armAfterCancel = null);
 
     /// <summary>
     /// The local player's current move-to's consecutive per-tick
@@ -40,17 +40,17 @@ internal interface IPlayerInteractionMovementSink
 
 internal sealed class PlayerInteractionMovementSink(
     Func<PlayerMovementController?> player,
-    IPlayerApproachTokenSource approachTokens)
+    IRuntimeApproachTokenSource approachTokens)
     : IPlayerInteractionMovementSink
 {
     private readonly Func<PlayerMovementController?> _player = player
         ?? throw new ArgumentNullException(nameof(player));
-    private readonly IPlayerApproachTokenSource _approachTokens = approachTokens
+    private readonly IRuntimeApproachTokenSource _approachTokens = approachTokens
         ?? throw new ArgumentNullException(nameof(approachTokens));
 
     public bool BeginApproach(
         InteractionApproach approach,
-        Action<PlayerApproachToken>? armAfterCancel = null)
+        Action<RuntimeInteractionApproachToken>? armAfterCancel = null)
     {
         PlayerMovementController? controller = _player();
         if (controller?.MoveTo is null)
@@ -78,7 +78,7 @@ internal sealed class PlayerInteractionMovementSink(
         };
 
         controller.Movement.CancelMoveTo(WeenieError.ActionCancelled);
-        if (!_approachTokens.TryBeginApproach(out PlayerApproachToken token))
+        if (!_approachTokens.TryBeginApproach(out RuntimeInteractionApproachToken token))
             return false;
         armAfterCancel?.Invoke(token);
 

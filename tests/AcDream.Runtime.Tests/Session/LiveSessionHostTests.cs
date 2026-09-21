@@ -76,7 +76,7 @@ public sealed class LiveSessionHostTests
     }
 
     [Fact]
-    public void LoginSequenceStartsAfterTheEnteredWorldObservation()
+    public void LoginSequenceStartsOnceTheWorldIsEnteredAndTheServerIsListening()
     {
         var calls = new List<string>();
         var operations = new TestOperations(calls);
@@ -99,10 +99,18 @@ public sealed class LiveSessionHostTests
             LiveSessionStartStatus.Connected,
             host.Start(LiveOptions()).Status);
 
+        // Entering the world is not enough: the server takes nothing from
+        // the character until it has been told the login is complete.
+        Assert.DoesNotContain("login:ready", calls);
+
+        host.CurrentSession!.GameActionCapture = static _ => { };
+        host.CurrentSession!.SendLoginComplete();
+        host.Tick();
+
         int entered = calls.IndexOf("character-entered:1342177282");
         int login = calls.IndexOf("login:ready");
         Assert.True(entered >= 0);
-        Assert.Equal(entered + 1, login);
+        Assert.True(login > entered);
         controller.Dispose();
     }
 

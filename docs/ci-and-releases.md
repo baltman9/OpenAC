@@ -83,11 +83,14 @@ and the loader tag and the commit that tag resolves to.
 The repository version is defined once in `Directory.Build.props`. It supplies
 the client, launcher, and other assemblies, including the version shown on the
 character-selection screen. Set that version before building a release, then
-push its matching tag on `main`:
+push its matching tag on the branch that release comes from:
 
 ```bash
-git tag v0.1.0
+git tag v0.1.0          # on main: the release everyone receives
 git push origin v0.1.0
+
+git tag v0.1.1-dev.1    # on dev: a test build, see "Two release trains"
+git push origin v0.1.1-dev.1
 ```
 
 When the four gate jobs are green, the `release` job downloads the verified
@@ -103,7 +106,12 @@ launcher-linux-x64.zip    acdream-launcher + acdream-bake
 client-osx-arm64.zip      acdream-client + acdream-headless for Apple silicon
 launcher-osx-arm64.zip    OpenAC.app Finder bundle with launcher + bake
 manifest.json             version, minimum launcher version, asset URLs, SHA-256s
+AcDream.Plugin.Abstractions.<version>.nupkg   the plugin API package, plus a .sha256 beside it
 ```
+
+The plugin API package is the one assembly a plugin references, so attaching
+it to every release lets a plugin kept in its own repository build against a
+released contract instead of against a checkout of the client.
 
 If `macos-intel` also succeeded, `release` downloads its assets too, the
 manifest lists them, and a second release step attaches `client-osx-x64.zip`
@@ -153,11 +161,50 @@ runtime described above; `-MacVulkanRuntimeDirectory` overrides where).
 `launcher-<rid>.zip` pair for `osx-arm64`, plus an optional matching pair for
 `osx-x64`.
 
-Releases are never flagged pre-release. The launcher polls
-`https://github.com/eriknihlen/OpenAC/releases/latest/download/manifest.json`,
-and GitHub's `latest` route skips pre-releases; the beta state is carried by
-the version string. Versions must sort above the previous release under SemVer
-2.0 or the launcher will not offer the update.
+### Two release trains
+
+|  | Stable | Pre-release |
+|---|---|---|
+| Branch | `main` | `dev` |
+| Tag | `vX.Y.Z` | `vX.Y.Z-dev.N` |
+| Marked | the latest release | a pre-release, never the latest release |
+| Reaches | everyone: every launcher offers it | only a launcher pointed at it by hand |
+| Assets | the list above | the same list |
+| Kept | indefinitely | the newest five |
+
+The release job decides which train a tag belongs to in one step, **Decide the
+release train**, and the publish steps read nothing but its answer. The tag is
+the decision: a version carrying a SemVer pre-release part is a test build.
+That is what keeps a test build away from players, because the launcher polls
+`https://github.com/eriknihlen/OpenAC/releases/latest/download/manifest.json`
+and GitHub's `latest` route skips pre-releases. Every step that touches the
+release passes the same pair of flags, including the one that attaches the
+Intel assets afterwards, because anything else there would reset them on the
+release it appends to.
+
+The same step refuses a tag from the wrong branch: a pre-release tag has to
+point at a commit reachable from `dev`, and a stable tag at one reachable from
+`main`. Tagging the wrong branch fails the job instead of publishing to the
+wrong audience.
+
+Versions must sort above the previous release under SemVer 2.0 or the launcher
+will not offer the update. SemVer orders `0.1.12 < 0.1.13-dev.1 < 0.1.13`, so a
+test build sits above the last release and below the stable release it
+rehearses. `Directory.Build.props` still holds the one version for the whole
+repository and `publish-bin.ps1` still refuses a tag that disagrees with it, so
+a pre-release needs its own version commit on `dev` -- set `0.1.13-dev.1`, then
+push `v0.1.13-dev.1` -- exactly as a stable release needs one on `main`.
+
+After a pre-release publishes, the `prune-pre-releases` job runs
+`tools/prune-dev-prereleases.ps1 -Keep 5`: every `-dev` pre-release past the
+newest five is deleted together with its tag. It ranks by version rather than
+by publication date, considers only `-dev` tags that GitHub reports as
+pre-releases, and does nothing when there are five or fewer. Rehearse it with
+`-WhatIf`, and check its selection rule alone, with no network access, with
+`-SelfTest`; a test in the release-train suite runs that check.
+
+To run a pre-release, see "Testing a pre-release" in
+[the launcher guide](launcher.md).
 
 To verify a release end to end from a checkout:
 

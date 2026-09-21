@@ -11,9 +11,9 @@ public readonly record struct NavBody(
     float StepUpHeight,
     float StepDownHeight)
 {
-    /// <summary>The player's body as the movement controller sweeps it: spheres of 0.48 reaching 1.835 high.</summary>
+    /// <summary>The player's body as the movement controller sweeps it.</summary>
     public static NavBody Player(float stepUpHeight, float stepDownHeight) =>
-        new(0.48f, 1.835f, stepUpHeight, stepDownHeight);
+        new(DefaultPlayerBody.Radius, DefaultPlayerBody.Height, stepUpHeight, stepDownHeight);
 }
 
 public readonly record struct NavTriangle(Vector3 A, Vector3 B, Vector3 C);

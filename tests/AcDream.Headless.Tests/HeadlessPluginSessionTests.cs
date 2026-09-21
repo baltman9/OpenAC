@@ -200,6 +200,99 @@ public sealed class HeadlessPluginSessionTests
         Assert.False(context.IsAlive);
     }
 
+    /// <summary>
+    /// A plugin driven by a bot has to be able to remember things, exactly
+    /// as one driven by a window does. Without its own storage the host
+    /// hands every plugin the no-op store: reads answer "nothing is there"
+    /// and writes vanish, so a plugin that keeps state beside the shared
+    /// profile files silently runs on defaults with nothing in the record
+    /// to say so.
+    /// </summary>
+    /// <summary>
+    /// A plugin that publishes its loot rules loads headless as it does with
+    /// a window: the session hosts the same classifier directory, so the
+    /// registration is taken rather than refused, and it is listed.
+    /// Mutation: leave the headless host on the contract's no-op registry and
+    /// the registration throws.
+    /// </summary>
+    [Fact]
+    public void APluginCanPublishALootClassifierInAHeadlessSession()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+
+        IPluginLootClassifierRegistry registry = session.Plugins.Host.LootClassifiers;
+        using IDisposable registration = registry.Register(
+            "fixture",
+            "Fixture classifier",
+            new IndifferentClassifier());
+
+        Assert.Contains(
+            registry.Available,
+            static info => info.DisplayName == "Fixture classifier");
+    }
+
+    private sealed class IndifferentClassifier : IPluginLootClassifier
+    {
+        public PluginLootClassification Classify(
+            in PluginLootClassificationContext context) => default;
+    }
+
+    [Fact]
+    public void APluginsOwnStorageIsReadableAndWritableInAHeadlessSession()
+    {
+        using var temporary = new TemporaryDirectory();
+        string storageRoot = Path.Combine(temporary.Path, "plugin-storage");
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path],
+            storage: new AcDream.Core.Plugins.FilePluginStorage(storageRoot));
+
+        IPluginStorage storage = session.Plugins.Host.Storage;
+
+        Assert.True(storage.IsAvailable);
+        storage.WriteText("edwards.tank/profiles/macro/thing.json", "{}");
+        Assert.Equal(
+            "{}",
+            storage.ReadText("edwards.tank/profiles/macro/thing.json"));
+        Assert.Contains(
+            "edwards.tank/profiles/macro/thing.json",
+            storage.List("edwards.tank"));
+        Assert.True(File.Exists(Path.Combine(
+            storageRoot, "edwards.tank", "profiles", "macro", "thing.json")));
+        Assert.True(storage.Delete("edwards.tank/profiles/macro/thing.json"));
+    }
+
+    /// <summary>
+    /// And a session given no storage still writes nothing anywhere: the
+    /// no-op store stays the default, so a host that never configured one
+    /// cannot start leaving files behind.
+    /// </summary>
+    [Fact]
+    public void ASessionWithNoConfiguredPluginStorageKeepsTheNoOpStore()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+
+        Assert.Same(NoOpPluginStorage.Instance, session.Plugins.Host.Storage);
+    }
+
     [Fact]
     public void LauncherProbeRoundTripKeepsPluginsDisabledInTheRealHost()
     {
@@ -325,11 +418,16 @@ public sealed class HeadlessPluginSessionTests
         session.Plugins.Host.Events.Tick += first;
         session.Plugins.Host.Events.Tick += second;
 
-        session.Tick(0.25d);
-        session.Tick(0.10d);
+        // The plugin tick is paced by the runtime's clock rather than by the
+        // length of a session turn, so a turn is worth however many whole
+        // steps have gone by and each one carries exactly the step.
+        session.Tick(0.010d);
+        session.Tick(0.010d);
+        session.Tick(0.010d);
 
-        Assert.Equal([0.25d, 0.10d], firstElapsed);
-        Assert.Equal([0.25d, 0.10d], secondElapsed);
+        double step = AcDream.Runtime.Plugins.RuntimePluginTickClock.StepSeconds;
+        Assert.Equal([step, step], firstElapsed);
+        Assert.Equal([step, step], secondElapsed);
     }
 
     [Fact]
@@ -351,9 +449,11 @@ public sealed class HeadlessPluginSessionTests
         session.Plugins.Host.Events.Tick += throwing;
         session.Plugins.Host.Events.Tick += later;
 
-        session.Tick(0.25d);
+        session.Tick(AcDream.Runtime.Plugins.RuntimePluginTickClock.StepSeconds);
 
-        Assert.Equal([0.25d], laterElapsed);
+        Assert.Equal(
+            [AcDream.Runtime.Plugins.RuntimePluginTickClock.StepSeconds],
+            laterElapsed);
         Assert.Contains(
             "plugin-warn:",
             diagnosticsOutput.ToString(),
@@ -508,6 +608,43 @@ public sealed class HeadlessPluginSessionTests
     }
 
     [Fact]
+    public void GraphicalOnlyPluginRequestedOnHeadlessHostReportsPluginFailed()
+    {
+        using var temporary = new TemporaryDirectory();
+        const string graphicalOnlyId = "acdream.test.graphical-only";
+        string pluginDirectory = Path.Combine(temporary.Path, "graphical-only");
+        Directory.CreateDirectory(pluginDirectory);
+        File.WriteAllText(
+            Path.Combine(pluginDirectory, "plugin.json"),
+            JsonSerializer.Serialize(new
+            {
+                id = graphicalOnlyId,
+                displayName = "Graphical only",
+                version = "1.0.0",
+                entryDll = "deliberately-missing.dll",
+                apiVersion = 1,
+                hosts = new[] { "graphical" },
+            }));
+        string statusPath = Path.Combine(temporary.Path, "status.jsonl");
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([graphicalOnlyId], statusPath),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+
+        _ = session.Start();
+
+        Assert.Equal(0, session.Plugins.LoadedCount);
+        JsonElement failed = ReadStatuses(statusPath)
+            .Single(static item =>
+                item.GetProperty("e").GetString() == "pluginFailed");
+        string error = failed.GetProperty("error").GetString()!;
+        Assert.Contains("runs only on the graphical host", error);
+    }
+
+    [Fact]
     public void ChatCaptureMessagesReturnsTextAddedToTheRuntimeCommunicationTranscript()
     {
         using var temporary = new TemporaryDirectory();
@@ -605,7 +742,8 @@ public sealed class HeadlessPluginSessionTests
             mergeItems: static (_, _, _) => true,
             dropItem: static (_, _) => true,
             giveItem: static (_, _, _) => true,
-            pickupItem: static (_, _) => true,
+            pickupItem: static (_, _) =>
+                AcDream.Runtime.Gameplay.RuntimeBackpackPlacementOutcome.Sent,
             identifyItem: static _ => true);
 
         Assert.Equal(
@@ -657,7 +795,8 @@ public sealed class HeadlessPluginSessionTests
             mergeItems: static (_, _, _) => true,
             dropItem: (_, _) => { dropCalls++; return true; },
             giveItem: (_, _, _) => { giveCalls++; return true; },
-            pickupItem: static (_, _) => true,
+            pickupItem: static (_, _) =>
+                AcDream.Runtime.Gameplay.RuntimeBackpackPlacementOutcome.Sent,
             identifyItem: static _ => true);
 
         Assert.Equal(
@@ -689,8 +828,15 @@ public sealed class HeadlessPluginSessionTests
         Assert.True(session.Plugins.Host.Automation.Equipment.IsAvailable);
     }
 
+    /// <summary>
+    /// A plugin is told where another creature's BODY is, because that body
+    /// is carried between the server's updates and the server's last word
+    /// about the creature is already stale by the time a plugin reads it.
+    /// A creature with no body yet -- which is every creature in a session
+    /// with no content lease -- has only that last word, and gets it.
+    /// </summary>
     [Fact]
-    public void RemoteObjectPositionTracksTheLatestUpdatePositionNotWhereItSpawned()
+    public void ACreaturesPositionIsItsBodyAndFallsBackToTheServersLastWord()
     {
         const uint remote = 0x50000099u;
         const uint cell = 0x01010100u;
@@ -707,35 +853,41 @@ public sealed class HeadlessPluginSessionTests
         RuntimeEntityRecord record = session.Runtime.EntityObjects
             .RegisterEntity(Spawn(remote, 1f, cell))
             .Canonical!;
-        var body = new PhysicsBody { Position = new Vector3(1f, 10f, 5f) };
+
+        // No body yet: the server's last word is all there is.
+        Assert.True(session.Plugins.Host.Automation.Objects.TryGet(
+            remote,
+            out PluginWorldObject bodyless));
+        PluginNavigationPosition spawned =
+            RuntimeAutomationSurface.ProjectNavigationPosition(
+                new Position(
+                    cell,
+                    new Vector3(1f, 10f, 5f),
+                    Quaternion.Identity));
+        Assert.Equal(
+            0d,
+            bodyless.Position.HorizontalDistanceMeters(spawned),
+            3);
+
+        // Given a body, and the body carried fifty metres east of where the
+        // creature spawned, that is where a plugin is told it is.
+        var body = new PhysicsBody { Position = new Vector3(51f, 10f, 5f) };
         body.SnapToCell(cell, body.Position, body.Position);
         session.Runtime.EntityObjects.Entities.SetPhysicsBody(record, body);
-
-        session.Runtime.EntityObjects.TryApplyPosition(
-            new WorldSession.EntityPositionUpdate(
-                remote,
-                new CreateObject.ServerPosition(cell, 51f, 10f, 5f, 1f, 0f, 0f, 0f),
-                Velocity: null,
-                PlacementId: null,
-                IsGrounded: true,
-                InstanceSequence: 0,
-                PositionSequence: 1,
-                TeleportSequence: 0,
-                ForcePositionSequence: 0),
-            isLocalPlayer: false,
-            forcePositionRotation: null,
-            currentLocalVelocity: null,
-            acknowledgeProjection: null,
-            out _,
-            out _,
-            out _);
 
         Assert.True(session.Plugins.Host.Automation.Objects.TryGet(
             remote,
             out PluginWorldObject value));
-        PluginNavigationPosition moved = RuntimeAutomationSurface.ProjectNavigationPosition(
-            new Position(cell, new Vector3(51f, 10f, 5f), Quaternion.Identity));
-        Assert.Equal(0d, value.Position.HorizontalDistanceMeters(moved), 3);
+        PluginNavigationPosition carried =
+            RuntimeAutomationSurface.ProjectNavigationPosition(
+                new Position(
+                    cell,
+                    new Vector3(51f, 10f, 5f),
+                    Quaternion.Identity));
+        Assert.Equal(0d, value.Position.HorizontalDistanceMeters(carried), 3);
+        Assert.True(
+            value.Position.HorizontalDistanceMeters(spawned) > 40d,
+            "The creature's position is still where it spawned.");
     }
 
     [Trait("Lane", "InstalledDat")]
@@ -909,7 +1061,7 @@ public sealed class HeadlessPluginSessionTests
         null);
 
     private static JsonElement[] ReadStatuses(string path) =>
-        File.ReadAllLines(path)
+        LiveStatusFile.ReadAllLines(path)
             .Select(static line => JsonDocument.Parse(line).RootElement.Clone())
             .ToArray();
 
@@ -1009,7 +1161,14 @@ public sealed class HeadlessPluginSessionTests
         public IPEndPoint ResolveEndpoint(string host, int port) =>
             new(IPAddress.Loopback, port);
 
-        public WorldSession CreateSession(IPEndPoint endpoint) => new(endpoint);
+        public WorldSession CreateSession(IPEndPoint endpoint)
+        {
+            // This scripted server never prompts the client to complete its
+            // login, so the session is taken as already past it.
+            var session = new WorldSession(endpoint);
+            session.AssumeLoginCompleteForTesting();
+            return session;
+        }
 
         public void Connect(WorldSession session, string user, string password)
         {

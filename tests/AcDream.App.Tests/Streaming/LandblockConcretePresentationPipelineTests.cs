@@ -30,12 +30,12 @@ public sealed class LandblockConcretePresentationPipelineTests
         ConcreteFixture fixture = Fixture(
             calls,
             commitEnvCells: _ => calls.Add("envcell"));
-        fixture.Events.EntitySpawned += _ =>
+        fixture.Scenery.Observe(_ =>
         {
             Assert.Equal(1, fixture.Physics.Diagnostics.CompleteCount);
             Assert.False(fixture.State.IsLoaded(LandblockId));
-            calls.Add("plugin");
-        };
+            calls.Add("scenery");
+        });
         var pipeline = new LandblockPresentationPipeline(
             fixture.Render,
             fixture.Physics,
@@ -49,7 +49,7 @@ public sealed class LandblockConcretePresentationPipelineTests
         pipeline.PublishLoaded(Result(build));
 
         Assert.Equal(
-            ["terrain", "envcell", "plugin", "pin", "live-recovery"],
+            ["terrain", "envcell", "scenery", "pin", "live-recovery"],
             calls);
         Assert.True(fixture.State.IsNearTier(LandblockId));
         Assert.Equal(1, fixture.Render.Diagnostics.BeginCount);
@@ -64,7 +64,7 @@ public sealed class LandblockConcretePresentationPipelineTests
         ConcreteFixture fixture = Fixture(
             calls,
             commitEnvCells: _ => calls.Add("envcell"));
-        fixture.Events.EntitySpawned += _ => calls.Add("plugin");
+        fixture.Scenery.Observe(_ => calls.Add("scenery"));
         var pipeline = new LandblockPresentationPipeline(
             fixture.Render,
             fixture.Physics,
@@ -116,7 +116,7 @@ public sealed class LandblockConcretePresentationPipelineTests
         Assert.False(pipeline.HasPendingPublication(result));
         Assert.True(fixture.State.IsNearTier(LandblockId));
         Assert.Equal(
-            ["terrain", "envcell", "plugin", "plugin", "pin", "live-recovery"],
+            ["terrain", "envcell", "scenery", "scenery", "pin", "live-recovery"],
             calls);
         Assert.Equal(1, fixture.Render.Diagnostics.BeginCount);
         Assert.Equal(1, fixture.Physics.Diagnostics.BeginCount);
@@ -140,7 +140,7 @@ public sealed class LandblockConcretePresentationPipelineTests
                     throw new InvalidOperationException("injected envcell failure");
                 }
             });
-        fixture.Events.EntitySpawned += _ => calls.Add("plugin");
+        fixture.Scenery.Observe(_ => calls.Add("scenery"));
         var pipeline = new LandblockPresentationPipeline(
             fixture.Render,
             fixture.Physics,
@@ -162,7 +162,7 @@ public sealed class LandblockConcretePresentationPipelineTests
 
         Assert.Equal(1, calls.Count(call => call == "terrain"));
         Assert.Equal(2, calls.Count(call => call == "envcell"));
-        Assert.Equal(1, calls.Count(call => call == "plugin"));
+        Assert.Equal(1, calls.Count(call => call == "scenery"));
         Assert.Equal(1, calls.Count(call => call == "pin"));
         Assert.Equal(1, fixture.Render.Diagnostics.BeginCount);
         Assert.Equal(1, fixture.Physics.Diagnostics.BeginCount);
@@ -418,7 +418,7 @@ public sealed class LandblockConcretePresentationPipelineTests
             liveEntity.Id,
             0u,
             out _));
-        Assert.Empty(fixture.World.Entities);
+        Assert.Empty(fixture.World.SceneryObjects);
         Assert.Equal(1, fixture.Physics.Diagnostics.FullRemovalCount);
         Assert.Equal(0, fixture.Physics.Diagnostics.DemotionCount);
         Assert.Equal(1, fixture.Render.Diagnostics.TerrainRemovalCount);
@@ -475,7 +475,7 @@ public sealed class LandblockConcretePresentationPipelineTests
             liveEntity.Id,
             0u,
             out _));
-        Assert.Empty(fixture.World.Entities);
+        Assert.Empty(fixture.World.SceneryObjects);
         Assert.Equal(0, fixture.Physics.Diagnostics.FullRemovalCount);
         Assert.Equal(1, fixture.Physics.Diagnostics.DemotionCount);
         Assert.Equal(0, fixture.Render.Diagnostics.TerrainRemovalCount);
@@ -675,7 +675,7 @@ public sealed class LandblockConcretePresentationPipelineTests
         Assert.True(fixture.State.IsLoaded(LandblockId));
         Assert.False(fixture.State.IsNearTier(LandblockId));
         Assert.Empty(fixture.State.Entities);
-        Assert.Empty(fixture.World.Entities);
+        Assert.Empty(fixture.World.SceneryObjects);
     }
 
     private static void AssertNearTerrain(ConcreteFixture fixture, WalkBuilding building)
@@ -791,11 +791,11 @@ public sealed class LandblockConcretePresentationPipelineTests
         var translucency = new TranslucencyFadeManager();
         var world = new WorldGameState();
         var events = new WorldEvents();
+        var scenery = new RecordingSceneryStore(world);
         var staticPresentation = new LandblockStaticPresentationPublisher(
             lighting,
             translucency,
-            world,
-            events);
+            scenery);
         var retirementOwner = new LandblockPresentationRetirementOwner(
             render,
             physics,
@@ -815,7 +815,8 @@ public sealed class LandblockConcretePresentationPipelineTests
             lights,
             lighting,
             translucency,
-            world);
+            world,
+            scenery);
     }
 
     private static LandblockStreamResult.Loaded Result(LandblockBuild build) =>
@@ -887,7 +888,43 @@ public sealed class LandblockConcretePresentationPipelineTests
         LightManager Lights,
         LightingHookSink Lighting,
         TranslucencyFadeManager Translucency,
-        WorldGameState World);
+        WorldGameState World,
+        RecordingSceneryStore Scenery);
+
+    /// <summary>
+    /// The plugin-facing scenery store, with a note of the order the
+    /// publisher wrote to it. Ordering is what these tests are about -- one
+    /// scenery write per metered frame, all of them after the world's own
+    /// cells and before the landblock is pinned -- and the store itself only
+    /// keeps a list, so the order has to be observed as it is written.
+    /// </summary>
+    private sealed class RecordingSceneryStore(WorldGameState inner)
+        : AcDream.Core.Plugins.ISceneryObjectStore
+    {
+        private Action<AcDream.Plugin.Abstractions.WorldEntitySnapshot>? _observer;
+
+        internal List<uint> Added { get; } = [];
+
+        internal List<uint> Removed { get; } = [];
+
+        internal void Observe(
+            Action<AcDream.Plugin.Abstractions.WorldEntitySnapshot> observer) =>
+            _observer = observer;
+
+        public void AddScenery(
+            AcDream.Plugin.Abstractions.WorldEntitySnapshot snapshot)
+        {
+            Added.Add(snapshot.Id);
+            _observer?.Invoke(snapshot);
+            inner.AddScenery(snapshot);
+        }
+
+        public bool RemoveSceneryById(uint id)
+        {
+            Removed.Add(id);
+            return inner.RemoveSceneryById(id);
+        }
+    }
 
     private sealed class NullHookSink : IAnimationHookSink
     {

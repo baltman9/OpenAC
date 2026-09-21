@@ -15,9 +15,15 @@ public interface IEvents
     event Action<WorldEntitySnapshot> EntitySpawned;
 
     /// <summary>
-    /// Raised once per client update, carrying the seconds elapsed since
-    /// the previous one. This is the thread every other event here is
-    /// raised on, and the thread a plugin should touch its own state on.
+    /// Raised at a fixed 15 ms -- about 66.7 times a second -- carrying
+    /// exactly 0.015 seconds every time, on every client. It is not the
+    /// client's own frame: a client that draws runs far faster than this and
+    /// one that does not takes its own turns, and neither rate reaches a
+    /// plugin, so the same plugin is paced the same way wherever it runs.
+    /// A client that has fallen behind raises several in a row, and a stall
+    /// longer than about a fifth of a second is dropped rather than replayed.
+    /// This is the thread every other event here is raised on, and the thread
+    /// a plugin should touch its own state on.
     /// </summary>
     event Action<double> Tick;
 
@@ -59,6 +65,36 @@ public interface IEvents
     /// exceptions are swallowed per handler, like every other event here.
     /// </summary>
     event Action<PluginObjectChange> ObjectChanged
+    {
+        add { }
+        remove { }
+    }
+
+    /// <summary>
+    /// Raised when the host observes a portal, recall, or other world
+    /// transition. Notifications carry a generation and revision so a
+    /// plugin can reject stale transition state.
+    /// </summary>
+    event Action<PluginPortalTransition> PortalTransition
+    {
+        add { }
+        remove { }
+    }
+
+    /// <summary>Raised when a plugin-issued item use receives its server completion.</summary>
+    event Action<PluginItemUseCompletion> ItemUseCompleted
+    {
+        add { }
+        remove { }
+    }
+
+    /// <summary>
+    /// Raised when a world-object activation (portal, door, NPC, vendor,
+    /// container, or other interactable landscape object) completes, fails,
+    /// or is interrupted. Correlates with a prior call to
+    /// <see cref="IWorldObjectAutomation.Activate"/>.
+    /// </summary>
+    event Action<PluginActivationCompletion> ActivationCompleted
     {
         add { }
         remove { }

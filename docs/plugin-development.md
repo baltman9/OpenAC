@@ -6,6 +6,19 @@ The API itself is described in [plugin-api.md](plugin-api.md) (game state,
 events, items, chat, trade, hotkeys, window, headless) and
 [plugin-ui-markup.md](plugin-ui-markup.md) (in-game panels).
 
+Getting a plugin into other players' hands has three stages, and this page
+follows them in order:
+
+1. **Build it** — project setup, the entry point, and what the API promises.
+2. **Test it** — run it from your own plugins folder, then check it against
+   the launcher's rules before anyone else sees it.
+3. **Publish and list it** — a GitHub release the launcher can install, and
+   an entry in the plugin list so players can find it.
+
+The exact field-by-field rules live in
+[plugin-manifest.md](plugin-manifest.md). This page links to them rather than
+repeating them, so there is one place a rule can change.
+
 ## The one rule
 
 A plugin references `AcDream.Plugin.Abstractions` and nothing else from
@@ -33,8 +46,48 @@ assembly; the host already ships it:
 
 `OpenAcRoot` points at a checkout of this repository. Give it a default in
 your `Directory.Build.props` and let people override it on the command line
-with `-p:OpenAcRoot=<path>`. A published contract package will replace the
-checkout reference; until then, build against the tagged release you target.
+with `-p:OpenAcRoot=<path>`.
+
+### Or against the contract package
+
+`AcDream.Plugin.Abstractions` is packable, so a plugin can build against a
+version of the contract instead of against a checkout. That is the reference a
+plugin in its own repository wants: it pins the contract version the plugin
+targets, and it needs no client sources to build.
+
+```xml
+<ItemGroup>
+  <PackageReference Include="AcDream.Plugin.Abstractions" Version="0.1.13"
+                    ExcludeAssets="runtime" />
+</ItemGroup>
+```
+
+`ExcludeAssets="runtime"` does for a package reference what `Private=false`
+does for a project reference: compile against the contract, ship no copy of
+it. The package carries the XML documentation, so your IDE shows the same text
+the [API reference](plugin-api.md) does.
+
+The package is not on a public feed. Every release from 0.1.13 on attaches it as an asset,
+`AcDream.Plugin.Abstractions.<version>.nupkg`, with its SHA-256 beside it; put
+the file in a folder and restore against that folder:
+
+```
+dotnet restore --source <folder>
+```
+
+Or produce one from a checkout, which is how you build against an unreleased
+contract:
+
+```
+dotnet pack <OpenAcRoot>/src/AcDream.Plugin.Abstractions -c Release -o <feed>
+dotnet restore --source <feed>
+```
+
+A plugin developed inside a checkout of this repository should be built the
+package way at least once before it ships, so the reference it will actually
+use is exercised rather than assumed;
+[extracting a plugin](plugins/extracting-a-plugin.md) is the rest of that
+checklist.
 
 Put a `plugin.json` next to your project and copy it to the output
 directory:
@@ -67,7 +120,9 @@ constructor. The host creates it with no arguments, then calls:
   `Enable`: unsubscribe events, release hotkeys, stop timers.
 
 `IPluginHost` gives you `State`, `Events`, `Commands`, `Storage`, `Log`,
-`Ui`, `Window`, `Clipboard`, `Hotkeys` and `Automation`. `Automation` is the
+`Ui`, `Window`, `Clipboard`, `Hotkeys`, `WorldLines` and `Automation`.
+`WorldLines` draws lines in the world (a route, say) in layers the plugin
+owns; a host without a window hands out no layer. `Automation` is the
 large surface: character, items, spells, combat, world objects, trade,
 vendor, navigation, fellowship, login. Check `IsAvailable` on a surface
 before relying on it; a host that cannot provide something returns an inert
@@ -95,6 +150,116 @@ For a bot or a test that needs no window, the headless host
 `Automation` surface; see the "Headless" section of `plugin-api.md` for the
 few things that differ (no UI, no window, remote positions from the latest
 server update).
+
+## Checking it before you publish
+
+`acdream-plugincheck` tells you whether the launcher would install your
+plugin, using the launcher's own code: the same manifest parser, install
+rules, zip safety checks, content policy and icon rules an install runs. It
+cannot disagree with the launcher, because it is the launcher's code.
+
+Run it from your OpenAC checkout (the one `OpenAcRoot` points at). It works
+the same on Windows, macOS and Linux:
+
+```
+dotnet run --project <OpenAcRoot>/src/AcDream.PluginCheck -- <path>
+```
+
+`<path>` is either your **release zip**, which is what players actually
+download and the check to run before publishing, or an **unzipped plugin
+folder**, which is what a hand install looks like. Checking the zip also
+verifies a `.sha256` sidecar if one sits beside it.
+
+```
+OpenAC PluginCheck — solrlabs.buffbot-0.1.0-beta.2.zip
+Mode: plugin .zip (a release asset)
+
+[PASS] zip within size cap
+[PASS] zip extracts safely
+[PASS] plugin.json present
+[PASS] plugin.json parses
+[PASS] manifest satisfies install rules
+[PASS] plugin content policy
+[PASS] plugin icon
+[PASS] sha256 sidecar
+
+Verdict: this plugin would install.
+```
+
+A failure names the problem in the launcher's own words, the same message a
+player would see:
+
+```
+[FAIL] plugin.json parses
+       capability 'chat' note contains a link. Fix: Correct the problem named
+       above in plugin.json; ...
+```
+
+Checks stop at the first problem in the manifest, so fix it and run again
+until the verdict passes. The exit code is `0` when the plugin would install,
+`1` when it would be refused, and `2` when the path is missing or unreadable.
+Add `--json` for a single machine-readable line in CI, with nothing else
+written to standard output.
+
+Two things it cannot check from a local file, so check them yourself against
+[plugin-manifest.md](plugin-manifest.md): the **GitHub release layout** (tag
+name, asset names, the prerelease flag, whether the release is marked
+*latest*), and whether a **particular client version** falls inside your
+`minHostVersion`/`maxHostVersion`/`skipHostVersions` range.
+
+## Publishing a release
+
+The launcher installs a plugin from a GitHub release in your own repository.
+It never runs a downloaded file: it unzips, verifies the checksum, and stages
+the plugin **disabled**, so enabling it stays an explicit choice the player
+makes on the Plugins tab.
+
+A release the launcher can install is stricter than a plugin that merely
+loads locally. The headlines:
+
+- A namespaced `id` (`yourname.yourplugin`), and a SemVer `version` equal to
+  the tag minus a leading `v`.
+- `minHostVersion` and `hosts` become **required**, not optional.
+- Tag `v<version>`, on a public repository, not a draft.
+- Assets with exact names: `plugin.json`, `<id>-<version>.zip`,
+  `<id>-<version>.zip.sha256`, and `icon.png` if the zip carries one.
+- Managed files only, by extension allowlist; no `runtimes/` folder.
+- An optional `icon.png` at the zip root: PNG, exactly 64x64, at most 64 KiB,
+  not animated. No icon is fine; a broken one refuses the whole install.
+- Declare [capabilities](plugin-manifest.md#capabilities) for anything the
+  player would want to know about — network access, chat, input automation.
+  The launcher shows them before installing and asks again when an update
+  changes them.
+
+[plugin-manifest.md](plugin-manifest.md) has the full contract, the size and
+extraction caps, and how to publish a **beta release** for players who opt
+that plugin into the Beta channel.
+
+## Getting listed
+
+A listed plugin appears in the launcher's **Discover** panel, so players can
+find and install it without being sent a link. The list lives at
+[eriknihlen/openac-plugins](https://github.com/eriknihlen/openac-plugins).
+
+**To ask for a listing, open an issue on that repository** with your plugin's
+id, display name, author name, a one-line description, and the `owner/name`
+of its GitHub repository. The list is published as a release asset by its
+maintainer; there is no pull request to merge, which is deliberate — nothing
+lands in the list that its maintainer did not put there.
+
+What is checked before a plugin is listed:
+
+- `acdream-plugincheck` passes against the release zip itself.
+- The repository is public, and the release layout is exactly as described.
+- Declared capabilities match what the plugin actually does.
+
+Beyond that mechanical bar, listing is at the maintainer's discretion: what
+a plugin does is looked at, a plugin can be declined, and one already listed
+can be **blocked** later — by id and version, with a reason players see. A
+blocked plugin is hidden from Discover, refused for install or update, and
+filtered out of every character's plugin list at launch. Being unlisted is
+not a judgement; a plugin distributed by link installs perfectly well through
+**Add from URL**.
 
 ## What you can rely on
 
@@ -125,6 +290,6 @@ and additive.
 - [OpenAC-MagTools](https://github.com/eriknihlen/OpenAC-MagTools): an
   external plugin in its own repository, built and installed exactly as
   described above.
-- `src/AcDream.Plugins.MossTank` in this repository: the bundled example,
-  which uses the panel markup heavily.
+- [openac-mosstank](https://github.com/eriknihlen/openac-mosstank): a large
+  external plugin, which uses the panel markup heavily.
 - `samples/`: render packs, the `RenderPack` kind.

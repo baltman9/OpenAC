@@ -23,22 +23,31 @@ internal sealed class RuntimeAutomationSurface
       ICombatAutomation, IEquipmentAutomation, IItemAutomation,
       ILootAutomation, IFellowshipAutomation, IEnchantmentAutomation,
       IRuntimeCommunicationObserver, IRuntimeEventObserver,
-      IWorldObjectAutomation, IWorldTimeAutomation,
-      ILoginAutomation, INetworkAutomation, IRecoveryAutomation,
+      IWorldObjectAutomation, IRecallAutomation, IAllegianceAutomation,
+      IWorldTimeAutomation, ILoginAutomation, INetworkAutomation, IRecoveryAutomation,
       IProjectileAutomation, ISelectionAutomation, IDialogAutomation, IDisposable
 {
     private readonly PluginCommandRegistry _pluginCommands;
+    private Action<string, Exception>? _pluginCommandFailed;
+    private AcDream.Runtime.Navigation.NavigationChatCommands?
+        _navigationCommands;
+    private IDisposable? _statusCommand;
     private const int MaximumPluginChatMessages = 512;
     private const double PeerHeartbeatSeconds = 5d;
     private readonly object _gate = new();
     private readonly AcDream.Runtime.Navigation.RuntimeNavigationAutomation _navigation;
-    private readonly IEvents? _events;
-    private readonly WorldEvents? _pluginEvents;
+    private readonly AcDream.Core.Plugins.IPluginEventSink? _events;
     private readonly LocalPluginPeerRegistry _peers;
     private readonly string[] _peerTags;
     private double _peerHeartbeatRemaining;
     private long _lastNavigationSequence;
     private PluginGoToState _lastNavigationState;
+    private RuntimePortalSnapshot? _lastPublishedPortalSnapshot;
+    private long _recallRequestRevision;
+    private long _pendingRecallRequestRevision;
+    private PluginRecallRequest _lastRecallRequest;
+    private long _activationRevision;
+    private readonly Dictionary<uint, long> _pendingActivationObjectIds = new();
 
     private GameRuntime? _runtime;
     private AcDream.Runtime.Gameplay.RuntimeTradeAutomation? _tradeAutomation;
@@ -55,6 +64,7 @@ internal sealed class RuntimeAutomationSurface
     private Func<int, string> _speciesName = static _ => string.Empty;
     private IChargenPaletteColorSource? _paletteColors;
     private Func<uint, uint, bool>? _equip;
+    private Func<uint, bool>? _equipSecondary;
     private Func<bool>? _equipmentBusy;
     private Func<bool>? _requestLogout;
     private Func<bool>? _canRequestLogout;
@@ -65,13 +75,24 @@ internal sealed class RuntimeAutomationSurface
     private Func<uint, uint, uint, bool>? _mergeItems;
     private Func<uint, uint, bool>? _dropItem;
     private Func<uint, uint, uint, bool>? _giveItem;
-    private Func<uint, bool, bool>? _pickupItem;
+    private Func<uint, bool, AcDream.Runtime.Gameplay.RuntimeBackpackPlacementOutcome>? _pickupItem;
     private Func<uint, bool>? _identifyItem;
     private Func<uint, IReadOnlyList<uint>, bool>? _salvageItems;
+    private PluginActivationCompletion _lastActivationCompletion;
+    private PluginRecallKind? _lastSuccessfulRecallKind;
+    private PluginRecallLocation? _lifestoneLocation;
+    private PluginRecallLocation? _marketplaceLocation;
+    private PluginRecallLocation? _mansionLocation;
+    private PluginRecallLocation? _allegianceLocation;
+    private long _lifestoneRevision;
+    private long _marketplaceRevision;
+    private long _mansionRevision;
+    private long _allegianceRevision;
     private Func<uint, uint, int, bool>? _sellItem;
     private Func<uint, bool>? _dismissGhost;
+    private Func<bool>? _chatInputActive;
+    private Func<string, bool>? _composeChat;
     private Func<PluginSelectionAction, bool>? _selectionAction;
-    private PhysicsEngine? _projectilePhysics;
     private IReadOnlyList<PluginProjectileDebugSample> _projectileDebugSamples =
         Array.Empty<PluginProjectileDebugSample>();
     private long _projectileDebugSamplesExpireAt;
@@ -91,6 +112,7 @@ internal sealed class RuntimeAutomationSurface
     private Func<uint, bool, bool>? _answerConfirmation;
     private Action<ExternalContainerTransition>? _externalContainerChanged;
     private Action<PluginChatMessage>? _chatReceived;
+    private event Action<PluginEquipmentObservation>? _equipmentPlacementObserved;
     private Action<PluginChatLinkClicked>? _chatLinkClicked;
     private SpellTable? _spellCatalogSource;
     private IReadOnlyList<PluginSpellInfo> _allSpells = Array.Empty<PluginSpellInfo>();
@@ -100,7 +122,12 @@ internal sealed class RuntimeAutomationSurface
         _trackedEnchantments = [];
     private long _trackedCastCompletionRevision;
     private bool _disposed;
-    private bool _remoteBodiesUnsimulated;
+
+    /// <summary>
+    /// The creature the outstanding plugin-driven swing was armed at, so a
+    /// request aimed somewhere else can end it rather than queue behind it.
+    /// </summary>
+    private uint _armedAttackTarget;
 
     private IReadOnlyList<PluginSpellInfo> _knownSelfBuffs = Array.Empty<PluginSpellInfo>();
     private IReadOnlyList<PluginSpellInfo> _knownAttackSpells =
@@ -121,17 +148,14 @@ internal sealed class RuntimeAutomationSurface
     }
 
     internal RuntimeAutomationSurface(
-        IEvents? events,
+        AcDream.Core.Plugins.IPluginEventSink? events,
         LocalPluginPeerRegistry? peers = null,
         IReadOnlyList<string>? peerTags = null)
     {
         _navigation = new AcDream.Runtime.Navigation.RuntimeNavigationAutomation(() => IsAvailable);
         _activeSpellIdsForPlayer = _ => _enchantments.Select(static enchantment => enchantment.SpellId).ToArray();
-        _pluginCommands = new PluginCommandRegistry((verb, error) =>
-            Console.WriteLine(
-                $"[PluginCommand:{verb}] {error.GetBaseException().Message}"));
+        _pluginCommands = new PluginCommandRegistry(ReportPluginCommandFailure);
         _events = events;
-        _pluginEvents = events as WorldEvents;
         _peers = peers ?? new LocalPluginPeerRegistry(Path.Combine(
             AcDream.Platform.ApplicationPathSet.Resolve().DataDirectory,
             "plugin-peers"));
@@ -147,8 +171,111 @@ internal sealed class RuntimeAutomationSurface
 
     internal IPluginCommandRegistry PluginCommands => _pluginCommands;
 
+    /// <summary>
+    /// Where a plugin command that threw is reported. Host-shaped rather than
+    /// a plugin seam: it lends the surface somewhere to put a line, not
+    /// something a plugin can reach. A host with somewhere
+    /// better to put it -- a diagnostic stream, a log file -- says so; one
+    /// that does not leaves the line on the standard output.
+    /// </summary>
+    internal void ReportPluginCommandFailuresTo(
+        Action<string, Exception> report)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        lock (_gate)
+            _pluginCommandFailed = report;
+    }
+
+    private void ReportPluginCommandFailure(string verb, Exception error)
+    {
+        Action<string, Exception>? report;
+        lock (_gate)
+            report = _pluginCommandFailed;
+        if (report is null)
+        {
+            Console.WriteLine(
+                $"[PluginCommand:{verb}] {error.GetBaseException().Message}");
+            return;
+        }
+        report(verb, error);
+    }
+
+    /// <summary>
+    /// Registers the client's own navigation verbs on this surface's command
+    /// registry. They are built here rather than by each host so both clients
+    /// answer the same words: the two that need something drawn are left out
+    /// by a client with nothing to draw on, and say so in plain terms instead
+    /// of being missing.
+    /// </summary>
+    /// <param name="runtime">The session the verbs act on and answer into.</param>
+    /// <param name="events">The tick the verbs follow their own walks on.</param>
+    /// <param name="toggleGrid">
+    /// Shows or hides the navigation grid; null where nothing is drawn.
+    /// </param>
+    /// <param name="previewRoute">
+    /// Draws a route without walking it; null where nothing is drawn.
+    /// </param>
+    /// <param name="narrate">
+    /// Sets who hears a walk's full narration; null where walks are not
+    /// planned at all.
+    /// </param>
+    internal void BindNavigationCommands(
+        GameRuntime runtime,
+        IEvents? events,
+        Func<bool>? toggleGrid,
+        Func<uint, bool>? previewRoute,
+        Action<Action<string>?>? narrate)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        lock (_gate)
+        {
+            if (_disposed || _navigationCommands is not null)
+                return;
+            _navigationCommands =
+                new AcDream.Runtime.Navigation.NavigationChatCommands(
+                    _navigation,
+                    () => runtime.ActionOwner.Selection.SelectedObjectId,
+                    // Chat rather than an on-screen notice, so a walk report
+                    // and its debug narration can be read back and copied.
+                    line => runtime.CommunicationOwner.AddText(
+                        line, AcDream.Core.Chat.RetailLogTextType.Default),
+                    toggleGrid,
+                    previewRoute,
+                    narrate)
+                .Register(_pluginCommands, events);
+        }
+    }
+
+    /// <summary>
+    /// Registers the client's own <c>/status</c> verb, which answers the one
+    /// line describing the session. It is registered here so a console and a
+    /// chat box answer the same words rather than each printing its own.
+    /// </summary>
+    internal void BindStatusCommand(GameRuntime runtime)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        lock (_gate)
+        {
+            if (_disposed || _statusCommand is not null)
+                return;
+            _statusCommand = _pluginCommands.Register(
+                AcDream.Runtime.Chat.RuntimeSessionStatusText.Verb,
+                _ => runtime.CommunicationOwner.AddText(
+                    AcDream.Runtime.Chat.RuntimeSessionStatusText.For(runtime),
+                    AcDream.Core.Chat.RetailLogTextType.Default));
+        }
+    }
+
     internal bool TryHandlePluginCommand(string commandLine) =>
         _pluginCommands.TryHandle(commandLine);
+
+    /// <summary>
+    /// Whether a verb is already spoken for on this registry. A front end
+    /// with a verb of its own asks before it answers one, so nothing it does
+    /// on its own ever shadows a plugin's.
+    /// </summary>
+    internal bool ClaimsPluginVerb(string verb) =>
+        _pluginCommands.IsRegistered(verb);
 
     public bool IsAvailable
     {
@@ -178,6 +305,8 @@ internal sealed class RuntimeAutomationSurface
     public IEnchantmentAutomation Enchantments => this;
     public INavigationAutomation Navigation => _navigation;
     public IWorldObjectAutomation Objects => this;
+    public IRecallAutomation Recalls => this;
+    public IAllegianceAutomation Allegiance => this;
     public IWorldTimeAutomation WorldTime => this;
     public ILoginAutomation Login => this;
     public INetworkAutomation Network => this;
@@ -191,6 +320,20 @@ internal sealed class RuntimeAutomationSurface
     public IVendorAutomation Vendor
     {
         get { lock (_gate) return (IVendorAutomation?)_vendorAutomation ?? NoOpAutomationSurface.Instance; }
+    }
+
+    PluginBusyState IRecoveryAutomation.CaptureBusyState()
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        if (runtime is null)
+            return default;
+        var state = runtime.ItemInteractionOwner.RuntimeTransactions.CaptureOwnership();
+        var inventory = runtime.InventoryOwner.Transactions;
+        return new(inventory.BusyCount, inventory.HasPendingRequest,
+            state.AwaitingAppraisalId, state.LastUseSourceId, state.LastUseTargetId,
+            state.AwaitingItemUseCompletion);
     }
 
     PluginRecoveryResult IRecoveryAutomation.ClearOneBusyReference()
@@ -208,14 +351,35 @@ internal sealed class RuntimeAutomationSurface
         InventoryTransactionState transactions =
             runtime.InventoryOwner.Transactions;
         int before = transactions.BusyCount;
-        transactions.CompleteUse(0u);
+        if (before != 0)
+        {
+            transactions.CompleteUse(0u);
+            return new(
+                Accepted: true,
+                PreviousCount: before,
+                CurrentCount: transactions.BusyCount,
+                Message: "Cleared one action busy reference.");
+        }
+
+        // Nothing is holding an item action, so the thing worth freeing is a
+        // description the server never answered: it holds its own reference
+        // and the one awaiting slot, and until it is let go every later
+        // description is refused.
+        if (runtime.ItemInteractionOwner.RuntimeTransactions
+            .AbandonAwaitingAppraisal())
+        {
+            return new(
+                Accepted: true,
+                PreviousCount: 0,
+                CurrentCount: 0,
+                Message: "Gave up an unanswered appraisal request.");
+        }
+
         return new(
             Accepted: true,
-            PreviousCount: before,
-            CurrentCount: transactions.BusyCount,
-            Message: before == 0
-                ? "The action busy count was already zero."
-                : "Cleared one action busy reference.");
+            PreviousCount: 0,
+            CurrentCount: 0,
+            Message: "The action busy count was already zero.");
     }
 
     bool INetworkAutomation.IsAvailable
@@ -360,6 +524,31 @@ internal sealed class RuntimeAutomationSurface
     private static string FormatCalendarName(string value) => value
         .Replace("AndHalf", "-and-Half", StringComparison.Ordinal);
 
+    /// <summary>
+    /// Attach to the runtime's gameplay owners unless already attached to
+    /// that same runtime. Re-attaching would detach and re-subscribe every
+    /// owner, so a host that attached early and a shared binding pass that
+    /// attaches late can both ask for it without the second one undoing the
+    /// first. Says whether the surface ended up bound: a disposed surface
+    /// binds nothing, and a caller reporting which seams it filled must not
+    /// count this one when it did not happen.
+    /// </summary>
+    internal bool EnsureBound(
+        GameRuntime runtime, RuntimeCharacterState character, RuntimeSpellCastState cast)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        lock (_gate)
+        {
+            if (_disposed)
+                return false;
+            if (ReferenceEquals(_runtime, runtime))
+                return true;
+        }
+        Bind(runtime, character, cast);
+        lock (_gate)
+            return !_disposed;
+    }
+
     /// <summary>Bind the surface to the runtime's gameplay owners.</summary>
     public void Bind(
         GameRuntime runtime, RuntimeCharacterState character, RuntimeSpellCastState cast)
@@ -392,6 +581,8 @@ internal sealed class RuntimeAutomationSurface
                 _externalContainerChanged;
             runtime.ActionOwner.Transactions.AppraisalReceived +=
                 OnAppraisalReceived;
+            runtime.ActionOwner.Transactions.UseCompleted +=
+                OnUseCompleted;
             _character = character;
             _cast = cast;
             _spellbook = spellbook;
@@ -401,6 +592,9 @@ internal sealed class RuntimeAutomationSurface
                 OnInventoryRequestCompleted;
             runtime.InventoryOwner.Transactions.RequestFailed +=
                 OnInventoryRequestFailed;
+            runtime.InventoryOwner.Objects.ObjectMoved += OnEquipmentObjectMoved;
+            runtime.InventoryOwner.Objects.ObjectRemovalClassified +=
+                OnEquipmentObjectRemoved;
         }
 
         RebuildSpellbook();
@@ -469,23 +663,18 @@ internal sealed class RuntimeAutomationSurface
             _paletteColors = resolver;
     }
 
-    // A host that never moves a remote entity's PhysicsBody reads its position from the snapshot instead.
-    internal void BindRemoteBodiesUnsimulated()
-    {
-        lock (_gate)
-            _remoteBodiesUnsimulated = true;
-        _navigation.BindRemoteBodiesUnsimulated();
-    }
 
     public void BindEquipment(
         Func<uint, uint, bool> equip,
-        Func<bool> isBusy)
+        Func<bool> isBusy,
+        Func<uint, bool>? equipSecondary = null)
     {
         ArgumentNullException.ThrowIfNull(equip);
         ArgumentNullException.ThrowIfNull(isBusy);
         lock (_gate)
         {
             _equip = equip;
+            _equipSecondary = equipSecondary;
             _equipmentBusy = isBusy;
         }
     }
@@ -510,7 +699,7 @@ internal sealed class RuntimeAutomationSurface
         Func<uint, uint, uint, bool> mergeItems,
         Func<uint, uint, bool> dropItem,
         Func<uint, uint, uint, bool> giveItem,
-        Func<uint, bool, bool> pickupItem,
+        Func<uint, bool, AcDream.Runtime.Gameplay.RuntimeBackpackPlacementOutcome> pickupItem,
         Func<uint, bool> identifyItem,
         Func<uint, IReadOnlyList<uint>, bool>? salvageItems = null,
         Func<uint, uint, int, bool>? sellItem = null)
@@ -577,13 +766,6 @@ internal sealed class RuntimeAutomationSurface
             _dismissGhost = dismissGhost;
     }
 
-    public void BindProjectileCollision(PhysicsEngine physics)
-    {
-        ArgumentNullException.ThrowIfNull(physics);
-        lock (_gate)
-            _projectilePhysics = physics;
-    }
-
     public void BindSelectionActions(
         Func<PluginSelectionAction, bool> execute)
     {
@@ -601,12 +783,35 @@ internal sealed class RuntimeAutomationSurface
         _knownAttackSpells = Array.Empty<PluginSpellInfo>();
         _knownCombatSpells = Array.Empty<PluginSpellInfo>();
         _enchantments = Array.Empty<PluginActiveEnchantment>();
+        _timedEnchantments = Array.Empty<PluginActiveEnchantment>();
+    }
+
+    /// <summary>
+    /// Reports whether the player is typing into the chat entry. Automation
+    /// that steers by holding keys asks before it holds any.
+    /// </summary>
+    public void BindChatInputActive(Func<bool> isActive)
+    {
+        ArgumentNullException.ThrowIfNull(isActive);
+        lock (_gate)
+            _chatInputActive = isActive;
+    }
+
+    /// <summary>Stages chat text in the entry box without sending it.</summary>
+    public void BindChatComposer(Func<string, bool> compose)
+    {
+        ArgumentNullException.ThrowIfNull(compose);
+        lock (_gate)
+            _composeChat = compose;
     }
 
     private void DetachLocked()
     {
         if (_runtime is { } runtime)
         {
+            runtime.InventoryOwner.Objects.ObjectRemovalClassified -=
+                OnEquipmentObjectRemoved;
+            runtime.InventoryOwner.Objects.ObjectMoved -= OnEquipmentObjectMoved;
             runtime.InventoryOwner.Transactions.RequestFailed -=
                 OnInventoryRequestFailed;
             runtime.InventoryOwner.Transactions.RequestCompleted -=
@@ -619,6 +824,8 @@ internal sealed class RuntimeAutomationSurface
             }
             runtime.ActionOwner.Transactions.AppraisalReceived -=
                 OnAppraisalReceived;
+            runtime.ActionOwner.Transactions.UseCompleted -=
+                OnUseCompleted;
         }
         if (_communication is not null)
             _communication.LocalPlayerDied -= OnLocalPlayerDied;
@@ -629,6 +836,10 @@ internal sealed class RuntimeAutomationSurface
         _runtimeEventSubscription?.Dispose();
         _runtimeEventSubscription = null;
         _wasInWorld = false;
+        _lastPublishedPortalSnapshot = null;
+        _lastRecallRequest = default;
+        _recallRequestRevision = 0;
+        _pendingRecallRequestRevision = 0;
         _chatMessages.Clear();
         if (_spellbook is not null)
         {
@@ -645,6 +856,8 @@ internal sealed class RuntimeAutomationSurface
         _navigation.UnbindRuntime();
         _communication = null;
         _dismissGhost = null;
+        _chatInputActive = null;
+        _composeChat = null;
         _trackedEnchantments.Clear();
         _trackedCastCompletionRevision = 0;
         _projectileDebugSamples = Array.Empty<PluginProjectileDebugSample>();
@@ -667,7 +880,7 @@ internal sealed class RuntimeAutomationSurface
         vendor?.Poll();
     }
 
-    // Graphical host only, driven from the plugin event tick.
+    // Driven from the plugin event tick on both clients.
     private void OnPeerTick(double elapsedSeconds)
     {
         Poll();
@@ -683,7 +896,7 @@ internal sealed class RuntimeAutomationSurface
 
     private void PublishNavigationChange()
     {
-        WorldEvents? events = _pluginEvents;
+        AcDream.Core.Plugins.IPluginEventSink? events = _events;
         if (events is null)
             return;
         PluginGoToReport report = _navigation.GoToReport;
@@ -828,6 +1041,11 @@ internal sealed class RuntimeAutomationSurface
                 }
                 continue;
             }
+            // A beneficial spell the caster cannot be the target of (the retail
+            // target rule refuses it on the caster) is no self buff, however
+            // good it sounds; a plugin handed it would ask for it forever.
+            if (!RetailSpellTargetPolicy.CanTargetSelf(meta))
+                continue;
             buffs.Add(Project(meta));
         }
 
@@ -854,14 +1072,29 @@ internal sealed class RuntimeAutomationSurface
         _knownCombatSpells = combat;
     }
 
+    private double _enchantmentProjectionTime = double.NaN;
+
+    // The clock must match the timestamp source used when receiving effects.
+    private double EnchantmentTime => _runtime?.Clock.SimulationTimeSeconds ?? 0d;
+
+    private void RefreshEnchantmentTime()
+    {
+        double now = _runtime?.Clock.SimulationTimeSeconds ?? 0d;
+        if (now != _enchantmentProjectionTime)
+            RebuildEnchantments();
+    }
+
     private void RebuildEnchantments()
     {
         Spellbook? spellbook;
         lock (_gate)
             spellbook = _spellbook;
+        double now = EnchantmentTime;
+        _enchantmentProjectionTime = _runtime?.Clock.SimulationTimeSeconds ?? 0d;
         if (spellbook is null)
         {
             _enchantments = Array.Empty<PluginActiveEnchantment>();
+            _timedEnchantments = Array.Empty<PluginActiveEnchantment>();
             return;
         }
 
@@ -878,10 +1111,24 @@ internal sealed class RuntimeAutomationSurface
                 tier = meta.Generation;
             }
             built.Add(new PluginActiveEnchantment(
-                record.SpellId, family, tier, record.Duration));
+                record.SpellId, family, tier, Remaining(record, now)));
         }
         _enchantments = built;
+        _timedEnchantments = spellbook.ActiveEnchantmentSnapshot
+            .Where(record => record.Bucket is 1u or 2u && record.Duration > 0d)
+            .Select(record =>
+            {
+                bool known = spellbook.TryGetMetadata(record.SpellId, out SpellMetadata metadata);
+                return new PluginActiveEnchantment(
+                    record.SpellId, known ? metadata.Family : 0u,
+                    known ? metadata.Generation : 0, Remaining(record, now));
+            }).ToArray();
     }
+
+    private static double Remaining(ActiveEnchantmentRecord record, double now)
+        => record.Duration < 0d
+            ? double.PositiveInfinity
+            : Math.Max(0d, record.StartTime + record.Duration - now);
 
     private static PluginSpellInfo Project(SpellMetadata meta) => new(
         meta.SpellId,
@@ -1054,6 +1301,10 @@ internal sealed class RuntimeAutomationSurface
     public uint MaxStamina => Vital(LocalPlayerState.VitalKind.Stamina).Maximum;
     public uint CurrentMana => Vital(LocalPlayerState.VitalKind.Mana).Current;
     public uint MaxMana => Vital(LocalPlayerState.VitalKind.Mana).Maximum;
+
+    public uint BaseHealth => BaseVital(LocalPlayerState.VitalKind.Health);
+    public uint BaseStamina => BaseVital(LocalPlayerState.VitalKind.Stamina);
+    public uint BaseMana => BaseVital(LocalPlayerState.VitalKind.Mana);
     public int SummoningMastery
     {
         get
@@ -1082,7 +1333,31 @@ internal sealed class RuntimeAutomationSurface
         return (vital.Current, vital.Maximum);
     }
 
-    public IReadOnlyList<PluginActiveEnchantment> ActiveEnchantments => _enchantments;
+    /// <summary>
+    /// The maximum with every enchantment layer off: base attributes, no
+    /// vital enchantments.
+    /// </summary>
+    private uint BaseVital(LocalPlayerState.VitalKind kind)
+    {
+        RuntimeCharacterState? character;
+        lock (_gate)
+            character = _character;
+        return character?.LocalPlayer.GetBaseMaxApprox(kind)
+            ?? Vital(kind).Maximum;
+    }
+
+    public IReadOnlyList<PluginActiveEnchantment> ActiveEnchantments
+    {
+        get { RefreshEnchantmentTime(); return _enchantments; }
+    }
+
+    private IReadOnlyList<PluginActiveEnchantment> _timedEnchantments =
+        Array.Empty<PluginActiveEnchantment>();
+
+    public IReadOnlyList<PluginActiveEnchantment> TimedEnchantments
+    {
+        get { RefreshEnchantmentTime(); return _timedEnchantments; }
+    }
 
     public IReadOnlyList<PluginSkillInfo> Skills
     {
@@ -1219,12 +1494,25 @@ internal sealed class RuntimeAutomationSurface
             if (_disposed || _wasInWorld == isInWorld)
                 return;
             _wasInWorld = isInWorld;
+
+            // Clear pending activations on logoff.
+            if (!isInWorld && _pendingActivationObjectIds.Count > 0)
+            {
+                long revision = ++_activationRevision;
+                foreach (uint objId in _pendingActivationObjectIds.Keys)
+                {
+                    _lastActivationCompletion = new PluginActivationCompletion(
+                        revision, objId, PluginActivationOutcome.Interrupted, 0u);
+                    _events?.FireActivationCompleted(_lastActivationCompletion);
+                }
+                _pendingActivationObjectIds.Clear();
+            }
         }
 
         if (isInWorld)
-            _pluginEvents?.FireLoginComplete();
+            _events?.FireLoginComplete();
         else
-            _pluginEvents?.FireLogoff();
+            _events?.FireLogoff();
     }
 
     void IRuntimeEventObserver.OnCommand(in RuntimeCommandDelta delta) { }
@@ -1239,7 +1527,7 @@ internal sealed class RuntimeAutomationSurface
     /// </summary>
     void IRuntimeEventObserver.OnEntity(in RuntimeEntityDelta delta)
     {
-        WorldEvents? events = _pluginEvents;
+        AcDream.Core.Plugins.IPluginEventSink? events = _events;
         if (events is null)
             return;
         PluginObjectChangeKind kind = delta.Change switch
@@ -1250,9 +1538,11 @@ internal sealed class RuntimeAutomationSurface
             RuntimeEntityChange.Deleted => PluginObjectChangeKind.Released,
             _ => PluginObjectChangeKind.Updated,
         };
-        events.FireObjectChanged(new PluginObjectChange(
-            delta.Entity.Identity.ServerGuid,
-            kind));
+        uint objectId = delta.Entity.Identity.ServerGuid;
+        events.FireObjectChanged(new PluginObjectChange(objectId, kind)
+        {
+            Current = CaptureCurrentObject(objectId),
+        });
     }
 
     /// <summary>
@@ -1264,7 +1554,14 @@ internal sealed class RuntimeAutomationSurface
     {
         if (delta.Change == RuntimeInventoryChange.Cleared)
             return;
-        WorldEvents? events = _pluginEvents;
+
+        if (delta.Change == RuntimeInventoryChange.Added
+            && delta.Item.EquipLocation != 0u)
+        {
+            PublishInitialEquipmentPlacement(delta.Item);
+        }
+
+        AcDream.Core.Plugins.IPluginEventSink? events = _events;
         if (events is null)
             return;
         PluginObjectChangeKind kind = delta.Change switch
@@ -1274,22 +1571,122 @@ internal sealed class RuntimeAutomationSurface
             RuntimeInventoryChange.Removed => PluginObjectChangeKind.Released,
             _ => PluginObjectChangeKind.Updated,
         };
-        events.FireObjectChanged(new PluginObjectChange(
-            delta.Item.ObjectId,
-            kind));
+        uint objectId = delta.Item.ObjectId;
+        events.FireObjectChanged(new PluginObjectChange(objectId, kind)
+        {
+            Current = CaptureCurrentObject(objectId),
+        });
+    }
+
+    private void PublishInitialEquipmentPlacement(
+        in RuntimeInventoryItemSnapshot item)
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        if (runtime is null)
+            return;
+
+        uint playerId = runtime.PlayerIdentity.ServerGuid;
+        ClientObjectTable objects = runtime.InventoryOwner.Objects;
+        if (playerId == 0u
+            || objects.Get(item.ObjectId) is not { } added
+            || !IsPlayerOwned(added, playerId, objects))
+        {
+            return;
+        }
+
+        Action<PluginEquipmentObservation>? handlers;
+        lock (_gate)
+            handlers = _equipmentPlacementObserved;
+        handlers?.Invoke(new PluginEquipmentObservation(
+            item.ObjectId,
+            item.EquipLocation,
+            IsRemoval: false)
+        {
+            IsInitialPlacement = true,
+        });
     }
 
     void IRuntimeEventObserver.OnChat(in RuntimeChatDelta delta) { }
     void IRuntimeEventObserver.OnMovement(in RuntimeMovementDelta delta) { }
-    void IRuntimeEventObserver.OnPortal(in RuntimePortalDelta delta) { }
+    void IRuntimeEventObserver.OnPortal(in RuntimePortalDelta delta)
+    {
+        long recallRequestRevision;
+        lock (_gate)
+        {
+            if (_lastPublishedPortalSnapshot is { } previous
+                && previous.Equals(delta.Portal))
+                return;
+            _lastPublishedPortalSnapshot = delta.Portal;
+            recallRequestRevision = _pendingRecallRequestRevision;
+            _pendingRecallRequestRevision = 0;
+        }
+        _events?.FirePortalTransition(new PluginPortalTransition(
+            Revision: 0,
+            Generation: delta.Portal.Generation,
+            DestinationCell: delta.Portal.DestinationCell,
+            IsReady: delta.Portal.IsReady,
+            IsMaterialized: delta.Portal.IsMaterialized,
+            IsCompleted: delta.Portal.IsCompleted,
+            IsCancelled: delta.Portal.IsCancelled)
+        {
+            RecallRequestRevision = recallRequestRevision,
+            Kind = delta.Portal.Kind switch
+            {
+                RuntimePortalKind.Login => PluginPortalTransitionKind.Login,
+                RuntimePortalKind.Portal => PluginPortalTransitionKind.Portal,
+                _ => PluginPortalTransitionKind.Unknown,
+            },
+        });
+
+        // When a portal transition completes or cancels, resolve any
+        // pending activation that may be awaiting this transition.
+        if (delta.Portal.IsCompleted || delta.Portal.IsCancelled)
+        {
+            PluginActivationOutcome outcome = delta.Portal.IsCompleted
+                ? PluginActivationOutcome.Completed
+                : PluginActivationOutcome.Interrupted;
+            lock (_gate)
+            {
+                if (_pendingActivationObjectIds.Count > 0)
+                {
+                    // Clear all pending activations -- the transition
+                    // resolves any outstanding world interaction.
+                    long revision = ++_activationRevision;
+                    foreach (uint objId in _pendingActivationObjectIds.Keys)
+                    {
+                        _lastActivationCompletion = new PluginActivationCompletion(
+                            revision,
+                            objId,
+                            outcome,
+                            WeenieError: 0u);
+                        _events?.FireActivationCompleted(_lastActivationCompletion);
+                    }
+                    _pendingActivationObjectIds.Clear();
+                }
+
+                // When a portal transition completes with a correlated recall
+                // request, learn the destination as a recall location.
+                if (delta.Portal.IsCompleted && recallRequestRevision > 0
+                    && _lastSuccessfulRecallKind is { } kind)
+                {
+                    GameRuntime? rt = _runtime;
+                    if (rt is not null)
+                        CaptureRecallLocation(kind, rt, recallRequestRevision, delta.Portal.DestinationCell);
+                    _lastSuccessfulRecallKind = null;
+                }
+            }
+        }
+    }
     void IRuntimeEventObserver.OnCombat(in RuntimeCombatDelta delta) { }
 
     private void OnLocalPlayerDied(string deathMessage) =>
-        _pluginEvents?.FireLocalPlayerDied(deathMessage);
+        _events?.FireLocalPlayerDied(deathMessage);
 
     private void OnExternalContainerChanged(ExternalContainerTransition transition)
     {
-        WorldEvents? events = _pluginEvents;
+        AcDream.Core.Plugins.IPluginEventSink? events = _events;
         if (events is null)
             return;
         switch (transition.Kind)
@@ -1306,10 +1703,49 @@ internal sealed class RuntimeAutomationSurface
         }
     }
 
+    private void OnUseCompleted(uint _)
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        if (runtime is null)
+            return;
+        RuntimeItemUseCompletion completion =
+            runtime.ActionOwner.Transactions.LastItemUseCompletion;
+        _events?.FireItemUseCompleted(new PluginItemUseCompletion(
+            completion.Revision,
+            completion.SourceObjectId,
+            completion.TargetObjectId,
+            completion.WeenieError));
+    }
+
     private void OnAppraisalReceived(uint objectId) =>
-        _pluginEvents?.FireObjectChanged(new PluginObjectChange(
+        _events?.FireObjectChanged(new PluginObjectChange(
             objectId,
-            PluginObjectChangeKind.IdentReceived));
+            PluginObjectChangeKind.IdentReceived)
+        {
+            Current = CaptureCurrentObject(objectId),
+        });
+
+    private PluginWorldObject? CaptureCurrentObject(uint objectId)
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        if (runtime is null || objectId == 0u)
+            return null;
+        runtime.EntityObjects.Entities.TryGetActive(
+            objectId,
+            out RuntimeEntityRecord? record);
+        ClientObject? item = runtime.InventoryOwner.Objects.Get(objectId);
+        if (record is null && item is null)
+            return null;
+        return ProjectWorldObject(
+            runtime,
+            record,
+            item,
+            runtime.PlayerIdentity.ServerGuid);
+    }
 
     // ── IDialogAutomation ────────────────────────────────────────────────
     IDialogAutomation IAutomationSurface.Dialogs => this;
@@ -1331,7 +1767,7 @@ internal sealed class RuntimeAutomationSurface
 
     /// <summary>Called by the host whenever it shows a confirmation dialog.</summary>
     public void RaiseConfirmationRequested(PluginConfirmation confirmation) =>
-        _pluginEvents?.FireConfirmationRequested(confirmation);
+        _events?.FireConfirmationRequested(confirmation);
 
     public IReadOnlyList<PluginSpellInfo> All
     {
@@ -1440,7 +1876,7 @@ internal sealed class RuntimeAutomationSurface
             return 0d;
         return spellbook.OnCooldown(
             cooldownId,
-            runtime.Clock.SimulationTimeSeconds,
+            EnchantmentTime,
             out double remaining)
                 ? Math.Max(0d, remaining)
                 : 0d;
@@ -1566,6 +2002,25 @@ internal sealed class RuntimeAutomationSurface
             RetailLogTextTypeCodec.FromPluginValue(logTextType));
     }
 
+    public bool IsInputActive
+    {
+        get
+        {
+            Func<bool>? isActive;
+            lock (_gate)
+                isActive = _disposed ? null : _chatInputActive;
+            return isActive?.Invoke() == true;
+        }
+    }
+
+    public bool Compose(string text)
+    {
+        Func<string, bool>? compose;
+        lock (_gate)
+            compose = _disposed ? null : _composeChat;
+        return compose?.Invoke(text) == true;
+    }
+
     public bool Submit(string text)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -1590,7 +2045,7 @@ internal sealed class RuntimeAutomationSurface
         get
         {
             lock (_gate)
-                return !_disposed && _projectilePhysics is not null && IsAvailable;
+                return !_disposed && IsAvailable;
         }
     }
 
@@ -1679,14 +2134,13 @@ internal sealed class RuntimeAutomationSurface
         bool captureDiagnostics)
     {
         GameRuntime? runtime;
-        PhysicsEngine? physics;
         lock (_gate)
-        {
             runtime = _runtime;
-            physics = _projectilePhysics;
-        }
-        if (runtime is null || physics is null || !IsAvailable)
+        if (runtime is null || !IsAvailable)
             return new(PluginProjectilePathStatus.Unavailable);
+        // The flight is tested against the collision world the session's own
+        // bodies move through, so every client answers from the same place.
+        PhysicsEngine physics = runtime.EntityObjects.Physics.Engine;
         if (targetObjectId == 0u
             || !float.IsFinite(projectileRadius)
             || projectileRadius <= 0f
@@ -1698,18 +2152,28 @@ internal sealed class RuntimeAutomationSurface
         }
 
         uint localId = runtime.PlayerIdentity.ServerGuid;
+        // The target is wherever the rest of the client takes it to be: its
+        // body when it has one, and the server's last word about it when it
+        // has stood still since it came into view and has none yet.
         if (!runtime.EntityObjects.Entities.TryGetActive(
                 localId,
                 out RuntimeEntityRecord local)
-            || !runtime.EntityObjects.Entities.TryGetActive(
-                targetObjectId,
-                out RuntimeEntityRecord target)
             || local.PhysicsBody is not { } localBody
-            || target.PhysicsBody is not { } targetBody
-            || localBody.CellPosition.ObjCellId == 0u)
+            || localBody.CellPosition.ObjCellId == 0u
+            || runtime.EntityObjects.Physics.InteractionTargetPosition(
+                targetObjectId) is not { } targetPosition)
         {
             return new(PluginProjectilePathStatus.InvalidTarget);
         }
+
+        // A flight through a place whose collision data is not loaded would
+        // meet nothing and read as clear. That is no answer, and it is said so.
+        uint startCell = localBody.CellPosition.ObjCellId;
+        bool worldIsLoaded = (startCell & 0xFFFFu) >= 0x0100u
+            ? physics.IsSpawnCellReady(startCell)
+            : physics.IsLandblockTerrainResident(startCell);
+        if (!worldIsLoaded)
+            return new(PluginProjectilePathStatus.Unavailable);
 
         try
         {
@@ -1718,7 +2182,7 @@ internal sealed class RuntimeAutomationSurface
                 localId,
                 localBody,
                 targetObjectId,
-                targetBody,
+                targetPosition,
                 kind,
                 targetHeight,
                 projectileRadius,
@@ -1739,7 +2203,7 @@ internal sealed class RuntimeAutomationSurface
         uint localObjectId,
         PhysicsBody local,
         uint targetObjectId,
-        PhysicsBody target,
+        System.Numerics.Vector3 targetPosition,
         PluginProjectilePathKind kind,
         PluginAttackHeight targetHeight,
         float radius,
@@ -1747,7 +2211,7 @@ internal sealed class RuntimeAutomationSurface
         int maximumChecks,
         bool captureDiagnostics)
     {
-        System.Numerics.Vector3 baseDelta = target.Position - local.Position;
+        System.Numerics.Vector3 baseDelta = targetPosition - local.Position;
         var horizontal = new System.Numerics.Vector2(baseDelta.X, baseDelta.Y);
         float horizontalDistance = horizontal.Length();
         if (!float.IsFinite(horizontalDistance)
@@ -1774,7 +2238,7 @@ internal sealed class RuntimeAutomationSurface
             direction.X * sourceForward,
             direction.Y * sourceForward,
             sourceHeight);
-        var destination = target.Position + new System.Numerics.Vector3(
+        var destination = targetPosition + new System.Numerics.Vector3(
             0f,
             0f,
             targetHeightMeters);
@@ -1912,6 +2376,205 @@ internal sealed class RuntimeAutomationSurface
     // ── IWorldObjectAutomation ────────────────────────────────────────────
     bool IWorldObjectAutomation.IsAvailable => IsAvailable;
 
+    bool IRecallAutomation.IsAvailable => IsAvailable;
+
+    bool IAllegianceAutomation.IsAvailable => IsAvailable;
+
+    PluginActivationCompletion IWorldObjectAutomation.LastActivationCompletion
+    {
+        get { lock (_gate) return _lastActivationCompletion; }
+    }
+
+    PluginAllegianceSnapshot IAllegianceAutomation.Snapshot
+    {
+        get
+        {
+            GameRuntime? runtime;
+            lock (_gate)
+                runtime = _runtime;
+            if (runtime is null || !IsAvailable)
+                return default;
+            RuntimeAllegianceSnapshot snapshot = runtime.Allegiance.Snapshot;
+            return new PluginAllegianceSnapshot(
+                snapshot.Revision,
+                snapshot.HasProfile,
+                snapshot.AllegianceName,
+                snapshot.Rank,
+                snapshot.TotalMembers,
+                snapshot.TotalVassals,
+                snapshot.MonarchGuid);
+        }
+    }
+
+    PluginRecallRequest IRecallAutomation.LastRequest
+    {
+        get { lock (_gate) return _lastRecallRequest; }
+    }
+
+    IReadOnlyList<PluginRecallLocation> IRecallAutomation.CaptureLocations()
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        if (runtime is null || !IsAvailable)
+            return Array.Empty<PluginRecallLocation>();
+
+        var results = new List<PluginRecallLocation>(5);
+
+        // House location from the house owner data.
+        AcDream.Core.Net.Messages.CreateObject.ServerPosition? house =
+            runtime.HouseOwner.Position;
+        AcDream.Core.Physics.Position? position =
+            RuntimeWorldObjectProjection.ConvertPosition(house);
+        if (position is not null)
+        {
+            results.Add(new PluginRecallLocation(
+                PluginRecallKind.House,
+                RuntimeWorldObjectProjection.ProjectNavigationPosition(position.Value),
+                "House",
+                runtime.HouseOwner.Revision,
+                true));
+        }
+
+        // Learned recall locations.
+        if (_lifestoneLocation is { } ls && ls.IsKnown)
+            results.Add(ls);
+        if (_marketplaceLocation is { } mp && mp.IsKnown)
+            results.Add(mp);
+        if (_mansionLocation is { } mn && mn.IsKnown)
+            results.Add(mn);
+        if (_allegianceLocation is { } al && al.IsKnown)
+            results.Add(al);
+
+        return results;
+    }
+
+    PluginRecallResult IRecallAutomation.Recall(PluginRecallKind kind)
+    {
+        GameRuntime? runtime;
+        IGameRuntimeCommands? commands;
+        lock (_gate)
+        {
+            runtime = _runtime;
+            commands = _sessionCommands;
+        }
+        if (runtime is null || commands is null || !IsAvailable)
+            return new(PluginRecallStatus.Unavailable);
+
+        RuntimePortalCommand command = kind switch
+        {
+            PluginRecallKind.Lifestone => RuntimePortalCommand.RecallLifestone,
+            PluginRecallKind.Marketplace => RuntimePortalCommand.RecallMarketplace,
+            PluginRecallKind.House => RuntimePortalCommand.RecallHouse,
+            PluginRecallKind.Mansion => RuntimePortalCommand.RecallMansion,
+            PluginRecallKind.Allegiance => RuntimePortalCommand.RecallAllegiance,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
+        RuntimeCommandResult result = commands.Portal.Execute(runtime.Generation, command);
+        PluginRecallStatus status = result.Status switch
+        {
+            RuntimeCommandStatus.Accepted => PluginRecallStatus.Started,
+            RuntimeCommandStatus.Unsupported => PluginRecallStatus.Unsupported,
+            _ => PluginRecallStatus.Refused,
+        };
+        lock (_gate)
+        {
+            _lastRecallRequest = new PluginRecallRequest(
+                ++_recallRequestRevision,
+                kind,
+                status);
+            _pendingRecallRequestRevision = status == PluginRecallStatus.Started
+                ? _lastRecallRequest.Revision
+                : 0;
+            if (status == PluginRecallStatus.Started)
+                _lastSuccessfulRecallKind = kind;
+        }
+        return new(status, status == PluginRecallStatus.Refused
+            ? result.Status.ToString()
+            : null);
+    }
+
+    private void CaptureRecallLocation(
+        PluginRecallKind kind, GameRuntime runtime, long revision, uint destinationCell)
+    {
+        // Learn the arrival position after a successful recall.
+        // For marketplace, use a known fixed location since the
+        // destination is always the same.
+        if (kind == PluginRecallKind.Marketplace)
+        {
+            // Marketplace town center. The cell is 0x0166 in the
+            // original client; the position is the standard arrival
+            // point after a marketplace recall.
+            _marketplaceLocation = new PluginRecallLocation(
+                PluginRecallKind.Marketplace,
+                new PluginNavigationPosition(
+                    CellId: 0x0166u,
+                    EastWest: 0.05, NorthSouth: 0.05, Elevation: 0.0,
+                    HeadingDegrees: 0.0f,
+                    IsOutdoor: true),
+                "Marketplace",
+                ++_marketplaceRevision,
+                true);
+            return;
+        }
+
+        // For house, use the data already available from the house owner.
+        if (kind == PluginRecallKind.House)
+        {
+            // Already tracked by CaptureLocations() from runtime.HouseOwner.
+            return;
+        }
+
+        // For mansion, check if the house data has a mansion position.
+        if (kind == PluginRecallKind.Mansion)
+        {
+            AcDream.Core.Net.Messages.CreateObject.ServerPosition? house =
+                runtime.HouseOwner.Position;
+            AcDream.Core.Physics.Position? position =
+                RuntimeWorldObjectProjection.ConvertPosition(house);
+            if (position is not null)
+            {
+                _mansionLocation = new PluginRecallLocation(
+                    PluginRecallKind.Mansion,
+                    RuntimeWorldObjectProjection.ProjectNavigationPosition(position.Value),
+                    "Mansion",
+                    ++_mansionRevision,
+                    true);
+            }
+            return;
+        }
+
+        // For lifestone, capture the destination cell from the portal transition.
+        if (kind == PluginRecallKind.Lifestone && destinationCell != 0u)
+        {
+            _lifestoneLocation = new PluginRecallLocation(
+                PluginRecallKind.Lifestone,
+                new PluginNavigationPosition(
+                    CellId: destinationCell,
+                    EastWest: 0.0, NorthSouth: 0.0, Elevation: 0.0,
+                    HeadingDegrees: 0.0f,
+                    IsOutdoor: true),
+                "Lifestone",
+                ++_lifestoneRevision,
+                true);
+        }
+
+        // For allegiance hometown, capture the destination cell from the portal transition.
+        if (kind == PluginRecallKind.Allegiance && destinationCell != 0u)
+        {
+            _allegianceLocation = new PluginRecallLocation(
+                PluginRecallKind.Allegiance,
+                new PluginNavigationPosition(
+                    CellId: destinationCell,
+                    EastWest: 0.0, NorthSouth: 0.0, Elevation: 0.0,
+                    HeadingDegrees: 0.0f,
+                    IsOutdoor: true),
+                "Allegiance Hometown",
+                ++_allegianceRevision,
+                true);
+        }
+    }
+
     uint IWorldObjectAutomation.OpenContainerObjectId
     {
         get
@@ -2002,6 +2665,45 @@ internal sealed class RuntimeAutomationSurface
     // owned inventory, equipped, landscape, a vendor listing, or an open
     // container's content -- unlike ILootAutomation.Identify, which is
     // deliberately scoped to the currently open corpse/container.
+    PluginItemCommandResult IWorldObjectAutomation.Activate(uint objectId)
+    {
+        GameRuntime? runtime;
+        Func<uint, PluginItemCommandResult>? useWorldObject;
+        lock (_gate)
+        {
+            runtime = _runtime;
+            useWorldObject = _useWorldObject;
+        }
+        if (runtime is null || useWorldObject is null || !IsAvailable)
+            return new(PluginItemCommandStatus.Unavailable);
+        if (objectId == 0u || runtime.InventoryOwner.Objects.Get(objectId) is not { } item)
+            return new(PluginItemCommandStatus.InvalidTarget);
+        uint playerId = runtime.PlayerIdentity.ServerGuid;
+        if (RuntimeWorldObjectProjection.IsPlayerOwned(
+                item,
+                playerId,
+                runtime.InventoryOwner.Objects))
+            return new(PluginItemCommandStatus.InvalidTarget,
+                "Activate is for world objects; use Items.Use for owned items.");
+        PluginItemCommandResult result = useWorldObject(objectId);
+        if (result.Accepted)
+        {
+            lock (_gate)
+            {
+                if (_pendingActivationObjectIds.TryGetValue(objectId, out long existing))
+                {
+                    // Already tracking this object; update revision.
+                    _pendingActivationObjectIds[objectId] = ++_activationRevision;
+                }
+                else
+                {
+                    _pendingActivationObjectIds.Add(objectId, ++_activationRevision);
+                }
+            }
+        }
+        return result;
+    }
+
     PluginItemCommandResult IWorldObjectAutomation.Identify(uint objectId)
     {
         GameRuntime? runtime;
@@ -2015,7 +2717,12 @@ internal sealed class RuntimeAutomationSurface
             return new(PluginItemCommandStatus.Unavailable);
         if (objectId == 0u || runtime.InventoryOwner.Objects.Get(objectId) is null)
             return new(PluginItemCommandStatus.InvalidItem);
-        if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
+        // Only another description in flight holds this up. An item action
+        // of the caller's own is not one: the two do not share a channel.
+        // A description waited on past its own bound is not one either --
+        // asked through the owner below, it is given up and this request
+        // takes its place.
+        if (!runtime.ActionOwner.Transactions.CanBeginAppraisal)
             return new(PluginItemCommandStatus.Busy);
         return identify(objectId)
             ? new(PluginItemCommandStatus.Started)
@@ -2032,8 +2739,7 @@ internal sealed class RuntimeAutomationSurface
             item,
             playerId,
             runtime.InventoryOwner.Objects,
-            activeSpellIdsForPlayer: _activeSpellIdsForPlayer,
-            remoteBodiesUnsimulated: _remoteBodiesUnsimulated);
+            activeSpellIdsForPlayer: _activeSpellIdsForPlayer);
 
     private static bool HasPropertyData(PropertyBundle properties) =>
         RuntimeWorldObjectProjection.HasPropertyData(properties);
@@ -2045,15 +2751,21 @@ internal sealed class RuntimeAutomationSurface
         AcDream.Core.Net.Messages.CreateObject.ServerPosition? position) =>
         RuntimeWorldObjectProjection.ConvertPosition(position);
 
+    /// <summary>
+    /// Whether a cast this session issued is still outstanding. It used to
+    /// answer from the inventory transaction count, which an appraisal or a
+    /// pickup raises as readily as a cast: an automation that appraises as
+    /// it goes then reads as permanently mid-cast, and every rule that
+    /// casts is refused for ever.
+    /// </summary>
     public bool IsCasting
     {
         get
         {
-            GameRuntime? runtime;
+            RuntimeSpellCastState? cast;
             lock (_gate)
-                runtime = _runtime;
-            return runtime is not null
-                && runtime.InventoryOwner.Transactions.BusyCount > 0;
+                cast = _cast;
+            return cast?.PendingSpellId is not null;
         }
     }
 
@@ -2181,7 +2893,62 @@ internal sealed class RuntimeAutomationSurface
         uint playerId = runtime.PlayerIdentity.ServerGuid;
         if (playerId == 0u)
             return Array.Empty<PluginEquipmentItem>();
-        ClientObjectTable objects = runtime.InventoryOwner.Objects;
+        return BuildOwnedEquipment(runtime.InventoryOwner.Objects, playerId);
+    }
+
+    public IReadOnlyList<PluginEquipmentPlacement> CaptureWorldPlacementsInOrder()
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        if (runtime is null || !IsAvailable)
+            return Array.Empty<PluginEquipmentPlacement>();
+        return runtime.InventoryOwner.Objects.Objects
+            .Select(static item => new PluginEquipmentPlacement(
+                item.ObjectId, (uint)item.CurrentlyEquippedLocation))
+            .ToArray();
+    }
+
+    event Action<PluginEquipmentObservation> IEquipmentAutomation.PlacementObserved
+    {
+        add { lock (_gate) _equipmentPlacementObserved += value; }
+        remove { lock (_gate) _equipmentPlacementObserved -= value; }
+    }
+
+    private void OnEquipmentObjectMoved(ClientObjectMove move)
+    {
+        if (move.Origin != ClientObjectMoveOrigin.AuthoritativeResponse)
+            return;
+        Action<PluginEquipmentObservation>? handlers;
+        lock (_gate)
+            handlers = _equipmentPlacementObserved;
+        handlers?.Invoke(new PluginEquipmentObservation(
+            move.ItemId,
+            (uint)move.Current.EquipLocation,
+            move.Current.EquipLocation == EquipMask.None));
+    }
+
+    private void OnEquipmentObjectRemoved(ClientObjectRemoval removal)
+    {
+        if (removal.Reason != ClientObjectRemovalReason.LogicalDelete)
+            return;
+        Action<PluginEquipmentObservation>? handlers;
+        lock (_gate)
+            handlers = _equipmentPlacementObserved;
+        handlers?.Invoke(new PluginEquipmentObservation(
+            removal.Object.ObjectId, 0u, true));
+    }
+
+    /// <summary>
+    /// Everything the player owns that can be worn or wielded, in the order
+    /// the contract promises: what is equipped first, then by name, then by
+    /// object id. "The first wand" means the held one when any wand is held,
+    /// and two wands of one name always come back in the same order.
+    /// </summary>
+    internal static List<PluginEquipmentItem> BuildOwnedEquipment(
+        ClientObjectTable objects,
+        uint playerId)
+    {
         var built = new List<PluginEquipmentItem>();
         foreach (ClientObject item in objects.Objects)
         {
@@ -2207,22 +2974,42 @@ internal sealed class RuntimeAutomationSurface
                 AmmoType = item.AmmoType ?? (uint)Math.Max(
                     0,
                     item.Properties.GetInt((uint)PropertyInt.AmmoType)),
-                StackSize = Math.Max(1, item.StackSize),
+                StackSize = item.StackSize,
+                ObjectClass = ClassifyObject(item),
                 WeaponType = item.Properties.GetInt(
                     (uint)PropertyInt.WeaponType),
+                Cleaving = item.Properties.GetInt(
+                    (uint)PropertyInt.Cleaving),
+                ImbuedEffect = item.Properties.GetInt(
+                    (uint)PropertyInt.ImbuedEffect),
+                ResistanceCleaving = item.Properties.GetInt(
+                    (uint)PropertyInt.ResistanceModifierType),
+                SlayerCreatureType = item.Properties.GetInt(
+                    (uint)PropertyInt.SlayerCreatureType),
+                CrushingBlow = item.Properties.GetFloat(
+                    (uint)PropertyFloat.CriticalMultiplier) > 0d,
+                BitingStrike = item.Properties.GetFloat(
+                    (uint)PropertyFloat.CriticalFrequency) > 0d,
+                ArmorCleaving = item.Properties.GetFloat(
+                    (uint)PropertyFloat.IgnoreArmor) > 0d,
             });
         }
-        built.Sort(static (left, right) =>
-        {
-            int equipped = right.IsEquipped.CompareTo(left.IsEquipped);
-            if (equipped != 0)
-                return equipped;
-            int name = string.CompareOrdinal(left.Name, right.Name);
-            return name != 0
-                ? name
-                : left.ObjectId.CompareTo(right.ObjectId);
-        });
+        built.Sort(CompareEquipmentOrder);
         return built;
+    }
+
+    /// <summary>Equipped first, then by name, then by object id.</summary>
+    internal static int CompareEquipmentOrder(
+        PluginEquipmentItem left,
+        PluginEquipmentItem right)
+    {
+        int equipped = right.IsEquipped.CompareTo(left.IsEquipped);
+        if (equipped != 0)
+            return equipped;
+        int name = string.CompareOrdinal(left.Name, right.Name);
+        return name != 0
+            ? name
+            : left.ObjectId.CompareTo(right.ObjectId);
     }
 
     public PluginEquipmentCommandResult Equip(
@@ -2260,6 +3047,32 @@ internal sealed class RuntimeAutomationSurface
             : new(PluginEquipmentCommandStatus.Refused);
     }
 
+    public PluginEquipmentCommandResult EquipSecondary(uint objectId)
+    {
+        Func<uint, bool>? equipSecondary;
+        Func<bool>? busy;
+        GameRuntime? runtime;
+        lock (_gate)
+        {
+            equipSecondary = _equipSecondary;
+            busy = _equipmentBusy;
+            runtime = _runtime;
+        }
+        if (equipSecondary is null || runtime is null || !IsAvailable)
+            return new(PluginEquipmentCommandStatus.Unavailable);
+        if (objectId == 0u
+            || runtime.InventoryOwner.Objects.Get(objectId) is not { } item
+            || item.ValidLocations == EquipMask.None)
+            return new(PluginEquipmentCommandStatus.InvalidItem);
+        if (item.CurrentlyEquippedLocation == EquipMask.Shield)
+            return new(PluginEquipmentCommandStatus.AlreadyEquipped);
+        if (busy?.Invoke() == true)
+            return new(PluginEquipmentCommandStatus.Busy);
+        return equipSecondary(objectId)
+            ? new(PluginEquipmentCommandStatus.Started)
+            : new(PluginEquipmentCommandStatus.Refused);
+    }
+
     // ── IItemAutomation ──────────────────────────────────────────────────
     bool IItemAutomation.IsAvailable
     {
@@ -2278,10 +3091,21 @@ internal sealed class RuntimeAutomationSurface
             GameRuntime? runtime;
             lock (_gate)
                 runtime = _runtime;
-            return runtime is not null
-                && !runtime.InventoryOwner.Transactions.CanBeginRequest;
+            return runtime is not null && IsItemCommandBusy(runtime);
         }
     }
+
+    /// <summary>
+    /// Whether a use or an inventory request offered this instant would come
+    /// back busy. There are two ways it can: a request of the caller's own is
+    /// still in flight and has to finish first, or the short pacing between
+    /// two uses has not lapsed yet. Both mean "not yet" rather than "no", and
+    /// both have to be visible from outside -- a caller that waits for this
+    /// to clear and only then asks must not still be refused.
+    /// </summary>
+    private static bool IsItemCommandBusy(GameRuntime runtime) =>
+        !runtime.InventoryOwner.Transactions.CanBeginRequest
+        || !runtime.ItemInteractionOwner.IsUseThrottleReadyForAutomation;
 
     int IItemAutomation.ActiveOwnedPetCount
     {
@@ -2656,7 +3480,13 @@ internal sealed class RuntimeAutomationSurface
                 PluginItemCommandStatus.Refused,
                 "This item requires a target; call Apply(objectId, targetObjectId) instead.");
         }
-        if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
+        // The owned-item use and apply paths below both take the same pacing
+        // between two uses that a click does, and both answer a refusal there
+        // in a way the caller cannot read: the use path reports it as a plain
+        // refusal, and the apply path reports it as started even though
+        // nothing went out. Name it here instead, as the early answer it is,
+        // and off the same predicate IsBusy reports.
+        if (IsItemCommandBusy(runtime))
             return new(PluginItemCommandStatus.Busy);
         bool started = targetObjectId == 0u
             ? use(objectId)
@@ -2705,8 +3535,7 @@ internal sealed class RuntimeAutomationSurface
             GameRuntime? runtime;
             lock (_gate)
                 runtime = _runtime;
-            return runtime is not null
-                && !runtime.InventoryOwner.Transactions.CanBeginRequest;
+            return runtime is not null && IsItemCommandBusy(runtime);
         }
     }
 
@@ -2754,7 +3583,12 @@ internal sealed class RuntimeAutomationSurface
                     ? default
                     : new PluginAppraisalState(
                         transactions.Revision,
-                        transactions.AwaitingAppraisalId,
+                        // A wait already past its own bound is reported as
+                        // no wait at all: the answer is not coming, and the
+                        // next request is what actually lets it go.
+                        transactions.IsAwaitingAppraisalExpired
+                            ? 0u
+                            : transactions.AwaitingAppraisalId,
                         // The plugin-facing completion signal: the object
                         // id of the last appraisal response that actually
                         // completed, regardless of whether the user's
@@ -2765,7 +3599,13 @@ internal sealed class RuntimeAutomationSurface
                         // the one the window shows, and mapping it here
                         // stalls any plugin polling for its own Identify
                         // to finish (loot scanners, trackers).
-                        transactions.LastCompletedAppraisalId);
+                        transactions.LastCompletedAppraisalId,
+                        // The other half of that poll: a request the client
+                        // gave up on never produces a completion, so an
+                        // asker with no failure signal waits for ever.
+                        transactions.IsAwaitingAppraisalExpired
+                            ? transactions.AwaitingAppraisalId
+                            : transactions.LastAbandonedAppraisalId);
             }
         }
     }
@@ -2800,6 +3640,14 @@ internal sealed class RuntimeAutomationSurface
                 continue;
             }
 
+            Position? corpsePosition =
+                runtime.EntityObjects.Entities.TryGetActive(
+                    candidate.ObjectId,
+                    out RuntimeEntityRecord corpseRecord)
+                    ? corpseRecord.PhysicsBody?.CellPosition
+                        ?? ConvertPosition(corpseRecord.Snapshot.Position)
+                    : null;
+
             result.Add(new PluginLootContainer(
                 candidate.ObjectId,
                 candidate.WeenieClassId,
@@ -2809,6 +3657,10 @@ internal sealed class RuntimeAutomationSurface
                 external.RequestedContainerId == candidate.ObjectId,
                 external.CurrentContainerId == candidate.ObjectId)
             {
+                HasPosition = corpsePosition is not null,
+                Position = corpsePosition is { } placed
+                    ? ProjectNavigationPosition(placed)
+                    : default,
                 LongDescription = candidate.Properties.GetString(
                     (uint)PropertyString.LongDesc),
                 IsGeneratedRare = candidate.Properties.GetBool(
@@ -2827,6 +3679,26 @@ internal sealed class RuntimeAutomationSurface
         return result.Count == 0
             ? Array.Empty<PluginLootContainer>()
             : result.ToArray();
+    }
+
+    public bool CurrentContentsReady
+    {
+        get
+        {
+            GameRuntime? runtime;
+            lock (_gate) runtime = _runtime;
+            if (runtime is null || !IsAvailable) return false;
+            uint root = runtime.InventoryOwner.ExternalContainers.CurrentContainerId;
+            if (root == 0u) return false;
+            ClientObjectTable objects = runtime.InventoryOwner.Objects;
+            foreach (uint id in CaptureContainerIds(objects, root))
+            {
+                if (objects.Get(id) is not { } item
+                    || string.IsNullOrEmpty(item.Name) || item.WeenieClassId == 0u)
+                    return false;
+            }
+            return true;
+        }
     }
 
     public IReadOnlyList<PluginInventoryItem> CaptureCurrentContents()
@@ -2880,10 +3752,12 @@ internal sealed class RuntimeAutomationSurface
     {
         GameRuntime? runtime;
         Func<uint, bool>? use;
+        Func<uint, PluginItemCommandResult>? useWorldObject;
         lock (_gate)
         {
             runtime = _runtime;
             use = _useItem;
+            useWorldObject = _useWorldObject;
         }
         if (runtime is null || use is null || !IsAvailable)
             return new(PluginItemCommandStatus.Unavailable);
@@ -2895,9 +3769,58 @@ internal sealed class RuntimeAutomationSurface
         {
             return new(PluginItemCommandStatus.InvalidTarget);
         }
-        if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
+        // Two ways to be early here, and neither is a verdict on this
+        // container: a request of the caller's own is still in flight, or the
+        // short pacing between two uses has not lapsed. An open that arrives
+        // inside either window has not failed, it is early. Saying so keeps
+        // the caller from spending one of the container's attempts -- and
+        // arming whatever back-off it pairs with a failure -- on a fifth of a
+        // second's wait, which is what stood a looter still between one
+        // container and the next after closing the first. IsBusy reports this
+        // same predicate, so a caller that waits for it to clear and asks
+        // again is then accepted rather than refused a second time.
+        if (IsItemCommandBusy(runtime))
             return new(PluginItemCommandStatus.Busy);
+        // A corpse or a chest out in the world is reached the same way here as
+        // it is through Use on the very same object: walk to it if it is out
+        // of reach, and send the open once the character is there. Sending it
+        // from wherever the character was standing asked a corpse metres away
+        // to hand over its contents, and the server answered nothing.
+        if (!IsPlayerOwned(
+                container,
+                runtime.PlayerIdentity.ServerGuid,
+                runtime.InventoryOwner.Objects)
+            && useWorldObject is not null)
+        {
+            return useWorldObject(containerObjectId);
+        }
         return use(containerObjectId)
+            ? new(PluginItemCommandStatus.Started)
+            : new(PluginItemCommandStatus.Refused);
+    }
+
+    public PluginItemCommandResult Close(uint containerObjectId)
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        if (runtime is null || !IsAvailable)
+            return new(PluginItemCommandStatus.Unavailable);
+        if (containerObjectId == 0u
+            || runtime.InventoryOwner.ExternalContainers.CurrentContainerId
+                != containerObjectId
+            || runtime.InventoryOwner.Objects.Get(containerObjectId)
+                is not { } container
+            || ((PublicWeenieFlags)(container.PublicWeenieBitfield ?? 0u)
+                & (PublicWeenieFlags.Corpse | PublicWeenieFlags.Openable)) == 0)
+        {
+            return new(PluginItemCommandStatus.InvalidTarget);
+        }
+        // Early rather than failed, the same way an open is.
+        if (IsItemCommandBusy(runtime))
+            return new(PluginItemCommandStatus.Busy);
+        return runtime.ItemInteractionOwner.TryUseItemForAutomation(
+            containerObjectId)
             ? new(PluginItemCommandStatus.Started)
             : new(PluginItemCommandStatus.Refused);
     }
@@ -2921,11 +3844,16 @@ internal sealed class RuntimeAutomationSurface
                 & PublicWeenieFlags.Corpse) != 0;
         bool currentContent = root != 0u
             && CaptureContainerIds(objects, root).Contains(objectId);
-        if (item is null || (!corpse && !currentContent))
+        bool owned = TryGetOwned(objects, runtime.PlayerIdentity.ServerGuid,
+            objectId, out _);
+        if (item is null || (!corpse && !currentContent && !owned))
         {
             return new(PluginItemCommandStatus.InvalidItem);
         }
-        if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
+        // One description at a time; a pick-up or an open of the caller's
+        // own is on another channel and does not hold this up, and neither
+        // does a description already waited on past its own bound.
+        if (!runtime.ActionOwner.Transactions.CanBeginAppraisal)
             return new(PluginItemCommandStatus.Busy);
         return identify(objectId)
             ? new(PluginItemCommandStatus.Started)
@@ -2935,7 +3863,8 @@ internal sealed class RuntimeAutomationSurface
     public PluginItemCommandResult Pickup(uint objectId, bool mainPack = false)
     {
         GameRuntime? runtime;
-        Func<uint, bool, bool>? pickup;
+        Func<uint, bool, AcDream.Runtime.Gameplay.RuntimeBackpackPlacementOutcome>?
+            pickup;
         lock (_gate)
         {
             runtime = _runtime;
@@ -2954,9 +3883,28 @@ internal sealed class RuntimeAutomationSurface
         }
         if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
             return new(PluginItemCommandStatus.Busy);
-        return pickup(objectId, mainPack)
-            ? new(PluginItemCommandStatus.Started)
-            : new(PluginItemCommandStatus.Refused);
+        // The placement has four endings that send nothing, and this used to
+        // answer Started for all of them: a plugin looting a corpse into a
+        // full pack was told its request was on its way and then waited for
+        // a completion that could never arrive.
+        return pickup(objectId, mainPack) switch
+        {
+            AcDream.Runtime.Gameplay.RuntimeBackpackPlacementOutcome.Sent =>
+                new(PluginItemCommandStatus.Started),
+            AcDream.Runtime.Gameplay.RuntimeBackpackPlacementOutcome.NoRoom =>
+                new(
+                    PluginItemCommandStatus.Refused,
+                    "no pack the player has open has room for it"),
+            AcDream.Runtime.Gameplay.RuntimeBackpackPlacementOutcome
+                .AlreadyPending =>
+                new(PluginItemCommandStatus.Busy),
+            AcDream.Runtime.Gameplay.RuntimeBackpackPlacementOutcome
+                .NotDispatched =>
+                new(
+                    PluginItemCommandStatus.Refused,
+                    "the merge this would have become did not go out"),
+            _ => new(PluginItemCommandStatus.Refused),
+        };
     }
 
     private static HashSet<uint> CaptureContainerIds(
@@ -3088,6 +4036,8 @@ internal sealed class RuntimeAutomationSurface
             AttackType = item.Properties.GetInt((uint)PropertyInt.AttackType),
             WeaponType = item.Properties.GetInt((uint)PropertyInt.WeaponType),
             BoosterVital = item.Properties.GetInt((uint)PropertyInt.BoosterEnum),
+            AmmoType = item.AmmoType ?? (uint)Math.Max(0,
+                item.Properties.GetInt((uint)PropertyInt.AmmoType)),
             BoostValue = item.Properties.GetInt((uint)PropertyInt.BoostValue),
             HealKitModifier = item.Properties.GetFloat(
                 (uint)PropertyFloat.HealkitMod),
@@ -3114,10 +4064,12 @@ internal sealed class RuntimeAutomationSurface
             ItemCurrentMana = item.Properties.GetInt((uint)PropertyInt.ItemCurMana),
             ItemMaximumMana = item.Properties.GetInt((uint)PropertyInt.ItemMaxMana),
             Workmanship = item.Workmanship,
+            NumTimesTinkered = item.Properties.GetInt((uint)PropertyInt.NumTimesTinkered),
             MaterialType = item.MaterialType ?? 0u,
             ObjectClass = ClassifyObject(item),
             Palettes = ProjectPalettes(runtime, item.ObjectId),
             IconId = item.IconId,
+            Effects = item.Effects,
         };
     }
 
@@ -3262,6 +4214,7 @@ internal sealed class RuntimeAutomationSurface
                 distance)
             {
                 ShareLoot = member.ShareLoot,
+                VitalsAgeSeconds = member.VitalsAgeSeconds,
             });
         }
         return result.Count == 0
@@ -3304,6 +4257,10 @@ internal sealed class RuntimeAutomationSurface
         InvokeFellowship((commands, generation) => commands.Fellowship.SetOpen(
             generation,
             isOpen));
+
+    public PluginFellowshipCommandResult RequestVitals(bool requested) =>
+        InvokeFellowship((commands, generation) =>
+            commands.Fellowship.RequestVitals(generation, requested));
 
     private PluginFellowshipCommandResult InvokeFellowship(
         Func<IGameRuntimeCommands, RuntimeGenerationToken, RuntimeCommandResult> invoke)
@@ -3364,6 +4321,7 @@ internal sealed class RuntimeAutomationSurface
                 distance)
             {
                 ShareLoot = member.ShareLoot,
+                VitalsAgeSeconds = member.VitalsAgeSeconds,
             });
         }
         return result.Count == 0
@@ -3372,6 +4330,21 @@ internal sealed class RuntimeAutomationSurface
     }
 
     // ── IEnchantmentAutomation ──────────────────────────────────────────
+    public void ForgetReported(uint targetObjectId = 0u)
+    {
+        lock (_gate)
+        {
+            // Consume the old receipt so polling cannot restore a forgotten cast.
+            _trackedCastCompletionRevision = _cast?.LastCompletion.Revision ?? 0;
+            if (targetObjectId == 0u)
+                _trackedEnchantments.Clear();
+            else
+                foreach (var key in _trackedEnchantments.Keys
+                    .Where(key => key.Target == targetObjectId).ToArray())
+                    _trackedEnchantments.Remove(key);
+        }
+    }
+
     public IReadOnlyList<PluginTrackedEnchantment> Capture(uint targetObjectId)
     {
         if (targetObjectId == 0u)
@@ -3517,6 +4490,10 @@ internal sealed class RuntimeAutomationSurface
                 CompletionRevision = attack.CompletionRevision,
                 CompletionSequence = attack.CompletionSequence,
                 CompletionWeenieError = attack.CompletionWeenieError,
+                QualifiedSelfMotionRevision = runtime.ActionOwner.CombatMode
+                    .QualifiedSelfMotionRevision,
+                QualifiedSelfMotionAgeSeconds = runtime.ActionOwner.CombatMode
+                    .QualifiedSelfMotionAgeSeconds(runtime.Clock.SimulationTimeSeconds),
             };
         }
     }
@@ -3531,7 +4508,7 @@ internal sealed class RuntimeAutomationSurface
             return Array.Empty<PluginCombatTarget>();
 
         IReadOnlyList<RuntimeHostileTargetSnapshot> captured =
-            RuntimeHostileTargetQuery.Capture(runtime, maximumDistance);
+            RuntimeHostileTargetQuery.Capture(runtime, maximumDistance, HostileTargetScope.Classified);
         if (captured.Count == 0)
             return Array.Empty<PluginCombatTarget>();
 
@@ -3558,6 +4535,7 @@ internal sealed class RuntimeAutomationSurface
                 Incarnation = target.Incarnation,
                 HealthRevision = target.HealthRevision,
                 SecondsSinceHealthUpdate = target.SecondsSinceHealthUpdate,
+                IsDead = target.IsDead,
             };
         }
         return projected;
@@ -3638,7 +4616,7 @@ internal sealed class RuntimeAutomationSurface
             runtime = _runtime;
         if (runtime is null || !IsAvailable)
             return new(PluginCombatCommandStatus.Unavailable);
-        if (!RuntimeHostileTargetQuery.IsHostile(runtime, targetObjectId))
+        if (!RuntimeHostileTargetQuery.IsHostile(runtime, targetObjectId, HostileTargetScope.Classified))
             return new(PluginCombatCommandStatus.InvalidTarget);
         if (!CombatInputPlanner.SupportsTargetedAttack(
                 runtime.ActionOwner.Combat.CurrentMode))
@@ -3647,11 +4625,20 @@ internal sealed class RuntimeAutomationSurface
         }
 
         RuntimeCombatAttackState attack = runtime.ActionOwner.CombatAttack;
-        if (attack.AttackRequestInProgress
+        bool outstanding = attack.AttackRequestInProgress
             || attack.AttackServerResponsePending
-            || attack.RepeatAttackInProgress)
+            || attack.RepeatAttackInProgress;
+        if (outstanding)
         {
-            return new(PluginCombatCommandStatus.Busy);
+            // A swing at the same creature is the ordinary pace of a fight:
+            // the caller waits for it. A swing at a different one is the
+            // caller having moved on -- most often because the first creature
+            // is dead -- and waiting there is what leaves a character standing
+            // in front of a corpse while everything else closes in. That swing
+            // is ended and the new one starts in the same breath.
+            if (_armedAttackTarget == targetObjectId)
+                return new(PluginCombatCommandStatus.Busy);
+            attack.AbortAutomaticAttack();
         }
 
         runtime.ActionOwner.Selection.Select(
@@ -3659,9 +4646,37 @@ internal sealed class RuntimeAutomationSurface
             SelectionChangeSource.Plugin);
         attack.SetDesiredPower(Math.Clamp(power, 0f, 1f));
         attack.PressAttack(Project(height));
-        return attack.AttackRequestInProgress
-            ? new(PluginCombatCommandStatus.Started)
-            : new(PluginCombatCommandStatus.Refused);
+        if (!attack.AttackRequestInProgress)
+        {
+            _armedAttackTarget = 0u;
+            return new(
+                PluginCombatCommandStatus.Refused,
+                DescribeAttackRefusal(runtime, targetObjectId));
+        }
+        _armedAttackTarget = targetObjectId;
+        return new(PluginCombatCommandStatus.Started);
+    }
+
+    /// <summary>
+    /// Why a swing that was asked for never armed. Without this a caller sees
+    /// only "refused" and has to guess whether the monster is the problem,
+    /// which is how an attackable monster standing next to the character ends
+    /// up written off for a pass.
+    /// </summary>
+    internal static string DescribeAttackRefusal(
+        GameRuntime runtime,
+        uint targetObjectId)
+    {
+        if (runtime.ActionOwner.Selection.SelectedObjectId != targetObjectId)
+            return "Something else took the target before the swing armed.";
+        if (!RuntimeHostileTargetQuery.IsHostile(
+                runtime,
+                targetObjectId,
+                HostileTargetScope.Selectable))
+        {
+            return "The target cannot be attacked: it is out of sight or out of play.";
+        }
+        return "The character is in no position to attack.";
     }
 
     public PluginCombatCommandResult ReleasePhysicalAttack()
@@ -3675,8 +4690,19 @@ internal sealed class RuntimeAutomationSurface
         RuntimeCombatAttackState attack = runtime.ActionOwner.CombatAttack;
         if (!attack.AttackRequestInProgress)
             return new(PluginCombatCommandStatus.Refused);
-        attack.ReleaseAttack();
-        return new(PluginCombatCommandStatus.Released);
+        if (attack.ReleaseAttack())
+            return new(PluginCombatCommandStatus.Released);
+        // The request ended without a swing leaving the client. Saying
+        // "released" here would start a wait on a result that is never coming.
+        // The server still holding the last swing is a moment to wait out; the
+        // creature no longer being attackable is not.
+        if (attack.AttackServerResponsePending)
+            return new(PluginCombatCommandStatus.Busy);
+        uint armed = _armedAttackTarget;
+        _armedAttackTarget = 0u;
+        return new(
+            PluginCombatCommandStatus.Refused,
+            DescribeAttackRefusal(runtime, armed));
     }
 
     public PluginCombatCommandResult AbortPhysicalAttack()
@@ -3686,8 +4712,19 @@ internal sealed class RuntimeAutomationSurface
             runtime = _runtime;
         if (runtime is null)
             return new(PluginCombatCommandStatus.Unavailable);
+        _armedAttackTarget = 0u;
         runtime.ActionOwner.CombatAttack.AbortAutomaticAttack();
         return new(PluginCombatCommandStatus.Stopped);
+    }
+
+    public IDisposable? AcquireCombatControl()
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        return runtime is not null && IsAvailable
+            ? runtime.ActionOwner.AcquireCombatControl()
+            : null;
     }
 
     private bool SelectExplicitTarget(uint targetObjectId)
@@ -3745,6 +4782,7 @@ internal sealed class RuntimeAutomationSurface
                 return;
             _disposed = true;
             _equip = null;
+            _equipSecondary = null;
             _equipmentBusy = null;
             _useItem = null;
             _useWorldObject = null;
@@ -3758,12 +4796,18 @@ internal sealed class RuntimeAutomationSurface
             _salvageItems = null;
             _sellItem = null;
             _selectionAction = null;
+            _navigationCommands?.Dispose();
+            _navigationCommands = null;
+            _statusCommand?.Dispose();
+            _statusCommand = null;
             DetachLocked();
         }
+        _armedAttackTarget = 0u;
         _knownSelfBuffs = Array.Empty<PluginSpellInfo>();
         _knownAttackSpells = Array.Empty<PluginSpellInfo>();
         _knownCombatSpells = Array.Empty<PluginSpellInfo>();
         _enchantments = Array.Empty<PluginActiveEnchantment>();
         _peers.Dispose();
+        _timedEnchantments = Array.Empty<PluginActiveEnchantment>();
     }
 }
