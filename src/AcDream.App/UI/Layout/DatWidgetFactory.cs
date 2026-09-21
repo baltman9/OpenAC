@@ -729,6 +729,7 @@ public static class DatWidgetFactory
         };
         if ((labelInfo.OutlineColor ?? info.OutlineColor) is { } buttonOutlineColor)
             button.OutlineColor = buttonOutlineColor;
+        button.LabelAtBottom = labelInfo.VJustify == VJustify.Bottom;
 
         if (face is not null)
         {

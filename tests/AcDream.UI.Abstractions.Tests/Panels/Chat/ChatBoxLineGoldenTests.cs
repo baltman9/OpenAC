@@ -93,14 +93,14 @@ public sealed class ChatBoxLineGoldenTests
     [Fact]
     public void UnnamedChannelFallsBackToItsNumber()
         => Assert.Equal(
-            "[ch 7] Bob says, \"group up\"",
+            "Bob says on the <unknown> channel, \"group up\"",
             ChatVM.FormatEntry(Entry(
                 ChatKind.Channel, "Bob", "group up", OtherPlayerGuid, channelId: 7u)));
 
     [Fact]
     public void UnnamedChannelFromUsFallsBackToItsNumber()
         => Assert.Equal(
-            "[ch 7] You say, \"group up\"",
+            "You say on the <unknown> channel, \"group up\"",
             ChatVM.FormatEntry(Entry(
                 ChatKind.Channel, "You", "group up", channelId: 7u)));
 

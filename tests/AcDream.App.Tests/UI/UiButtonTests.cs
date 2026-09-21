@@ -367,6 +367,21 @@ public class UiButtonTests
 
     private static float BitmapMeasure(string text) => text.Length * 8f;
 
+    // OpenAC #145: a count along the foot of an icon is authored as bottom
+    // justified. It sat in the middle of the button instead.
+    [Fact]
+    public void WrapBlockLines_AtBottom_SitsOnTheBottomEdgeOfTheBox()
+    {
+        var lines = UiButton.WrapBlockLines(
+            "1358", BitmapMeasure, lineHeight: 16f,
+            boxX: 0f, boxY: 0f, boxWidth: 55f, boxHeight: 58f,
+            UiButton.LabelAlignment.Center, leftOffset: 0f, atBottom: true);
+
+        Assert.Single(lines);
+        Assert.Equal(58f - 16f, lines[0].Y);
+        Assert.Equal((55f - 32f) * 0.5f, lines[0].X);
+    }
+
     [Fact]
     public void WrapBlockLines_SingleLineThatFits_MatchesPriorOneLineGeometry()
     {

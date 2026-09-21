@@ -131,6 +131,28 @@ public sealed class CharacterControllerTests
         Assert.Equal(2, builds);
     }
 
+    [Fact]
+    public void Report_InnateLineShowsStartingValuesNotCurrentOnes()
+    {
+        string report = Report(new CharacterSheet
+        {
+            Strength = 290,
+            Endurance = 250,
+            Coordination = 240,
+            Quickness = 230,
+            Focus = 220,
+            Self = 210,
+            AttributeInnateValues = [100, 60, 50, 40, 30, 10],
+        });
+
+        Assert.Contains("Innate Strength: 100", report);
+        Assert.Contains("Innate Endurance: 60", report);
+        Assert.Contains("Innate Coordination: 50", report);
+        Assert.Contains("Innate Quickness: 40", report);
+        Assert.Contains("Innate Focus: 30", report);
+        Assert.Contains("Innate Self: 10", report);
+    }
+
     private static string Report(CharacterSheet sheet)
         => CharacterController.BuildReport(sheet, CharacterInfoStrings.English);
 

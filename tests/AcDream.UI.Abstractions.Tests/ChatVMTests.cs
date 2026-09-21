@@ -78,7 +78,7 @@ public sealed class ChatVMTests
         Assert.Equal("[Trade] Caith says, \"g'day\"", ChatVM.FormatEntry(named));
 
         var unnamed = new ChatEntry(ChatKind.Channel, "Caith", "g'day", 0x5000_0001u, 7u);
-        Assert.Equal("[ch 7] Caith says, \"g'day\"", ChatVM.FormatEntry(unnamed));
+        Assert.Equal("Caith says on the <unknown> channel, \"g'day\"", ChatVM.FormatEntry(unnamed));
     }
 
     [Fact]

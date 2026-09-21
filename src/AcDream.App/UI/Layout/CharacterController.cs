@@ -145,9 +145,14 @@ public static class CharacterController
             .Append(strings.Resists[3]);
         AppendSectionBreak(body);
 
+        // Innate is what the attribute started at: neither the experience
+        // spent on it since nor any enchantment is part of it.
+        int[] innate = sheet.AttributeInnateValues.Length == 6
+            ? sheet.AttributeInnateValues
+            : [sheet.Strength, sheet.Endurance, sheet.Coordination,
+                sheet.Quickness, sheet.Focus, sheet.Self];
         AppendTokens(body, strings.Innates,
-            sheet.Strength, sheet.Endurance, sheet.Coordination,
-            sheet.Quickness, sheet.Focus, sheet.Self);
+            innate[0], innate[1], innate[2], innate[3], innate[4], innate[5]);
         AppendSectionBreak(body);
 
         AppendTokens(body, strings.Chess, sheet.ChessRank);

@@ -50,6 +50,31 @@ public sealed class ItemAppraisalTextFormatterTests
         Assert.DoesNotContain("Unknown Skill", report);
     }
 
+    // OpenAC #143: the server sends an item's mana drain as a negative rate,
+    // and the line read "1 point per -20 seconds". The interval is the size of
+    // the rate, rounded half up, and the wording does not change for one.
+    [Theory]
+    [InlineData(-0.05d, "Mana Cost: 1 point per 20 seconds.")]
+    [InlineData(0.05d, "Mana Cost: 1 point per 20 seconds.")]
+    [InlineData(-0.4d, "Mana Cost: 1 point per 3 seconds.")]
+    [InlineData(-1d, "Mana Cost: 1 point per 1 seconds.")]
+    public void ManaDrain_IsAnIntervalWhateverTheSignOfTheRate(
+        double manaRate,
+        string expected)
+    {
+        var obj = new ClientObject { ObjectId = 0x50000011u, Name = "Amulet" };
+        var properties = new PropertyBundle();
+        properties.Floats[5u] = manaRate;
+        SpellMetadata armor = Spell(102u, "Impenetrability VI", "Increases the target's armor.");
+
+        string report = ItemAppraisalTextFormatter.Build(
+            obj,
+            Parsed(properties, spells: [102u]),
+            id => id == 102u ? armor : null);
+
+        Assert.Contains(expected, report);
+    }
+
     [Fact]
     public void WeaponAndMagic_AreProjectedInRetailOrderWithDatDescriptions()
     {
