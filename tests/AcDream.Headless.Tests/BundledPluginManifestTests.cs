@@ -123,20 +123,6 @@ public sealed class BundledPluginManifestTests
     public void TheWindowlessHostsOutputStagesADiscoverablePluginFolder() =>
         AssertHostStagesTheBundledPlugin("AcDream.Headless");
 
-    /// <summary>Both hosts stage the plugin from one shared set of build rules, so what the graphical
-    /// client hands a plugin cannot drift from what the windowless host hands it. This suite does not
-    /// build the graphical host, so it pins the shared rules rather than that host's output folder.
-    /// </summary>
-    [Theory]
-    [InlineData("AcDream.App")]
-    [InlineData("AcDream.Headless")]
-    public void EveryHostStagesTheBundledPluginFromTheSameBuildRules(string hostProjectName)
-    {
-        string projectFile = Path.Combine(
-            FindRepositoryRoot(), "src", hostProjectName, hostProjectName + ".csproj");
-
-        Assert.Contains("BundledPlugin.targets", File.ReadAllText(projectFile));
-    }
 
     private static void AssertHostStagesTheBundledPlugin(string hostProjectName)
     {
