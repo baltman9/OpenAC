@@ -10,6 +10,13 @@ namespace AcDream.HostParity.Tests;
 /// which client it happened to be loaded into, and nothing compared the two.
 /// Both now answer from the one owner, and these scenarios are what says so.
 ///
+/// Every step is recorded AND asserted: what the client answered the plugin,
+/// and what left the client for the server. Recording alone compares the two
+/// clients and nothing else, and these scenarios showed why that is not
+/// enough -- the apply and the salvage were both refused on BOTH clients, for
+/// want of a material and a target kind in the staging, and the two
+/// transcripts agreed about it line for line.
+///
 /// Mutation check (2026-09-20), run: making the shared binding pass hand one
 /// arm a <c>Use</c> that always refuses turned every scenario in this file
 /// red, on the status lines and on the outbound counts. Separately, stamping
@@ -34,19 +41,54 @@ public sealed class ItemParityTests
             transcript.Step("before");
             RecordItemState(transcript, items);
 
+            // Nothing is in flight and the character carries what the
+            // scenario staged: two clients that both had no items at all
+            // would agree about the rest of this and prove nothing.
+            Assert.True(items.IsAvailable, $"{arm.Name} has no item surface.");
+            Assert.False(items.IsBusy);
+            Assert.Equal(CarriedItems, items.CaptureOwnedItems().Count);
+
             transcript.Step("use the kit");
-            Record(transcript, "use", items.Use(ParityWorld.Kit));
+            PluginItemCommandResult use = items.Use(ParityWorld.Kit);
+            Record(transcript, "use", use);
             RecordItemState(transcript, items);
+            // The use really left the client, naming the kit. A client that
+            // answered Started and sent nothing would agree with one that
+            // sent it, and a plugin would wait for ever.
+            Assert.Equal(PluginItemCommandStatus.Started, use.Status);
+            Assert.True(items.IsBusy);
+            Assert.Equal(ParityWorld.Kit, WhatTheUseNamed(arm));
             transcript.RecordOutbound(arm);
 
             transcript.Step("the server answers");
-            arm.Deliver(static runtime =>
-                runtime.ActionOwner.Transactions.CompleteUse(0u));
+            arm.Server.UseDone();
             arm.Advance();
             RecordItemState(transcript, items);
             transcript.Record("completion.error", items.LastCompletion.WeenieError);
             transcript.Record(
                 "completion.source", items.LastCompletion.SourceObjectId);
+            transcript.RecordOutbound(arm);
+            // The completion a plugin reads stays empty on both clients and
+            // is recorded rather than asserted: it is armed by the route a
+            // click on something in the WORLD takes, and a carried item's
+            // use does not arm it, so the server's answer to this use never
+            // reaches it. Making it assertable means arming it where a
+            // carried item's use is dispatched, which is a client change and
+            // not a test one.
+
+            transcript.Step("and the next use is let through");
+            for (int step = 0; step < TicksPastTheUsePacing; step++)
+                arm.Advance();
+            PluginItemCommandResult again = items.Use(ParityWorld.Kit);
+            Record(transcript, "use", again);
+            RecordItemState(transcript, items);
+            // What the client really did with the answer: the pacing has
+            // lapsed, the next use is let through, and it goes out. Two
+            // clients both stuck busy for the rest of the session would
+            // agree with each other.
+            Assert.Equal(PluginItemCommandStatus.Started, again.Status);
+            Assert.Equal(ParityWorld.Kit, WhatTheUseNamed(arm));
+            transcript.RecordOutbound(arm);
         });
 
     [Fact]
@@ -56,18 +98,26 @@ public sealed class ItemParityTests
             IItemAutomation items = StageAndTakeItems(arm);
 
             transcript.Step("apply the stone to the kit");
-            Record(
-                transcript,
-                "apply",
-                items.Apply(ParityWorld.TargetedItem, ParityWorld.Kit));
+            PluginItemCommandResult applied =
+                items.Apply(ParityWorld.TargetedItem, ParityWorld.Kit);
+            Record(transcript, "apply", applied);
             RecordItemState(transcript, items);
+            // The apply really went out, naming both halves of it. While the
+            // stone was staged without a target kind this was refused on
+            // BOTH clients, which passed the comparison and proved nothing.
+            Assert.Equal(PluginItemCommandStatus.Started, applied.Status);
+            Assert.True(items.IsBusy);
+            Assert.Equal(
+                (ParityWorld.TargetedItem, ParityWorld.Kit), TheApply(arm));
             transcript.RecordOutbound(arm);
 
             transcript.Step("apply it to something that is not there");
-            Record(
-                transcript,
-                "apply",
-                items.Apply(ParityWorld.TargetedItem, 0x5000_00FFu));
+            PluginItemCommandResult nowhere =
+                items.Apply(ParityWorld.TargetedItem, 0x5000_00FFu);
+            Record(transcript, "apply", nowhere);
+            // Turned away for the target, and nothing sent for it.
+            Assert.Equal(PluginItemCommandStatus.InvalidTarget, nowhere.Status);
+            Assert.Empty(Sent(arm, ApplyAction));
             transcript.RecordOutbound(arm);
         });
 
@@ -83,13 +133,29 @@ public sealed class ItemParityTests
             IItemAutomation items = StageAndTakeItems(arm);
 
             transcript.Step("use a targeted item with no target");
-            Record(transcript, "use", items.Use(ParityWorld.TargetedItem));
+            PluginItemCommandResult bare = items.Use(ParityWorld.TargetedItem);
+            Record(transcript, "use", bare);
+            // The reason is the point of this one: a bot reads it, and a
+            // bare "no" tells it nothing it can act on. Two bare "no"s agree
+            // with each other perfectly.
+            Assert.Equal(PluginItemCommandStatus.Refused, bare.Status);
+            Assert.Equal(
+                "This item requires a target; call Apply(objectId, targetObjectId) instead.",
+                bare.Notice);
 
             transcript.Step("use something that is not there");
-            Record(transcript, "use", items.Use(0x5000_00FFu));
+            PluginItemCommandResult missing = items.Use(0x5000_00FFu);
+            Record(transcript, "use", missing);
+            Assert.Equal(PluginItemCommandStatus.InvalidItem, missing.Status);
 
             transcript.Step("use a creature the player does not own");
-            Record(transcript, "use", items.Use(ParityWorld.Monster));
+            PluginItemCommandResult creature = items.Use(ParityWorld.Monster);
+            Record(transcript, "use", creature);
+            Assert.Equal(PluginItemCommandStatus.Refused, creature.Status);
+            Assert.Equal("That cannot be used.", creature.Notice);
+            // Three refusals, and nothing left either client for any of them.
+            Assert.Empty(Sent(arm, UseAction));
+            Assert.Empty(Sent(arm, ApplyAction));
             transcript.RecordOutbound(arm);
         });
 
@@ -100,19 +166,24 @@ public sealed class ItemParityTests
             IItemAutomation items = StageAndTakeItems(arm);
 
             transcript.Step("move the kit into the side pack");
-            Record(
-                transcript,
-                "move",
-                items.MoveToContainer(ParityWorld.Kit, ParityWorld.SidePack));
+            PluginItemCommandResult move =
+                items.MoveToContainer(ParityWorld.Kit, ParityWorld.SidePack);
+            Record(transcript, "move", move);
             RecordItemState(transcript, items);
+            // The move really went out, naming the thing and the pack it is
+            // going into.
+            Assert.Equal(PluginItemCommandStatus.Started, move.Status);
+            Assert.Equal((ParityWorld.Kit, ParityWorld.SidePack), TheMove(arm));
             transcript.RecordOutbound(arm);
 
             transcript.Step("and again while the first is in flight");
-            Record(
-                transcript,
-                "move",
-                items.MoveToContainer(
-                    ParityWorld.ScrapItem, ParityWorld.SidePack));
+            PluginItemCommandResult second = items.MoveToContainer(
+                ParityWorld.ScrapItem, ParityWorld.SidePack);
+            Record(transcript, "move", second);
+            // One request at a time: the second is held back rather than
+            // racing the first, and nothing went out for it.
+            Assert.Equal(PluginItemCommandStatus.Busy, second.Status);
+            Assert.Empty(Sent(arm, MoveAction));
             transcript.RecordOutbound(arm);
         });
 
@@ -123,21 +194,33 @@ public sealed class ItemParityTests
             IItemAutomation items = StageAndTakeItems(arm);
 
             transcript.Step("salvage the scrap with the tool");
-            Record(
-                transcript,
-                "salvage",
-                items.Salvage(ParityWorld.SalvageTool, [ParityWorld.ScrapItem]));
+            PluginItemCommandResult salvage =
+                items.Salvage(ParityWorld.SalvageTool, [ParityWorld.ScrapItem]);
+            Record(transcript, "salvage", salvage);
+            // The salvage really went out, naming the tool and the one thing
+            // fed to it. While the scrap was staged without a material this
+            // was refused on BOTH clients and the comparison passed.
+            Assert.Equal(PluginItemCommandStatus.Started, salvage.Status);
+            Assert.Equal(
+                (ParityWorld.SalvageTool, ParityWorld.ScrapItem),
+                TheSalvage(arm));
             transcript.RecordOutbound(arm);
 
             transcript.Step("salvage with something that is not a tool");
-            Record(
-                transcript,
-                "salvage",
-                items.Salvage(ParityWorld.Kit, [ParityWorld.ScrapItem]));
+            PluginItemCommandResult notATool =
+                items.Salvage(ParityWorld.Kit, [ParityWorld.ScrapItem]);
+            Record(transcript, "salvage", notATool);
+            Assert.Equal(PluginItemCommandStatus.InvalidTarget, notATool.Status);
 
             transcript.Step("sell with no vendor trading");
             transcript.Record("vendor", items.ActiveVendorObjectId);
-            Record(transcript, "sell", items.Sell(ParityWorld.ScrapItem));
+            PluginItemCommandResult sell = items.Sell(ParityWorld.ScrapItem);
+            Record(transcript, "sell", sell);
+            // No vendor is open, the reason says so, and nothing is sent.
+            Assert.Equal(0u, items.ActiveVendorObjectId);
+            Assert.Equal(PluginItemCommandStatus.InvalidTarget, sell.Status);
+            Assert.Equal("No vendor is open.", sell.Notice);
+            Assert.Empty(Sent(arm, SalvageAction));
             transcript.RecordOutbound(arm);
         });
 
@@ -153,22 +236,38 @@ public sealed class ItemParityTests
         {
             _ = StageAndTakeItems(arm);
             ILootAutomation loot = arm.Host.Automation.Loot;
-            ParityWorld.StageCorpse(arm.Runtime);
+            // At arm's length, so the open sends its use there and then.
+            // Three metres off it begins a walk instead, and then every step
+            // below answers busy on both clients -- which agrees line for
+            // line and says nothing about the pacing this is about.
+            ParityWorld.StageCorpse(arm.Runtime, ParityWorld.WithinArmsReach);
 
             transcript.Step("open the corpse");
-            Record(transcript, "open", loot.Open(ParityWorld.Corpse));
+            PluginItemCommandResult first = loot.Open(ParityWorld.Corpse);
+            Record(transcript, "open", first);
+            Assert.Equal(PluginItemCommandStatus.Started, first.Status);
+            Assert.Equal(ParityWorld.Corpse, WhatTheUseNamed(arm));
             transcript.RecordOutbound(arm);
 
             transcript.Step("open it again straight away");
-            Record(transcript, "open", loot.Open(ParityWorld.Corpse));
+            PluginItemCommandResult tooSoon = loot.Open(ParityWorld.Corpse);
+            Record(transcript, "open", tooSoon);
+            // Early, not failed -- and nothing went out for it.
+            Assert.Equal(PluginItemCommandStatus.Busy, tooSoon.Status);
+            Assert.Empty(Sent(arm, UseAction));
             transcript.RecordOutbound(arm);
 
             transcript.Step("and again once the pacing has lapsed");
-            arm.Deliver(static runtime =>
-                runtime.ActionOwner.Transactions.CompleteUse(0u));
+            arm.Server.UseDone();
             for (int step = 0; step < TicksPastTheUsePacing; step++)
                 arm.Advance();
-            Record(transcript, "open", loot.Open(ParityWorld.Corpse));
+            PluginItemCommandResult later = loot.Open(ParityWorld.Corpse);
+            Record(transcript, "open", later);
+            // The pacing is measured off the one simulation clock both
+            // clients advance, so simulated waiting really reaches it and
+            // the third open goes out.
+            Assert.Equal(PluginItemCommandStatus.Started, later.Status);
+            Assert.Equal(ParityWorld.Corpse, WhatTheUseNamed(arm));
             transcript.RecordOutbound(arm);
         });
 
@@ -184,30 +283,57 @@ public sealed class ItemParityTests
         {
             _ = StageAndTakeItems(arm);
             ILootAutomation loot = arm.Host.Automation.Loot;
-            ParityWorld.StageCorpse(arm.Runtime);
+            // At arm's length. Three metres off, every step of this cycle
+            // was refused on both clients -- the open began a walk, the
+            // contents never arrived, and the gem was never there to look at
+            // or take -- and the two transcripts agreed about all of it.
+            ParityWorld.StageCorpse(arm.Runtime, ParityWorld.WithinArmsReach);
 
             transcript.Step("nothing open");
             RecordLootState(transcript, loot);
             transcript.Record("corpses", loot.CaptureCorpses(10f).Count);
+            Assert.False(loot.IsBusy);
+            Assert.Equal(0u, loot.CurrentContainerId);
+            Assert.Equal(ParityWorld.Corpse, Assert.Single(
+                loot.CaptureCorpses(10f)).ObjectId);
 
             transcript.Step("open it");
-            Record(transcript, "open", loot.Open(ParityWorld.Corpse));
+            PluginItemCommandResult open = loot.Open(ParityWorld.Corpse);
+            Record(transcript, "open", open);
             RecordLootState(transcript, loot);
+            // The open really went out, and the client is waiting on THIS
+            // corpse rather than on nothing.
+            Assert.Equal(PluginItemCommandStatus.Started, open.Status);
+            Assert.Equal(ParityWorld.Corpse, loot.RequestedContainerId);
+            Assert.Equal(ParityWorld.Corpse, WhatTheUseNamed(arm));
             transcript.RecordOutbound(arm);
 
             transcript.Step("the contents arrive");
+            arm.Server.UseDone();
             arm.Deliver(static runtime =>
-            {
-                runtime.ActionOwner.Transactions.CompleteUse(0u);
-                ParityWorld.DeliverCorpseContents(runtime);
-            });
+                ParityWorld.DeliverCorpseContents(runtime));
             arm.Advance();
             RecordLootState(transcript, loot);
             RecordContents(transcript, loot);
+            // What is in the corpse, in the order the server listed it.
+            Assert.Equal(ParityWorld.Corpse, loot.CurrentContainerId);
+            Assert.True(
+                loot.CurrentContentsReady,
+                $"{arm.Name} never finished reading the corpse.");
+            Assert.Equal(
+                new[] { ParityWorld.CorpseCoin, ParityWorld.CorpseGem },
+                loot.CaptureCurrentContents()
+                    .Select(static item => item.ObjectId));
 
             transcript.Step("look the gem over");
-            Record(transcript, "identify", loot.Identify(ParityWorld.CorpseGem));
+            PluginItemCommandResult identify =
+                loot.Identify(ParityWorld.CorpseGem);
+            Record(transcript, "identify", identify);
             RecordAppraisal(transcript, loot);
+            // The question went out and the client is waiting for the answer
+            // about the gem: a plugin polls exactly this.
+            Assert.Equal(PluginItemCommandStatus.Started, identify.Status);
+            Assert.Equal(ParityWorld.CorpseGem, loot.Appraisal.AwaitingObjectId);
             transcript.RecordOutbound(arm);
 
             transcript.Step("the description comes back");
@@ -216,19 +342,35 @@ public sealed class ItemParityTests
                     ParityWorld.CorpseGem));
             arm.Advance();
             RecordAppraisal(transcript, loot);
+            // The wait is over and the answer is about the gem that was
+            // asked about.
+            Assert.Equal(0u, loot.Appraisal.AwaitingObjectId);
+            Assert.Equal(ParityWorld.CorpseGem, loot.Appraisal.CurrentObjectId);
 
             transcript.Step("take the gem");
             for (int step = 0; step < TicksPastTheUsePacing; step++)
                 arm.Advance();
-            Record(transcript, "pickup", loot.Pickup(ParityWorld.CorpseGem));
+            PluginItemCommandResult pickup = loot.Pickup(ParityWorld.CorpseGem);
+            Record(transcript, "pickup", pickup);
             RecordLootState(transcript, loot);
+            // The take really went out, naming the gem and the pack it is
+            // going into.
+            Assert.Equal(PluginItemCommandStatus.Started, pickup.Status);
+            Assert.Equal(
+                (ParityWorld.CorpseGem, ParityWorld.Player), TheMove(arm));
             transcript.RecordOutbound(arm);
 
             transcript.Step("try to close while the take is out");
             for (int step = 0; step < TicksPastTheUsePacing; step++)
                 arm.Advance();
-            Record(transcript, "close", loot.Close(ParityWorld.Corpse));
+            PluginItemCommandResult close = loot.Close(ParityWorld.Corpse);
+            Record(transcript, "close", close);
             RecordLootState(transcript, loot);
+            // The take is still out, so the close waits its turn rather than
+            // racing it, and the corpse stays open and read.
+            Assert.Equal(PluginItemCommandStatus.Busy, close.Status);
+            Assert.Equal(ParityWorld.Corpse, loot.CurrentContainerId);
+            Assert.Empty(Sent(arm, MoveAction));
             transcript.RecordOutbound(arm);
         });
 
@@ -280,6 +422,60 @@ public sealed class ItemParityTests
             Assert.Equal(
                 ParityWorld.ScrapItem, loot.Appraisal.AwaitingObjectId);
         });
+
+    /// <summary>How many things the staged character carries.</summary>
+    private const int CarriedItems = 5;
+
+    /// <summary>The client actions these scenarios look for on the wire.</summary>
+    private const uint UseAction = 0x0036u;
+    private const uint ApplyAction = 0x0035u;
+    private const uint MoveAction = 0x0019u;
+    private const uint SalvageAction = 0x027Du;
+
+    /// <summary>
+    /// Everything this arm asked to send that carries one named client
+    /// action. Counting messages will not do: a character standing in the
+    /// world is telling the server where it is the whole time.
+    /// </summary>
+    private static IReadOnlyList<ParityOutbound> Sent(ParityArm arm, uint action)
+        => [.. arm.Operations.Outbound.Where(
+            message => message.GameAction == action)];
+
+    /// <summary>One unsigned number out of a client action's body.</summary>
+    private static uint Field(ParityOutbound message, int offset)
+    {
+        byte[] body = Convert.FromHexString(message.Body);
+        return System.Buffers.Binary.BinaryPrimitives
+            .ReadUInt32LittleEndian(body.AsSpan(offset));
+    }
+
+    /// <summary>What the one use this arm sent named.</summary>
+    private static uint WhatTheUseNamed(ParityArm arm) =>
+        Field(Assert.Single(Sent(arm, UseAction)), 12);
+
+    /// <summary>What the one apply named: the thing, then what it was used on.</summary>
+    private static (uint Item, uint Target) TheApply(ParityArm arm)
+    {
+        ParityOutbound message = Assert.Single(Sent(arm, ApplyAction));
+        return (Field(message, 12), Field(message, 16));
+    }
+
+    /// <summary>What the one move named: the thing, then the pack.</summary>
+    private static (uint Item, uint Container) TheMove(ParityArm arm)
+    {
+        ParityOutbound message = Assert.Single(Sent(arm, MoveAction));
+        return (Field(message, 12), Field(message, 16));
+    }
+
+    /// <summary>
+    /// What the one salvage named: the tool, then the first thing fed to it.
+    /// The count of things comes between them.
+    /// </summary>
+    private static (uint Tool, uint Item) TheSalvage(ParityArm arm)
+    {
+        ParityOutbound message = Assert.Single(Sent(arm, SalvageAction));
+        return (Field(message, 12), Field(message, 20));
+    }
 
     /// <summary>
     /// Puts a character with a body and a full pack on this arm and hands
