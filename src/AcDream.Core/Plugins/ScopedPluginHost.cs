@@ -1524,6 +1524,16 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             }
         }
 
+        public IPluginCanvas RegisterCanvas(
+            PluginCanvasDescriptor descriptor,
+            Action<IPluginPainter> paint)
+        {
+            ArgumentNullException.ThrowIfNull(descriptor);
+            ArgumentNullException.ThrowIfNull(paint);
+            IPluginCanvas canvas = _inner.RegisterCanvas(_owner, descriptor, paint);
+            return new IndividualCanvas(canvas, TrackRegistration(canvas));
+        }
+
         private void AddRegistration(IDisposable registration)
         {
             lock (_gate)
@@ -1591,6 +1601,46 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
 
             public void Dispose() => Interlocked.Exchange(ref _owner, null)?
                 .RemoveRegistration(registration);
+        }
+
+        /// <summary>
+        /// The host's canvas as the plugin holds it: every call forwards, and
+        /// disposing it goes through the tracked registration so the plugin's
+        /// list and the host agree on what is still mounted.
+        /// </summary>
+        private sealed class IndividualCanvas(
+            IPluginCanvas inner,
+            IDisposable registration) : IPluginCanvas
+        {
+            public string CanvasId => inner.CanvasId;
+            public int Width => inner.Width;
+            public int Height => inner.Height;
+            public bool IsAvailable => inner.IsAvailable;
+
+            public bool IsVisible
+            {
+                get => inner.IsVisible;
+                set => inner.IsVisible = value;
+            }
+
+            public PluginCanvasAnchor Anchor
+            {
+                get => inner.Anchor;
+                set => inner.Anchor = value;
+            }
+
+            public PluginPoint Offset
+            {
+                get => inner.Offset;
+                set => inner.Offset = value;
+            }
+
+            public void Invalidate() => inner.Invalidate();
+
+            public void Dispose()
+            {
+                registration.Dispose();
+            }
         }
     }
 }

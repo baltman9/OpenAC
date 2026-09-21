@@ -892,6 +892,36 @@ public sealed class HeadlessPluginApiSurfaceTests
         Assert.Equal(0, images.Count);
     }
 
+    /// <summary>
+    /// The same canvas registration a plugin makes with a window is
+    /// accepted without one: the plugin keeps its handle, sets what it
+    /// likes, and the paint callback is never called because there is
+    /// nothing to paint on.
+    /// </summary>
+    [Fact]
+    public void WithoutAWindowACanvasIsAcceptedAndNeverPainted()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        IPluginHost pluginHost = host;
+        int paints = 0;
+
+        IPluginCanvas canvas = pluginHost.Ui.RegisterCanvas(
+            new PluginCanvasDescriptor("hud", 200, 100) { Anchor = PluginCanvasAnchor.BottomRight },
+            _ => paints++);
+        canvas.Invalidate();
+        canvas.IsVisible = false;
+        canvas.Offset = new PluginPoint(-10, -10);
+
+        Assert.False(canvas.IsAvailable);
+        Assert.Equal("hud", canvas.CanvasId);
+        Assert.Equal((200, 100), (canvas.Width, canvas.Height));
+        Assert.Equal(PluginCanvasAnchor.BottomRight, canvas.Anchor);
+        Assert.False(canvas.IsVisible);
+        Assert.Equal(0, paints);
+        canvas.Dispose();
+    }
+
     private static GameRuntime NewRuntime()
     {
         var operations = new InertOperations();
