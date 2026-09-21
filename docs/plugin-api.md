@@ -969,6 +969,53 @@ plugin still holds is removed when the plugin unloads.
 Without a window the canvas is accepted, `IsAvailable` is false, the
 state the plugin sets is kept, and the paint callback is never called.
 
+## Dungeon map
+
+```csharp
+IDungeonMapAutomation map = host.Automation.DungeonMap;
+uint landblock = map.CurrentLandblockId;
+if (landblock != 0u && map.IsSealedDungeon(here.CellId))
+{
+    PluginDungeonFloorplan plan = map.CaptureFloorplan(landblock);
+    foreach (PluginDungeonLayer layer in plan.Layers)
+        foreach (PluginDungeonWall wall in layer.Walls)
+            DrawLine(wall.Start, wall.End);
+}
+```
+
+`DungeonMap` is the shape of the place the character is in, as data: the
+plugin draws it however it likes. `CurrentLandblockId` is the landblock the
+character's body is in, with a zero low half, or zero before there is a body.
+`IsSealedDungeon` is true for an indoor cell that sees nothing outside, as a
+dungeon's cells are, and false for the landscape, for a building interior
+that opens onto it, and for a cell the game data lacks.
+
+`CaptureFloorplan` builds a landblock's plan from the cell geometry in the
+game data the first time it is asked and hands back the same object every
+time after, so a plugin may ask every frame. Every cell's structure is placed
+by the cell's own position and turn and flattened onto the ground: a level
+face that faces up is floor, a standing face is a wall seen edge-on as a
+line, and the doorways the data lists between cells are left open. Cells are
+grouped into `Layers` by height, six metres to a band and shifted down three,
+so a storey reads as a layer; each layer has its floor polygons and its wall
+lines, collinear runs already joined. `Cells` names every cell with its
+middle and its layer, and `BoundsMin`/`BoundsMax` box the whole plan.
+
+Everything is in the landblock's own frame, in metres: x east and y north
+from the landblock's south-west corner, which is the frame the game's cell
+positions use. `PluginDungeonFloorplan.ToLandblockLocal` puts a position from
+`Navigation` into that frame; compare the position's landblock with the
+plan's before drawing it on the plan. The plan is built once and never
+changed, so it is safe to keep and to read from any thread.
+
+The plan is derived from geometry, not drawn by hand, so on a dungeon whose
+rooms are authored as sloped or stepped structures the floor and wall
+classification can be rougher than a hand-made map; a plugin should expect
+polygons to overlap where cells meet and fill them rather than stitch them.
+`PluginDungeonFloorplan.Empty` comes back for a landblock the data does not
+have, for one with no indoor cells, and on a client with no lease on the
+game data.
+
 ## Headless
 
 A windowless client binds this same surface through the same binding pass the
@@ -1084,6 +1131,10 @@ with a window does the work:
   formulas in those files. Without them a content-less session reads its own
   skills below what the server allows it -- which also means it runs at the
   speed those lower numbers give.
+- `DungeonMap` reads a cell's kind and a landblock's floorplan out of the
+  same files. Without them `IsSealedDungeon` is false and `CaptureFloorplan`
+  is empty; `CurrentLandblockId` comes from the character's body and is real
+  either way.
 
 Other creatures' bodies come off the same lease. The server says where a
 creature is a few times a second and every client fills the gaps itself from

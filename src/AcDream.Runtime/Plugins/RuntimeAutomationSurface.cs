@@ -41,6 +41,7 @@ internal sealed class RuntimeAutomationSurface
         LocalPluginPeerRegistry.HeartbeatPeriod.TotalSeconds;
     private readonly object _gate = new();
     private readonly AcDream.Runtime.Navigation.RuntimeNavigationAutomation _navigation;
+    private readonly AcDream.Runtime.Maps.RuntimeDungeonMapAutomation _dungeonMap = new();
     private readonly AcDream.Core.Plugins.IPluginEventSink? _events;
     private readonly LocalPluginPeerRegistry _peers;
     private readonly string[] _peerTags;
@@ -329,6 +330,7 @@ internal sealed class RuntimeAutomationSurface
     public IRecoveryAutomation Recovery => this;
     public IProjectileAutomation Projectiles => this;
     public IWorldLabelAutomation Labels => this;
+    public IDungeonMapAutomation DungeonMap => _dungeonMap;
     public ISelectionAutomation Selection => this;
     public ITradeAutomation Trade
     {
@@ -685,6 +687,7 @@ internal sealed class RuntimeAutomationSurface
             DetachLocked();
             _runtime = runtime;
             _navigation.Bind(runtime);
+            _dungeonMap.Bind(runtime);
             _tradeAutomation = new AcDream.Runtime.Gameplay.RuntimeTradeAutomation(runtime);
             _vendorAutomation = new AcDream.Runtime.Gameplay.RuntimeVendorAutomation(runtime);
             _communication = runtime.CommunicationOwner;
@@ -759,6 +762,13 @@ internal sealed class RuntimeAutomationSurface
     /// <summary>The walks plugins ask for through the navigation API.</summary>
     public void BindNavigationWalk(AcDream.Runtime.Navigation.NavigationWalkController walk) =>
         _navigation.BindWalk(walk);
+
+    /// <summary>
+    /// Lends the dungeon map the game files, read under <paramref name="contentLock"/>,
+    /// so it can tell a sealed cell and flatten a landblock's cells into a plan.
+    /// </summary>
+    public void BindDungeonMap(AcDream.Core.Content.IDatObjectSource content, object contentLock) =>
+        _dungeonMap.BindContent(content, contentLock);
 
     /// <summary>The runtime navigation this surface hands to plugins; a host binds its walk controller and commands to it.</summary>
     internal AcDream.Runtime.Navigation.RuntimeNavigationAutomation NavigationAutomation => _navigation;

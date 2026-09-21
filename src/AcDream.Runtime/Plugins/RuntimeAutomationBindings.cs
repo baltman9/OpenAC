@@ -201,7 +201,8 @@ internal static class RuntimeAutomationBindings
             ["BindChatComposer"] = null,
             ["BindSpeciesNameResolver"] =
                 nameof(RuntimeAutomationHostCapabilities.Content),
-
+            ["BindDungeonMap"] =
+                nameof(RuntimeAutomationHostCapabilities.Content),
         };
 
     /// <summary>
@@ -466,6 +467,12 @@ internal static class RuntimeAutomationBindings
         surface.BindSpeciesNameResolver(
             species => creatureNames.Value.Resolve(species));
         bound.Add(nameof(surface.BindSpeciesNameResolver));
+
+        // The shape of a dungeon is authored in the same files: a plugin
+        // drawing a map reads it from here, on either host, and the files
+        // are only opened when a plan is first asked for.
+        surface.BindDungeonMap(content, ContentReadLock);
+        bound.Add(nameof(surface.BindDungeonMap));
 
         if (!content.TryGet<DatReaderWriter.DBObjs.SkillTable>(
                 SkillTableId, out var skillTable)
