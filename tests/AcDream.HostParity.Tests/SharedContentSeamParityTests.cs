@@ -104,6 +104,7 @@ public sealed class SharedContentSeamParityTests
             {
                 Runtime = runtime,
                 Content = content,
+                DatLock = new object(),
                 MagicCatalog = MagicCatalog.Empty,
                 NavigationWalk =
                     Part<AcDream.Runtime.Navigation.NavigationWalkController>(),
@@ -118,6 +119,7 @@ public sealed class SharedContentSeamParityTests
             {
                 Runtime = runtime,
                 Content = content,
+                ContentLock = new object(),
                 MagicCatalog = MagicCatalog.Empty,
                 NavigationWalk =
                     Part<AcDream.Runtime.Navigation.NavigationWalkController>(),

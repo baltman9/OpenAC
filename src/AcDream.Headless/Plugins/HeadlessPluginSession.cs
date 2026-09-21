@@ -58,6 +58,7 @@ internal sealed class HeadlessPluginSession : IDisposable
         Func<uint, bool, bool>? answerConfirmation = null,
         Func<bool>? requestGracefulStop = null,
         AcDream.Content.IDatReaderWriter? content = null,
+        object? contentLock = null,
         IGameRuntimeCommands? sessionCommands = null,
         NavigationWalkController? navigationWalk = null,
         string? dataDirectory = null,
@@ -85,6 +86,7 @@ internal sealed class HeadlessPluginSession : IDisposable
             answerConfirmation,
             requestGracefulStop,
             content,
+            contentLock,
             sessionCommands,
             navigationWalk,
             (verb, error) => diagnostics.Failure(

@@ -110,18 +110,27 @@ internal sealed class DungeonFloorplanBuilder
 
         var counts = new DungeonFloorplanCounts();
         var bounds = DungeonFloorplanBounds.Empty;
-        var cells = ImmutableArray.CreateBuilder<DungeonFloorplanCell>(placed.Count);
         var layers = new SortedDictionary<float, LayerBuilder>();
+        LayerBuilder Layer(float z)
+        {
+            if (!layers.TryGetValue(z, out LayerBuilder? layer))
+                layers[z] = layer = new LayerBuilder();
+            return layer;
+        }
 
+        // Every cell is flattened first: its floor goes straight into the
+        // band of its own height, since a floor is at the height it is at
+        // whatever the cell's origin says; its walls wait until the cell's
+        // band is known.
+        var flattened = new List<FlattenedCell>(placed.Count);
         foreach (PlacedCell cell in placed)
         {
-            float layerZ = LayerKey(cell.Origin.Z);
-            if (!layers.TryGetValue(layerZ, out LayerBuilder? layer))
-                layers[layerZ] = layer = new LayerBuilder();
-
             Matrix4x4 transform = Matrix4x4.CreateFromQuaternion(cell.Orientation)
                 * Matrix4x4.CreateTranslation(cell.Origin);
             var cellBounds = DungeonFloorplanBounds.Empty;
+            var walls = new List<WallSpan>();
+            float floorHeight = 0f;
+            int floorVertices = 0;
 
             foreach (PolygonGeometry polygon in cell.Geometry.Polygons)
             {
@@ -151,7 +160,13 @@ internal sealed class DungeonFloorplanBuilder
                     if (facesUp > 0f)
                     {
                         counts.Floors++;
-                        layer.Floors.Add(ProjectFloor(world));
+                        float height = 0f;
+                        foreach (Vector3 vertex in world)
+                            height += vertex.Z;
+                        height /= world.Length;
+                        Layer(LayerKey(height)).Floors.Add(ProjectFloor(world));
+                        floorHeight += height * world.Length;
+                        floorVertices += world.Length;
                     }
                     else
                     {
@@ -163,7 +178,7 @@ internal sealed class DungeonFloorplanBuilder
                     if (TryProjectWall(world, facing, out WallSpan span))
                     {
                         counts.Walls++;
-                        layer.Walls.Add(span);
+                        walls.Add(span);
                     }
                 }
                 else
@@ -172,14 +187,66 @@ internal sealed class DungeonFloorplanBuilder
                 }
             }
 
-            if (!cellBounds.IsEmpty)
+            if (cellBounds.IsEmpty)
+                continue;
+            bounds = bounds.Including(cellBounds.Min).Including(cellBounds.Max);
+            flattened.Add(new FlattenedCell(
+                cell.CellId,
+                cell.Neighbours,
+                (cellBounds.Min + cellBounds.Max) * 0.5f,
+                floorVertices == 0 ? null : LayerKey(floorHeight / floorVertices),
+                LayerKey(cell.Origin.Z),
+                walls));
+        }
+
+        // A tall room is authored as a cell on top of a cell: the upper one
+        // has walls and a ceiling but no floor, and its doorway list names
+        // the cell it opens onto below. Its walls belong in that cell's
+        // band, or the band above would show an empty outline of the room
+        // below. A cell with a floor is drawn in its floor's band; a cell
+        // with no floor and no way down stays in the band its origin is in.
+        var bands = new Dictionary<uint, float>(flattened.Count);
+        foreach (FlattenedCell cell in flattened)
+        {
+            if (cell.FloorBand is { } floorBand)
+                bands[cell.CellId] = floorBand;
+        }
+        var unresolved = flattened.Where(static cell => cell.FloorBand is null).ToList();
+        // A cell may open onto another floorless cell, so folding goes
+        // round until nothing more folds.
+        for (bool folded = true; folded && unresolved.Count != 0;)
+        {
+            folded = false;
+            for (int index = unresolved.Count - 1; index >= 0; index--)
             {
-                bounds = bounds.Including(cellBounds.Min).Including(cellBounds.Max);
-                cells.Add(new DungeonFloorplanCell(
-                    cell.CellId,
-                    (cellBounds.Min + cellBounds.Max) * 0.5f,
-                    layerZ));
+                FlattenedCell cell = unresolved[index];
+                float? below = null;
+                foreach (uint neighbour in cell.Neighbours)
+                {
+                    if (bands.TryGetValue(landblock | neighbour, out float band)
+                        && band < cell.OriginBand
+                        && (below is null || band > below))
+                    {
+                        below = band;
+                    }
+                }
+                if (below is { } found)
+                {
+                    bands[cell.CellId] = found;
+                    unresolved.RemoveAt(index);
+                    folded = true;
+                }
             }
+        }
+        foreach (FlattenedCell cell in unresolved)
+            bands[cell.CellId] = cell.OriginBand;
+
+        var cells = ImmutableArray.CreateBuilder<DungeonFloorplanCell>(flattened.Count);
+        foreach (FlattenedCell cell in flattened)
+        {
+            float band = bands[cell.CellId];
+            Layer(band).Walls.AddRange(cell.Walls);
+            cells.Add(new DungeonFloorplanCell(cell.CellId, cell.Center, band));
         }
 
         var built = ImmutableArray.CreateBuilder<DungeonFloorplanLayer>(layers.Count);
@@ -274,11 +341,16 @@ internal sealed class DungeonFloorplanBuilder
                 ? geometry
                 : geometry.WithOpenings(openings);
 
+            var neighbours = new List<uint>(envCell.CellPortals.Count);
+            foreach (CellPortal portal in envCell.CellPortals)
+                neighbours.Add(portal.OtherCellId);
+
             placed.Add(new PlacedCell(
                 cellId,
                 envCell.Position.Origin,
                 envCell.Position.Orientation,
-                withOpenings));
+                withOpenings,
+                neighbours));
         }
         return placed;
     }
@@ -406,11 +478,27 @@ internal sealed class DungeonFloorplanBuilder
     /// <summary>A wall line before merging: its direction, its sideways offset from the origin, and its extent along the direction.</summary>
     private readonly record struct WallSpan(Vector2 Along, float Offset, float Minimum, float Maximum);
 
+    /// <param name="Neighbours">The low halves of the cells this cell's doorways open onto.</param>
     private readonly record struct PlacedCell(
         uint CellId,
         Vector3 Origin,
         Quaternion Orientation,
-        CellGeometry Geometry);
+        CellGeometry Geometry,
+        List<uint> Neighbours);
+
+    /// <summary>
+    /// A cell after flattening, before its band is settled: its floor is
+    /// already in the band of its own height, its walls are still waiting.
+    /// </summary>
+    /// <param name="FloorBand">The band of the cell's floor, weighted by vertex; null when the cell has no floor.</param>
+    /// <param name="OriginBand">The band the cell's origin is in.</param>
+    private readonly record struct FlattenedCell(
+        uint CellId,
+        List<uint> Neighbours,
+        Vector3 Center,
+        float? FloorBand,
+        float OriginBand,
+        List<WallSpan> Walls);
 
     /// <summary>One polygon of a structure, in the structure's own frame.</summary>
     private readonly record struct PolygonGeometry(

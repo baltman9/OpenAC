@@ -101,6 +101,7 @@ internal static class ObservedHostRecords
             Runtime = Part<GameRuntime>(),
             Warn = Note,
             Content = Part<AcDream.Content.RuntimeDatCollection>(),
+            DatLock = new object(),
             MagicCatalog = Part<AcDream.Content.MagicCatalog>(),
             SessionCommands = Part<AcDream.App.Runtime.CurrentGameRuntimeAdapter>(),
             NavigationWalk = Part<AcDream.Runtime.Navigation.NavigationWalkController>(),
@@ -120,6 +121,7 @@ internal static class ObservedHostRecords
             Runtime = Part<GameRuntime>(),
             Warn = Note,
             Content = Part<AcDream.Content.RuntimeDatCollection>(),
+            ContentLock = new object(),
             MagicCatalog = Part<AcDream.Content.MagicCatalog>(),
             SubmitChatText = NoteAndAccept,
             // This client's own command adapter, not the other client's:

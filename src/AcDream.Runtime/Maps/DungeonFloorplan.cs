@@ -43,9 +43,12 @@ internal sealed class DungeonFloorplanCounts
 }
 
 /// <summary>
-/// The cells whose origin falls in one six-metre band of height, drawn
-/// together. A dungeon's storeys sit six metres apart often enough that the
-/// band reads as a storey.
+/// One six-metre band of height, drawn together: every floor polygon at
+/// that height, and the walls of every cell whose floor is there. A
+/// dungeon's storeys sit six metres apart often enough that the band reads
+/// as a storey. A tall room's upper cell, which has walls but no floor, is
+/// drawn with the cell it opens onto below rather than as an empty outline
+/// a band up.
 /// </summary>
 /// <param name="Z">The band's key: the lowest height it covers, in metres.</param>
 /// <param name="Floors">

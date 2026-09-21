@@ -22,6 +22,14 @@ internal sealed record GraphicalAutomationParts
     public Action<string>? Warn { get; init; }
 
     public IDatReaderWriter? Content { get; init; }
+
+    /// <summary>
+    /// The window's lock on <see cref="Content"/>, the one its streaming
+    /// reader and every other reader of the files hold. Required whenever
+    /// <see cref="Content"/> is named.
+    /// </summary>
+    public object? DatLock { get; init; }
+
     public MagicCatalog? MagicCatalog { get; init; }
     public AcDream.App.Runtime.CurrentGameRuntimeAdapter? SessionCommands { get; init; }
     public AcDream.Runtime.Navigation.NavigationWalkController? NavigationWalk { get; init; }
@@ -109,7 +117,16 @@ internal static partial class GraphicalAutomationCapabilities
             KeyboardGoesToText = input is null
                 ? null
                 : () => input.WantsTextInput,
-            Content = parts.Content,
+            // The files go with the lock the window reads them under; a
+            // window that names the files without it is a defect, not a
+            // configuration.
+            Content = parts.Content is null
+                ? null
+                : new RuntimeAutomationContent(
+                    parts.Content,
+                    parts.DatLock ?? throw new InvalidOperationException(
+                        "The windowed host named the installed data files "
+                        + "for plugins without the lock it reads them under.")),
             MagicCatalog = parts.MagicCatalog,
             SubmitChatText = session is null ? null : session.SubmitChatText,
             SessionCommands = session,
