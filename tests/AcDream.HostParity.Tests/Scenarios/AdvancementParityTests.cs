@@ -175,6 +175,12 @@ public sealed class AdvancementParityTests
             ICharacterInfo character = arm.Host.Automation.Character;
             transcript.Step("before the world");
             transcript.Record("isInWorld", character.IsInWorld);
+            // Said outright: the character really is not in yet. Two
+            // clients that both thought they WERE in would agree here too,
+            // and the refusal below would then be about something else.
+            Assert.False(
+                character.IsInWorld,
+                $"the {arm.Name} client is in the world before it was let in");
             Ask(transcript, arm, "skill",
                 PluginAdvancementKind.Skill, Skill, 2500UL,
                 PluginAdvancementStatus.Unavailable);

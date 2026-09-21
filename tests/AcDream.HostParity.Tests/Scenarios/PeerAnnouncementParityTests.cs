@@ -16,6 +16,11 @@ namespace AcDream.HostParity.Tests;
 /// silences: the note has to exist, and it has to carry this character and
 /// this client's configured words.
 ///
+/// Mutation check (2026-09-21), run: swapping the health and the mana the
+/// note reports turned <see cref="EitherClientAnnouncesItselfToTheMachine"/>
+/// red on both arms at once, 55 against 40. Both clients wrote the same wrong
+/// note, so the comparison was perfectly happy with it.
+///
 /// Mutation checks (2026-09-20):
 /// * building the windowless host's surface with no tick (its state before
 ///   this work) turned <see cref="EitherClientAnnouncesItselfToTheMachine"/>
@@ -35,6 +40,12 @@ public sealed class PeerAnnouncementParityTests
         ParityScenario.Run(static (arm, transcript) =>
         {
             _ = ParityWorld.Stage(arm);
+            // What the server has said about this character. Without it the
+            // note carries nothing but zeroes, and a note of zeroes is the
+            // same on a client that fills it in and one that does not.
+            arm.Server.VitalUpdate(MaxHealth, current: HealthLeft, ranks: 3u);
+            arm.Server.VitalUpdate(MaxStamina, current: StaminaLeft, ranks: 9u);
+            arm.Server.VitalUpdate(MaxMana, current: ManaLeft, ranks: 1u);
             arm.Advance();
 
             PluginNetworkClient announced = TheOneAnnouncement(arm);
@@ -49,7 +60,34 @@ public sealed class PeerAnnouncementParityTests
             transcript.Record("maxHealth", announced.MaxHealth);
             transcript.Record("stamina", announced.CurrentStamina);
             transcript.Record("mana", announced.CurrentMana);
+
+            // Who it says it is, and where. A plugin on another client
+            // decides who is in its group from exactly these.
+            Assert.Equal(ParityWorld.Player, announced.PlayerId);
+            Assert.Equal("Parity", announced.Name);
+            Assert.Equal(ParitySessionOperations.WorldName, announced.WorldName);
+            // And how it is doing, which is what a plugin watches to decide
+            // whether to heal it. A note of zeroes reads as a character at
+            // death's door on every client that sees it.
+            Assert.Equal(HealthLeft, announced.CurrentHealth);
+            Assert.Equal(StaminaLeft, announced.CurrentStamina);
+            Assert.Equal(ManaLeft, announced.CurrentMana);
+            Assert.True(
+                announced.MaxHealth >= announced.CurrentHealth
+                    && announced.MaxHealth > 0u,
+                $"{arm.Name} announced a pool of {announced.MaxHealth} with "
+                + $"{announced.CurrentHealth} left in it.");
         });
+
+    /// <summary>The three pools, as the server names them on the wire.</summary>
+    private const uint MaxHealth = 1u;
+    private const uint MaxStamina = 3u;
+    private const uint MaxMana = 5u;
+
+    /// <summary>What the server says each pool is at.</summary>
+    private const uint HealthLeft = 55u;
+    private const uint StaminaLeft = 42u;
+    private const uint ManaLeft = 40u;
 
     /// <summary>
     /// The configured words, which are how a plugin tells one bot apart from

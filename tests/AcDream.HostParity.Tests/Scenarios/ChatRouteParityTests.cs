@@ -18,6 +18,11 @@ namespace AcDream.HostParity.Tests;
 /// text, its kind and its place in the order; and what the submission itself
 /// answered. Those three are what a plugin, a chat box and a console all read.
 ///
+/// Mutation check (2026-09-21), run: making a submitted line lose to whatever
+/// was already staged in the box turned
+/// <see cref="SendingWhileSomethingIsStagedRunsTheSameOnBothClients"/> red on
+/// both arms at once, on the words that reached the world.
+///
 /// Mutation check (2026-09-20), run: making the windowless client's route
 /// resolve no pose -- which is what it used to be given -- turned the pose
 /// scenario red and left the other thirteen green. Restoring it turned it
@@ -33,9 +38,10 @@ public sealed class ChatRouteParityTests
         ParityScenario.Run(static (arm, transcript) =>
         {
             transcript.Step("say hello");
-            // Said outright: something really went out. Two clients whose
-            // routes were both inert would agree and prove nothing.
-            Assert.NotEqual(0, Type(arm, transcript, "hello"));
+            // Said outright: the words really went out, as speech. Two
+            // clients whose routes were both inert would agree and prove
+            // nothing.
+            Assert.Equal("hello", TheSpokenLine(Type(arm, transcript, "hello")));
         });
 
     [Fact]
@@ -43,7 +49,11 @@ public sealed class ChatRouteParityTests
         ParityScenario.Run(static (arm, transcript) =>
         {
             transcript.Step("tell Bob");
-            Assert.NotEqual(0, Type(arm, transcript, "@tell Bob, hi"));
+            // The words go out as a tell, to the listener the line named.
+            IReadOnlyList<ParityOutbound> sent =
+                Type(arm, transcript, "@tell Bob, hi");
+            Assert.Equal("hi", TheToldLine(sent));
+            Assert.NotEmpty(sent);
         });
 
     /// <summary>
@@ -103,7 +113,8 @@ public sealed class ChatRouteParityTests
             ]);
 
             transcript.Step("say hello with a wave");
-            int sent = Type(arm, transcript, "hello *wave*");
+            IReadOnlyList<ParityOutbound> sent =
+                Type(arm, transcript, "hello *wave*");
             transcript.Record(
                 "motion",
                 arm.Runtime.MovementOwner.Controller?.Movement.Minterp
@@ -112,7 +123,7 @@ public sealed class ChatRouteParityTests
             // the speaker's own line about the pose is in the chat feed --
             // a client that dropped poses said the words and nothing else,
             // and two clients that both dropped them agree for nothing.
-            Assert.NotEqual(0, sent);
+            Assert.Equal("hello", TheSpokenLine(sent));
             Assert.Contains(
                 arm.Runtime.CommunicationOwner.ChatFeed.Snapshot(),
                 line => line.Text.Contains(
@@ -121,15 +132,22 @@ public sealed class ChatRouteParityTests
 
     /// <summary>
     /// A channel tag with no command behind it. Both clients have to fall
-    /// back the same way rather than one sending and the other not.
+    /// back the same way rather than one sending and the other not: the tag
+    /// picks the channel and the rest of the line is what is said on it.
     /// </summary>
     [Fact]
     public void AChannelTagWithNoCommandFallsBackTheSameOnBothClients() =>
         ParityScenario.Run(static (arm, transcript) =>
         {
             transcript.Step("a channel tag");
-            Type(arm, transcript, "@f general x");
+            IReadOnlyList<ParityOutbound> sent =
+                Type(arm, transcript, "@f general x");
             RecordInterfaceText(arm, transcript);
+            // Said outright: one line went out, on a channel, carrying the
+            // words after the tag and not the tag itself. Two clients that
+            // both swallowed the line would agree and prove nothing.
+            Assert.Single(sent);
+            Assert.Equal("general x", TheChannelLine(sent));
         });
 
     /// <summary>
@@ -166,20 +184,28 @@ public sealed class ChatRouteParityTests
         ParityScenario.Run(static (arm, transcript) =>
         {
             transcript.Step("stage half a sentence");
-            transcript.Record(
-                "accepted",
-                arm.Host.Automation.Chat.Compose("half a sentence"));
+            bool staged = arm.Host.Automation.Chat.Compose("half a sentence");
+            transcript.Record("accepted", staged);
+            Assert.True(staged, $"{arm.Name} would not stage the line.");
 
             transcript.Step("send something else");
             Submit(arm, transcript, "hello");
             RecordFeed(arm, transcript);
+            // What was submitted is what went out, and the half sentence
+            // sitting in the box is not what the world hears.
+            Assert.Equal("hello", TheSpokenLine([.. arm.Operations.Outbound]));
             transcript.RecordOutbound(arm);
             transcript.Record("draft", Entry(arm).Draft);
+            Assert.Equal(string.Empty, Entry(arm).Draft);
 
             transcript.Step("stage again");
-            transcript.Record(
-                "accepted", arm.Host.Automation.Chat.Compose("second"));
+            bool again = arm.Host.Automation.Chat.Compose("second");
+            transcript.Record("accepted", again);
             transcript.Record("draft", Entry(arm).Draft);
+            // The box took the keyboard back rather than being left locked
+            // by the line that overtook it.
+            Assert.True(again, $"{arm.Name} would not stage a second line.");
+            Assert.Equal("second", Entry(arm).Draft);
         });
 
     /// <summary>
@@ -269,43 +295,93 @@ public sealed class ChatRouteParityTests
         });
 
     /// <summary>
-    /// The client's own verbs, typed. Each one either sends something or
-    /// answers in words, on both clients, and no line may throw at whoever
-    /// typed it.
+    /// A plugin's verb, typed at the box with no plugin loaded to claim it.
+    /// Both clients do the same thing with it, and what they do is send it:
+    /// an unclaimed verb falls through to speech, with the leading slash
+    /// written as the at-sign the server expects. Neither client swallows
+    /// it, and neither answers the player in words.
     /// </summary>
+    /// <remarks>
+    /// The fall-through is what is pinned here, not the verb: with a plugin
+    /// loaded the verb is claimed before it reaches this point, which is a
+    /// scenario for a host with plugins rather than for the bare routes.
+    /// </remarks>
     [Theory]
-    [InlineData("/status")]
-    [InlineData("/nav status")]
-    [InlineData("/nav grid")]
-    [InlineData("/motor turn left 90")]
+    [InlineData("/status", "@status")]
+    [InlineData("/nav status", "@nav status")]
+    [InlineData("/nav grid", "@nav grid")]
+    [InlineData("/motor turn left 90", "@motor turn left 90")]
     public void APluginVerbTypedAtTheBoxAnswersTheSameOnBothClients(
-        string line) =>
+        string line, string spoken) =>
         ParityScenario.Run((arm, transcript) =>
         {
             transcript.Step($"type {line}");
-            Type(arm, transcript, line);
+            IReadOnlyList<ParityOutbound> sent = Type(arm, transcript, line);
             RecordInterfaceText(arm, transcript);
+            // Said outright per arm: the line really left the client,
+            // word for word, and nothing was put to the player instead.
+            Assert.Single(sent);
+            Assert.Equal(spoken, TheSpokenLine(sent));
+            Assert.Empty(arm.Runtime.CommunicationOwner.SpewBox.Snapshot());
         });
+
+    /// <summary>The client actions a typed line can leave as.</summary>
+    private const uint TalkAction = 0x0015u;
+    private const uint TellAction = 0x005Du;
+    private const uint ChannelAction = 0x0147u;
 
     private static RuntimeChatEntryOwner Entry(ParityArm arm) =>
         arm.Runtime.CommunicationOwner.ChatEntryOwner;
+
+    /// <summary>
+    /// The words in the one line said out loud. Read back off the bytes,
+    /// because what a plugin and a player care about is what the world
+    /// hears, not that two clients sent the same number of messages.
+    /// </summary>
+    private static string TheSpokenLine(IReadOnlyList<ParityOutbound> sent) =>
+        TextAt(OneMessage(sent, TalkAction), 12);
+
+    /// <summary>The words in the one line sent to a channel.</summary>
+    private static string TheChannelLine(IReadOnlyList<ParityOutbound> sent) =>
+        TextAt(OneMessage(sent, ChannelAction), 16);
+
+    /// <summary>The words in the one line told to a single listener.</summary>
+    private static string TheToldLine(IReadOnlyList<ParityOutbound> sent) =>
+        TextAt(OneMessage(sent, TellAction), 12);
+
+    private static ParityOutbound OneMessage(
+        IReadOnlyList<ParityOutbound> sent, uint action) =>
+        Assert.Single(sent, message => message.GameAction == action);
+
+    /// <summary>
+    /// One length-prefixed line of text out of a client action's body: two
+    /// bytes of length, then the characters.
+    /// </summary>
+    private static string TextAt(ParityOutbound message, int offset)
+    {
+        byte[] body = Convert.FromHexString(message.Body);
+        int length = System.Buffers.Binary.BinaryPrimitives
+            .ReadUInt16LittleEndian(body.AsSpan(offset));
+        return System.Text.Encoding.Latin1.GetString(
+            body, offset + 2, length);
+    }
 
     /// <summary>
     /// Types one line and submits it the way a person does: through the one
     /// chat entry, onto this client's own outbound route.
     /// </summary>
     /// <summary>
-    /// Types one line, and answers how many messages the route asked to
-    /// send. The count is read before the outbound record is taken, because
-    /// taking it empties it -- an assertion asked afterwards is worth
-    /// nothing.
+    /// Types one line, and hands back what the route asked to send for it.
+    /// What was sent is taken before the outbound record is written, because
+    /// writing it empties the record -- an assertion asked afterwards is
+    /// worth nothing.
     /// </summary>
-    private static int Type(
+    private static IReadOnlyList<ParityOutbound> Type(
         ParityArm arm, ParityTranscript transcript, string line)
     {
         Submit(arm, transcript, line);
         RecordFeed(arm, transcript);
-        int sent = arm.Operations.Outbound.Count;
+        ParityOutbound[] sent = [.. arm.Operations.Outbound];
         transcript.RecordOutbound(arm);
         return sent;
     }

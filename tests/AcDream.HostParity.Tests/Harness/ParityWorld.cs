@@ -1,4 +1,4 @@
-﻿using AcDream.Core.Combat;
+using AcDream.Core.Combat;
 using AcDream.Core.Items;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
@@ -97,6 +97,9 @@ internal static class ParityWorld
     /// <summary>An item that cannot be used without naming a target.</summary>
     internal const uint TargetedItem = 0x50000044u;
 
+    /// <summary>What the scrap is made of, as the server states it.</summary>
+    internal const uint SteelMaterial = 61u;
+
     /// <summary>
     /// A part-filled stack the character already carries, of the same kind as
     /// the coins lying in the corpse.
@@ -161,11 +164,23 @@ internal static class ParityWorld
             SalvageTool, "Tinkering Tool", ItemUseability.Contained);
         tool.Type = ItemType.TinkeringTool;
         objects.AddOrUpdate(tool);
-        objects.AddOrUpdate(Carried(ScrapItem, "Scrap", ItemUseability.Contained));
-        objects.AddOrUpdate(Carried(
+        ClientObject scrap = Carried(
+            ScrapItem, "Scrap", ItemUseability.Contained);
+        // What it is made of, which is what a salvage reads before it sends:
+        // a thing with no material is not salvageable at all, so without this
+        // both clients refuse and agree about refusing.
+        scrap.MaterialType = SteelMaterial;
+        objects.AddOrUpdate(scrap);
+        ClientObject stone = Carried(
             TargetedItem,
             "Mana Stone",
-            ItemUseability.Contained | (ItemUseability.Contained << 16)));
+            ItemUseability.Contained | (ItemUseability.Contained << 16));
+        // What it may be used ON. A targeted item whose target kinds are
+        // left blank is compatible with nothing, so the apply is turned away
+        // before it is composed -- on both clients, which is agreement
+        // about doing nothing.
+        stone.TargetType = (uint)ItemType.Misc;
+        objects.AddOrUpdate(stone);
     }
 
     /// <summary>
