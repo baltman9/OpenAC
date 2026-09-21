@@ -1030,7 +1030,7 @@ public interface IAutomationSurface
     /// <summary>The account's character list, and logging out.</summary>
     ILoginAutomation Login => NoOpAutomationSurface.Instance;
 
-    /// <summary>The state of the connection to the server.</summary>
+    /// <summary>The other clients on this computer: the local client list, and the casts they report.</summary>
     INetworkAutomation Network => NoOpAutomationSurface.Instance;
 
     /// <summary>Recovering after death.</summary>
