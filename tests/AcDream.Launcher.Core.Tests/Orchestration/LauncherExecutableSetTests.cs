@@ -58,6 +58,16 @@ public sealed class LauncherExecutableSetTests : IDisposable
             set.CreatePlaySpec(LaunchMode.Headless, "session.json")
                 .SupportsConsoleGracefulStop);
         Assert.True(set.CreateProbeSpec("session.json").SupportsConsoleGracefulStop);
+
+        // A windowless session is started with its console on and its input
+        // left open, so the launcher's console window can talk to it. A probe
+        // and a windowed session are not.
+        var headlessSpec = set.CreatePlaySpec(LaunchMode.Headless, "session.json");
+        Assert.Contains("--console", headlessSpec.Arguments);
+        Assert.True(headlessSpec.KeepStandardInputOpen);
+        Assert.DoesNotContain("--console", set.CreateProbeSpec("session.json").Arguments);
+        Assert.False(set.CreateProbeSpec("session.json").KeepStandardInputOpen);
+        Assert.False(set.CreatePlaySpec(LaunchMode.Gui, "session.json").KeepStandardInputOpen);
     }
 
     [Fact]

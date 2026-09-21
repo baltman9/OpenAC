@@ -548,6 +548,35 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
         return StartActivityAsync(request);
     }
 
+    public bool TrySendConsoleLine(string sessionId, string line)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(line);
+        ILauncherProcessSupervisor? supervisor;
+        lock (_gate)
+        {
+            if (_disposed)
+                return false;
+            ManagedActivity? activity = _activities.FirstOrDefault(
+                candidate => candidate.SessionId == sessionId);
+            if (activity is not { IsActive: true })
+                return false;
+            supervisor = activity.Supervisor;
+        }
+
+        return supervisor?.TrySendLine(line) == true;
+    }
+
+    public string? GetSessionLogPath(string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        lock (_gate)
+        {
+            return _activities.FirstOrDefault(
+                candidate => candidate.SessionId == sessionId)?.StderrLogPath;
+        }
+    }
+
     public async Task StopSessionAsync(
         string sessionId,
         TimeSpan timeout,

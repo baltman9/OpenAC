@@ -51,6 +51,38 @@ public sealed class LauncherProcessSupervisorTests
             states);
     }
 
+    /// <summary>
+    /// A session with a console reads its input for as long as it runs: the
+    /// password goes first, the pipe stays open, and a line sent later
+    /// arrives after it. A session without one still has its input closed,
+    /// and takes no lines.
+    /// </summary>
+    [Fact]
+    public void AConsoleSessionKeepsItsInputOpenAndTakesLines()
+    {
+        var factory = new FakeChildProcessFactory(exitsWithinStopTimeout: true);
+        using var supervisor = new LauncherProcessSupervisor(factory);
+
+        supervisor.Start(Spec() with { KeepStandardInputOpen = true }, "pw");
+
+        FakeChildProcess fake = factory.LastCreated!;
+        Assert.False(fake.StandardInputClosed);
+        Assert.True(supervisor.TrySendLine("/vt start"));
+        Assert.Equal("pw\n/vt start\n", fake.StandardInputText);
+    }
+
+    [Fact]
+    public void ASessionWithoutAConsoleTakesNoLines()
+    {
+        var factory = new FakeChildProcessFactory(exitsWithinStopTimeout: true);
+        using var supervisor = new LauncherProcessSupervisor(factory);
+
+        supervisor.Start(Spec(), "pw");
+
+        Assert.False(supervisor.TrySendLine("/vt start"));
+        Assert.Equal("pw\n", factory.LastCreated!.StandardInputText);
+    }
+
     [Fact]
     public void StartWithNullPasswordClosesStdinWithoutWriting()
     {

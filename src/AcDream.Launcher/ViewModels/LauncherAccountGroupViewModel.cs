@@ -28,6 +28,8 @@ public sealed class LauncherAccountServerRowViewModel : ObservableObject
     private string _endpoint = "";
     private string _status = "Ready";
     private string? _activeSessionId;
+    private bool _activeIsHeadless;
+    private Action<string, string>? _openConsole;
     private bool? _isServerOnline;
     private string _serverStatusText = "Not checked";
     private double? _latencyMilliseconds;
@@ -53,6 +55,13 @@ public sealed class LauncherAccountServerRowViewModel : ObservableObject
         StopCommand = new AsyncRelayCommand(() => _activeSessionId is { } id ? stop(id) : Task.CompletedTask,
             () => IsActive && canInteract());
         OptionsCommand = new RelayCommand(() => options(this), canInteract);
+        ConsoleCommand = new RelayCommand(
+            () =>
+            {
+                if (_activeSessionId is { } id)
+                    _openConsole?.Invoke(id, $"{ActiveCharacterName ?? AccountName} · {ServerName}");
+            },
+            () => CanOpenConsole);
     }
 
     public string AccountName { get; }
@@ -88,6 +97,9 @@ public sealed class LauncherAccountServerRowViewModel : ObservableObject
     {
         if (!_applyingSavedSelection) _selectionChanged?.Invoke(this);
     }
+
+    /// <summary>How the row opens a session's console: the session's id and a title for the window.</summary>
+    internal void UseConsole(Action<string, string> open) => _openConsole = open;
 
     internal void UseSelectionStore(Action<LauncherAccountServerRowViewModel> save) => _selectionChanged = save;
     public LaunchMode Mode => SelectedLaunchMode == "Headless" ? LaunchMode.Headless : SelectedCharacter == CharacterSelect ? LaunchMode.GuiSelect : LaunchMode.Gui;
@@ -139,12 +151,16 @@ public sealed class LauncherAccountServerRowViewModel : ObservableObject
         OnPropertyChanged(nameof(PingTooltip));
     }
     public bool IsActive => _activeSessionId is not null;
+
+    /// <summary>A session with no window is talked to through its console; one with a window has the game itself.</summary>
+    public bool CanOpenConsole => IsActive && _activeIsHeadless && _openConsole is not null;
     public bool CanEditSelection => !IsActive && _canInteract();
     public bool CanPlay => DisabledReason.Length == 0;
     public string DisabledReason => _disabledReason(this) ?? "";
     public AsyncRelayCommand PlayCommand { get; }
     public AsyncRelayCommand StopCommand { get; }
     public RelayCommand OptionsCommand { get; }
+    public RelayCommand ConsoleCommand { get; }
 
     internal void Update(LauncherServerSnapshot server, LauncherAccountSnapshot account, LauncherSessionSnapshot? session)
     {
@@ -177,6 +193,7 @@ public sealed class LauncherAccountServerRowViewModel : ObservableObject
         }
         finally { _applyingSavedSelection = false; }
         _activeSessionId = session?.IsActive == true ? session.SessionId : null;
+        _activeIsHeadless = session?.IsActive == true && session.LaunchMode == LaunchMode.Headless;
         ActiveCharacterName = session?.IsActive == true ? session.CharacterName : null;
         Status = session?.Error ?? session?.Status ?? account.ActivityStatus;
         LaunchError = session?.Error;
@@ -186,6 +203,7 @@ public sealed class LauncherAccountServerRowViewModel : ObservableObject
     internal void NotifyState()
     {
         OnPropertyChanged(nameof(IsActive));
+        OnPropertyChanged(nameof(CanOpenConsole));
         OnPropertyChanged(nameof(DisplayedCharacter));
         OnPropertyChanged(nameof(CanEditSelection));
         OnPropertyChanged(nameof(CanPlay));
@@ -193,5 +211,6 @@ public sealed class LauncherAccountServerRowViewModel : ObservableObject
         PlayCommand.NotifyCanExecuteChanged();
         StopCommand.NotifyCanExecuteChanged();
         OptionsCommand.NotifyCanExecuteChanged();
+        ConsoleCommand.NotifyCanExecuteChanged();
     }
 }

@@ -63,15 +63,28 @@ public sealed partial class MainWindow : Window
         if (_observedViewModel is not null)
         {
             _observedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            _observedViewModel.ConsoleRequested -= OnConsoleRequested;
         }
 
         _observedViewModel = viewModel;
         if (_observedViewModel is not null)
         {
             _observedViewModel.PropertyChanged += OnViewModelPropertyChanged;
+            _observedViewModel.ConsoleRequested += OnConsoleRequested;
         }
 
         _wasModalOpen = viewModel?.IsModalOpen == true;
+    }
+
+    /// <summary>
+    /// A console is a window of its own, not a panel over this one: a session
+    /// is watched while the launcher goes on being used, and several sessions
+    /// can each have theirs open.
+    /// </summary>
+    private void OnConsoleRequested(SessionConsoleViewModel console)
+    {
+        var window = new SessionConsoleWindow { DataContext = console };
+        window.Show(this);
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
