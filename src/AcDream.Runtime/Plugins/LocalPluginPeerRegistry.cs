@@ -68,6 +68,16 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     internal const double MaximumCastDurationSeconds = 24d * 60d * 60d;
 
     /// <summary>
+    /// The highest sequence a cast may claim. Sequences count from one and
+    /// only ever grow, and a reader sets its cursor for a peer from them, so
+    /// a note claiming a number no client could have counted to would park
+    /// that cursor past everything the genuine client will ever send. A
+    /// thousand million is years of casting several times a second, and a
+    /// note above it is broken or hostile rather than long-lived.
+    /// </summary>
+    internal const long MaximumCastSequence = 1_000_000_000L;
+
+    /// <summary>
     /// The earliest and latest instants a cast may be stamped with. A note is
     /// a file written by another process, so its stamp is any eight bytes at
     /// all, and a number outside this range is not a time: converting it
@@ -97,8 +107,8 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     /// <summary>What this client is telling the others, oldest first.</summary>
     private readonly List<PeerCastEntry> _ring = [];
 
-    /// <summary>The highest sequence taken in from each peer, by instance.</summary>
-    private readonly Dictionary<Guid, ObservedPeer> _observedPeers = [];
+    /// <summary>The highest sequence taken in from each peer's note.</summary>
+    private readonly Dictionary<PeerCursorKey, ObservedPeer> _observedPeers = [];
 
     /// <summary>What this client has read from the others, oldest first.</summary>
     private readonly List<ObservedCast> _observedCasts = [];
@@ -229,8 +239,8 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         lock (_gate)
         {
-            return ReadRemoteDocuments(_time.GetUtcNow())
-                .Select(static document => document.ToClient())
+            return ReadRemoteNotes(_time.GetUtcNow())
+                .Select(static note => note.Document.ToClient())
                 .OrderBy(static client => client.Name, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(static client => client.ClientId)
                 .ToArray();
@@ -314,11 +324,11 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     /// One reader for both what a peer is and what it cast, so a note cannot
     /// be trusted for one and unchecked for the other.
     /// </summary>
-    private List<PeerDocument> ReadRemoteDocuments(DateTimeOffset now)
+    private List<PeerNote> ReadRemoteNotes(DateTimeOffset now)
     {
-        var documents = new List<PeerDocument>();
+        var notes = new List<PeerNote>();
         if (!Directory.Exists(_directory))
-            return documents;
+            return notes;
         long newestAllowed = now.Subtract(StaleAfter).ToUnixTimeMilliseconds();
         foreach (string file in Directory.EnumerateFiles(
             _directory,
@@ -357,7 +367,7 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                 {
                     continue;
                 }
-                documents.Add(document);
+                notes.Add(new PeerNote(file, document));
             }
             catch (IOException)
             {
@@ -371,7 +381,7 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
             {
             }
         }
-        return documents;
+        return notes;
     }
 
     /// <summary>
@@ -386,10 +396,11 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         string worldName,
         uint ownPlayerObjectId)
     {
-        foreach (PeerDocument document in ReadRemoteDocuments(now)
-            .OrderBy(static document => document.ClientId)
-            .ThenBy(static document => document.InstanceId))
+        foreach (PeerNote note in ReadRemoteNotes(now)
+            .OrderBy(static note => note.Document.ClientId)
+            .ThenBy(static note => note.Document.InstanceId))
         {
+            PeerDocument document = note.Document;
             // A peer logged in somewhere else shares nothing but a hard disk:
             // its object ids name other creatures entirely.
             if (!string.Equals(
@@ -399,8 +410,9 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
             {
                 continue;
             }
+            var cursor = new PeerCursorKey(note.Path, document.InstanceId);
             long highest =
-                _observedPeers.TryGetValue(document.InstanceId, out ObservedPeer peer)
+                _observedPeers.TryGetValue(cursor, out ObservedPeer peer)
                     ? peer.HighestSequence
                     : 0L;
             foreach (PeerCastEntry entry in OldestFirst(document.Casts))
@@ -415,7 +427,7 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                     document.ClientId,
                     entry));
             }
-            _observedPeers[document.InstanceId] = new ObservedPeer(highest, now);
+            _observedPeers[cursor] = new ObservedPeer(highest, now);
         }
         if (_observedCasts.Count > ObservedCastCapacity)
         {
@@ -461,6 +473,7 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     /// </summary>
     private static bool IsWellFormed(PeerCastEntry entry) =>
         entry.Sequence > 0L
+        && entry.Sequence <= MaximumCastSequence
         && entry.AtUnixMs >= EarliestCastUnixMs
         && entry.AtUnixMs <= LatestCastUnixMs
         && entry.CasterObjectId != 0u
@@ -507,14 +520,32 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     {
         _observedCasts.RemoveAll(observed => Age(observed.Entry, now) > StaleAfter);
         TimeSpan forgetPeerAfter = StaleAfter * 4;
-        foreach (Guid instanceId in _observedPeers
+        foreach (PeerCursorKey cursor in _observedPeers
             .Where(pair => now - pair.Value.LastSeen > forgetPeerAfter)
             .Select(static pair => pair.Key)
             .ToArray())
         {
-            _observedPeers.Remove(instanceId);
+            _observedPeers.Remove(cursor);
         }
     }
+
+    /// <summary>A peer's note: the file it was read from, and what it says.</summary>
+    private readonly record struct PeerNote(string Path, PeerDocument Document);
+
+    /// <summary>
+    /// What a high-water mark belongs to. The identity in a note is a field
+    /// another process wrote, so two files can claim one identity; keyed on
+    /// the claim alone, whichever file was read first moved the mark the
+    /// other's casts are measured against, and the genuine client was
+    /// silenced for good. Keyed on the file as well, a note can only ever
+    /// move its own file's mark.
+    ///
+    /// <para>The path is compared exactly as the directory scan reports it,
+    /// which is the same spelling every scan, and is the right comparison on
+    /// a file system where two names differing only in case are two
+    /// files.</para>
+    /// </summary>
+    private readonly record struct PeerCursorKey(string Path, Guid InstanceId);
 
     /// <summary>How far one peer's casts have been read.</summary>
     private readonly record struct ObservedPeer(

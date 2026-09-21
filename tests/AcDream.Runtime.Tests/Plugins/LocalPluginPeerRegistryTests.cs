@@ -414,6 +414,105 @@ public sealed class LocalPluginPeerRegistryTests
         }
     }
 
+    /// <summary>
+    /// The cursor that says how far a peer has been read is tied to the file
+    /// the note came from as well as to the identity the note claims. The
+    /// identity is a field another process wrote, so two files can claim one:
+    /// keyed on the claim alone, whichever was read first moved the mark the
+    /// other's casts are measured against, and the genuine client's casts were
+    /// dropped for good.
+    ///
+    /// Mutation check (2026-09-21): with the cursor keyed on the claimed
+    /// identity alone, the genuine client's three casts never arrived -- zero
+    /// instead of three.
+    /// </summary>
+    [Fact]
+    public void AFileClaimingAPeersIdentityCannotSilenceThatPeer()
+    {
+        string root = TemporaryRoot();
+        var now = new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);
+        var time = new ManualTimeProvider(now);
+        try
+        {
+            using var reader = Registry(root, time, 2);
+            using var genuine = Registry(root, time, 1);
+
+            // A second file, under a name of its own, claiming the genuine
+            // client's identity and a sequence past anything it has sent.
+            JsonObject impostor = RawNote(now, Instance(1));
+            impostor["Casts"] = new JsonArray(
+                RawCast(9L, now.ToUnixTimeMilliseconds(), spellId: 99u));
+            WriteRawNote(root, HostileInstance, impostor);
+            PluginPeerCast claimed = Assert.Single(
+                reader.CaptureRemoteCasts(0L, "Coldeve", 20u));
+
+            for (uint index = 1; index <= 3u; index++)
+                genuine.RecordCast(Landed(10u, 0x50000000u + index, 40u + index));
+            time.Advance(LocalPluginPeerRegistry.CastWriteDebounce);
+            genuine.Publish(Client(genuine.ClientId, 10u, "Alpha", []));
+
+            Assert.Equal(
+                3,
+                reader.CaptureRemoteCasts(
+                    claimed.Sequence, "Coldeve", 20u).Count);
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    /// <summary>
+    /// A sequence is a number in a file and the reader's cursor for a peer is
+    /// set from it, so a note claiming a number no client could count to would
+    /// park that cursor past everything the genuine client will ever send --
+    /// for the rest of the session, because the genuine client's own
+    /// heartbeats keep it from being forgotten. A process running as this user
+    /// can write any file, including the genuine client's own, where tying the
+    /// cursor to the file does not help. So the number itself is bounded.
+    ///
+    /// Mutation check (2026-09-21): without the bound the poisoned note was
+    /// believed (one cast instead of none) and the genuine client's two casts
+    /// never came back afterwards -- zero instead of two.
+    /// </summary>
+    [Fact]
+    public void ASequenceNoClientCouldCountToIsRefusedRatherThanBelieved()
+    {
+        string root = TemporaryRoot();
+        var now = new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);
+        var time = new ManualTimeProvider(now);
+        try
+        {
+            using var reader = Registry(root, time, 2);
+            using var genuine = Registry(root, time, 1);
+            genuine.RecordCast(Landed(10u, 0x50000012u, 42u));
+            genuine.Publish(Client(genuine.ClientId, 10u, "Alpha", []));
+
+            // Written over the genuine client's own note, in its own file.
+            JsonObject poisoned = RawNote(now, Instance(1));
+            poisoned["ClientId"] = genuine.ClientId;
+            poisoned["Casts"] = new JsonArray(RawCast(
+                long.MaxValue,
+                now.ToUnixTimeMilliseconds(),
+                spellId: 99u));
+            WriteRawNote(root, Instance(1), poisoned);
+            Assert.Empty(reader.CaptureRemoteCasts(0L, "Coldeve", 20u));
+
+            // The genuine client heartbeats again, carrying its whole ring.
+            time.Advance(LocalPluginPeerRegistry.CastWriteDebounce);
+            genuine.RecordCast(Landed(10u, 0x50000013u, 43u));
+            genuine.Publish(Client(genuine.ClientId, 10u, "Alpha", []));
+
+            Assert.Equal(
+                2,
+                reader.CaptureRemoteCasts(0L, "Coldeve", 20u).Count);
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
     /// <summary>The identity every raw note in these tests claims.</summary>
     private static readonly Guid HostileInstance =
         Guid.Parse("99999999-9999-9999-9999-999999999999");
@@ -494,10 +593,14 @@ public sealed class LocalPluginPeerRegistryTests
     private static LocalPluginPeerRegistry Registry(
         string root,
         TimeProvider time,
-        int which) => new(
-            root,
-            time,
-            Guid.Parse($"{which:D8}-0000-0000-0000-000000000000"));
+        int which) => new(root, time, Instance(which));
+
+    /// <summary>
+    /// The instance id registry number <paramref name="which"/> runs under,
+    /// so a raw note can claim it or be written into its file.
+    /// </summary>
+    private static Guid Instance(int which) =>
+        Guid.Parse($"{which:D8}-0000-0000-0000-000000000000");
 
     private static string TemporaryRoot() => Path.Combine(
         Path.GetTempPath(),
