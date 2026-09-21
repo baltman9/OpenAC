@@ -582,7 +582,16 @@ host.Automation.Vendor.TransactionCompleted += result =>
 foreach (PluginVendorItem item in host.Automation.Vendor.Items)
 {
     // item.TemplateObjectId, item.Name, item.UnitPrice (retail sell-rate math -- the vendor's SellPrice, what it charges the player), item.StackSize
+    // item.MaxStackSize  -- how many fit in one stack, so a purchase can be costed in pack slots
+    // item.ItemType      -- the listing's category, comparable with Profile.DealsInItemTypes
 }
+
+PluginVendorProfile profile = host.Automation.Vendor.Profile;
+// profile.BuyRate                         -- the share of an item's value this vendor pays you
+// profile.DealsInItemTypes                -- the categories it buys, as a bit mask
+// profile.MinimumValue / .MaximumValue    -- its per-unit value limits, or NoValueLimit
+// profile.DealsInMagicalItems             -- whether it takes items carrying spells
+// profile.UsesAlternateCurrency           -- and AlternateCurrencyWeenieClassId / Amount / Name
 
 host.Automation.Vendor.AddToBuyList(templateObjectId, count: 1);
 host.Automation.Vendor.BuyAll();
@@ -605,6 +614,26 @@ live appraisal round trip -- by its `TemplateObjectId`, including the
 `WeaponProfile`/`ArmorProfile` fields described under
 [Weapon and armor profiles](#weapon-and-armor-profiles) when the listing
 carries one.
+
+`Vendor.Profile` is the open vendor's shop terms, which is what a plugin
+needs to plan a visit before it walks in. `BuyRate` is the share of an
+item's value this vendor pays when it buys **from** you — 0.75 means three
+quarters of the item's value — so a payout is that rate times the item's
+per-unit value, rounded to whole coin; a trade note is always paid at face
+value whatever the rate says. What the vendor *charges* is already per
+listing, as `PluginVendorItem.UnitPrice`. `DealsInItemTypes` is a bit mask
+of the categories it buys, comparable directly against a listing's
+`ItemType` or an inventory item's: no shared bit means the vendor refuses
+the item. `MinimumValue` and `MaximumValue` are its per-unit value limits,
+each reading `PluginVendorProfile.NoValueLimit` when the vendor sets no
+limit in that direction; an item worth nothing at all is refused whatever
+they say. `UsesAlternateCurrency` tells you to count
+`AlternateCurrencyWeenieClassId` rather than the character's money;
+`AlternateCurrencyAmount` is how many of it the character held when the
+listing arrived — a snapshot, not a live count — and
+`AlternateCurrencyName` its plural name for a line you write. Every field
+reads zero, and the name null, when no vendor is open, so check `IsOpen`
+first.
 
 `IsBusy` reports whether this adapter's own buy/sell is in flight -- it is
 vendor-local, not the client-wide inventory-transaction busy state, which

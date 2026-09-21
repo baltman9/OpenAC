@@ -87,9 +87,46 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
                     item.Name ?? string.Empty,
                     ClassifyVendorItem(item),
                     unitPrice,
-                    item.StackSize);
+                    item.StackSize)
+                {
+                    // A listing that authored no maximum does not stack --
+                    // the same reading the vendor window makes of the same
+                    // missing field when it decides whether to offer a split.
+                    MaxStackSize = item.MaxStackSize ?? 1,
+                    ItemType = item.ItemType ?? 0u,
+                };
             }
             return built;
+        }
+    }
+
+    // The shop terms, projected straight off the state the listing carried:
+    // what the vendor pays, what it deals in, what it refuses, and what it
+    // is paid in. A plugin needs all four to plan a visit before it walks in.
+    public PluginVendorProfile Profile
+    {
+        get
+        {
+            VendorState vendor = Vendor;
+            if (vendor.VendorId == 0u)
+                return default;
+            VendorShopProfile profile = vendor.Profile;
+            // BuyPrice is the rate the vendor pays the player; SellPrice is
+            // what it charges, and that already reaches plugins per listing
+            // as PluginVendorItem.UnitPrice.
+            return new PluginVendorProfile(
+                profile.BuyPrice,
+                profile.MerchandiseItemTypes,
+                profile.MerchandiseMinValue,
+                profile.MerchandiseMaxValue,
+                profile.DealMagicalItems,
+                profile.AlternateCurrencyWcid,
+                profile.AlternateCurrencyWcid == 0u
+                    ? 0u
+                    : profile.AlternateCurrencyAmount,
+                profile.AlternateCurrencyWcid == 0u
+                    ? null
+                    : profile.AlternateCurrencyPluralName);
         }
     }
 

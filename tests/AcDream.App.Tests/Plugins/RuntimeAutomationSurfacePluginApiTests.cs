@@ -869,6 +869,60 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
         Assert.Equal(1.8f, projected.ElectricMod);
     }
 
+    /// <summary>
+    /// The shop terms and the per-listing stack ceiling reach a plugin
+    /// through the host it actually holds, not just through the adapter:
+    /// a plugin planning a vendor visit asks host.Automation.Vendor.
+    /// Mutation: return default from RuntimeVendorAutomation.Profile and this
+    /// goes red on BuyRate.
+    /// </summary>
+    [Fact]
+    public void GraphicalHostProjectsTheVendorShopTermsAndListingStackCeiling()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        runtime.InventoryOwner.Vendor.Apply(
+            0x40001000u,
+            new VendorShopProfile(
+                MerchandiseItemTypes: (uint)ItemType.SpellComponents,
+                MerchandiseMinValue: 25u,
+                MerchandiseMaxValue: 30_000u,
+                DealMagicalItems: true,
+                BuyPrice: 0.75f,
+                SellPrice: 1.15f,
+                AlternateCurrencyWcid: 0u,
+                AlternateCurrencyAmount: 0u,
+                AlternateCurrencyPluralName: string.Empty),
+            [
+                new VendorShopItem(
+                    ItemGuid: 0x50002000u,
+                    StackSize: 100,
+                    WeenieClassId: 1234u,
+                    Name: "Fixture Peas",
+                    ItemType: (uint)ItemType.SpellComponents,
+                    IconId: 0x06000001u,
+                    Value: 5,
+                    DescStackSize: 1,
+                    MaxStackSize: 25),
+            ]);
+        IPluginHost host = new AppPluginHost(
+            new TestPluginLogger(), new WorldGameState(), new WorldEvents(),
+            new SelectionState(), NoOpUiRegistry.Instance, surface);
+
+        PluginVendorProfile profile = host.Automation.Vendor.Profile;
+        Assert.Equal(0.75f, profile.BuyRate);
+        Assert.Equal((uint)ItemType.SpellComponents, profile.DealsInItemTypes);
+        Assert.Equal(25u, profile.MinimumValue);
+        Assert.Equal(30_000u, profile.MaximumValue);
+        Assert.True(profile.DealsInMagicalItems);
+        Assert.False(profile.UsesAlternateCurrency);
+
+        PluginVendorItem item = Assert.Single(host.Automation.Vendor.Items);
+        Assert.Equal(25, item.MaxStackSize);
+        Assert.Equal((uint)ItemType.SpellComponents, item.ItemType);
+    }
+
     [Fact]
     public void LogoutIsUnavailableWithoutAnInWorldSessionAndNeverCallsTheRoute()
     {

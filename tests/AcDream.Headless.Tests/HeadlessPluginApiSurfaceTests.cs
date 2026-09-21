@@ -791,6 +791,64 @@ public sealed class HeadlessPluginApiSurfaceTests
         Assert.NotNull(locations);
     }
 
+    /// <summary>
+    /// The windowless host answers the shop terms and the per-listing stack
+    /// ceiling exactly as the windowed one does -- both bind the one shared
+    /// vendor adapter, so a vendor-planning plugin runs unchanged on either.
+    /// Mutation: return default from RuntimeVendorAutomation.Profile and this
+    /// goes red on BuyRate.
+    /// </summary>
+    [Fact]
+    public void WindowlessHostProjectsTheVendorShopTermsAndListingStackCeiling()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        runtime.InventoryOwner.Vendor.Apply(
+            0x40001000u,
+            new AcDream.Core.Items.VendorShopProfile(
+                MerchandiseItemTypes: (uint)AcDream.Core.Items.ItemType.SpellComponents,
+                MerchandiseMinValue: 25u,
+                MerchandiseMaxValue: 30_000u,
+                DealMagicalItems: true,
+                BuyPrice: 0.75f,
+                SellPrice: 1.15f,
+                AlternateCurrencyWcid: 20630u,
+                AlternateCurrencyAmount: 17u,
+                AlternateCurrencyPluralName: "Writs of Refusal"),
+            [
+                new AcDream.Core.Items.VendorShopItem(
+                    ItemGuid: 0x50002000u,
+                    StackSize: 100,
+                    WeenieClassId: 1234u,
+                    Name: "Fixture Peas",
+                    ItemType: (uint)AcDream.Core.Items.ItemType.SpellComponents,
+                    IconId: 0x06000001u,
+                    Value: 5,
+                    DescStackSize: 1,
+                    MaxStackSize: 25),
+            ]);
+        IPluginHost pluginHost = host;
+
+        PluginVendorProfile profile = pluginHost.Automation.Vendor.Profile;
+        Assert.Equal(0.75f, profile.BuyRate);
+        Assert.Equal(
+            (uint)AcDream.Core.Items.ItemType.SpellComponents,
+            profile.DealsInItemTypes);
+        Assert.Equal(25u, profile.MinimumValue);
+        Assert.Equal(30_000u, profile.MaximumValue);
+        Assert.True(profile.DealsInMagicalItems);
+        Assert.True(profile.UsesAlternateCurrency);
+        Assert.Equal(20630u, profile.AlternateCurrencyWeenieClassId);
+        Assert.Equal(17u, profile.AlternateCurrencyAmount);
+        Assert.Equal("Writs of Refusal", profile.AlternateCurrencyName);
+
+        PluginVendorItem item = Assert.Single(pluginHost.Automation.Vendor.Items);
+        Assert.Equal(25, item.MaxStackSize);
+        Assert.Equal(
+            (uint)AcDream.Core.Items.ItemType.SpellComponents,
+            item.ItemType);
+    }
+
     [Fact]
     public void ActivationCompletedEventHasDefaultStub()
     {
