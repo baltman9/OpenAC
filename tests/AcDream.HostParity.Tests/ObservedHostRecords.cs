@@ -238,6 +238,7 @@ internal static class ObservedHostRecords
                     .RuntimeMovementStatsApplier>(),
                 ResolveSkillFormulaBonus = NoteAndAnswerSkill,
                 ClientTime = NoteAndAnswerTime,
+                NoteOptionsSeeded = NoteNothingHappened,
                 RetainedUi = Part<AcDream.App.UI.RetailUiRuntime>(),
             });
 

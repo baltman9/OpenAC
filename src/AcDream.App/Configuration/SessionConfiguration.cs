@@ -62,9 +62,11 @@ internal sealed record SessionDescriptor
     [JsonRequired]
     public SessionCredentialDescriptor Credential { get; init; } = new();
 
-    /// <summary>Accepted-but-ignored by the windowed client; the windowless
-    /// client's own reader owns the allow-list semantics for this field.
-    /// Accepting it here keeps one document startable on either client.</summary>
+    /// <summary>
+    /// The character options this session should arrive with. Both clients
+    /// check the map against the same declarable set and seed it the same way
+    /// on login, so one document means the same thing whichever starts it.
+    /// </summary>
     public Dictionary<string, bool>? CharacterOptions { get; init; }
 
     /// <summary>Plugin ids to load. Absent = load all; explicit

@@ -156,6 +156,7 @@ internal static class SessionConfigurationLoader
         }
 
         ValidatePluginSettings(session);
+        ValidateCharacterOptions(session);
 
         if (session.LoginCommandDelayMs < 0)
         {
@@ -183,6 +184,19 @@ internal static class SessionConfigurationLoader
         {
             throw new SessionConfigurationException(
                 $"Session '{session.Id}' {fault}");
+        }
+    }
+
+    // The declarable set and the rules about it belong to the runtime that
+    // seeds them, so both clients refuse the same document for the same
+    // reason instead of one starting on a file the other rejects.
+    private static void ValidateCharacterOptions(SessionDescriptor session)
+    {
+        if (AcDream.Runtime.Gameplay.RuntimeDeclaredCharacterOptions.Describe(
+                session.Id,
+                session.CharacterOptions) is { } complaint)
+        {
+            throw new SessionConfigurationException(complaint);
         }
     }
 

@@ -868,7 +868,7 @@ public sealed class HeadlessConsoleTests
 
             DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
             while (!File.Exists(statusPathAlpha)
-                || !File.ReadAllText(statusPathAlpha).Contains("\"exited\""))
+                || !LiveStatusFile.ReadAllText(statusPathAlpha).Contains("\"exited\""))
             {
                 if (DateTime.UtcNow > deadline)
                 {
@@ -886,7 +886,8 @@ public sealed class HeadlessConsoleTests
             // write rather than racing it.
             DateTime betaDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
             while (!File.Exists(statusPathBeta)
-                || !File.ReadAllText(statusPathBeta).Contains("\"enteredWorld\""))
+                || !LiveStatusFile.ReadAllText(statusPathBeta)
+                    .Contains("\"enteredWorld\""))
             {
                 if (DateTime.UtcNow > betaDeadline)
                     throw new TimeoutException("beta never reached enteredWorld.");
@@ -894,14 +895,19 @@ public sealed class HeadlessConsoleTests
             }
 
             Assert.False(beta.IsPolicyComplete);
-            Assert.DoesNotContain("\"exited\"", File.ReadAllText(statusPathBeta));
+            Assert.DoesNotContain(
+                "\"exited\"",
+                LiveStatusFile.ReadAllText(statusPathBeta));
 
             cts.Cancel();
             HeadlessExitCode exitCode = await run.WaitAsync(TimeSpan.FromSeconds(10));
             Assert.Equal(HeadlessExitCode.Success, exitCode);
 
             JsonElement alphaExited = JsonDocument.Parse(
-                File.ReadAllLines(statusPathAlpha)
+                LiveStatusFile.ReadAllText(statusPathAlpha)
+                    .Split(
+                        Environment.NewLine,
+                        StringSplitOptions.RemoveEmptyEntries)
                     .Single(line => line.Contains("\"exited\"")))
                 .RootElement.Clone();
             Assert.Equal(0, alphaExited.GetProperty("code").GetInt32());

@@ -284,6 +284,9 @@ internal sealed class WindowedArm : ParityArm
                     new AcDream.Content.Skills.LiveSkillCreditResolver(
                         skillTable: null).Resolve,
                 ClientTime = () => Runtime.Clock.SimulationTimeSeconds,
+                // Neither arm starts from a session document, so nothing is
+                // declared for the seeder to compare against.
+                NoteOptionsSeeded = () => { },
                 RetainedUi = null,
                 Warn = _warnings.Add,
             });

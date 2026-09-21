@@ -130,7 +130,9 @@ public class ChatWindowControllerTests
         var (rootInfo, layout, vm) = BuildTestTree();
         var bus = new CaptureBus();
 
-        var ctrl = ChatWindowController.Bind(rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex);
+        var ctrl = ChatWindowController.Bind(
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner());
 
         Assert.NotNull(ctrl);
     }
@@ -152,7 +154,7 @@ public class ChatWindowControllerTests
         var entry = new RuntimeChatEntryOwner();
         ChatWindowController? ctrl = ChatWindowController.Bind(
             rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
-            NoTex, entry: entry);
+            NoTex, entry);
         Assert.NotNull(ctrl);
         return (ctrl!, bus, entry);
     }
@@ -272,7 +274,8 @@ public class ChatWindowControllerTests
         var (rootInfo, layout, vm) = BuildTestTree();
         var bus = new CaptureBus();
         ChatWindowController? ctrl = ChatWindowController.Bind(
-            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex);
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner());
         Assert.NotNull(ctrl);
         return ctrl!;
     }
@@ -369,7 +372,8 @@ public class ChatWindowControllerTests
         var bus = new CaptureBus();
 
         ChatWindowController? ctrl = ChatWindowController.Bind(
-            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex);
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner());
         Assert.NotNull(ctrl);
 
         ctrl!.StartTell("Dww");
@@ -389,7 +393,8 @@ public class ChatWindowControllerTests
         string? selected = "Dww";
 
         ChatWindowController? ctrl = ChatWindowController.Bind(
-            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex,
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner(),
             selectedTargetName: () => selected);
         Assert.NotNull(ctrl);
         UiMenu menu = Assert.IsType<UiMenu>(layout.FindElement(0x10000014u));
@@ -422,7 +427,8 @@ public class ChatWindowControllerTests
         var bus = new CaptureBus();
 
         ChatWindowController? ctrl = ChatWindowController.Bind(
-            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex,
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner(),
             selectedTargetName: () => "Aun Tanua",
             selectedTargetGuid: () => 0x8000ABCDu);
         Assert.NotNull(ctrl);
@@ -445,7 +451,8 @@ public class ChatWindowControllerTests
         var bus = new CaptureBus();
 
         ChatWindowController? ctrl = ChatWindowController.Bind(
-            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex,
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner(),
             selectedTargetName: () => "Aun Tanua",
             selectedTargetGuid: () => 0x8000ABCDu);
         Assert.NotNull(ctrl);
@@ -468,7 +475,8 @@ public class ChatWindowControllerTests
         var bus = new CaptureBus();
 
         ChatWindowController? ctrl = ChatWindowController.Bind(
-            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex,
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner(),
             selectedTargetName: () => null);
         Assert.NotNull(ctrl);
         UiMenu menu = Assert.IsType<UiMenu>(layout.FindElement(0x10000014u));
@@ -492,7 +500,9 @@ public class ChatWindowControllerTests
         var (rootInfo, layout, vm) = BuildTestTree();
         var bus = new CaptureBus();
 
-        var ctrl = ChatWindowController.Bind(rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex);
+        var ctrl = ChatWindowController.Bind(
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner());
 
         Assert.NotNull(ctrl);
         var panel = layout.FindElement(0x10000010u);
@@ -507,7 +517,9 @@ public class ChatWindowControllerTests
         var (rootInfo, layout, vm) = BuildTestTree();
         var bus = new CaptureBus();
 
-        var ctrl = ChatWindowController.Bind(rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex);
+        var ctrl = ChatWindowController.Bind(
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner());
 
         Assert.NotNull(ctrl);
         Assert.False(ctrl!.Transcript.Centered);
@@ -520,7 +532,9 @@ public class ChatWindowControllerTests
         var (rootInfo, layout, vm) = BuildTestTree();
         var bus = new CaptureBus();
 
-        var ctrl = ChatWindowController.Bind(rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex);
+        var ctrl = ChatWindowController.Bind(
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner());
 
         Assert.NotNull(ctrl);
         var bar = layout.FindElement(0x10000013u);
@@ -534,7 +548,8 @@ public class ChatWindowControllerTests
         var (rootInfo, layout, vm) = BuildTestTree();
         var bus = new CaptureBus();
         var ctrl = ChatWindowController.Bind(
-            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex)!;
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner())!;
 
         vm.ShowSystemMessage("one wrapped transcript line");
         IReadOnlyList<UiText.Line> first = ctrl.Transcript.LinesProvider();
@@ -567,7 +582,8 @@ public class ChatWindowControllerTests
         var filters = new ChatWindowState();
         filters.SetFilter(ChatWindowState.MainWindowId, ulong.MaxValue);
         var ctrl = ChatWindowController.Bind(
-            rootInfo, layout, vm, () => bus, filters, null, null, NoTex)!;
+            rootInfo, layout, vm, () => bus, filters, null, null,
+            NoTex, new RuntimeChatEntryOwner())!;
 
         log.OnSystemMessage("first", chatType: 0x05u);
         log.OnSystemMessage("middle", chatType: 0x22u);
@@ -587,7 +603,9 @@ public class ChatWindowControllerTests
         var (rootInfo, layout, vm) = BuildTestTree();
         var bus = new CaptureBus();
 
-        var ctrl = ChatWindowController.Bind(rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex);
+        var ctrl = ChatWindowController.Bind(
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner());
 
         Assert.NotNull(ctrl);
         ctrl!.Input.OnSubmit!.Invoke("hello world");
@@ -603,7 +621,9 @@ public class ChatWindowControllerTests
         var (rootInfo, layout, vm) = BuildTestTree();
         var bus = new CaptureBus();
 
-        var ctrl = ChatWindowController.Bind(rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex);
+        var ctrl = ChatWindowController.Bind(
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner());
 
         Assert.NotNull(ctrl);
         ctrl!.Input.OnSubmit!.Invoke("/ls");
@@ -619,7 +639,9 @@ public class ChatWindowControllerTests
         var (rootInfo, layout, vm) = BuildTestTree();
         var bus = new CaptureBus();
 
-        var ctrl = ChatWindowController.Bind(rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex);
+        var ctrl = ChatWindowController.Bind(
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner());
 
         Assert.NotNull(ctrl);
         ctrl!.Menu.OnSelect!.Invoke((object?)ChatChannelKind.General);
@@ -642,7 +664,9 @@ public class ChatWindowControllerTests
         var vm = new ChatVM(new ChatLog());
         var bus = new CaptureBus();
 
-        var ctrl = ChatWindowController.Bind(root, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex);
+        var ctrl = ChatWindowController.Bind(
+            root, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner());
 
         Assert.Null(ctrl);
     }
@@ -653,7 +677,9 @@ public class ChatWindowControllerTests
     {
         var (rootInfo, layout, vm) = BuildTestTree();
         var bus = new CaptureBus();
-        var ctrl = ChatWindowController.Bind(rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex);
+        var ctrl = ChatWindowController.Bind(
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner());
         Assert.NotNull(ctrl);
         Assert.Null(ctrl!.Input.LayoutPolicy);
         Assert.Equal(AnchorEdges.Left | AnchorEdges.Right, ctrl.Input.Anchors & (AnchorEdges.Left | AnchorEdges.Right));
@@ -674,7 +700,9 @@ public class ChatWindowControllerTests
     {
         var (rootInfo, layout, vm) = BuildTestTree();
         var bus = new CaptureBus();
-        var ctrl = ChatWindowController.Bind(rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex);
+        var ctrl = ChatWindowController.Bind(
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner());
         Assert.NotNull(ctrl);
 
         const float authoredParentWidth = 490f;
@@ -704,7 +732,9 @@ public class ChatWindowControllerTests
 
         layout = LayoutImporter.Build(rootInfo, NoTex, null);
         var bus = new CaptureBus();
-        var ctrl = ChatWindowController.Bind(rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex);
+        var ctrl = ChatWindowController.Bind(
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner());
 
         Assert.NotNull(ctrl);
         Assert.NotNull(ctrl!.Input.LayoutPolicy);
@@ -739,7 +769,9 @@ public class ChatWindowControllerTests
     {
         var (rootInfo, layout, vm) = BuildTestTree();
         var bus = new CaptureBus();
-        var ctrl = ChatWindowController.Bind(rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex)!;
+        var ctrl = ChatWindowController.Bind(
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner())!;
         var indicator = Assert.IsType<UiButton>(layout.FindElement(indicatorId));
 
         ctrl.SetIndicatorOpen(windowId, open: true);
@@ -752,7 +784,9 @@ public class ChatWindowControllerTests
     {
         var (rootInfo, layout, vm) = BuildTestTree();
         var bus = new CaptureBus();
-        var ctrl = ChatWindowController.Bind(rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex)!;
+        var ctrl = ChatWindowController.Bind(
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner())!;
         var indicator = Assert.IsType<UiButton>(layout.FindElement(0x10000522u));
 
         ctrl.SetIndicatorOpen(1, open: true);
@@ -766,7 +800,9 @@ public class ChatWindowControllerTests
     {
         var (rootInfo, layout, vm) = BuildTestTree();
         var bus = new CaptureBus();
-        var ctrl = ChatWindowController.Bind(rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex)!;
+        var ctrl = ChatWindowController.Bind(
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner())!;
         var indicator2 = Assert.IsType<UiButton>(layout.FindElement(0x10000523u));
 
         ctrl.SetIndicatorOpen(1, open: true);
@@ -781,7 +817,9 @@ public class ChatWindowControllerTests
     {
         var (rootInfo, layout, vm) = BuildTestTree();
         var bus = new CaptureBus();
-        var ctrl = ChatWindowController.Bind(rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex)!;
+        var ctrl = ChatWindowController.Bind(
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner())!;
 
         Assert.Throws<ArgumentOutOfRangeException>(() => ctrl.SetIndicatorOpen(windowId, open: true));
     }
@@ -792,7 +830,7 @@ public class ChatWindowControllerTests
         var (rootInfo, layout, vm) = BuildTestTree();
         ChatWindowController? ctrl = ChatWindowController.Bind(
             rootInfo, layout, vm, () => NullCommandBus.Instance,
-            new ChatWindowState(), null, null, NoTex);
+            new ChatWindowState(), null, null, NoTex, new RuntimeChatEntryOwner());
         Assert.NotNull(ctrl);
         UiMenu menu = Assert.IsType<UiMenu>(layout.FindElement(0x10000014u));
 
@@ -808,7 +846,7 @@ public class ChatWindowControllerTests
         var (rootInfo2, layout2, vm2) = BuildTestTree();
         ChatWindowController? ctrl2 = ChatWindowController.Bind(
             rootInfo2, layout2, vm2, () => NullCommandBus.Instance,
-            new ChatWindowState(), null, null, NoTex,
+            new ChatWindowState(), null, null, NoTex, new RuntimeChatEntryOwner(),
             chatStrings: key => key == "ID_Chat_ChatTargetMenuGeneral" ? "LOC" : null);
         Assert.NotNull(ctrl2);
         UiMenu menu2 = Assert.IsType<UiMenu>(layout2.FindElement(0x10000014u));
@@ -822,7 +860,8 @@ public class ChatWindowControllerTests
         var layout = LayoutImporter.Build(info, NoTex, null);
         var vm = new ChatVM(new ChatLog());
         var controller = ChatWindowController.Bind(info, layout, vm,
-            () => new CaptureBus(), new ChatWindowState(), null, null, NoTex)!;
+            () => new CaptureBus(), new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner())!;
         var root = new UiRoot { Width = 800f, Height = 600f };
         var handle = RetailWindowFrame.Mount(root, controller.Root, NoTex,
             new RetailWindowFrame.Options
@@ -904,7 +943,7 @@ public class ChatWindowControllerTests
         UiDatFont newFont = BuildDatFont();
         var ctrl = ChatWindowController.Bind(
             rootInfo, layout, vm, () => bus, new ChatWindowState(),
-            builtFont, null, NoTex)!;
+            builtFont, null, NoTex, new RuntimeChatEntryOwner())!;
 
         ctrl.ApplyChatFont(newFont);
 
@@ -919,7 +958,7 @@ public class ChatWindowControllerTests
         var bus = new CaptureBus();
         var ctrl = ChatWindowController.Bind(
             rootInfo, layout, vm, () => bus, new ChatWindowState(),
-            BuildDatFont(), null, NoTex)!;
+            BuildDatFont(), null, NoTex, new RuntimeChatEntryOwner())!;
         vm.ShowSystemMessage("one line before the font changes");
         IReadOnlyList<UiText.Line> before = ctrl.Transcript.LinesProvider();
 

@@ -100,6 +100,12 @@ internal sealed record GraphicalCharacterSessionParts
 
     public RetailUiRuntime? RetainedUi { get; init; }
 
+    /// <summary>
+    /// Told when the server has said what the character options are, so the
+    /// options a session document declared can be compared against them.
+    /// </summary>
+    public required Action NoteOptionsSeeded { get; init; }
+
     /// <summary>Where a binding problem is reported, as above.</summary>
     public Action<string>? Warn { get; init; }
 }
@@ -222,6 +228,7 @@ internal static partial class GraphicalAutomationCapabilities
                 // Open option-bearing panels re-read the live bits at every
                 // seed, which happens on login and again on a reconnect.
                 settings.NotifyServerOptionsSeeded();
+                parts.NoteOptionsSeeded();
             });
         LiveSessionBindingDeclarations.ReportDeclaredButUnfilled(
             "windowed",

@@ -48,8 +48,8 @@ public sealed record ChatRuntimeBindings(
     ChatVM ViewModel,
     Func<ICommandBus> CommandBus,
     ChatWindowState Windows,
-    SettingsStore? Store = null,
-    AcDream.Runtime.Chat.RuntimeChatEntryOwner? Entry = null);
+    AcDream.Runtime.Chat.RuntimeChatEntryOwner Entry,
+    SettingsStore? Store = null);
 
 public sealed record RadarRuntimeBindings(
     Func<UiRadarSnapshot> Snapshot,

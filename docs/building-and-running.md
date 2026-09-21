@@ -173,6 +173,13 @@ group carries the group's word:
 "pluginTags": ["tank", "group-a"]
 ```
 
+`statusFile` is one JSON line per session event, appended as it happens. A
+running session keeps that file open for its whole lifetime, so anything
+that watches it -- the launcher, a script, a person -- must open it with
+writing shared (`FileShare.ReadWrite`, or a tool that tails rather than
+locks). An ordinary exclusive read is refused while the session runs, so a
+watcher can never take the session's own writing away from it.
+
 `pluginSettings` is the startup settings each plugin is given, one object of
 settings per plugin id. A plugin reads only its own, through
 `IPluginHost.SessionSettings`:
@@ -211,15 +218,17 @@ dotnet run --project src/AcDream.App/AcDream.App.csproj -c Release -- --session-
 
 It requires exactly one session in the document, and it honours every
 per-session field that decides what a plugin sees: `character`, `plugins`,
-`pluginTags`, `pluginSettings`, `loginCommands`, `loginCommandDelayMs` and
-`statusFile`. Two fields only the windowless client acts on are accepted and
-ignored here rather than refused, so one document still starts either client:
-`characterOptions` (the windowless client applies the declared options on
-login; the graphical client leaves the character's own saved options alone)
-and `policy` (which bot policy drives a windowless session; a graphical
-session is driven by the player). The one field the graphical client refuses
-is `"mode": "probe"`, because a probe never selects a character and there is
-no windowed session to show.
+`pluginTags`, `pluginSettings`, `loginCommands`, `loginCommandDelayMs`,
+`characterOptions` and `statusFile`. Both clients check `characterOptions`
+against the same declarable list and seed it the same way on login, so a
+document means the same thing whichever client reads it; a client started
+without a document declares none, so a player who sets an option in the
+panels is never overruled. One field only the windowless client acts on is
+accepted and ignored here rather than refused, so one document still starts
+either client: `policy` (which bot policy drives a windowless session; a
+graphical session is driven by the player). The one field the graphical
+client refuses is `"mode": "probe"`, because a probe never selects a
+character and there is no windowed session to show.
 
 Where a document and a startup option say the same thing, the document wins:
 its `pluginTags` outranks `ACDREAM_PLUGIN_TAGS`, and its `pluginSettings`

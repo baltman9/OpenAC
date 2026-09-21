@@ -119,7 +119,7 @@ public sealed class UiWindowDrawCaptureSweepTests
             new ChatWindowState(),
             null,
             null,
-            id => (id, 8, 8));
+            id => (id, 8, 8), new RuntimeChatEntryOwner());
         Assert.NotNull(controller);
 
         var root = new UiRoot { Width = 1600f, Height = 1200f };
