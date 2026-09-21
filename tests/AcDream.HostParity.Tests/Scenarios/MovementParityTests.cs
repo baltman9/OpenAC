@@ -17,6 +17,10 @@ namespace AcDream.HostParity.Tests;
 /// a presentation tree, so these calls were recorded as refused and the two
 /// clients were only compared below the seam.
 ///
+/// Mutation check (2026-09-21), run: overshooting a turn by five degrees
+/// turned <see cref="TurningOnTheSpotRunsTheSameOnBothClients"/> red on both
+/// arms at once, 95 against 90.
+///
 /// Mutation check (2026-09-20), run: dropping the post-network half of the
 /// frame -- the half that sends the character's position -- from the windowed
 /// arm alone turned both scenarios in this file red, along with four combat

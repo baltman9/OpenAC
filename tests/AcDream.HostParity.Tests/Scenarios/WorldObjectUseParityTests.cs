@@ -15,6 +15,12 @@ namespace AcDream.HostParity.Tests;
 /// tell a client that walked to the corpse from one that did nothing, since
 /// two clients doing nothing agree line for line.
 ///
+/// Mutation check (2026-09-21), run: making the shared route send the use
+/// from wherever the character stands instead of walking first turned
+/// <see cref="UsingACorpseSeveralMetresOffLooksTheSameOnBothClients"/> and
+/// <see cref="TwoUsesInARowAreRefusedTheSameOnBothClients"/> red on both arms
+/// at once -- a use on the wire where there should have been none.
+///
 /// Mutation check (2026-09-20), run: taking the walk-then-use binding out of
 /// the shared binding pass for one arm turned three of these four red on the
 /// status lines, exactly as the client without a window used to answer;

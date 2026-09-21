@@ -19,6 +19,11 @@ namespace AcDream.HostParity.Tests;
 /// is the same length on both, so the agreement is exact rather than within a
 /// tolerance.
 ///
+/// Mutation check (2026-09-21), run: treating a creature the server moved
+/// outright as an ordinary update turned
+/// <see cref="ATeleportPutsTheBodyInTheSamePlaceOnBoth"/> red on both arms at
+/// once, UnroutedCatchUp against TeleportPlacement.
+///
 /// Mutation checks (2026-09-20), all run:
 /// * making the windowless drive carry nothing turned four of the five red,
 ///   and left only the beyond-the-bubble one green -- which is right, because

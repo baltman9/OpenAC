@@ -13,6 +13,12 @@ namespace AcDream.HostParity.Tests;
 /// legitimately have different no-op implementations, and a plugin cannot
 /// tell them apart except by what they do.
 ///
+/// Mutation check (2026-09-21), run: counting a re-selection of what is
+/// already selected as a change turned
+/// <see cref="SelectingAndClearingBehavesTheSameOnBothClients"/> red on both
+/// arms at once, on the answer and on the four changes a plugin then heard
+/// where there should have been three.
+///
 /// Mutation check (2026-09-20), run: taking the real storage away from the
 /// client with a window -- leaving it the do-nothing store the scenario used
 /// to run against on both arms -- turned

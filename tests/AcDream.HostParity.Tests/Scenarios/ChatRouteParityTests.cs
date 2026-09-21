@@ -18,6 +18,11 @@ namespace AcDream.HostParity.Tests;
 /// text, its kind and its place in the order; and what the submission itself
 /// answered. Those three are what a plugin, a chat box and a console all read.
 ///
+/// Mutation check (2026-09-21), run: making a submitted line lose to whatever
+/// was already staged in the box turned
+/// <see cref="SendingWhileSomethingIsStagedRunsTheSameOnBothClients"/> red on
+/// both arms at once, on the words that reached the world.
+///
 /// Mutation check (2026-09-20), run: making the windowless client's route
 /// resolve no pose -- which is what it used to be given -- turned the pose
 /// scenario red and left the other thirteen green. Restoring it turned it

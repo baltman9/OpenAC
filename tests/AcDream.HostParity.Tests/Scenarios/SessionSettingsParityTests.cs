@@ -13,6 +13,11 @@ namespace AcDream.HostParity.Tests;
 /// wrapper each client puts around its host, which is what turns "the whole
 /// map" into "this plugin's own settings".
 ///
+/// Mutation check (2026-09-21), run: handing every plugin the whole settings
+/// map instead of its own turned
+/// <see cref="APluginReadsTheSameStartupSettingsOnBothClients"/> red on both
+/// arms at once.
+///
 /// Mutation check (2026-09-20), run: taking the settings away from the
 /// windowed arm's host -- which is what that client did before it had the
 /// option at all -- turned

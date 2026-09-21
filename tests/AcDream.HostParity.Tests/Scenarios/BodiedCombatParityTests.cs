@@ -17,6 +17,13 @@ namespace AcDream.HostParity.Tests;
 /// to finish loading, no swing left either of them, which the comparison was
 /// perfectly happy with.
 ///
+/// Mutation checks (2026-09-21), each run: making the power bar take two
+/// seconds to fill instead of one turned
+/// <see cref="HoldingAndReleasingASwingRunsTheSameOnBothClients"/> red at the
+/// first step of the bar; sending every swing aimed at the middle turned the
+/// same scenario red on the height. Both clients were wrong together in each
+/// case, so nothing but the assertions could see it.
+///
 /// Mutation checks (2026-09-20), each run:
 /// * Before the clock was made one clock, the windowed client timed its
 ///   power-up off a wall clock:

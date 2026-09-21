@@ -19,6 +19,11 @@ namespace AcDream.HostParity.Tests;
 /// the clients agree, including when they agree on staging nothing and
 /// sending nothing.
 ///
+/// Mutation check (2026-09-21), run: making a submitted line lose to whatever
+/// was already staged in the box turned
+/// <see cref="SendingWhileADraftIsPendingBehavesTheSameOnBothClients"/> red on
+/// both arms at once -- "half a sentence" went out where "hello" should have.
+///
 /// What is and is not under test here: the entry, its routing and both hosts'
 /// real binding pass are. The windowed chat PANEL is not -- it needs a layout
 /// tree, a font and a sprite resolver, none of which exist without a window --

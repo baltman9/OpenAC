@@ -20,10 +20,12 @@ namespace AcDream.HostParity.Tests;
 /// Mutation check (2026-09-20): unbinding the windowed arm's combat-mode
 /// operations turned every scenario that enters a stance red, naming the
 /// fields that diverged; restoring the binding turned them green.
-/// Mutation check (2026-09-21): answering the skill projection with an empty
-/// list turned <see cref="SkillsAndAttributesReadTheSameOnBothClients"/> red
-/// on both arms at once -- which is exactly the shape of break the
-/// comparison alone could never see.
+/// Mutation check (2026-09-21), run: dropping the ranks bought into a pool
+/// out of the maximum it adds up to turned
+/// <see cref="TheCharacterReadsTheSameOnBothClients"/> red on both arms at
+/// once, 159 against 156 -- which is exactly the shape of break the
+/// comparison alone could never see, since both clients were wrong together
+/// and their transcripts still matched line for line.
 /// </summary>
 public sealed class ReadParityTests
 {

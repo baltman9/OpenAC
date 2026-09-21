@@ -17,6 +17,11 @@ namespace AcDream.HostParity.Tests;
 /// want of a material and a target kind in the staging, and the two
 /// transcripts agreed about it line for line.
 ///
+/// Mutation check (2026-09-21), run: handing a plugin an empty list for the
+/// container it has open turned <see cref="ACorpseCycleLooksTheSameOnBothClients"/>
+/// red on both arms at once, with the two things in the corpse against
+/// nothing; the transcripts still agreed, so only the assertion caught it.
+///
 /// Mutation check (2026-09-20), run: making the shared binding pass hand one
 /// arm a <c>Use</c> that always refuses turned every scenario in this file
 /// red, on the status lines and on the outbound counts. Separately, stamping

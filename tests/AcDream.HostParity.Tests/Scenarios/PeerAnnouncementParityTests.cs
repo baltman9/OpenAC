@@ -16,6 +16,11 @@ namespace AcDream.HostParity.Tests;
 /// silences: the note has to exist, and it has to carry this character and
 /// this client's configured words.
 ///
+/// Mutation check (2026-09-21), run: swapping the health and the mana the
+/// note reports turned <see cref="EitherClientAnnouncesItselfToTheMachine"/>
+/// red on both arms at once, 55 against 40. Both clients wrote the same wrong
+/// note, so the comparison was perfectly happy with it.
+///
 /// Mutation checks (2026-09-20):
 /// * building the windowless host's surface with no tick (its state before
 ///   this work) turned <see cref="EitherClientAnnouncesItselfToTheMachine"/>

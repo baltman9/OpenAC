@@ -15,6 +15,12 @@ namespace AcDream.HostParity.Tests;
 /// clients doing nothing agree line for line -- and until the wait for the
 /// power bar was added below, no swing left either client in this file.
 ///
+/// Mutation check (2026-09-21), run: sending every swing aimed at the middle
+/// whatever height was asked for turned
+/// <see cref="NamingATargetWhileAnotherIsSelectedSwingsAtTheNamedOne"/> red
+/// on both arms at once. Both clients were wrong in the same way, so the
+/// transcripts still agreed.
+///
 /// Mutation check (2026-09-20): making the windowed arm resolve its target
 /// from the selection at swing time -- reading
 /// <c>Runtime.ActionOwner.Selection.SelectedObjectId</c> in place of the
