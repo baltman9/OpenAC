@@ -209,7 +209,7 @@ public sealed class NavigationWalkControllerTests
     public void AWalkThatCanOnlyEndOutOfSightOfItsGoalDoesNotSayItArrived()
     {
         var body = new SimulatedBody(new Vector3(10f, 4f, -30f));
-        var walk = new NavigationWalkController(RoomWithDoorways(), body, new Goals { [Target] = new Vector3(10f, 16f, -30f) });
+        var walk = new NavigationWalkController(ImpassableRoomWall(), body, new Goals { [Target] = new Vector3(10f, 16f, -30f) });
 
         walk.WalkTo(Target);
         NavigationWalkReport report = RunUntilSettled(walk, body);
@@ -1860,6 +1860,36 @@ public sealed class NavigationWalkControllerTests
             0xA9B4FFFFu,
             new TerrainSurface(new byte[81], new float[256]),
             [new CellSurface(0xA9B40100u, vertices, polygons)],
+            [],
+            0f,
+            0f);
+        return physics;
+    }
+
+    /// <summary>
+    /// A room like <see cref="RoomWithDoorways"/>, but with the dividing wall extending
+    /// beyond the floor so the route cannot walk around either end.
+    /// </summary>
+    private static PhysicsEngine ImpassableRoomWall()
+    {
+        const float floor = -30f;
+        const float top = -27f;
+        var vertices = new Dictionary<ushort, Vector3>
+        {
+            [0] = new(0f, 0f, floor),
+            [1] = new(20f, 0f, floor),
+            [2] = new(20f, 20f, floor),
+            [3] = new(0f, 20f, floor),
+            [4] = new(-100f, 10f, floor),
+            [5] = new(100f, 10f, floor),
+            [6] = new(100f, 10f, top),
+            [7] = new(-100f, 10f, top),
+        };
+        var physics = new PhysicsEngine();
+        physics.AddLandblock(
+            0xA9B4FFFFu,
+            new TerrainSurface(new byte[81], new float[256]),
+            [new CellSurface(0xA9B40100u, vertices, [[0, 1, 2, 3], [4, 5, 6, 7]])],
             [],
             0f,
             0f);

@@ -549,6 +549,20 @@ public sealed class HeadlessConsoleTests
         string statusPathBeta = Path.Combine(
             Path.GetTempPath(),
             $"acdream-headless-requestclose-beta-{Guid.NewGuid():N}.jsonl");
+
+        static string ReadStatusFile(string path)
+        {
+            // File.ReadAllText opens with FileShare.Read, which conflicts with
+            // the status writer's append handle on Windows while it is writing.
+            using var stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite);
+            using var reader = new StreamReader(stream);
+            return reader.ReadToEnd();
+        }
+
         try
         {
             HeadlessSessionDescriptor StandardInputDescriptor(
@@ -600,7 +614,7 @@ public sealed class HeadlessConsoleTests
 
             DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
             while (!File.Exists(statusPathAlpha)
-                || !File.ReadAllText(statusPathAlpha).Contains("\"exited\""))
+                || !ReadStatusFile(statusPathAlpha).Contains("\"exited\""))
             {
                 if (DateTime.UtcNow > deadline)
                 {
@@ -618,7 +632,7 @@ public sealed class HeadlessConsoleTests
             // write rather than racing it.
             DateTime betaDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
             while (!File.Exists(statusPathBeta)
-                || !File.ReadAllText(statusPathBeta).Contains("\"enteredWorld\""))
+                || !ReadStatusFile(statusPathBeta).Contains("\"enteredWorld\""))
             {
                 if (DateTime.UtcNow > betaDeadline)
                     throw new TimeoutException("beta never reached enteredWorld.");
@@ -626,7 +640,7 @@ public sealed class HeadlessConsoleTests
             }
 
             Assert.False(beta.IsPolicyComplete);
-            Assert.DoesNotContain("\"exited\"", File.ReadAllText(statusPathBeta));
+            Assert.DoesNotContain("\"exited\"", ReadStatusFile(statusPathBeta));
 
             cts.Cancel();
             HeadlessExitCode exitCode = await run.WaitAsync(TimeSpan.FromSeconds(10));
