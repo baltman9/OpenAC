@@ -294,12 +294,6 @@
           "AcDream.Runtime": "[0.1.13-dev.1, )"
         }
       },
-      "acdream-plugincheck": {
-        "type": "Project",
-        "dependencies": {
-          "AcDream.Launcher.Core": "[0.1.13-dev.1, )"
-        }
-      },
       "acdream.content": {
         "type": "Project",
         "dependencies": {
