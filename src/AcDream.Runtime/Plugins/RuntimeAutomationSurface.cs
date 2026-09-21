@@ -25,7 +25,8 @@ internal sealed class RuntimeAutomationSurface
       IRuntimeCommunicationObserver, IRuntimeEventObserver,
       IWorldObjectAutomation, IRecallAutomation, IAllegianceAutomation,
       IWorldTimeAutomation, ILoginAutomation, INetworkAutomation, IRecoveryAutomation,
-      IProjectileAutomation, ISelectionAutomation, IDialogAutomation, IDisposable
+      IProjectileAutomation, ISelectionAutomation, IDialogAutomation,
+      IWorldLabelAutomation, IScopedWorldLabelSource, IDisposable
 {
     private readonly PluginCommandRegistry _pluginCommands;
     private Action<string, Exception>? _pluginCommandFailed;
@@ -100,6 +101,13 @@ internal sealed class RuntimeAutomationSurface
     private IReadOnlyList<PluginProjectileDebugSample> _projectileDebugSamples =
         Array.Empty<PluginProjectileDebugSample>();
     private long _projectileDebugSamplesExpireAt;
+    // One label set per owner, so a plugin replacing its own set never
+    // touches another's. The merged view the drawing side reads is rebuilt
+    // only when a set changes, since it is asked for every frame.
+    private readonly Dictionary<string, PluginWorldLabel[]> _worldLabels =
+        new(StringComparer.Ordinal);
+    private PluginWorldLabel[]? _worldLabelsMerged = Array.Empty<PluginWorldLabel>();
+    private const string UnscopedWorldLabelOwner = "";
     private IGameRuntimeCommands? _sessionCommands;
     private Func<string, bool>? _submitChatText;
     private IDisposable? _communicationSubscription;
@@ -320,6 +328,7 @@ internal sealed class RuntimeAutomationSurface
     public INetworkAutomation Network => this;
     public IRecoveryAutomation Recovery => this;
     public IProjectileAutomation Projectiles => this;
+    public IWorldLabelAutomation Labels => this;
     public ISelectionAutomation Selection => this;
     public ITradeAutomation Trade
     {
@@ -973,6 +982,9 @@ internal sealed class RuntimeAutomationSurface
         _trackedCastCompletionRevision = 0;
         _projectileDebugSamples = Array.Empty<PluginProjectileDebugSample>();
         _projectileDebugSamplesExpireAt = 0;
+        // The objects the labels hung from are gone with the session.
+        _worldLabels.Clear();
+        _worldLabelsMerged = Array.Empty<PluginWorldLabel>();
     }
 
     // Trade/vendor event polling only. The headless host calls this once per
@@ -2402,6 +2414,108 @@ internal sealed class RuntimeAutomationSurface
             }
             return _projectileDebugSamples;
         }
+    }
+
+    // ── IWorldLabelAutomation ───────────────────────────────────────────
+    // The same shape as the projectile markers: a plugin pushes a whole
+    // set, the surface keeps a detached copy, and whichever host has
+    // something to draw with reads it back once a frame. A host with no
+    // window keeps the set too and simply never asks for it.
+
+    bool IWorldLabelAutomation.ShowLabels(IReadOnlyList<PluginWorldLabel> labels) =>
+        ShowWorldLabels(UnscopedWorldLabelOwner, labels);
+
+    IWorldLabelAutomation IScopedWorldLabelSource.ScopeTo(string ownerId)
+    {
+        ArgumentNullException.ThrowIfNull(ownerId);
+        return new OwnedWorldLabels(this, ownerId);
+    }
+
+    void IScopedWorldLabelSource.Release(string ownerId)
+    {
+        ArgumentNullException.ThrowIfNull(ownerId);
+        lock (_gate)
+        {
+            if (_worldLabels.Remove(ownerId))
+                _worldLabelsMerged = null;
+        }
+    }
+
+    /// <summary>
+    /// Takes one owner's whole label set. A set over the cap is refused
+    /// unchanged rather than trimmed, so the plugin learns it asked for too
+    /// much; an unusable label inside an acceptable set is dropped quietly,
+    /// since one bad entry should not cost the other two hundred.
+    /// </summary>
+    internal bool ShowWorldLabels(string ownerId, IReadOnlyList<PluginWorldLabel> labels)
+    {
+        ArgumentNullException.ThrowIfNull(ownerId);
+        ArgumentNullException.ThrowIfNull(labels);
+        if (labels.Count > IWorldLabelAutomation.MaximumLabels)
+            return false;
+
+        var detached = new List<PluginWorldLabel>(labels.Count);
+        for (int index = 0; index < labels.Count; index++)
+        {
+            PluginWorldLabel label = labels[index];
+            if (label.ObjectId == 0u
+                || string.IsNullOrEmpty(label.Text)
+                || !float.IsFinite(label.MaxRange)
+                || label.MaxRange <= 0f
+                || !float.IsFinite(label.HeightOffset))
+            {
+                continue;
+            }
+            detached.Add(label);
+        }
+
+        lock (_gate)
+        {
+            if (_disposed)
+                return false;
+            if (detached.Count == 0)
+                _worldLabels.Remove(ownerId);
+            else
+                _worldLabels[ownerId] = detached.ToArray();
+            _worldLabelsMerged = null;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Every label every plugin has showing, in the order the owners pushed
+    /// them. The array is shared between calls until a set changes, so a
+    /// reader iterates it and never holds on to it.
+    /// </summary>
+    internal IReadOnlyList<PluginWorldLabel> CaptureWorldLabels()
+    {
+        lock (_gate)
+        {
+            if (_disposed)
+                return Array.Empty<PluginWorldLabel>();
+            if (_worldLabelsMerged is { } merged)
+                return merged;
+            int total = 0;
+            foreach (PluginWorldLabel[] set in _worldLabels.Values)
+                total += set.Length;
+            if (total == 0)
+                return _worldLabelsMerged = Array.Empty<PluginWorldLabel>();
+            var all = new PluginWorldLabel[total];
+            int cursor = 0;
+            foreach (PluginWorldLabel[] set in _worldLabels.Values)
+            {
+                set.CopyTo(all, cursor);
+                cursor += set.Length;
+            }
+            return _worldLabelsMerged = all;
+        }
+    }
+
+    private sealed class OwnedWorldLabels(RuntimeAutomationSurface surface, string ownerId)
+        : IWorldLabelAutomation
+    {
+        public bool ShowLabels(IReadOnlyList<PluginWorldLabel> labels) =>
+            surface.ShowWorldLabels(ownerId, labels);
     }
 
     private PluginProjectilePathResult EvaluateProjectilePathRequest(

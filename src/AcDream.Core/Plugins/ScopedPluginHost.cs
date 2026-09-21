@@ -145,6 +145,8 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         private ScopedPluginChat? _chatWrapper;
         private INavigationAutomation? _navigationSource;
         private INavigationAutomation? _navigationScope;
+        private IWorldLabelAutomation? _labelSource;
+        private IWorldLabelAutomation? _labelScope;
         private bool _disposed;
 
         private IAutomationSurface Inner => host.Automation;
@@ -217,6 +219,30 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         public INetworkAutomation Network => Inner.Network;
         public IRecoveryAutomation Recovery => Inner.Recovery;
         public IProjectileAutomation Projectiles => Inner.Projectiles;
+        // The same shape as navigation: a host whose labels can tell plugins
+        // apart hands this plugin its own set, so the cap is per plugin and
+        // the set goes with the plugin when it is disabled.
+        public IWorldLabelAutomation Labels
+        {
+            get
+            {
+                IWorldLabelAutomation source = Inner.Labels;
+                lock (_gate)
+                {
+                    if (_disposed)
+                        return NoOpAutomationSurface.Instance.Labels;
+                    if (!ReferenceEquals(_labelSource, source))
+                    {
+                        (_labelSource as IScopedWorldLabelSource)?.Release(pluginId);
+                        _labelSource = source;
+                        _labelScope = source is IScopedWorldLabelSource scoped
+                            ? scoped.ScopeTo(pluginId)
+                            : source;
+                    }
+                    return _labelScope!;
+                }
+            }
+        }
         public ISelectionAutomation Selection => Inner.Selection;
         public ITradeAutomation Trade => Inner.Trade;
         public IVendorAutomation Vendor => Inner.Vendor;
@@ -224,6 +250,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         public void Dispose()
         {
             INavigationAutomation? navigation;
+            IWorldLabelAutomation? labels;
             lock (_gate)
             {
                 _disposed = true;
@@ -231,9 +258,14 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
                 navigation = _navigationSource;
                 _navigationSource = null;
                 _navigationScope = null;
+                labels = _labelSource;
+                _labelSource = null;
+                _labelScope = null;
             }
-            // The plugin is going: its walk stops and its pauses are dropped.
+            // The plugin is going: its walk stops, its pauses are dropped,
+            // and its labels come down.
             (navigation as IScopedNavigationSource)?.Release(pluginId);
+            (labels as IScopedWorldLabelSource)?.Release(pluginId);
         }
     }
 

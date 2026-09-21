@@ -33,7 +33,7 @@ public sealed class ScopedAutomationSurfaceTests
         // Sanity check: if this drops below the known count, the interface
         // shrank and the loop below silently checks less than intended.
         Assert.True(
-            properties.Length >= 22,
+            properties.Length >= 23,
             "IAutomationSurface should still have every member this test knows about.");
 
         var checkedMembers = new List<string>();
@@ -63,7 +63,7 @@ public sealed class ScopedAutomationSurfaceTests
         // Every property this loop actually walked should be one of the
         // known forwarders, guarding against the loop silently checking zero
         // properties if reflection ever returned nothing.
-        Assert.Equal(22, checkedMembers.Count);
+        Assert.Equal(23, checkedMembers.Count);
 
         scoped.Dispose();
     }
