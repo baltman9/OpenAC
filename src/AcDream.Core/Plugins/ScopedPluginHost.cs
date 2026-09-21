@@ -243,6 +243,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
                 }
             }
         }
+        public IDungeonMapAutomation DungeonMap => Inner.DungeonMap;
         public ISelectionAutomation Selection => Inner.Selection;
         public ITradeAutomation Trade => Inner.Trade;
         public IVendorAutomation Vendor => Inner.Vendor;

@@ -935,6 +935,9 @@ public interface IAutomationSurface
     /// <summary>Text labels hung over objects in the world.</summary>
     IWorldLabelAutomation Labels => NoOpAutomationSurface.Instance;
 
+    /// <summary>The shape of the dungeon the character is in, for drawing a map of it.</summary>
+    IDungeonMapAutomation DungeonMap => NoOpAutomationSurface.Instance;
+
     /// <summary>What the player has selected, and acting on it.</summary>
     ISelectionAutomation Selection => NoOpAutomationSurface.Instance;
 
@@ -958,7 +961,7 @@ public sealed class NoOpAutomationSurface
       IFellowshipAutomation, IAllegianceAutomation, IEnchantmentAutomation, INavigationAutomation
       , IWorldObjectAutomation, IRecallAutomation, IWorldTimeAutomation, ILoginAutomation,
       INetworkAutomation, IRecoveryAutomation, IProjectileAutomation
-      , IWorldLabelAutomation
+      , IWorldLabelAutomation, IDungeonMapAutomation
       , ISelectionAutomation, IDialogAutomation, ITradeAutomation,
       IVendorAutomation
 {
@@ -1034,6 +1037,9 @@ public sealed class NoOpAutomationSurface
 
     /// <inheritdoc/>
     public IWorldLabelAutomation Labels => this;
+
+    /// <inheritdoc/>
+    public IDungeonMapAutomation DungeonMap => this;
 
     /// <inheritdoc/>
     public ISelectionAutomation Selection => this;

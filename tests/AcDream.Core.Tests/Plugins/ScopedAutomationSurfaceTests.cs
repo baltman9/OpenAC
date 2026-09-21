@@ -63,7 +63,7 @@ public sealed class ScopedAutomationSurfaceTests
         // Every property this loop actually walked should be one of the
         // known forwarders, guarding against the loop silently checking zero
         // properties if reflection ever returned nothing.
-        Assert.Equal(23, checkedMembers.Count);
+        Assert.Equal(24, checkedMembers.Count);
 
         scoped.Dispose();
     }
@@ -332,6 +332,7 @@ public sealed class ScopedAutomationSurfaceTests
         public INetworkAutomation Network { get; } = new FakeNetworkAutomation();
         public IRecoveryAutomation Recovery { get; } = new FakeRecoveryAutomation();
         public IProjectileAutomation Projectiles { get; } = new FakeProjectileAutomation();
+        public IDungeonMapAutomation DungeonMap { get; } = new FakeDungeonMapAutomation();
         public ISelectionAutomation Selection { get; } = new FakeSelectionAutomation();
         public ITradeAutomation Trade { get; } = new FakeTradeAutomation();
         public IVendorAutomation Vendor { get; } = new FakeVendorAutomation();
@@ -434,6 +435,8 @@ public sealed class ScopedAutomationSurfaceTests
     private sealed class FakeRecoveryAutomation : IRecoveryAutomation;
 
     private sealed class FakeProjectileAutomation : IProjectileAutomation;
+
+    private sealed class FakeDungeonMapAutomation : IDungeonMapAutomation;
 
     private sealed class FakeSelectionAutomation : ISelectionAutomation;
 
