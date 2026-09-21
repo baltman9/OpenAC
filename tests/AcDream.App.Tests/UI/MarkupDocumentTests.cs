@@ -23,6 +23,49 @@ public class MarkupDocumentTests
         public Action<int> SelectIndex => value => SelectedIndex = value;
     }
 
+    private sealed class LateValueBinding
+    {
+        public string Range { get; set; } = "5";
+        public List<string> Heard { get; } = [];
+        public Action<string> ChangeRange => value =>
+        {
+            Heard.Add(value);
+            Range = value;
+        };
+    }
+
+    /// <summary>
+    /// A value that changes behind a field -- a profile loaded after the panel
+    /// was built -- is shown by the field, and the owner is not told about a
+    /// change it made itself. What is typed still reaches the owner.
+    /// </summary>
+    [Fact]
+    public void AFieldFollowsItsValueWhenNobodyIsTypingInIt()
+    {
+        const string xml = """
+            <panel x="0" y="0" w="240" h="120">
+              <field x="4" y="4" w="120" h="20" text="{Range}"
+                     onchange="{ChangeRange}" />
+            </panel>
+            """;
+        var binding = new LateValueBinding();
+        UiNineSlicePanel panel = MarkupDocument.Build(
+            xml, binding, _ => (1u, 32, 32));
+        UiField field = Assert.IsType<UiField>(panel.Children[0]);
+        Assert.Equal("5", field.Text);
+
+        binding.Range = "40";
+        panel.TickSelfAndChildren(0.016);
+
+        Assert.Equal("40", field.Text);
+        Assert.Empty(binding.Heard);
+
+        field.SetText("5");
+        Assert.Equal(["5"], binding.Heard);
+        panel.TickSelfAndChildren(0.016);
+        Assert.Equal("5", field.Text);
+    }
+
     [Fact]
     public void FieldAndMenuBindEditablePluginState()
     {
