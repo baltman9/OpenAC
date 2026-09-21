@@ -391,10 +391,15 @@ public static class MarkupDocument
                     MaxCharacters = Math.Max(1, I(el, "maxlength", 128)),
                     ClearOnSubmit = B(el, "clearonsubmit", false),
                     RecordHistory = false,
-                    OnTextChanged = fieldChanged,
                     OnSubmit = submitted,
                 };
-                field.SetText(BindString((string?)el.Attribute("text"), binding)());
+                Func<string?> fieldText = BindString(
+                    (string?)el.Attribute("text"), binding);
+                // The owner hears about what is typed, not about its own
+                // value being put on show.
+                field.SetText(fieldText());
+                field.BoundText = () => fieldText() ?? string.Empty;
+                field.OnTextChanged = fieldChanged;
                 ApplyCommon(field, el, binding);
                 parent.AddChild(field);
                 break;

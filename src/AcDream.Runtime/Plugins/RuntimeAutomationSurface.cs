@@ -93,7 +93,6 @@ internal sealed class RuntimeAutomationSurface
     private Func<bool>? _chatInputActive;
     private Func<string, bool>? _composeChat;
     private Func<PluginSelectionAction, bool>? _selectionAction;
-    private PhysicsEngine? _projectilePhysics;
     private IReadOnlyList<PluginProjectileDebugSample> _projectileDebugSamples =
         Array.Empty<PluginProjectileDebugSample>();
     private long _projectileDebugSamplesExpireAt;
@@ -765,13 +764,6 @@ internal sealed class RuntimeAutomationSurface
         ArgumentNullException.ThrowIfNull(dismissGhost);
         lock (_gate)
             _dismissGhost = dismissGhost;
-    }
-
-    public void BindProjectileCollision(PhysicsEngine physics)
-    {
-        ArgumentNullException.ThrowIfNull(physics);
-        lock (_gate)
-            _projectilePhysics = physics;
     }
 
     public void BindSelectionActions(
@@ -2053,7 +2045,7 @@ internal sealed class RuntimeAutomationSurface
         get
         {
             lock (_gate)
-                return !_disposed && _projectilePhysics is not null && IsAvailable;
+                return !_disposed && IsAvailable;
         }
     }
 
@@ -2142,14 +2134,13 @@ internal sealed class RuntimeAutomationSurface
         bool captureDiagnostics)
     {
         GameRuntime? runtime;
-        PhysicsEngine? physics;
         lock (_gate)
-        {
             runtime = _runtime;
-            physics = _projectilePhysics;
-        }
-        if (runtime is null || physics is null || !IsAvailable)
+        if (runtime is null || !IsAvailable)
             return new(PluginProjectilePathStatus.Unavailable);
+        // The flight is tested against the collision world the session's own
+        // bodies move through, so every client answers from the same place.
+        PhysicsEngine physics = runtime.EntityObjects.Physics.Engine;
         if (targetObjectId == 0u
             || !float.IsFinite(projectileRadius)
             || projectileRadius <= 0f
@@ -2161,18 +2152,28 @@ internal sealed class RuntimeAutomationSurface
         }
 
         uint localId = runtime.PlayerIdentity.ServerGuid;
+        // The target is wherever the rest of the client takes it to be: its
+        // body when it has one, and the server's last word about it when it
+        // has stood still since it came into view and has none yet.
         if (!runtime.EntityObjects.Entities.TryGetActive(
                 localId,
                 out RuntimeEntityRecord local)
-            || !runtime.EntityObjects.Entities.TryGetActive(
-                targetObjectId,
-                out RuntimeEntityRecord target)
             || local.PhysicsBody is not { } localBody
-            || target.PhysicsBody is not { } targetBody
-            || localBody.CellPosition.ObjCellId == 0u)
+            || localBody.CellPosition.ObjCellId == 0u
+            || runtime.EntityObjects.Physics.InteractionTargetPosition(
+                targetObjectId) is not { } targetPosition)
         {
             return new(PluginProjectilePathStatus.InvalidTarget);
         }
+
+        // A flight through a place whose collision data is not loaded would
+        // meet nothing and read as clear. That is no answer, and it is said so.
+        uint startCell = localBody.CellPosition.ObjCellId;
+        bool worldIsLoaded = (startCell & 0xFFFFu) >= 0x0100u
+            ? physics.IsSpawnCellReady(startCell)
+            : physics.IsLandblockTerrainResident(startCell);
+        if (!worldIsLoaded)
+            return new(PluginProjectilePathStatus.Unavailable);
 
         try
         {
@@ -2181,7 +2182,7 @@ internal sealed class RuntimeAutomationSurface
                 localId,
                 localBody,
                 targetObjectId,
-                targetBody,
+                targetPosition,
                 kind,
                 targetHeight,
                 projectileRadius,
@@ -2202,7 +2203,7 @@ internal sealed class RuntimeAutomationSurface
         uint localObjectId,
         PhysicsBody local,
         uint targetObjectId,
-        PhysicsBody target,
+        System.Numerics.Vector3 targetPosition,
         PluginProjectilePathKind kind,
         PluginAttackHeight targetHeight,
         float radius,
@@ -2210,7 +2211,7 @@ internal sealed class RuntimeAutomationSurface
         int maximumChecks,
         bool captureDiagnostics)
     {
-        System.Numerics.Vector3 baseDelta = target.Position - local.Position;
+        System.Numerics.Vector3 baseDelta = targetPosition - local.Position;
         var horizontal = new System.Numerics.Vector2(baseDelta.X, baseDelta.Y);
         float horizontalDistance = horizontal.Length();
         if (!float.IsFinite(horizontalDistance)
@@ -2237,7 +2238,7 @@ internal sealed class RuntimeAutomationSurface
             direction.X * sourceForward,
             direction.Y * sourceForward,
             sourceHeight);
-        var destination = target.Position + new System.Numerics.Vector3(
+        var destination = targetPosition + new System.Numerics.Vector3(
             0f,
             0f,
             targetHeightMeters);
