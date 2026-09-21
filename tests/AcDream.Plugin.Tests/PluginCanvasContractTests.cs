@@ -46,6 +46,51 @@ public sealed class PluginCanvasContractTests
         Assert.Equal(PluginCanvasAnchor.TopLeft, descriptor.Anchor);
         Assert.Equal(default, descriptor.Offset);
         Assert.True(descriptor.StartVisible);
+        Assert.False(descriptor.AcceptsPointerInput);
+    }
+
+    [Fact]
+    public void APointerEventDefaultsToNoWheelDelta()
+    {
+        var pressed = new PluginPointerEvent(
+            PluginPointerEventKind.Down, new PluginPoint(3, 4), PluginPointerButton.Left, PluginKeyModifiers.None);
+
+        Assert.Equal(0, pressed.WheelDelta);
+        Assert.Equal(new PluginPoint(3, 4), pressed.Position);
+        Assert.Equal(0, (int)PluginPointerButton.None);
+        Assert.Equal(0, (int)PluginKeyModifiers.None);
+    }
+
+    [Fact]
+    public void ARegistryThatNeverHeardOfPointerInputKeepsTheHandlerAndNeverCallsIt()
+    {
+        IUiRegistry registry = new BareRegistry();
+        int calls = 0;
+        Action<PluginPointerEvent> handler = _ => calls++;
+
+        IPluginCanvas canvas = registry.RegisterCanvas(
+            new PluginCanvasDescriptor("map", 64, 64) { AcceptsPointerInput = true }, _ => { });
+        canvas.PointerHandler = handler;
+        canvas.ReleasePointer();
+
+        Assert.Same(handler, canvas.PointerHandler);
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
+    public void TheFakeHostKeepsThePointerHandlerAndNeverCallsIt()
+    {
+        var host = new FakePluginHost();
+        int calls = 0;
+
+        IPluginCanvas canvas = host.Ui.RegisterCanvas(
+            new PluginCanvasDescriptor("map", 8, 8) { AcceptsPointerInput = true }, _ => { });
+        canvas.PointerHandler = _ => calls++;
+        canvas.ReleasePointer();
+
+        Assert.NotNull(canvas.PointerHandler);
+        Assert.False(canvas.IsAvailable);
+        Assert.Equal(0, calls);
     }
 
     [Fact]

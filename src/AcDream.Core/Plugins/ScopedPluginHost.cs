@@ -1668,7 +1668,15 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
                 set => inner.Offset = value;
             }
 
+            public Action<PluginPointerEvent>? PointerHandler
+            {
+                get => inner.PointerHandler;
+                set => inner.PointerHandler = value;
+            }
+
             public void Invalidate() => inner.Invalidate();
+
+            public void ReleasePointer() => inner.ReleasePointer();
 
             public void Dispose()
             {

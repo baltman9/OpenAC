@@ -59,7 +59,94 @@ public sealed record PluginCanvasDescriptor(string CanvasId, int Width, int Heig
 
     /// <summary>Whether the canvas is shown as soon as it is registered.</summary>
     public bool StartVisible { get; init; } = true;
+
+    /// <summary>
+    /// Whether the canvas takes pointer input. Off, the default, the canvas
+    /// is click-through: presses, drags and the wheel over it go to the
+    /// world and the windows beneath as if it were not there. On, the two
+    /// are exclusive and input wins: while the canvas is shown and has a
+    /// <see cref="IPluginCanvas.PointerHandler"/>, everything the pointer
+    /// does inside the canvas's rectangle goes to that handler and no
+    /// further, and the world beneath gets no mouse there. Outside the
+    /// rectangle nothing changes either way. On a host without a window
+    /// the flag is kept and nothing is ever delivered.
+    /// </summary>
+    public bool AcceptsPointerInput { get; init; }
 }
+
+/// <summary>Which mouse button a pointer event is about.</summary>
+public enum PluginPointerButton
+{
+    /// <summary>No button: a wheel turn, or a move with nothing held.</summary>
+    None = 0,
+
+    /// <summary>The left button.</summary>
+    Left = 1,
+
+    /// <summary>The right button.</summary>
+    Right = 2,
+
+    /// <summary>The middle button, the wheel pressed.</summary>
+    Middle = 3,
+}
+
+/// <summary>The modifier keys held while a pointer event happened.</summary>
+[Flags]
+public enum PluginKeyModifiers
+{
+    /// <summary>No modifier key held.</summary>
+    None = 0,
+
+    /// <summary>Either shift key.</summary>
+    Shift = 1,
+
+    /// <summary>Either control key.</summary>
+    Control = 2,
+
+    /// <summary>Either alt key.</summary>
+    Alt = 4,
+}
+
+/// <summary>What the pointer did over a canvas that takes input.</summary>
+public enum PluginPointerEventKind
+{
+    /// <summary>A button went down inside the canvas. The canvas holds the pointer until the button comes up.</summary>
+    Down,
+
+    /// <summary>The button that went down came up, wherever the pointer is by then.</summary>
+    Up,
+
+    /// <summary>The pointer moved with the button still held, wherever it is; the position may lie outside the canvas.</summary>
+    Move,
+
+    /// <summary>The wheel turned with the pointer over the canvas; <see cref="PluginPointerEvent.WheelDelta"/> says how far.</summary>
+    Wheel,
+
+    /// <summary>
+    /// A press ended without its <see cref="Up"/>: the canvas was hidden or
+    /// removed, or the host took the pointer for something else. No
+    /// <see cref="Up"/> follows. A release the plugin asked for through
+    /// <see cref="IPluginCanvas.ReleasePointer"/> is not reported.
+    /// </summary>
+    Cancelled,
+}
+
+/// <summary>
+/// One pointer event on a canvas, in the canvas's own pixels from its
+/// top-left corner, y down, at whatever anchor, offset or interface
+/// scale the canvas is shown at.
+/// </summary>
+/// <param name="Kind">What the pointer did.</param>
+/// <param name="Position">Where, in the canvas's own pixels; outside the canvas's rectangle only during a drag.</param>
+/// <param name="Button">The button the event is about: the one pressed, released or held during a move; <see cref="PluginPointerButton.None"/> for a wheel turn.</param>
+/// <param name="Modifiers">The modifier keys held at the time.</param>
+/// <param name="WheelDelta">How far the wheel turned, in notches, positive away from the user; zero for everything but <see cref="PluginPointerEventKind.Wheel"/>.</param>
+public readonly record struct PluginPointerEvent(
+    PluginPointerEventKind Kind,
+    PluginPoint Position,
+    PluginPointerButton Button,
+    PluginKeyModifiers Modifiers,
+    int WheelDelta = 0);
 
 /// <summary>
 /// What a canvas's paint callback draws with. Coordinates are pixels from
@@ -156,7 +243,8 @@ public interface IPluginPainter
 
 /// <summary>
 /// A rectangle the plugin paints, shown over the world and under every
-/// window, taking no input. Painting is retained: the host keeps what was
+/// window, taking no input unless it opted in through
+/// <see cref="PluginCanvasDescriptor.AcceptsPointerInput"/>. Painting is retained: the host keeps what was
 /// last painted and calls the paint callback again only after
 /// <see cref="Invalidate"/>, at most once per frame, on the tick thread,
 /// with a painter that is valid only for the duration of that call.
@@ -196,6 +284,41 @@ public interface IPluginCanvas : IDisposable
     /// earliest. Calling it several times before that frame paints once.
     /// </summary>
     void Invalidate();
+
+    /// <summary>
+    /// Where pointer events go, on a canvas registered with
+    /// <see cref="PluginCanvasDescriptor.AcceptsPointerInput"/>. Null, the
+    /// default, and the canvas is click-through whatever the descriptor
+    /// said: nobody is listening, so nothing is taken. Set, and every
+    /// press, held move, release and wheel turn over the canvas arrives
+    /// here, on the tick thread, in the canvas's own pixels.
+    ///
+    /// <para>The handler is measured like the paint callback: one that
+    /// keeps running over its budget on several events in a row, or
+    /// throws, is dropped for the rest of the session and the canvas goes
+    /// back to click-through; painting continues and the client's log says
+    /// why. Setting the handler on a canvas that did not opt in, or on a
+    /// host without a window, keeps the value and delivers nothing; a host
+    /// that predates pointer input answers null and ignores the set.</para>
+    /// </summary>
+    Action<PluginPointerEvent>? PointerHandler
+    {
+        get => null;
+        set { }
+    }
+
+    /// <summary>
+    /// Ends the press the canvas is holding, if any: no further
+    /// <see cref="PluginPointerEventKind.Move"/> or
+    /// <see cref="PluginPointerEventKind.Up"/> arrives for it, and no
+    /// <see cref="PluginPointerEventKind.Cancelled"/> is sent for a release
+    /// the plugin asked for. Safe to call from inside the handler and at any
+    /// other time; does nothing when nothing is held, on a canvas without
+    /// input, or on a host without a window.
+    /// </summary>
+    void ReleasePointer()
+    {
+    }
 }
 
 /// <summary>
@@ -238,8 +361,16 @@ public sealed class NoOpPluginCanvas : IPluginCanvas
     /// <summary>True once <see cref="Dispose"/> has been called.</summary>
     public bool IsDisposed { get; private set; }
 
+    /// <summary>Kept so the plugin's own logic runs unchanged; never called, because nothing is shown to point at.</summary>
+    public Action<PluginPointerEvent>? PointerHandler { get; set; }
+
     /// <summary>Does nothing; there is nothing to paint on.</summary>
     public void Invalidate()
+    {
+    }
+
+    /// <summary>Does nothing; nothing is ever held.</summary>
+    public void ReleasePointer()
     {
     }
 
