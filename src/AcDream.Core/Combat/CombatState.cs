@@ -76,6 +76,21 @@ public sealed class CombatState
         CombatModeChanged?.Invoke(mode);
     }
 
+    /// <summary>
+    /// The mode the server last reported for the character, or null before
+    /// it has reported one this session. The client follows it, so it is
+    /// also the current mode from that moment; it lags a change the client
+    /// sent until the server has taken it.
+    /// </summary>
+    public CombatMode? ServerMode { get; private set; }
+
+    /// <summary>The server's word on the character's mode: recorded, then followed.</summary>
+    public void SetServerCombatMode(CombatMode mode)
+    {
+        ServerMode = mode;
+        SetCombatMode(mode);
+    }
+
     public void OnVictimNotification(
         string attackerName, uint attackerGuid, uint damageType, uint damage,
         uint hitQuadrant, uint critical, uint attackType,
@@ -124,6 +139,7 @@ public sealed class CombatState
     {
         _healthByGuid.Clear();
         CurrentMode = CombatMode.NonCombat;
+        ServerMode = null;
 
         Action<CombatMode>? listeners = CombatModeChanged;
         if (listeners is null)

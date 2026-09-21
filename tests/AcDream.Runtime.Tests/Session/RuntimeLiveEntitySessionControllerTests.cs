@@ -120,6 +120,39 @@ public sealed class RuntimeLiveEntitySessionControllerTests
             ServerControlSequence: 1,
             IsAutonomous: autonomous);
 
+    /// <summary>
+    /// A plugin can tell the client's own word from the server's: the
+    /// snapshot's mode moves with a change the client makes, the server mode
+    /// only with the server's property, and it reads Unknown before the
+    /// server has said anything.
+    /// </summary>
+    [Fact]
+    public void TheCombatSnapshotCarriesTheServersModeApartFromTheClients()
+    {
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        runtime.PlayerIdentity.ServerGuid = 0x50000005u;
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        Assert.True(surface.IsAvailable);
+
+        Assert.Equal(PluginCombatMode.Unknown, surface.Combat.Snapshot.ServerMode);
+
+        runtime.ActionOwner.Combat.SetCombatMode(CombatMode.Magic);
+        Assert.Equal(PluginCombatMode.Magic, surface.Combat.Snapshot.Mode);
+        Assert.Equal(PluginCombatMode.Unknown, surface.Combat.Snapshot.ServerMode);
+
+        Assert.True(CombatStateWiring.ApplyPlayerIntProperty(
+            runtime.ActionOwner.Combat,
+            CombatStateWiring.CombatModePropertyId,
+            (int)CombatMode.Magic));
+        Assert.Equal(PluginCombatMode.Magic, surface.Combat.Snapshot.ServerMode);
+
+        runtime.ActionOwner.Combat.SetCombatMode(CombatMode.NonCombat);
+        Assert.Equal(PluginCombatMode.Peace, surface.Combat.Snapshot.Mode);
+        Assert.Equal(PluginCombatMode.Magic, surface.Combat.Snapshot.ServerMode);
+    }
+
     private static void SendMotion(
         LiveEntitySessionSink sink, uint objectId,
         byte type, byte headerFlags, uint packed)

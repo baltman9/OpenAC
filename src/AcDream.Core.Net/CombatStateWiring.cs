@@ -39,7 +39,7 @@ public static class CombatStateWiring
             or CombatMode.Magic))
             return false;
 
-        combat.SetCombatMode(mode);
+        combat.SetServerCombatMode(mode);
         return true;
     }
 

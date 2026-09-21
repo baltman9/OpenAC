@@ -4494,6 +4494,9 @@ internal sealed class RuntimeAutomationSurface
                     .QualifiedSelfMotionRevision,
                 QualifiedSelfMotionAgeSeconds = runtime.ActionOwner.CombatMode
                     .QualifiedSelfMotionAgeSeconds(runtime.Clock.SimulationTimeSeconds),
+                ServerMode = runtime.ActionOwner.Combat.ServerMode is { } serverMode
+                    ? Project(serverMode)
+                    : PluginCombatMode.Unknown,
             };
         }
     }

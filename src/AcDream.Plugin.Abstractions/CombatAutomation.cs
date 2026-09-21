@@ -165,6 +165,16 @@ public readonly record struct PluginCombatSnapshot(
 
     /// <summary>Seconds since that receipt, or zero before any receipt.</summary>
     public double QualifiedSelfMotionAgeSeconds { get; init; }
+
+    /// <summary>
+    /// The stance the server last said the character is in, or
+    /// <see cref="PluginCombatMode.Unknown"/> before it has said anything
+    /// this session. <see cref="Mode"/> changes the moment the client sends
+    /// a change; this changes when the server has taken it, which can be a
+    /// little later, and a spell sent in between is cast in the old stance.
+    /// A plugin that wants the server's word waits until the two agree.
+    /// </summary>
+    public PluginCombatMode ServerMode { get; init; }
 }
 
 /// <summary>How the client answered a plugin's combat command.</summary>
