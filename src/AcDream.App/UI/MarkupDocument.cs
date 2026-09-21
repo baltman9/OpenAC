@@ -97,6 +97,14 @@ public static class MarkupDocument
                     BorderThickness = el.Attribute("border") is null ? 0f : 1f,
                     ClickThrough = true,
                 };
+                BindColorSource(
+                    (string?)el.Attribute("background"), binding,
+                    value => group.BackgroundColor = value,
+                    source => group.BackgroundColorSource = source);
+                BindColorSource(
+                    (string?)el.Attribute("border"), binding,
+                    value => group.BorderColor = value,
+                    source => group.BorderColorSource = source);
                 ApplyCommon(group, el, binding);
                 parent.AddChild(group);
                 foreach (XElement child in el.Elements())
@@ -125,6 +133,10 @@ public static class MarkupDocument
                         FrontTile     = Hex((string?)el.Attribute("fronttile")),
                         FrontRight    = Hex((string?)el.Attribute("frontright")),
                     };
+                    BindColorSource(
+                        (string?)el.Attribute("color"), binding,
+                        value => meter.BarColor = value,
+                        source => meter.BarColorSource = source);
                     ApplyCommon(meter, el, binding);
                     parent.AddChild(meter);
                     break;
@@ -143,6 +155,10 @@ public static class MarkupDocument
                     };
                     if (el.Attribute("color") is not null)
                         label.TextColor = Color((string?)el.Attribute("color"));
+                    BindColorSource(
+                        (string?)el.Attribute("color"), binding,
+                        value => label.TextColor = value,
+                        source => label.TextColorSource = source);
                     ApplyCommon(label, el, binding);
                     parent.AddChild(label);
                     break;
@@ -176,6 +192,18 @@ public static class MarkupDocument
                     if (el.Attribute("border") is not null)
                         button.BorderColor = Color(
                             (string?)el.Attribute("border"));
+                    BindColorSource(
+                        (string?)el.Attribute("color"), binding,
+                        value => button.TextColor = value,
+                        source => button.TextColorSource = source);
+                    BindColorSource(
+                        (string?)el.Attribute("background"), binding,
+                        value => button.BackgroundColor = value,
+                        source => button.BackgroundColorSource = source);
+                    BindColorSource(
+                        (string?)el.Attribute("border"), binding,
+                        value => button.BorderColor = value,
+                        source => button.BorderColorSource = source);
                     string? buttonIcon = (string?)el.Attribute("icon");
                     if (buttonIcon is not null)
                     {
@@ -296,6 +324,10 @@ public static class MarkupDocument
                 };
                 if (el.Attribute("color") is not null)
                     toggle.TextColor = Color((string?)el.Attribute("color"));
+                BindColorSource(
+                    (string?)el.Attribute("color"), binding,
+                    value => toggle.TextColor = value,
+                    source => toggle.TextColorSource = source);
                 ApplyCommon(toggle, el, binding);
                 parent.AddChild(toggle);
                 break;
@@ -393,6 +425,14 @@ public static class MarkupDocument
                     RecordHistory = false,
                     OnSubmit = submitted,
                 };
+                BindColorSource(
+                    (string?)el.Attribute("background"), binding,
+                    value => field.BackgroundColor = value,
+                    source => field.BackgroundColorSource = source);
+                BindColorSource(
+                    (string?)el.Attribute("color"), binding,
+                    value => field.TextColor = value,
+                    source => field.TextColorSource = source);
                 Func<string?> fieldText = BindString(
                     (string?)el.Attribute("text"), binding);
                 // The owner hears about what is typed, not about its own
@@ -1010,13 +1050,63 @@ public static class MarkupDocument
         if (hex is { Length: 9 } && hex[0] == '#'
             && uint.TryParse(hex.AsSpan(1), NumberStyles.HexNumber,
                              CultureInfo.InvariantCulture, out uint argb))
-            return new Vector4(
-                ((argb >> 16) & 0xFF) / 255f,
-                ((argb >> 8)  & 0xFF) / 255f,
-                (argb         & 0xFF) / 255f,
-                ((argb >> 24) & 0xFF) / 255f);
+            return Argb(argb);
         return Vector4.One;
     }
+
+    /// <summary>Unpacks 0xAARRGGBB, the byte order of the #AARRGGBB literal.</summary>
+    private static Vector4 Argb(uint packed) => new(
+        ((packed >> 16) & 0xFFu) / 255f,
+        ((packed >> 8)  & 0xFFu) / 255f,
+        (packed         & 0xFFu) / 255f,
+        ((packed >> 24) & 0xFFu) / 255f);
+
+    /// <summary>
+    /// A colour attribute may name a binding instead of a literal, so a
+    /// plugin whose settings include colours can show them rather than only
+    /// store them. The literal has already been applied by the element's own
+    /// initializer when this runs; this only takes over when the attribute is
+    /// a <c>{Binding}</c> that resolves, and then it both seeds the element's
+    /// colour (so the first frame is right) and installs the per-frame source
+    /// the element draws with.
+    /// <para>
+    /// An unresolved binding is silent, exactly as an unresolved <c>text</c>
+    /// binding is: nothing is installed, and the colour stays on whatever the
+    /// literal parser made of the attribute text -- opaque white for a brace
+    /// expression -- which is what an unknown colour binding already did.
+    /// </para>
+    /// </summary>
+    private static void BindColorSource(
+        string? expression,
+        object binding,
+        Action<Vector4> setValue,
+        Action<Func<Vector4>> setSource)
+    {
+        if (expression is null || !IsBinding(expression))
+            return;
+        PropertyInfo? property = binding.GetType().GetProperty(expression[1..^1]);
+        if (property is null)
+            return;
+
+        Vector4 Read() => ColorFromBoundValue(property.GetValue(binding));
+        setValue(Read());
+        setSource(Read);
+    }
+
+    /// <summary>
+    /// The shapes a bound colour may arrive in: a 32-bit 0xAARRGGBB value,
+    /// signed or unsigned, which is how a plugin stores a colour setting; or
+    /// the same #AARRGGBB text the literal attribute takes. Anything else --
+    /// another type, or text the literal parser rejects -- lands on the
+    /// literal parser's own fallback rather than throwing at a player.
+    /// </summary>
+    private static Vector4 ColorFromBoundValue(object? value) => value switch
+    {
+        uint packed => Argb(packed),
+        int packed => Argb(unchecked((uint)packed)),
+        string text => Color(text),
+        _ => Vector4.One,
+    };
 
     private static Func<float?> BindFloat(string? expr, object binding)
     {

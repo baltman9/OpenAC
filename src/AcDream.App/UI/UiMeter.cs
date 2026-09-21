@@ -63,6 +63,10 @@ public sealed class UiMeter : UiElement, IUiDatStateful
     public Func<float?> Fill { get; set; } = () => 0f;
     public Func<string?> Label { get; set; } = () => null;
     public Vector4 BarColor { get; set; } = new(1f, 0f, 0f, 1f);
+
+    /// <summary>Re-read every frame in place of <see cref="BarColor"/>.</summary>
+    public Func<Vector4>? BarColorSource { get; set; }
+
     public Vector4 BgColor { get; set; } = new(0f, 0f, 0f, 0.5f);
     public Vector4 LabelColor { get; set; } = new(1f, 1f, 1f, 1f);
 
@@ -249,7 +253,8 @@ public sealed class UiMeter : UiElement, IUiDatStateful
             if (pct is not null && p > 0f)
             {
                 var (fx, fy, fw, fh) = ComputeFillRect(p, Width, Height);
-                if (fw > 0f) ctx.DrawRect(fx, fy, fw, fh, BarColor);
+                if (fw > 0f)
+                    ctx.DrawRect(fx, fy, fw, fh, BarColorSource?.Invoke() ?? BarColor);
             }
         }
 

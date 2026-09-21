@@ -9,6 +9,17 @@ public class UiPanel : UiElement
 
     public Vector4 BorderColor     { get; set; } = new(0.15f, 0.15f, 0.2f, 0.8f);
 
+    /// <summary>
+    /// Re-read every frame in place of <see cref="BackgroundColor"/> when it
+    /// is set, the way <see cref="UiLabel.TextSource"/> stands in for a
+    /// caption: a colour a player can change has to be asked for again, not
+    /// captured once.
+    /// </summary>
+    public Func<Vector4>? BackgroundColorSource { get; set; }
+
+    /// <summary>Re-read every frame in place of <see cref="BorderColor"/>.</summary>
+    public Func<Vector4>? BorderColorSource { get; set; }
+
     public float BorderThickness   { get; set; } = 1f;
 
     public uint BackgroundSprite { get; set; }
@@ -17,19 +28,22 @@ public class UiPanel : UiElement
 
     protected override void OnDraw(UiRenderContext ctx)
     {
+        Vector4 background = BackgroundColorSource?.Invoke() ?? BackgroundColor;
+        Vector4 border = BorderColorSource?.Invoke() ?? BorderColor;
+
         if (BackgroundSprite != 0 && SpriteResolve is { } sr)
         {
             var (tex, tw, th) = sr(BackgroundSprite);
             if (tex != 0 && tw != 0 && th != 0)
                 ctx.DrawSprite(tex, 0, 0, Width, Height, 0, 0, Width / tw, Height / th, Vector4.One);
         }
-        else if (BackgroundColor.W > 0f)
+        else if (background.W > 0f)
         {
-            ctx.DrawFill(0, 0, Width, Height, BackgroundColor);
+            ctx.DrawFill(0, 0, Width, Height, background);
         }
 
-        if (BorderColor.W > 0f && BorderThickness > 0f)
-            ctx.DrawRectOutline(0, 0, Width, Height, BorderColor, BorderThickness);
+        if (border.W > 0f && BorderThickness > 0f)
+            ctx.DrawRectOutline(0, 0, Width, Height, border, BorderThickness);
     }
 }
 
@@ -39,6 +53,9 @@ public class UiLabel : UiElement
     public Vector4 TextColor { get; set; } = new(1f, 1f, 1f, 1f);
 
     public Func<string?>? TextSource { get; set; }
+
+    /// <summary>Re-read every frame in place of <see cref="TextColor"/>.</summary>
+    public Func<Vector4>? TextColorSource { get; set; }
 
     public UiDatFont? DatFont { get; set; }
 
@@ -51,6 +68,7 @@ public class UiLabel : UiElement
     protected override void OnDraw(UiRenderContext ctx)
     {
         string text = TextSource?.Invoke() ?? Text;
+        Vector4 textColor = TextColorSource?.Invoke() ?? TextColor;
         float w = DatFont is { } df
             ? df.MeasureWidth(text)
             : (ctx.DefaultFont?.MeasureWidth(text) ?? text.Length * 7f);
@@ -59,9 +77,9 @@ public class UiLabel : UiElement
         if (w != Width) Width = w;
         if (h != Height) Height = h;
         if (DatFont is { } dat)
-            ctx.DrawStringDat(dat, text, 0, 0, TextColor, Outline);
+            ctx.DrawStringDat(dat, text, 0, 0, textColor, Outline);
         else
-            ctx.DrawString(text, 0, 0, TextColor);
+            ctx.DrawString(text, 0, 0, textColor);
     }
 }
 
@@ -71,6 +89,9 @@ public class UiSimpleButton : UiPanel
     public Vector4 TextColor { get; set; } = new(1f, 1f, 1f, 1f);
 
     public Func<string?>? TextSource { get; set; }
+
+    /// <summary>Re-read every frame in place of <see cref="TextColor"/>.</summary>
+    public Func<Vector4>? TextColorSource { get; set; }
 
     public UiDatFont? DatFont { get; set; }
 
@@ -125,6 +146,7 @@ public class UiSimpleButton : UiPanel
 
         string caption = TextSource?.Invoke() ?? Text;
         if (caption.Length == 0) return;
+        Vector4 textColor = TextColorSource?.Invoke() ?? TextColor;
 
         float captionAreaX = iconColumn;
         float captionAreaWidth = MathF.Max(0f, Width - iconColumn);
@@ -135,7 +157,7 @@ public class UiSimpleButton : UiPanel
                 dat, caption,
                 captionAreaX + (captionAreaWidth - datW) * 0.5f,
                 (Height - dat.LineHeight) * 0.5f,
-                TextColor, Outline);
+                textColor, Outline);
             return;
         }
 
@@ -143,7 +165,7 @@ public class UiSimpleButton : UiPanel
         float textW = ctx.DefaultFont.MeasureWidth(caption);
         float tx = captionAreaX + (captionAreaWidth - textW) * 0.5f;
         float ty = (Height - ctx.DefaultFont.LineHeight) * 0.5f;
-        ctx.DrawString(caption, tx, ty, TextColor);
+        ctx.DrawString(caption, tx, ty, textColor);
     }
 }
 
