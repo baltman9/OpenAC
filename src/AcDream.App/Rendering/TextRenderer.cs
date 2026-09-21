@@ -225,6 +225,51 @@ public sealed class TextRenderer : IDisposable
         AppendQuad(seg.Verts, x, y, w, h, u0, v0, u1, v1, tint);
     }
 
+    /// <summary>
+    /// Append a convex outline of three to eight corners as a triangle fan.
+    /// This is the path for anything that is not an upright rectangle -- a
+    /// thick line, a rotated or scaled blit, either of those after clipping.
+    ///
+    /// <para>It lands in the same per-texture run as <see cref="DrawSprite"/>,
+    /// so a rotated blit sandwiched between two upright ones of the same
+    /// texture still costs one draw call, and an untextured line drawn next to
+    /// untextured fills joins their run.</para>
+    /// </summary>
+    internal void DrawConvexPolygon(uint texture, ReadOnlySpan<UiQuadVertex> polygon, Vector4 color)
+    {
+        if (polygon.Length < 3)
+            return;
+        if (CanvasScale != Vector2.One && LinearTwinResolver is { } resolve)
+            texture = resolve(texture);
+
+        SpriteSeg seg = OverlayMode
+            ? NextSpriteSeg(_overlaySpriteSegs, ref _overlaySegUsed, texture)
+            : NextSpriteSeg(_spriteSegs,        ref _segUsed,        texture);
+
+        // Fan from the first corner: (0,1,2), (0,2,3), ... The pipeline takes a
+        // plain triangle list, so the fan is written out as separate triangles.
+        for (int i = 1; i + 1 < polygon.Length; i++)
+        {
+            AppendVertex(seg.Verts, polygon[0], color);
+            AppendVertex(seg.Verts, polygon[i], color);
+            AppendVertex(seg.Verts, polygon[i + 1], color);
+        }
+    }
+
+    private void AppendVertex(List<float> buf, in UiQuadVertex vertex, Vector4 color)
+    {
+        float px = vertex.Position.X;
+        float py = vertex.Position.Y;
+        if (CanvasScale != Vector2.One)
+        {
+            px *= CanvasScale.X;
+            py *= CanvasScale.Y;
+        }
+        buf.Add(px); buf.Add(py);
+        buf.Add(vertex.Uv.X); buf.Add(vertex.Uv.Y);
+        buf.Add(color.X); buf.Add(color.Y); buf.Add(color.Z); buf.Add(color.W);
+    }
+
     internal static uint ResolveExternalTextureSlot(GpuTextureSlot slot) =>
         UiTextureTableHandle.FromSlot(slot);
 
