@@ -58,19 +58,34 @@ internal sealed class UiDrawCallbackGuard
     private readonly Func<double> _nowMilliseconds;
     private int _consecutiveOverruns;
 
+    /// <param name="name">What the callback is called in the report that drops it.</param>
+    /// <param name="report">Where the one report goes; the client's log by default.</param>
+    /// <param name="nowMilliseconds">The clock, for tests; the stopwatch by default.</param>
+    /// <param name="budgetMilliseconds">
+    /// How long one call may take before it counts as an overrun.
+    /// <see cref="FrameBudgetMilliseconds"/> by default; a callback that
+    /// draws into its own off-screen surface once in a while rather than
+    /// on every frame may be given more.
+    /// </param>
     internal UiDrawCallbackGuard(
         string name,
         Action<string>? report = null,
-        Func<double>? nowMilliseconds = null)
+        Func<double>? nowMilliseconds = null,
+        double budgetMilliseconds = FrameBudgetMilliseconds)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(budgetMilliseconds);
         _name = name;
+        BudgetMilliseconds = budgetMilliseconds;
         _report = report ?? (line => Serilog.Log.Warning("{Line}", line));
         // One clock for the whole guard: a budget measured against two
         // different time sources is a comparison between unrelated numbers.
         _nowMilliseconds = nowMilliseconds
             ?? (static () => Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency);
     }
+
+    /// <summary>How long one call may take before it counts as an overrun.</summary>
+    internal double BudgetMilliseconds { get; }
 
     /// <summary>True once the callback has been dropped for good.</summary>
     internal bool IsTripped { get; private set; }
@@ -124,7 +139,7 @@ internal sealed class UiDrawCallbackGuard
             return false;
         }
 
-        if (LastMilliseconds <= FrameBudgetMilliseconds)
+        if (LastMilliseconds <= BudgetMilliseconds)
         {
             _consecutiveOverruns = 0;
             return true;
@@ -134,7 +149,7 @@ internal sealed class UiDrawCallbackGuard
         if (_consecutiveOverruns >= ConsecutiveOverrunsBeforeTrip)
         {
             Trip(
-                $"took more than {FrameBudgetMilliseconds:0.##} ms on "
+                $"took more than {BudgetMilliseconds:0.##} ms on "
                 + $"{_consecutiveOverruns} frames in a row "
                 + $"(last {LastMilliseconds:0.##} ms)");
         }

@@ -318,28 +318,65 @@ public sealed class TextRenderer : IDisposable
     /// <summary>Upload + draw accumulated rects + text. font may be null if only DrawRect was used.</summary>
     public void Flush(BitmapFont? font)
     {
-        bool anyNormal  = _segUsed > 0 || _textVerts > 0 || _rectVerts > 0;
-        bool anyOverlay = _overlaySegUsed > 0 || _overlayTextVerts > 0 || _overlayRectVerts > 0;
-        if (!anyNormal && !anyOverlay) return;
+        if (!HasAnythingToDraw) return;
+        FlushInto(
+            new GpuPassDescription
+            {
+                Name = "ui-text",
+                Color = new GpuColorAttachment(
+                    Target: null,
+                    Load: GpuLoadOp.Load,
+                    Store: GpuStoreOp.Store,
+                    ClearColor: default),
+                Depth = null,
+                SampleCount = 1,
+            },
+            "ui-text",
+            font);
+    }
 
+    /// <summary>
+    /// Draws what was collected into an off-screen target instead of the
+    /// frame, clearing the target first. The projection is whatever
+    /// <see cref="Begin"/> was given, so the caller begins with the target's
+    /// size. Unlike <see cref="Flush"/> this always opens the pass, because
+    /// a target that collected nothing still has to be cleared: the caller
+    /// asked for a repaint and expects an empty surface, not the last one.
+    /// </summary>
+    internal void FlushTo(IGpuRenderTarget target, Vector4 clearColor, BitmapFont? font, string passName)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentException.ThrowIfNullOrWhiteSpace(passName);
+        FlushInto(
+            new GpuPassDescription
+            {
+                Name = passName,
+                Color = new GpuColorAttachment(
+                    Target: target,
+                    Load: GpuLoadOp.Clear,
+                    Store: GpuStoreOp.Store,
+                    ClearColor: clearColor),
+                Depth = null,
+                SampleCount = 1,
+            },
+            passName,
+            font);
+    }
+
+    private bool HasAnythingToDraw =>
+        _segUsed > 0 || _textVerts > 0 || _rectVerts > 0
+        || _overlaySegUsed > 0 || _overlayTextVerts > 0 || _overlayRectVerts > 0;
+
+    private void FlushInto(GpuPassDescription pass, string stageName, BitmapFont? font)
+    {
         IGpuFrame frame = _frameSource.CurrentFrame
             ?? throw new InvalidOperationException(
                 "TextRenderer.Flush requires an open IGpuFrame (see GpuDeviceFrameLifetime) — " +
                 "the host must drive IGpuDevice.BeginFrame() before rendering the retained UI.");
 
-        using IGpuPassEncoder encoder = frame.BeginPass(new GpuPassDescription
-        {
-            Name = "ui-text",
-            Color = new GpuColorAttachment(
-                Target: null,
-                Load: GpuLoadOp.Load,
-                Store: GpuStoreOp.Store,
-                ClearColor: default),
-            Depth = null,
-            SampleCount = 1,
-        });
+        using IGpuPassEncoder encoder = frame.BeginPass(pass);
         using IDisposable? stage = AcDream.App.Diagnostics.GpuStageProfiler.Measure(
-            encoder, "ui-text");
+            encoder, stageName);
         encoder.BindPipeline(_pipeline);
 
         DrawLayer(_spriteSegs, _segUsed, _rectBuf, _rectVerts, _textBuf, _textVerts, font, frame, encoder);

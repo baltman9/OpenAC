@@ -1040,6 +1040,11 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                         || d.Character.LocalPlayer.Properties.GetBool(
                             (uint)AcDream.Core.Properties.PropertyBool.IsPsr)),
                 IsGameplayDisplay: () => d.Settings.IsGameplayDisplay,
+                PluginCanvases: new PluginCanvasHostServices(
+                    d.GpuDevice,
+                    d.GpuFrameSource,
+                    d.ShadersDirectory,
+                    d.TextureCache.GetOrCreateLinearUiTwin),
                 SynchronizeDisplayPhase: () =>
                 {
                     if (late.GameRuntime.Connection?.Snapshot.Status is
