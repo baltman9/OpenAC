@@ -160,14 +160,14 @@ public sealed class RuntimeNavigationAutomationTests
         var navigation = new RuntimeNavigationAutomation();
         var walk = new NavigationWalkController(new PhysicsEngine(), new NoWalkBody(), new NoWalkGoals());
         navigation.BindWalk(walk);
-        string? need = "MossTank is running Attack";
+        string? need = "a plugin is running Attack";
         IDisposable broken = navigation.PauseGoToWhile(() => throw new InvalidOperationException("a broken plugin"));
         IDisposable pause = navigation.PauseGoToWhile(() => need);
 
-        Assert.Equal("MossTank is running Attack", walk.PausedBy?.Invoke());
+        Assert.Equal("a plugin is running Attack", walk.PausedBy?.Invoke());
         need = null;
         Assert.Null(walk.PausedBy?.Invoke());
-        need = "MossTank is buffing";
+        need = "a plugin is buffing";
         pause.Dispose();
         pause.Dispose();
         Assert.Null(navigation.PauseReason());
@@ -219,11 +219,11 @@ public sealed class RuntimeNavigationAutomationTests
             0x50000001u,
             float.NaN,
             0,
-            "waiting: MossTank is running Attack",
+            "waiting: a plugin is running Attack",
             BlockedByObjectId: 0x70000002u));
 
         Assert.Equal(PluginGoToState.Waiting, report.State);
-        Assert.Equal("waiting: MossTank is running Attack", report.Reason);
+        Assert.Equal("waiting: a plugin is running Attack", report.Reason);
         Assert.Equal(0x70000002u, report.BlockedByObjectId);
     }
 

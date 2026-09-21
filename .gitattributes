@@ -19,3 +19,6 @@ src/AcDream.Plugins.MossTank/*.ast -text
 tests/AcDream.Headless.Tests/Fixtures/vt-proof/**/*.usd -text
 tests/AcDream.Headless.Tests/Fixtures/vt-proof/**/*.utl -text
 tests/AcDream.Headless.Tests/Fixtures/vt-proof/**/*.af -text
+tests/AcDream.Plugins.MossTank.Tests/Fixtures/vt-proof/**/*.usd -text
+tests/AcDream.Plugins.MossTank.Tests/Fixtures/vt-proof/**/*.utl -text
+tests/AcDream.Plugins.MossTank.Tests/Fixtures/vt-proof/**/*.af -text

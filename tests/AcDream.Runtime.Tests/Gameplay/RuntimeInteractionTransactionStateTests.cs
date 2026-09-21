@@ -356,7 +356,7 @@ public sealed class RuntimeInteractionTransactionStateTests
         // LastCompletedAppraisalId (the plugin-facing completion signal
         // mapped by AppAutomationSurface into
         // ILootAutomation.Appraisal.CurrentObjectId) are two different
-        // things. Before this split, MossTank's corpse-identify wait
+        // things. Before this split, a plugin's corpse-identify wait
         // polled CurrentAppraisalId and never observed it change for a
         // corpse the window was not showing, so corpse looting stalled
         // forever. LastCompletedAppraisalId must advance for every

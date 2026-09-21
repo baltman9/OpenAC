@@ -12,14 +12,14 @@ using Xunit;
 namespace AcDream.App.Tests.UI;
 
 [Trait("Lane", "InstalledDat")]
-public sealed class MossTankIconInstalledDatTests
+public sealed class PluginShelfIconInstalledDatTests
 {
-    /// <summary>The id <c>MossTankPlugin.cs</c> sets as its shelf descriptor's
-    /// <c>IconSurfaceId</c>.</summary>
-    private const uint MossTankShelfIconId = 0x06002C41u;
+    /// <summary>One installed image id, standing in for whatever a plugin
+    /// names as its shelf descriptor's <c>IconSurfaceId</c>.</summary>
+    private const uint ShelfIconId = 0x06002C41u;
 
     [Fact]
-    public void MossTankShelfIconId_IsARealInstalledRenderSurface()
+    public void AShelfIconId_ResolvesToARealInstalledRenderSurface()
     {
         string? datDir = InstalledDatTestPath.Resolve();
         if (datDir is null)
@@ -32,11 +32,11 @@ public sealed class MossTankIconInstalledDatTests
         using var dats = new DatCollection(datDir, DatAccessType.Read);
         using var adapter = new DatCollectionAdapter(dats);
 
-        bool existsInPortal = adapter.Portal.TryGet<RenderSurface>(MossTankShelfIconId, out _);
-        bool existsInHighRes = adapter.HighRes.TryGet<RenderSurface>(MossTankShelfIconId, out _);
+        bool existsInPortal = adapter.Portal.TryGet<RenderSurface>(ShelfIconId, out _);
+        bool existsInHighRes = adapter.HighRes.TryGet<RenderSurface>(ShelfIconId, out _);
         Assert.True(
             existsInPortal || existsInHighRes,
-            $"expected 0x{MossTankShelfIconId:X8} to be a real installed RenderSurface (Portal or HighRes)");
+            $"expected 0x{ShelfIconId:X8} to be a real installed RenderSurface (Portal or HighRes)");
 
         var device = new RecordingGpuDevice();
         using var cache = new TextureCache(device, adapter);
@@ -44,7 +44,7 @@ public sealed class MossTankIconInstalledDatTests
         var objects = new ClientObjectTable();
         var resolver = new RetailMarkupIconResolver(adapter, icons, objects);
 
-        (uint tex, int w, int h) = resolver.ResolveDid(MossTankShelfIconId);
+        (uint tex, int w, int h) = resolver.ResolveDid(ShelfIconId);
         Assert.NotEqual(0u, tex);
         Assert.True(w > 0 && h > 0);
     }

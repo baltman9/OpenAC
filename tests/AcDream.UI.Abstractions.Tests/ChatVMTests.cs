@@ -180,11 +180,11 @@ public sealed class ChatVMTests
         var vm = new ChatVM(log, displayLimit: 50);
 
         log.OnSystemMessage(
-            "MossTank: buffs applied.",
+            "Tank: buffs applied.",
             chatType: (uint)RetailLogTextType.Default);
 
         Assert.Equal(
-            "MossTank: buffs applied.",
+            "Tank: buffs applied.",
             Assert.Single(vm.RecentLines()));
         Assert.Equal(
             (uint)RetailLogTextType.Default,

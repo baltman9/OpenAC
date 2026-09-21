@@ -286,10 +286,10 @@ public sealed class CampaignAutomationSurfaceTests
         using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
 
-        surface.PostSystemMessage("MossTank: buffs applied.");
+        surface.PostSystemMessage("Tank: buffs applied.");
 
         var entry = Assert.Single(runtime.CommunicationOwner.Chat.Snapshot());
-        Assert.Equal("MossTank: buffs applied.", entry.Text);
+        Assert.Equal("Tank: buffs applied.", entry.Text);
         Assert.Equal((uint)RetailLogTextType.Default, entry.LogTextType);
 
         runtime.CommunicationOwner.SpewBox.Tick(0d);

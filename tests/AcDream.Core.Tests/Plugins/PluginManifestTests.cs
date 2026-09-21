@@ -9,20 +9,20 @@ public class PluginManifestTests
     {
         const string json = """
         {
-          "id": "acdream.mosstank",
-          "displayName": "MossTank",
+          "id": "edwards.tank",
+          "displayName": "Tank",
           "version": "0.1.0",
-          "entryDll": "AcDream.Plugins.MossTank.dll",
+          "entryDll": "Edwards.Tank.dll",
           "apiVersion": 1
         }
         """;
 
         var manifest = PluginManifest.Parse(json);
 
-        Assert.Equal("acdream.mosstank", manifest.Id);
-        Assert.Equal("MossTank", manifest.DisplayName);
+        Assert.Equal("edwards.tank", manifest.Id);
+        Assert.Equal("Tank", manifest.DisplayName);
         Assert.Equal("0.1.0", manifest.Version);
-        Assert.Equal("AcDream.Plugins.MossTank.dll", manifest.EntryDll);
+        Assert.Equal("Edwards.Tank.dll", manifest.EntryDll);
         Assert.Equal(1, manifest.ApiVersion);
         Assert.Equal([PluginKind.Gameplay], manifest.Kinds);
     }

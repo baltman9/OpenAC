@@ -3,54 +3,59 @@ using AcDream.App.Rendering;
 using AcDream.App.Rendering.Gpu;
 using AcDream.App.Tests.Rendering.Gpu;
 using AcDream.App.UI;
-using AcDream.Plugin.Abstractions;
-using AcDream.Plugins.MossTank;
 using Xunit;
 
 namespace AcDream.App.Tests.UI;
 
-public sealed class MossTankMarkupBuildOverRealFilesTests
+/// <summary>
+/// The markup engine over a realistic, large plugin panel set: nine tabs, a
+/// wide multi-column table, anchored resize, and two resizable popups. The
+/// fixture in <c>UI/fixtures/plugin-panel</c> and its binding source
+/// (<see cref="SamplePluginPanelBindings"/>) belong to this test project, so
+/// what is pinned here is the client's own engine rather than any plugin's
+/// current panel.
+/// </summary>
+public sealed class LargePluginPanelMarkupBuildTests
 {
-    private static string MossTankMarkupDirectory =>
-        Path.Combine(AppContext.BaseDirectory, "MossTank");
+    private static string FixtureDirectory =>
+        Path.Combine(AppContext.BaseDirectory, "PluginPanel");
 
-    public static IEnumerable<object[]> MossTankMarkupFiles() =>
-        Directory.GetFiles(MossTankMarkupDirectory, "mosstank*.xml")
+    public static IEnumerable<object[]> FixtureFiles() =>
+        Directory.GetFiles(FixtureDirectory, "sample-panel*.xml")
             .OrderBy(static path => path, StringComparer.Ordinal)
             .Select(static path => new object[] { path });
 
+    private static UiNineSlicePanel Build(string fileName, bool withIcons = false) =>
+        MarkupDocument.Build(
+            File.ReadAllText(Path.Combine(FixtureDirectory, fileName)),
+            new SamplePluginPanelBindings(),
+            static id => (id, 32, 32),
+            icons: withIcons ? new IdentityIconResolver() : null);
+
     [Theory]
-    [MemberData(nameof(MossTankMarkupFiles))]
-    public void EveryMossTankPanelFileBuildsAgainstARealPanelWithNoException(string path)
+    [MemberData(nameof(FixtureFiles))]
+    public void EveryPanelFileBuildsAgainstARealPanelWithNoException(string path)
     {
         string xml = File.ReadAllText(path);
-        var panel = new MossTankPanel(new StubHost());
 
-        UiNineSlicePanel built = MarkupDocument.Build(xml, panel, static id => (id, 32, 32));
+        UiNineSlicePanel built = MarkupDocument.Build(
+            xml, new SamplePluginPanelBindings(), static id => (id, 32, 32));
 
         Assert.NotNull(built);
         Assert.NotEmpty(built.Children);
     }
 
     [Fact]
-    public void WideningTheRealMainPanelWidensTheRealMonstersList()
+    public void WideningTheMainPanelWidensTheWideTable()
     {
-        string xml = File.ReadAllText(
-            Path.Combine(MossTankMarkupDirectory, "mosstank.xml"));
-        var panel = new MossTankPanel(new StubHost());
+        UiNineSlicePanel built = Build("sample-panel.xml");
 
-        UiNineSlicePanel built = MarkupDocument.Build(xml, panel, static id => (id, 32, 32));
-
-        UiPanel[] tabGroups = built.Children
-            .Where(static child => child.GetType() == typeof(UiPanel))
-            .Cast<UiPanel>()
-            .ToArray();
-        Assert.Equal(9, tabGroups.Length);
+        UiPanel[] tabGroups = TabGroups(built);
         foreach (UiPanel group in tabGroups)
             group.Visible = false;
-        UiPanel monstersGroup = tabGroups[3];
-        monstersGroup.Visible = true;
-        UiMarkupList monstersList = Assert.Single(monstersGroup.Children.OfType<UiMarkupList>());
+        UiPanel tableGroup = tabGroups[3];
+        tableGroup.Visible = true;
+        UiMarkupList table = Assert.Single(tableGroup.Children.OfType<UiMarkupList>());
 
         var device = new RecordingGpuDevice();
         var renderer = new TextRenderer(device, new NullGpuFrameSource(), "unused");
@@ -58,33 +63,28 @@ public sealed class MossTankMarkupBuildOverRealFilesTests
         var ctx = new UiRenderContext(renderer, new Vector2(1400f, 900f));
 
         built.DrawSelfAndChildren(ctx);
-        float widthAtAuthoredDefault = monstersList.Width;
+        float widthAtAuthoredDefault = table.Width;
 
         built.Width += 100f;
         built.DrawSelfAndChildren(ctx);
 
         Assert.True(
-            monstersList.Width > widthAtAuthoredDefault,
-            $"Monsters list width did not grow: {widthAtAuthoredDefault} -> {monstersList.Width}");
+            table.Width > widthAtAuthoredDefault,
+            $"Table width did not grow: {widthAtAuthoredDefault} -> {table.Width}");
     }
 
     [Fact]
-    public void WideningTheRealAdvancedOptionsPopupGrowsTheOptionListWithoutOverlappingItsSibling()
+    public void WideningTheResizablePopupGrowsItsOptionListWithoutOverlappingItsSibling()
     {
-        string xml = File.ReadAllText(
-            Path.Combine(MossTankMarkupDirectory, "mosstank-advanced.xml"));
-        var panel = new MossTankPanel(new StubHost());
-
-        UiNineSlicePanel built = MarkupDocument.Build(xml, panel, static id => (id, 32, 32));
+        UiNineSlicePanel built = Build("sample-panel-advanced.xml");
 
         Assert.True(built.Resizable);
         Assert.Equal(392f, built.MinWidth);
         Assert.Equal(300f, built.MinHeight);
 
-        // Bypass the VisibleSource binding (bound to AdvancedOptionsVisible,
-        // false on the stub automation) the same way the Monsters test
-        // bypasses tab visibility — DrawSelfAndChildren's own anchor pass
-        // never runs for an invisible element.
+        // The popup's own visibility is bound; force it visible, because
+        // DrawSelfAndChildren's anchor pass never runs for an invisible
+        // element.
         built.Visible = true;
 
         UiMarkupList optionList = Assert.Single(
@@ -120,14 +120,12 @@ public sealed class MossTankMarkupBuildOverRealFilesTests
             + $"the repositioned category list (left edge {categoryList.Left}).");
     }
 
+    /// <summary>A file that authors no <c>tooltip</c> anywhere must produce a
+    /// tree with no tooltip anywhere: the engine never invents one.</summary>
     [Fact]
-    public void AdvancedOptionsPopupHasNoElementWithATooltip()
+    public void APanelFileWithNoAuthoredTooltipBuildsNoTooltip()
     {
-        string xml = File.ReadAllText(
-            Path.Combine(MossTankMarkupDirectory, "mosstank-advanced.xml"));
-        var panel = new MossTankPanel(new StubHost());
-
-        UiNineSlicePanel built = MarkupDocument.Build(xml, panel, static id => (id, 32, 32));
+        UiNineSlicePanel built = Build("sample-panel-advanced.xml");
 
         AssertNoElementHasATooltip(built);
     }
@@ -136,21 +134,17 @@ public sealed class MossTankMarkupBuildOverRealFilesTests
     {
         Assert.True(
             element.RuntimeTooltipTextSource is null,
-            $"{element.GetType().Name} carries a tooltip — the Advanced "
-            + "Options popup must have none (owner's third live look).");
+            $"{element.GetType().Name} carries a tooltip the markup never authored.");
         foreach (UiElement child in element.Children)
             AssertNoElementHasATooltip(child);
     }
 
     [Theory]
     [InlineData(856f, 236f)] // the panel's own minw/minh floor
-    [InlineData(1100f, 320f)] // one enlarged size past the 984x271 default
+    [InlineData(1100f, 320f)] // one enlarged size past the authored default
     public void ResolvedMainPanelHasNoOverlapOrOutOfBoundsChildAtThisSize(
         float width, float height)
     {
-        string xml = File.ReadAllText(
-            Path.Combine(MossTankMarkupDirectory, "mosstank.xml"));
-
         var device = new RecordingGpuDevice();
         var renderer = new TextRenderer(device, new NullGpuFrameSource(), "unused");
         renderer.Begin(new Vector2(1400f, 900f));
@@ -158,15 +152,10 @@ public sealed class MossTankMarkupBuildOverRealFilesTests
 
         for (int tabIndex = 0; tabIndex < 9; tabIndex++)
         {
-            var panel = new MossTankPanel(new StubHost());
-            UiNineSlicePanel built = MarkupDocument.Build(xml, panel, static id => (id, 32, 32));
+            UiNineSlicePanel built = Build("sample-panel.xml");
             built.Visible = true;
 
-            UiPanel[] tabGroups = built.Children
-                .Where(static child => child.GetType() == typeof(UiPanel))
-                .Cast<UiPanel>()
-                .ToArray();
-            Assert.Equal(9, tabGroups.Length);
+            UiPanel[] tabGroups = TabGroups(built);
             foreach (UiPanel group in tabGroups)
                 group.Visible = false;
             tabGroups[tabIndex].Visible = true;
@@ -179,6 +168,16 @@ public sealed class MossTankMarkupBuildOverRealFilesTests
             AssertResolvedWithinParent(built);
             AssertResolvedNoSiblingOverlap(built);
         }
+    }
+
+    private static UiPanel[] TabGroups(UiNineSlicePanel built)
+    {
+        UiPanel[] tabGroups = built.Children
+            .Where(static child => child.GetType() == typeof(UiPanel))
+            .Cast<UiPanel>()
+            .ToArray();
+        Assert.Equal(9, tabGroups.Length);
+        return tabGroups;
     }
 
     private static void AssertResolvedWithinParent(UiElement parent)
@@ -210,27 +209,20 @@ public sealed class MossTankMarkupBuildOverRealFilesTests
         }
     }
 
+    /// <summary>Two fixed-width icon columns side by side keep their authored
+    /// pitch however wide the panel gets: only the auto-width column absorbs
+    /// the extra room.</summary>
     [Theory]
     [InlineData(984f)]
     [InlineData(1100f)]
-    public void MonstersMoveUpAndMoveDownIconsStayAdjacentAtEveryWidth(float width)
+    public void AdjacentFixedWidthIconColumnsKeepTheirPitchAtEveryWidth(float width)
     {
-        string xml = File.ReadAllText(
-            Path.Combine(MossTankMarkupDirectory, "mosstank.xml"));
-        var panel = new MossTankPanel(new StubHost());
+        UiNineSlicePanel built = Build("sample-panel.xml", withIcons: true);
 
-        UiNineSlicePanel built = MarkupDocument.Build(
-            xml, panel, static id => (id, 32, 32), icons: new IdentityIconResolver());
-
-        UiPanel[] tabGroups = built.Children
-            .Where(static child => child.GetType() == typeof(UiPanel))
-            .Cast<UiPanel>()
-            .ToArray();
-        Assert.Equal(9, tabGroups.Length);
+        UiPanel[] tabGroups = TabGroups(built);
         foreach (UiPanel group in tabGroups)
             group.Visible = false;
-        UiPanel monstersGroup = tabGroups[3];
-        monstersGroup.Visible = true;
+        tabGroups[3].Visible = true;
 
         var device = new RecordingGpuDevice();
         var renderer = new TextRenderer(device, new NullGpuFrameSource(), "unused");
@@ -241,17 +233,17 @@ public sealed class MossTankMarkupBuildOverRealFilesTests
         built.Width = width;
         built.DrawSelfAndChildren(ctx);
 
-        var moveUpQuad = renderer.DebugSpriteSegmentVerts
-            .Last(static s => s.Texture == 0x060028FCu);
-        var moveDownQuad = renderer.DebugSpriteSegmentVerts
-            .Last(static s => s.Texture == 0x060028FDu);
+        var firstColumnQuad = renderer.DebugSpriteSegmentVerts
+            .Last(static s => s.Texture == SamplePluginPanelBindings.FirstRowIconId);
+        var secondColumnQuad = renderer.DebugSpriteSegmentVerts
+            .Last(static s => s.Texture == SamplePluginPanelBindings.SecondRowIconId);
 
-        float gap = moveDownQuad.Verts[0] - moveUpQuad.Verts[0];
+        float gap = secondColumnQuad.Verts[0] - firstColumnQuad.Verts[0];
         Assert.True(
             gap is >= 20f and <= 26f,
-            $"MoveUp/MoveDown icons are {gap}px apart at width {width} — "
-            + "expected VTank's fixed ~23px icon pitch, not the growing "
-            + "gap a still-last, still-auto MoveDown column would produce.");
+            $"The two icon columns are {gap}px apart at width {width} - expected the "
+            + "authored ~23px column pitch, not the growing gap a still-last, "
+            + "still-auto second column would produce.");
     }
 
     private static void AssertResolvedNoSiblingOverlap(UiElement container)
@@ -299,55 +291,5 @@ public sealed class MossTankMarkupBuildOverRealFilesTests
             spellId == 0u ? (0u, 0, 0) : (spellId, 16, 16);
         public (uint tex, int w, int h) ResolveItem(uint objectId) =>
             objectId == 0u ? (0u, 0, 0) : (objectId, 16, 16);
-    }
-
-    private sealed class StubHost : IPluginHost
-    {
-        public bool HasUi => false;
-        public IPluginLogger Log { get; } = new StubLogger();
-        public IGameState State { get; } = new StubState();
-        public IEvents Events { get; } = new StubEvents();
-        public ISelectionService Selection { get; } = new StubSelection();
-        public IUiRegistry Ui => NoOpUiRegistry.Instance;
-        public IAutomationSurface Automation => NoOpAutomationSurface.Instance;
-    }
-
-    private sealed class StubLogger : IPluginLogger
-    {
-        public void Info(string message) { }
-        public void Warn(string message) { }
-        public void Error(string message, Exception? exception = null) { }
-    }
-
-    private sealed class StubState : IGameState
-    {
-        public IReadOnlyList<WorldEntitySnapshot> Entities => [];
-    }
-
-    private sealed class StubEvents : IEvents
-    {
-        public event Action<WorldEntitySnapshot> EntitySpawned
-        {
-            add { }
-            remove { }
-        }
-        public event Action<double> Tick
-        {
-            add { }
-            remove { }
-        }
-    }
-
-    private sealed class StubSelection : ISelectionService
-    {
-        public uint? SelectedObjectId => null;
-        public uint? PreviousObjectId => null;
-        public event Action<SelectionChangedEvent> Changed
-        {
-            add { }
-            remove { }
-        }
-        public bool Select(uint objectId) => false;
-        public bool Clear() => false;
     }
 }

@@ -14,7 +14,7 @@ public class MarkupPanelClickTests
     }
 
     private const string Markup =
-        "<panel x=\"40\" y=\"120\" w=\"360\" h=\"132\" title=\"MossTank\" visible=\"{Shown}\">"
+        "<panel x=\"40\" y=\"120\" w=\"360\" h=\"132\" title=\"Sample Panel\" visible=\"{Shown}\">"
         + "  <label x=\"12\" y=\"30\" text=\"{Status}\"/>"
         + "  <button x=\"12\" y=\"94\" w=\"108\" h=\"28\" text=\"Buff\" onclick=\"{Go}\"/>"
         + "</panel>";

@@ -109,7 +109,7 @@ public sealed class PluginSidePanelTests
         };
         root.AddChild(frame);
         RetailWindowHandle handle = root.WindowManager.Register(
-            "plugin:acdream.mosstank:main",
+            "plugin:edwards.tank:main",
             frame);
         using var shelf = new PluginSidePanel(
             root.WindowManager,
@@ -118,8 +118,8 @@ public sealed class PluginSidePanelTests
         root.AddChild(shelf);
 
         shelf.Add(
-            new PluginUiOwner("acdream.mosstank", "MossTank"),
-            new PluginPanelDescriptor("main", "MossTank"),
+            new PluginUiOwner("edwards.tank", "Tank"),
+            new PluginPanelDescriptor("main", "Tank"),
             handle);
 
         Assert.Equal(0f, handle.Left);

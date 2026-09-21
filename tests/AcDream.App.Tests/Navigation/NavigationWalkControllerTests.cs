@@ -162,11 +162,11 @@ public sealed class NavigationWalkControllerTests
 
         walk.WalkTo(Target);
         RunUntil(walk, body, _ => body.Position.Y > 60f);
-        need = "MossTank is running Attack";
+        need = "a plugin is running Attack";
         walk.Tick(Frame);
 
         Assert.Equal(NavigationWalkState.Waiting, walk.Report.State);
-        Assert.Equal("waiting: MossTank is running Attack", walk.Report.Reason);
+        Assert.Equal("waiting: a plugin is running Attack", walk.Report.Reason);
         Assert.False(body.Travelling);
         body.Place(new Vector3(55f, 70f, 0f));
         Run(walk, body, 10f);
@@ -330,7 +330,7 @@ public sealed class NavigationWalkControllerTests
         };
         walk.WalkTo(Target);
         RunUntil(walk, body, report => report.State == NavigationWalkState.Walking);
-        need = "MossTank is running Attack";
+        need = "a plugin is running Attack";
         Run(walk, body, 1f);
         Assert.Equal(NavigationWalkState.Waiting, walk.Report.State);
         int moves = body.MovesBegun;
@@ -367,7 +367,7 @@ public sealed class NavigationWalkControllerTests
         };
         walk.WalkTo(Target);
         RunUntil(walk, body, report => report.State == NavigationWalkState.Walking);
-        need = "MossTank is running Attack";
+        need = "a plugin is running Attack";
         Run(walk, body, 1f);
         int moves = body.MovesBegun;
 
@@ -375,12 +375,12 @@ public sealed class NavigationWalkControllerTests
         {
             need = null;
             Run(walk, body, (float)NavigationWalkController.PauseSettleSeconds * 0.5f);
-            need = "MossTank is running LootCorpseIdle";
+            need = "a plugin is running LootCorpseIdle";
             Run(walk, body, 0.2f);
         }
 
         Assert.Equal(NavigationWalkState.Waiting, walk.Report.State);
-        Assert.Equal("waiting: MossTank is running LootCorpseIdle", walk.Report.Reason);
+        Assert.Equal("waiting: a plugin is running LootCorpseIdle", walk.Report.Reason);
         Assert.Equal(moves, body.MovesBegun);
         need = null;
         Assert.Equal(NavigationWalkState.Arrived, RunUntilSettled(walk, body).State);
@@ -392,7 +392,7 @@ public sealed class NavigationWalkControllerTests
         var body = new SimulatedBody(new Vector3(40f, 40f, 0f));
         var walk = new NavigationWalkController(FlatWorld(), body, new Goals { [Target] = new Vector3(60f, 75f, 0f) })
         {
-            PausedBy = () => "MossTank is running Attack",
+            PausedBy = () => "a plugin is running Attack",
         };
 
         walk.RouteTo(Target);
