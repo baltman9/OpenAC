@@ -84,7 +84,6 @@ internal sealed record RuntimeAutomationHostCapabilities
     public NavigationWalkController? NavigationWalk { get; init; }
     public RuntimeAutomationLogoutCommands? Logout { get; init; }
     public Func<uint, bool, bool>? AnswerConfirmation { get; init; }
-    public PhysicsEngine? ProjectileCollision { get; init; }
 
 
     /// <summary>The names of the properties that are not the host's own bookkeeping.</summary>
@@ -202,8 +201,6 @@ internal static class RuntimeAutomationBindings
             ["BindChatComposer"] = null,
             ["BindSpeciesNameResolver"] =
                 nameof(RuntimeAutomationHostCapabilities.Content),
-            ["BindProjectileCollision"] =
-                nameof(RuntimeAutomationHostCapabilities.ProjectileCollision),
 
         };
 
@@ -384,12 +381,6 @@ internal static class RuntimeAutomationBindings
         bound.Add(nameof(surface.BindChatInputActive));
         surface.BindChatComposer(chatEntry.Compose);
         bound.Add(nameof(surface.BindChatComposer));
-        if (capabilities.ProjectileCollision is { } projectilePhysics)
-        {
-            surface.BindProjectileCollision(projectilePhysics);
-            bound.Add(nameof(surface.BindProjectileCollision));
-        }
-
         ReportDeclaredButUnfilled(capabilities, bound);
         return bound;
     }

@@ -129,7 +129,9 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
         _ammoIndicator = layout.FindElement(AmmoIndicatorId) as UiButton;
         if (_ammoIndicator is not null)
         {
-            _ammoIndicator.LabelFont = ammoFont;
+            // The count is drawn in the font the layout gives the button.
+            // The font handed in is only for a layout that names none.
+            _ammoIndicator.LabelFont ??= ammoFont;
             _ammoIndicator.LabelColor = System.Numerics.Vector4.One;
         }
 

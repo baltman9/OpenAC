@@ -47,7 +47,9 @@ public sealed class LoginCommandSequence
     public bool IsActive => _active;
     public int NextCommandIndex => _nextIndex;
 
-    public void EnteredWorld(RuntimeGenerationToken generation)
+    public void EnteredWorld(
+        RuntimeGenerationToken generation,
+        bool isListening = true)
     {
         if (_lastStartedGeneration == generation)
             return;
@@ -57,7 +59,7 @@ public sealed class LoginCommandSequence
         _nextIndex = 0;
         _active = _commands.Length > 0;
         _nextDeadline = _timeProvider.GetTimestamp();
-        DrainDue(generation, isInWorld: true);
+        DrainDue(generation, isListening);
     }
 
     public void Tick(

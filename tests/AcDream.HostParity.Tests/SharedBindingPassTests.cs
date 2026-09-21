@@ -90,7 +90,6 @@ public sealed class SharedBindingPassTests
         Logout = new RuntimeAutomationLogoutCommands(
             static () => true, static () => true),
         AnswerConfirmation = static (_, _) => true,
-        ProjectileCollision = physics,
     };
 
     private static GameRuntime NewRuntime()

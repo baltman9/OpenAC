@@ -91,6 +91,12 @@ Every element except the root also accepts `name` (or `id`), `visible`,
 `enabled`, `tooltip`, and `anchor`. The root `panel` accepts `visible` only as
 a binding.
 
+A `field` shows its bound `text` and goes on following it: while nobody is
+typing in the field, a value that changes behind it -- a profile loaded after
+the panel was built -- replaces what the field shows. `onchange` reports what
+the player types; it is not called for the field's own value being shown, at
+build time or later.
+
 `menu style` and `slider style` are `plain` (default: flat fill, one-pixel
 border, no sprite art) or `retail` (the game's own pushbutton or scrollbar
 art). A `menu` always opens as one scrolling column of at most `rows` entries;

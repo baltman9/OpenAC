@@ -742,9 +742,11 @@ takes the selected object out of the world, or stops showing it, `Selection`
 clears rather than keeping a guid nothing will answer to. That used to happen
 only where there was something drawing the object.
 
-One seam is empty on **both** clients: `BindProjectileCollision`. A plugin
-that asks about projectile collision gets nothing anywhere, and it needs a
-runtime source before either client can fill it.
+`Projectiles.EvaluatePath` is answered on both clients from the session's own
+collision world. It answers `Unavailable` only outside the world, or while the
+collision data around the character is not loaded -- a client with no lease on
+the installed data files never has it. `Unavailable` means the flight was not
+tested; it does not mean the flight is blocked.
 
 ### Walking to something and then using it
 

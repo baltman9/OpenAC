@@ -1562,6 +1562,26 @@ public sealed partial class WorldSession : IDisposable
         }
     }
 
+    /// <summary>
+    /// True once this session has told the server that its login is complete.
+    /// Until then the server is not listening for what a character says or
+    /// does, so anything sent earlier is lost.
+    /// </summary>
+    public bool LoginCompleteSent { get; private set; }
+
+    /// <summary>
+    /// For a test whose scripted server never sends the character's own
+    /// object, which is what prompts the real client to complete its login.
+    /// </summary>
+    internal void AssumeLoginCompleteForTesting() => LoginCompleteSent = true;
+
+    /// <summary>Tells the server the login, or a portal arrival, is complete.</summary>
+    public void SendLoginComplete()
+    {
+        SendGameAction(GameActionLoginComplete.Build());
+        LoginCompleteSent = true;
+    }
+
     public void SendGameAction(byte[] gameActionBody)
     {
         if (GameActionCapture is not null)

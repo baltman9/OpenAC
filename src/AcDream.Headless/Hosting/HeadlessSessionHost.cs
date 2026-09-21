@@ -1144,7 +1144,7 @@ internal sealed class HeadlessSessionHost : IDisposable
             _firstEntryDrive,
             _ =>
             {
-                session.SendGameAction(GameActionLoginComplete.Build());
+                session.SendLoginComplete();
                 _optionsSeeder?.NoteLoginCompleteSent();
                 session.SendHouseQuery();
             },

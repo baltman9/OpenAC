@@ -1789,7 +1789,7 @@ public class InventoryControllerTests
     }
 
     [Fact]
-    public void OnDragOver_fullSideBag_acceptsBecauseTheDropFallsThrough_andGridAccepts()
+    public void OnDragOver_fullSideBag_refusesOnItsOwnIcon_andGridAccepts()
     {
         var (layout, grid, containers, _, _, _, _, _) = BuildLayout();
         var objects = new ClientObjectTable();
@@ -1798,12 +1798,28 @@ public class InventoryControllerTests
         objects.AddOrUpdate(new ClientObject { ObjectId = 0xFFFFu });
         var ctrl = (IItemListDragHandler)Bind(layout, objects);
 
-        // Hover tests legality only; a full bag still accepts because the
-        // drop falls through to a pack with room.
-        Assert.Equal(ItemDragAcceptance.Accept,
+        // OpenAC #146: the mark over a pack's icon answers for that pack, so
+        // a full one refuses. The item grid still accepts, because letting
+        // go there finds the item a place in another pack.
+        Assert.Equal(ItemDragAcceptance.Reject,
             ctrl.OnDragOver(containers, containers.GetItem(0)!, Payload(0xFFFFu)));  // full bag → red
         Assert.Equal(ItemDragAcceptance.Accept,
             ctrl.OnDragOver(grid, grid.GetItem(0)!, Payload(0xFFFFu)));               // grid → green
+    }
+
+    // OpenAC #146 follow-up: a focus sits in the side column but carries
+    // nothing. Holding an item over it refuses, as over a full pack.
+    [Fact]
+    public void OnDragOver_aThingInTheSideColumnThatCarriesNothing_refuses()
+    {
+        var (layout, _, containers, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedBag(objects, 0xC, slot: 0, itemsCapacity: 0);
+        objects.AddOrUpdate(new ClientObject { ObjectId = 0xFFFFu });
+        var ctrl = (IItemListDragHandler)Bind(layout, objects);
+
+        Assert.Equal(ItemDragAcceptance.Reject,
+            ctrl.OnDragOver(containers, containers.GetItem(0)!, Payload(0xFFFFu)));
     }
 
     [Fact]
@@ -1824,9 +1840,8 @@ public class InventoryControllerTests
         var controller = (IItemListDragHandler)Bind(layout, objects);
         UiItemSlot mainPack = top.GetItem(0)!;
 
-        // The main pack is full, but the drop still has somewhere to go: the
-        // item's own side bag takes it back, so the hover accepts.
-        Assert.Equal(ItemDragAcceptance.Accept,
+        // The main pack is full, and its own icon says so.
+        Assert.Equal(ItemDragAcceptance.Reject,
             controller.OnDragOver(top, mainPack, Payload(0xB0u)));
 
         Assert.True(objects.Remove(0xA1u));

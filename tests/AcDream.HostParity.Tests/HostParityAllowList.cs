@@ -84,30 +84,6 @@ internal static class HostParityAllowList
     /// </summary>
     internal static IReadOnlyList<ParityAllowance> Seams { get; } =
     [
-        // The seam itself works: the binding pass fills it the moment a host
-        // supplies a physics engine, and until one does the projectile
-        // automation answers IsAvailable false and every path request
-        // Unavailable, so a plugin is told rather than left guessing. What is
-        // silent is the bind pass -- neither host DECLARES the capability, so
-        // nothing warns that the seam came out empty. Both facts belong in the
-        // reason: the earlier wording, "plugins that ask get nothing", read as
-        // though the call itself were dead.
-        ParityAllowance.Debt("BindProjectileCollision", ParityHost.Windowed,
-            "Neither host supplies a projectile physics engine, so the seam is "
-            + "filled on neither and the projectile automation answers every "
-            + "request Unavailable. Neither host declares the capability "
-            + "either, so nothing warns at bind time and the status is the "
-            + "only notice a plugin gets. It needs a runtime source before "
-            + "either host can fill it.",
-            ParityStage.AnswerItFromOneSource),
-        ParityAllowance.Debt("BindProjectileCollision", ParityHost.Windowless,
-            "Neither host supplies a projectile physics engine, so the seam is "
-            + "filled on neither and the projectile automation answers every "
-            + "request Unavailable. Neither host declares the capability "
-            + "either, so nothing warns at bind time and the status is the "
-            + "only notice a plugin gets. It needs a runtime source before "
-            + "either host can fill it.",
-            ParityStage.AnswerItFromOneSource),
     ];
 
     /// <summary>

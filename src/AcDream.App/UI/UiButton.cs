@@ -86,6 +86,13 @@ public sealed class UiButton : UiElement, IUiGlobalTimeListener, IUiDatStateful
 
     public LabelAlignment LabelAlign { get; set; } = LabelAlignment.Center;
 
+    /// <summary>
+    /// The label sits on the bottom edge of its box instead of in the middle
+    /// of it. Set for a button whose layout asks for bottom justification,
+    /// such as a count drawn along the foot of an icon.
+    /// </summary>
+    public bool LabelAtBottom { get; set; }
+
     public (float X, float Y, float Width, float Height)? LabelBox { get; set; }
 
     public string? ValueLabel { get; set; }
@@ -488,13 +495,13 @@ public sealed class UiButton : UiElement, IUiGlobalTimeListener, IUiDatStateful
         // which change between frames for a button that is simply on screen.
         // Re-running it per draw split the string, built a list and bound a
         // measure delegate every frame, for every labelled button.
-        var key = (text, font, boxX, boxY, boxWidth, boxHeight, align, leftOffset);
+        var key = (text, font, boxX, boxY, boxWidth, boxHeight, align, leftOffset, LabelAtBottom);
         if (_blockLabelLines is null || _blockLabelKey != key)
         {
             _blockLabelKey = key;
             _blockLabelLines = WrapBlockLines(
                 text, font.MeasureWidth, font.LineHeight,
-                boxX, boxY, boxWidth, boxHeight, align, leftOffset);
+                boxX, boxY, boxWidth, boxHeight, align, leftOffset, LabelAtBottom);
         }
 
         IReadOnlyList<(string Text, float X, float Y)> lines = _blockLabelLines;
@@ -516,7 +523,7 @@ public sealed class UiButton : UiElement, IUiGlobalTimeListener, IUiDatStateful
 
     private IReadOnlyList<(string Text, float X, float Y)>? _blockLabelLines;
     private (string Text, UiDatFont Font, float X, float Y, float Width, float Height,
-        LabelAlignment Align, float Offset) _blockLabelKey;
+        LabelAlignment Align, float Offset, bool AtBottom) _blockLabelKey;
 
     internal static IReadOnlyList<(string Text, float X, float Y)> WrapBlockLines(
         string text,
@@ -527,12 +534,15 @@ public sealed class UiButton : UiElement, IUiGlobalTimeListener, IUiDatStateful
         float boxWidth,
         float boxHeight,
         LabelAlignment align,
-        float leftOffset)
+        float leftOffset,
+        bool atBottom = false)
     {
         string[] lines = text.Split('\n');
 
         float totalHeight = lines.Length * lineHeight;
-        float startY = boxY + (boxHeight - totalHeight) * 0.5f;
+        float startY = atBottom
+            ? boxY + boxHeight - totalHeight
+            : boxY + (boxHeight - totalHeight) * 0.5f;
 
         var result = new List<(string, float, float)>(lines.Length);
         for (int i = 0; i < lines.Length; i++)

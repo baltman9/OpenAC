@@ -70,6 +70,39 @@ public sealed class UiField : UiElement
     public Action<string>? OnFocusLost { get; set; }
     public Action<string>? OnTextChanged { get; set; }
 
+    /// <summary>
+    /// Where the shown text comes from when the owner keeps the value. While
+    /// nobody is typing in the field it follows this: a value that changes
+    /// behind the field -- a profile loading after the panel was built -- is
+    /// shown, instead of the text the field happened to be built with. The
+    /// owner is not told about a change it made itself.
+    /// </summary>
+    public Func<string>? BoundText { get; set; }
+
+    private string? _lastBoundText;
+    private bool _followingBoundText;
+
+    private void FollowBoundText()
+    {
+        if (BoundText is null || _focused)
+            return;
+        string bound = BoundText() ?? string.Empty;
+        if (string.Equals(bound, _lastBoundText, StringComparison.Ordinal))
+            return;
+        _lastBoundText = bound;
+        if (string.Equals(bound, _text, StringComparison.Ordinal))
+            return;
+        _followingBoundText = true;
+        try
+        {
+            SetText(bound);
+        }
+        finally
+        {
+            _followingBoundText = false;
+        }
+    }
+
     private string _textValue = "";
 
     private string _text
@@ -81,7 +114,8 @@ public sealed class UiField : UiElement
                 return;
             _textValue = value;
             _textVersion++;
-            OnTextChanged?.Invoke(value);
+            if (!_followingBoundText)
+                OnTextChanged?.Invoke(value);
         }
     }
 
@@ -697,6 +731,7 @@ public sealed class UiField : UiElement
 
     protected override void OnTick(double deltaSeconds)
     {
+        FollowBoundText();
         if (!Editable || _repeatKey is not { } k) return;
         _repeatTimer -= deltaSeconds;
         if (_repeatTimer > 0) return;
