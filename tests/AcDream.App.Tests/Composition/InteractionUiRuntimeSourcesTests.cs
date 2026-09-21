@@ -459,6 +459,11 @@ public sealed class InteractionUiRuntimeSourcesTests
         public VividTargetInfo? ResolveVividTargetInfo(uint serverGuid) =>
             new(Vector3.Zero, 3f, 0u, 0u);
         public bool IsWithinExternalContainerUseRange(uint serverGuid) => false;
+        public bool TryResolveWorldLabelAnchor(uint serverGuid, out WorldLabelAnchor anchor)
+        {
+            anchor = new WorldLabelAnchor(Vector3.Zero, 1.1f, WorldLabelAnchorSource.Fallback);
+            return true;
+        }
     }
 
     private sealed class AutomationRuntime
