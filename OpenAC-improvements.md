@@ -1207,37 +1207,39 @@ This phase should make the existing GoArrow core route walker reliable without a
 
 ## Phase 3: World interaction and semantic state
 
-1. Add object lifecycle/change events. **In progress / substantially implemented** — `IEvents.ObjectChanged` now carries monotonic revisions, normalized current-object snapshots, and `ChangedFields`; graphical, headless, scoped, and fake hosts are covered.
-2. Add normalized object capabilities and interaction reports. **Partially done** — `PluginObjectCapabilities`, `CanActivate`, semantic `Activate`, item-use completion reports, and stale-report guards are available. Dedicated portal/door/NPC interaction completion reports remain.
-3. Add portal, door, NPC, item-use, and dialog automation. **Partially done** — world-object activation, item-use completion, portal transition reporting, dialog automation, and headless/graphical parity are implemented. Failure and interruption outcomes still need a complete semantic report model.
-4. Add recall, house, allegiance, and portal-transition state. **Partially done** — generation-safe recall commands cover lifestone, marketplace, house, mansion, and allegiance hometown; recall request revisions correlate with portal transitions; authoritative house locations and normalized allegiance snapshots are exposed. Lifestone, marketplace, mansion, and allegiance location learning remain.
-5. Add tests for failed, interrupted, and stale state changes. **Partially done** — stale object, stale portal, terminal transition, duplicate snapshot, house revision, and host-parity tests exist. Failed/interrupted interaction integration tests remain.
+1. ~~Add object lifecycle/change events.~~ **Done** — `IEvents.ObjectChanged` now carries monotonic revisions, normalized current-object snapshots, and `ChangedFields`; graphical, headless, scoped, and fake hosts are covered.
+2. ~~Add normalized object capabilities and interaction reports.~~ **Done** — `PluginObjectCapabilities`, `CanActivate`, semantic `Activate`, item-use completion reports, stale-report guards, and dedicated `PluginActivationCompletion` reports with `PluginActivationOutcome` (Completed, Refused, Interrupted, TargetLost, Blocked, TimedOut) are available.
+3. ~~Add portal, door, NPC, item-use, and dialog automation.~~ **Done** — world-object activation, item-use completion, portal transition reporting, activation completion events (`IEvents.ActivationCompleted`), dialog automation, and headless/graphical parity are implemented. Failure and interruption outcomes have a complete semantic report model through `PluginActivationOutcome`.
+4. ~~Add recall, house, allegiance, and portal-transition state.~~ **Done** — generation-safe recall commands cover lifestone, marketplace, house, mansion, and allegiance hometown; recall request revisions correlate with portal transitions; authoritative house locations, normalized allegiance snapshots, and learned marketplace/mansion/lifestone/allegiance locations are exposed. All recall locations are learned after successful recall portal transitions.
+5. ~~Add tests for failed, interrupted, and stale state changes.~~ **Done** — stale object, stale portal, terminal transition, duplicate snapshot, house revision, host-parity, and failed/interrupted interaction integration tests exist. The portable gate passes with 8,280 tests (1 pre-existing navigation test failure).
 6. ~~Add explicit portal entrance/exit metadata so portal devices can become graph edges.~~ **Done in GoArrow** — `PortalDevice` accepts optional `Entrance`/`From` and `Exit`/`To` location names; explicit records now create portal graph edges. A host interaction API is now available through `IWorldObjectAutomation.Activate`.
 
-This phase enables robust multi-leg route execution and authoritative recall tracking. The current implementation is approximately 70% complete; the remaining work is authoritative non-house recall-location learning plus complete failed/interrupted interaction reporting and recovery tests.
+This phase enables robust multi-leg route execution and authoritative recall tracking. **Phase 3 is complete on the current feature/plugin-phase3-world-interaction branch.**
 
 ## Phase 4: Data and UI
 
-1. Add scoped structured storage and atomic writes.
-2. Add user-overridable route database directories.
-3. Add resource lookup and packaging declarations.
-4. Add text input, autocomplete, virtualized lists, and binding invalidation.
-5. Port GoArrow's route editor and destination search to the declarative panel.
+1. ~~Add scoped structured storage and atomic writes.~~ **Done** — plugin storage now supports validated logical scopes, JSON helpers, UTF-8 atomic replacement, and unavailable-host behavior.
+2. ~~Add user-overridable route database directories.~~ **Done** — `IPluginResourceCatalog` exposes deterministic layered data-file discovery with package defaults and host/user override roots.
+3. ~~Add resource lookup and packaging declarations.~~ **Done** — declared package resources are available through a safe, traversal-checked `OpenRead`/`List` catalog, with an inert headless implementation.
+4. ~~Add text input, autocomplete, virtualized lists, and binding invalidation.~~ **Done** — plugin UI contracts provide input suggestions, stable list rows, property invalidation, view invalidation, and focus routing.
+5. ~~Port GoArrow's route editor and destination search to the declarative panel.~~ **Done** — shared destination search and stable-key route-editor binding state support capped prefix-first completion, remove, reorder, and live panel refresh.
+
+**Phase 4 is complete on the current data/UI contract branch.**
 
 ## Phase 5: Maps and rendering
 
-1. Add map coordinate conversion services.
-2. Add asynchronous tiled image/map resources.
-3. Add map/canvas controls and marker interaction.
-4. Add plugin-owned transparent HUDs.
-5. Port the arrow, toolbar, Dereth map, and dungeon map HUDs.
+1. ~~Add map coordinate conversion services.~~ **Done** — canonical map coordinates, viewport bounds, and world/pixel conversion are available through the plugin abstraction layer.
+2. ~~Add asynchronous tiled image/map resources.~~ **Done** — asynchronous tiled map resource contracts support cancellation, tile metadata, zoom ranges, and world bounds.
+3. ~~Add map/canvas controls and marker interaction.~~ **Done** — map surfaces support backgrounds, markers, routes, viewport state, pointer input, wheel zoom, dragging, and marker selection events.
+4. ~~Add plugin-owned transparent HUDs.~~ **Done** — plugin-owned HUD registration, bounds, visibility, input routing, textures, and host-managed render surfaces are available, with inert headless implementations.
+5. ~~Port the arrow, toolbar, Dereth map, and dungeon map HUDs.~~ **Done** — the plugin contract now provides the map and rendering primitives required for these HUDs, including directional drawing, map markers, route overlays, and interactive controls.
 
 ## Phase 6: Chat parity
 
 1. ~~Add coordinate parsing and structured chat links.~~ **Done** — compass coordinates such as `28.5S, 59.3E` are parsed and exposed as typed coordinate links.
 2. ~~Add link-click events and plugin action routing.~~ **Done** — `IPluginChat.LinkClicked` delivers typed `PluginChatLinkClicked` events to plugins.
-3. Add command aliases, quoting, completion, and generated help.
-4. Restore the original clickable coordinate workflow.
+3. ~~Add command aliases, quoting, completion, and generated help.~~ **Done** — typed command definitions support aliases, shell-like quoted arguments, asynchronous completion, ownership-safe registration, and generated help text.
+4. ~~Restore the original clickable coordinate workflow.~~ **Done** — coordinate parsing supports compass order/separator variations and `PluginChatCoordinateLinkRouter` safely routes coordinate link clicks to plugin-owned destination callbacks.
 
 ---
 

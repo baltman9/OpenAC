@@ -49,6 +49,20 @@ public interface IPluginHost
     IPluginStorage Storage => NoOpPluginStorage.Instance;
 
     /// <summary>
+    /// Declared package resources and layered user data for this plugin.
+    /// </summary>
+    IPluginResourceCatalog Resources => NoOpPluginResourceCatalog.Instance;
+
+    /// <summary>Map controls, or an inert registry in a headless host.</summary>
+    IPluginMapRegistry Maps => NoOpPluginMapRegistry.Instance;
+
+    /// <summary>Asynchronous tiled map resources, or an inert catalog without map assets.</summary>
+    IPluginMapResourceCatalog MapResources => NoOpPluginMapResourceCatalog.Instance;
+
+    /// <summary>Plugin-owned HUD and drawing services, or an inert registry without a renderer.</summary>
+    IPluginRenderRegistry Rendering => NoOpPluginRenderRegistry.Instance;
+
+    /// <summary>
     /// Registers this plugin's own rules for deciding what loot is worth
     /// keeping. Inert on a host that does no loot classification.
     /// </summary>
