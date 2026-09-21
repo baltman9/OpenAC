@@ -63,5 +63,4 @@
     <EmbeddedResource Include="..\..\assets\icons\acdream-client-256.png"
                       LogicalName="AcDream.App.Rendering.Icons.acdream-client-256.png" />
   </ItemGroup>
-  <Import Project="..\AcDream.Plugins.MossTank\BundledPlugin.targets" />
 </Project>

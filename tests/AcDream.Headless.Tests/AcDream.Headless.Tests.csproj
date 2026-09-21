@@ -30,10 +30,6 @@
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <SkipGetTargetFrameworkProperties>true</SkipGetTargetFrameworkProperties>
     </ProjectReference>
-    <ProjectReference Include="..\..\src\AcDream.Plugins.MossTank\AcDream.Plugins.MossTank.csproj">
-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
-      <SkipGetTargetFrameworkProperties>true</SkipGetTargetFrameworkProperties>
-    </ProjectReference>
   </ItemGroup>
 
   <ItemGroup>
@@ -42,14 +38,5 @@
     <Compile Include="..\Fixtures\plugin-icons\PngTestData.cs"
              Link="Fixtures\PngTestData.cs" />
     <!-- One plugin, two hosts: the same script runs in both host suites. -->
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- The automation-session proof's own profile inputs, laid out the way
-         the plugin's profile storage expects them. -->
-    <Content Include="Fixtures\vt-proof\**\*">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Link>Fixtures\vt-proof\%(RecursiveDir)%(Filename)%(Extension)</Link>
-    </Content>
   </ItemGroup>
 </Project>

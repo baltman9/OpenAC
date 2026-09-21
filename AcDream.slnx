@@ -12,7 +12,6 @@
     <Project Path="src/AcDream.Platform/AcDream.Platform.csproj" />
     <Project Path="src/AcDream.PluginCheck/AcDream.PluginCheck.csproj" />
     <Project Path="src/AcDream.Plugin.Abstractions/AcDream.Plugin.Abstractions.csproj" />
-    <Project Path="src/AcDream.Plugins.MossTank/AcDream.Plugins.MossTank.csproj" />
     <Project Path="src/AcDream.Runtime/AcDream.Runtime.csproj" />
     <Project Path="src/AcDream.UI.Abstractions/AcDream.UI.Abstractions.csproj" />
   </Folder>
@@ -42,7 +41,6 @@
     <Project Path="tests/AcDream.Launcher.Tests/AcDream.Launcher.Tests.csproj" />
     <Project Path="tests/AcDream.Platform.Tests/AcDream.Platform.Tests.csproj" />
     <Project Path="tests/AcDream.PluginCheck.Tests/AcDream.PluginCheck.Tests.csproj" />
-    <Project Path="tests/AcDream.Plugins.MossTank.Tests/AcDream.Plugins.MossTank.Tests.csproj" />
     <Project Path="tests/AcDream.Plugin.Tests.Fixtures.HostPlugin/AcDream.Plugin.Tests.Fixtures.HostPlugin.csproj" />
     <Project Path="tests/AcDream.Plugin.Tests.Fixtures/AcDream.Plugin.Tests.Fixtures.csproj" />
     <Project Path="tests/AcDream.Plugin.Tests.Fixtures.InvalidRenderPackInternal/AcDream.Plugin.Tests.Fixtures.InvalidRenderPackInternal.csproj" />
