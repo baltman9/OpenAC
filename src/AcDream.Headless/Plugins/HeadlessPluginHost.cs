@@ -3,6 +3,7 @@ using AcDream.Core.Items;
 using AcDream.Headless.Hosting;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
+using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Navigation;
 using AcDream.Runtime.Plugins;
 
@@ -33,12 +34,19 @@ internal sealed class HeadlessPluginHost
     private Action? _logoff;
     private Action<string>? _localPlayerDied;
     private Action<PluginObjectChange>? _objectChanged;
+    private long _objectChangeRevision;
+    private Action<PluginPortalTransition>? _portalTransition;
+    private long _portalTransitionRevision;
+    private RuntimePortalSnapshot? _lastPublishedPortalSnapshot;
+    private long _lastPublishedRecallRequestRevision;
+    private Action<PluginItemUseCompletion>? _itemUseCompleted;
     private Action<PluginGoToReport>? _navigationChanged;
     private long _lastNavigationSequence;
     private PluginGoToState _lastNavigationState;
     private Action<uint>? _containerOpened;
     private Action<uint>? _containerClosed;
     private Action<PluginConfirmation>? _confirmationRequested;
+    private Action<PluginActivationCompletion>? _activationCompleted;
     private bool _wasInWorld;
     private bool _disposed;
 
@@ -107,6 +115,7 @@ internal sealed class HeadlessPluginHost
         runtime.CommunicationOwner.LocalPlayerDied += OnLocalPlayerDied;
         runtime.InventoryOwner.ExternalContainers.Changed += OnExternalContainerChanged;
         runtime.ActionOwner.Transactions.AppraisalReceived += OnAppraisalReceived;
+        runtime.ActionOwner.Transactions.UseCompleted += OnUseCompleted;
         _eventSubscription = runtime.Subscribe(this);
     }
 
@@ -343,6 +352,7 @@ internal sealed class HeadlessPluginHost
         _runtime.CommunicationOwner.LocalPlayerDied -= OnLocalPlayerDied;
         _runtime.InventoryOwner.ExternalContainers.Changed -= OnExternalContainerChanged;
         _runtime.ActionOwner.Transactions.AppraisalReceived -= OnAppraisalReceived;
+        _runtime.ActionOwner.Transactions.UseCompleted -= OnUseCompleted;
         _eventSubscription.Dispose();
         _automation.Dispose();
     }
@@ -499,6 +509,40 @@ internal sealed class HeadlessPluginHost
         }
     }
 
+    public event Action<PluginPortalTransition> PortalTransition
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_tickGate)
+                _portalTransition += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_tickGate)
+                _portalTransition -= value;
+        }
+    }
+
+    public event Action<PluginItemUseCompletion> ItemUseCompleted
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_tickGate)
+                _itemUseCompleted += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_tickGate)
+                _itemUseCompleted -= value;
+        }
+    }
+
     public event Action<PluginGoToReport> NavigationChanged
     {
         add
@@ -567,6 +611,23 @@ internal sealed class HeadlessPluginHost
         }
     }
 
+    public event Action<PluginActivationCompletion> ActivationCompleted
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_tickGate)
+                _activationCompleted += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_tickGate)
+                _activationCompleted -= value;
+        }
+    }
+
     public void OnCommand(in RuntimeCommandDelta delta) { }
 
     public void OnInventory(in RuntimeInventoryDelta delta)
@@ -608,7 +669,18 @@ internal sealed class HeadlessPluginHost
             handlers = _objectChanged;
         if (handlers is null)
             return;
-        var change = new PluginObjectChange(objectId, kind);
+        PluginWorldObject? current = null;
+        if (kind != PluginObjectChangeKind.Released
+            && ((IWorldObjectAutomation)_automation).TryGet(objectId, out PluginWorldObject snapshot))
+        {
+            current = snapshot;
+        }
+        var change = new PluginObjectChange(objectId, kind)
+        {
+            Revision = Interlocked.Increment(ref _objectChangeRevision),
+            ChangedFields = PluginObjectChange.FieldsFor(kind),
+            Current = current,
+        };
         foreach (Delegate handler in handlers.GetInvocationList())
         {
             try { ((Action<PluginObjectChange>)handler)(change); }
@@ -638,6 +710,30 @@ internal sealed class HeadlessPluginHost
 
     private void OnAppraisalReceived(uint objectId) =>
         RaiseObjectChanged(objectId, PluginObjectChangeKind.IdentReceived);
+
+    private void OnUseCompleted(uint _)
+    {
+        RuntimeItemUseCompletion completion =
+            _runtime.ActionOwner.Transactions.LastItemUseCompletion;
+        Action<PluginItemUseCompletion>? handlers;
+        lock (_tickGate)
+            handlers = _itemUseCompleted;
+        if (handlers is null)
+            return;
+        var report = new PluginItemUseCompletion(
+            completion.Revision,
+            completion.SourceObjectId,
+            completion.TargetObjectId,
+            completion.WeenieError);
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginItemUseCompletion>)handler)(report); }
+            catch (Exception error)
+            {
+                Log.Warn($"Plugin item-use handler threw: {error}");
+            }
+        }
+    }
 
     private void RaiseUInt(ref Action<uint>? field, uint value)
     {
@@ -674,9 +770,88 @@ internal sealed class HeadlessPluginHost
         }
     }
 
+    internal void RaiseActivationCompleted(PluginActivationCompletion completion)
+    {
+        Action<PluginActivationCompletion>? handlers;
+        lock (_tickGate)
+            handlers = _activationCompleted;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginActivationCompletion>)handler)(completion); }
+            catch (Exception error)
+            {
+                Log.Warn($"Plugin activation-completion handler threw: {error}");
+            }
+        }
+    }
+
     public void OnChat(in RuntimeChatDelta delta) { }
     public void OnMovement(in RuntimeMovementDelta delta) { }
-    public void OnPortal(in RuntimePortalDelta delta) { }
+    public void OnPortal(in RuntimePortalDelta delta)
+    {
+        lock (_tickGate)
+        {
+            if (_lastPublishedPortalSnapshot is { } previous
+                && previous.Equals(delta.Portal))
+                return;
+            _lastPublishedPortalSnapshot = delta.Portal;
+        }
+        long recallRequestRevision =
+            ((IRecallAutomation)_automation).LastRequest.Status == PluginRecallStatus.Started
+                ? ((IRecallAutomation)_automation).LastRequest.Revision
+                : 0;
+        if (recallRequestRevision == _lastPublishedRecallRequestRevision)
+            recallRequestRevision = 0;
+        else
+            _lastPublishedRecallRequestRevision = recallRequestRevision;
+        PluginPortalTransition transition = new(
+            Revision: Interlocked.Increment(ref _portalTransitionRevision),
+            Generation: delta.Portal.Generation,
+            DestinationCell: delta.Portal.DestinationCell,
+            IsReady: delta.Portal.IsReady,
+            IsMaterialized: delta.Portal.IsMaterialized,
+            IsCompleted: delta.Portal.IsCompleted,
+            IsCancelled: delta.Portal.IsCancelled)
+        {
+            RecallRequestRevision = recallRequestRevision,
+            Kind = delta.Portal.Kind switch
+            {
+                RuntimePortalKind.Login => PluginPortalTransitionKind.Login,
+                RuntimePortalKind.Portal => PluginPortalTransitionKind.Portal,
+                _ => PluginPortalTransitionKind.Unknown,
+            },
+        };
+        Action<PluginPortalTransition>? handlers;
+        lock (_tickGate)
+            handlers = _portalTransition;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginPortalTransition>)handler)(transition); }
+            catch (Exception error)
+            {
+                Log.Warn($"Plugin portal-transition handler threw: {error}");
+            }
+        }
+
+        // When a portal transition completes that was correlated to a recall
+        // request, fire an activation completion event.
+        if ((delta.Portal.IsCompleted || delta.Portal.IsCancelled)
+            && recallRequestRevision > 0)
+        {
+            PluginActivationOutcome outcome = delta.Portal.IsCompleted
+                ? PluginActivationOutcome.Completed
+                : PluginActivationOutcome.Interrupted;
+            RaiseActivationCompleted(new PluginActivationCompletion(
+                Interlocked.Increment(ref _portalTransitionRevision),
+                0u, // The object id is not directly tracked in the headless host.
+                outcome,
+                0u));
+        }
+    }
     public void OnCombat(in RuntimeCombatDelta delta) { }
 
     private static WorldEntitySnapshot Convert(

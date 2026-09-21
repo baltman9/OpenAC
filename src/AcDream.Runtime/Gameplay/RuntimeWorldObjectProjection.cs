@@ -47,15 +47,17 @@ public static class RuntimeWorldObjectProjection
             ? activeSpellIdsForPlayer?.Invoke(playerId) ?? Array.Empty<uint>()
             : Array.Empty<uint>();
         uint publicFlags = item?.PublicWeenieBitfield ?? 0u;
+        PluginObjectClass objectClass = ClassifyObject(item);
         return new PluginWorldObject(
             objectId,
             item?.WeenieClassId ?? 0u,
             item?.Name ?? record?.Snapshot.Name ?? $"0x{objectId:X8}",
-            ClassifyObject(item),
+            objectClass,
             (uint)(item?.Type ?? ItemType.None),
             item?.ContainerId ?? 0u,
             item?.WielderId ?? 0u)
         {
+            Capabilities = PluginObjectClassifier.Capabilities(objectClass),
             IsOwned = owned,
             IsLandscape = source is not null
                 && !owned

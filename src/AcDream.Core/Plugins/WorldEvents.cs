@@ -13,10 +13,15 @@ public sealed class WorldEvents : IEvents
     private Action? _logoff;
     private Action<string>? _localPlayerDied;
     private Action<PluginObjectChange>? _objectChanged;
+    private long _objectChangeRevision;
+    private Action<PluginPortalTransition>? _portalTransition;
+    private long _portalTransitionRevision;
+    private Action<PluginItemUseCompletion>? _itemUseCompleted;
     private Action<PluginGoToReport>? _navigationChanged;
     private Action<uint>? _containerOpened;
     private Action<uint>? _containerClosed;
     private Action<PluginConfirmation>? _confirmationRequested;
+    private Action<PluginActivationCompletion>? _activationCompleted;
 
     private sealed class Subscription(Action<WorldEntitySnapshot> handler)
     {
@@ -159,6 +164,40 @@ public sealed class WorldEvents : IEvents
         }
     }
 
+    public event Action<PluginPortalTransition> PortalTransition
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_lock)
+                _portalTransition += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_lock)
+                _portalTransition -= value;
+        }
+    }
+
+    public event Action<PluginItemUseCompletion> ItemUseCompleted
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_lock)
+                _itemUseCompleted += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_lock)
+                _itemUseCompleted -= value;
+        }
+    }
+
     public event Action<PluginGoToReport> NavigationChanged
     {
         add
@@ -227,6 +266,23 @@ public sealed class WorldEvents : IEvents
         }
     }
 
+    public event Action<PluginActivationCompletion> ActivationCompleted
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_lock)
+                _activationCompleted += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_lock)
+                _activationCompleted -= value;
+        }
+    }
+
     public void FireLoginComplete()
     {
         Action? handlers;
@@ -262,12 +318,50 @@ public sealed class WorldEvents : IEvents
     {
         Action<PluginObjectChange>? handlers;
         lock (_lock)
+        {
+            change = change with
+            {
+                Revision = ++_objectChangeRevision,
+                ChangedFields = PluginObjectChange.FieldsFor(change.Kind),
+            };
             handlers = _objectChanged;
+        }
         if (handlers is null)
             return;
         foreach (Delegate handler in handlers.GetInvocationList())
         {
             try { ((Action<PluginObjectChange>)handler)(change); }
+            catch { /* plugin errors do not propagate out of event dispatch */ }
+        }
+    }
+
+    public void FirePortalTransition(PluginPortalTransition transition)
+    {
+        Action<PluginPortalTransition>? handlers;
+        lock (_lock)
+        {
+            transition = transition with { Revision = ++_portalTransitionRevision };
+            handlers = _portalTransition;
+        }
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginPortalTransition>)handler)(transition); }
+            catch { /* plugin errors do not propagate out of event dispatch */ }
+        }
+    }
+
+    public void FireItemUseCompleted(PluginItemUseCompletion completion)
+    {
+        Action<PluginItemUseCompletion>? handlers;
+        lock (_lock)
+            handlers = _itemUseCompleted;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginItemUseCompletion>)handler)(completion); }
             catch { /* plugin errors do not propagate out of event dispatch */ }
         }
     }
@@ -312,6 +406,20 @@ public sealed class WorldEvents : IEvents
         foreach (Delegate handler in handlers.GetInvocationList())
         {
             try { ((Action<PluginConfirmation>)handler)(confirmation); }
+            catch { /* plugin errors do not propagate out of event dispatch */ }
+        }
+    }
+
+    public void FireActivationCompleted(PluginActivationCompletion completion)
+    {
+        Action<PluginActivationCompletion>? handlers;
+        lock (_lock)
+            handlers = _activationCompleted;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginActivationCompletion>)handler)(completion); }
             catch { /* plugin errors do not propagate out of event dispatch */ }
         }
     }

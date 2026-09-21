@@ -65,6 +65,36 @@ public interface IEvents
     }
 
     /// <summary>
+    /// Raised when the host observes a portal, recall, or other world
+    /// transition. Notifications carry a generation and revision so a
+    /// plugin can reject stale transition state.
+    /// </summary>
+    event Action<PluginPortalTransition> PortalTransition
+    {
+        add { }
+        remove { }
+    }
+
+    /// <summary>Raised when a plugin-issued item use receives its server completion.</summary>
+    event Action<PluginItemUseCompletion> ItemUseCompleted
+    {
+        add { }
+        remove { }
+    }
+
+    /// <summary>
+    /// Raised when a world-object activation (portal, door, NPC, vendor,
+    /// container, or other interactable landscape object) completes, fails,
+    /// or is interrupted. Correlates with a prior call to
+    /// <see cref="IWorldObjectAutomation.Activate"/>.
+    /// </summary>
+    event Action<PluginActivationCompletion> ActivationCompleted
+    {
+        add { }
+        remove { }
+    }
+
+    /// <summary>
     /// Raised when the host's current navigation walk report changes. Reports
     /// are delivered on the same thread as <see cref="Tick"/> and are emitted
     /// only when the report's sequence or state changes. A host that does not

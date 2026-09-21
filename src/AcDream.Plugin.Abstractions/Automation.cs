@@ -731,6 +731,9 @@ public interface IAutomationSurface
     /// <summary>Authoritative fellowship vitals for helper spell policy.</summary>
     IFellowshipAutomation Fellowship => NoOpAutomationSurface.Instance;
 
+    /// <summary>Authoritative allegiance identity and membership state.</summary>
+    IAllegianceAutomation Allegiance => NoOpAutomationSurface.Instance;
+
     /// <summary>Enchantments in force on other objects, as the client tracks them.</summary>
     IEnchantmentAutomation Enchantments => NoOpAutomationSurface.Instance;
 
@@ -739,6 +742,9 @@ public interface IAutomationSurface
 
     /// <summary>The world objects the client is tracking.</summary>
     IWorldObjectAutomation Objects => NoOpAutomationSurface.Instance;
+
+    /// <summary>Generation-safe recall commands and portal transition state.</summary>
+    IRecallAutomation Recalls => NoOpAutomationSurface.Instance;
 
     /// <summary>The in-game clock and calendar.</summary>
     IWorldTimeAutomation WorldTime => NoOpAutomationSurface.Instance;
@@ -775,8 +781,8 @@ public sealed class NoOpAutomationSurface
     : IAutomationSurface, ICharacterInfo, ISpellCatalog, IMagicCommands,
       IPluginChat, ICombatAutomation
       , IEquipmentAutomation, IItemAutomation, ILootAutomation,
-      IFellowshipAutomation, IEnchantmentAutomation, INavigationAutomation
-      , IWorldObjectAutomation, IWorldTimeAutomation, ILoginAutomation,
+      IFellowshipAutomation, IAllegianceAutomation, IEnchantmentAutomation, INavigationAutomation
+      , IWorldObjectAutomation, IRecallAutomation, IWorldTimeAutomation, ILoginAutomation,
       INetworkAutomation, IRecoveryAutomation, IProjectileAutomation
       , ISelectionAutomation, IDialogAutomation, ITradeAutomation,
       IVendorAutomation
@@ -822,6 +828,9 @@ public sealed class NoOpAutomationSurface
     public IFellowshipAutomation Fellowship => this;
 
     /// <inheritdoc/>
+    public IAllegianceAutomation Allegiance => this;
+
+    /// <inheritdoc/>
     public IEnchantmentAutomation Enchantments => this;
 
     /// <inheritdoc/>
@@ -829,6 +838,9 @@ public sealed class NoOpAutomationSurface
 
     /// <inheritdoc/>
     public IWorldObjectAutomation Objects => this;
+
+    /// <inheritdoc/>
+    public IRecallAutomation Recalls => this;
 
     /// <inheritdoc/>
     public IWorldTimeAutomation WorldTime => this;

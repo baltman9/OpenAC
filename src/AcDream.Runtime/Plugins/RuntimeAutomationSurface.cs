@@ -23,8 +23,8 @@ internal sealed class RuntimeAutomationSurface
       ICombatAutomation, IEquipmentAutomation, IItemAutomation,
       ILootAutomation, IFellowshipAutomation, IEnchantmentAutomation,
       IRuntimeCommunicationObserver, IRuntimeEventObserver,
-      IWorldObjectAutomation, IWorldTimeAutomation,
-      ILoginAutomation, INetworkAutomation, IRecoveryAutomation,
+      IWorldObjectAutomation, IRecallAutomation, IAllegianceAutomation,
+      IWorldTimeAutomation, ILoginAutomation, INetworkAutomation, IRecoveryAutomation,
       IProjectileAutomation, ISelectionAutomation, IDialogAutomation, IDisposable
 {
     private readonly PluginCommandRegistry _pluginCommands;
@@ -39,6 +39,12 @@ internal sealed class RuntimeAutomationSurface
     private double _peerHeartbeatRemaining;
     private long _lastNavigationSequence;
     private PluginGoToState _lastNavigationState;
+    private RuntimePortalSnapshot? _lastPublishedPortalSnapshot;
+    private long _recallRequestRevision;
+    private long _pendingRecallRequestRevision;
+    private PluginRecallRequest _lastRecallRequest;
+    private long _activationRevision;
+    private readonly Dictionary<uint, long> _pendingActivationObjectIds = new();
 
     private GameRuntime? _runtime;
     private AcDream.Runtime.Gameplay.RuntimeTradeAutomation? _tradeAutomation;
@@ -68,6 +74,16 @@ internal sealed class RuntimeAutomationSurface
     private Func<uint, bool, bool>? _pickupItem;
     private Func<uint, bool>? _identifyItem;
     private Func<uint, IReadOnlyList<uint>, bool>? _salvageItems;
+    private PluginActivationCompletion _lastActivationCompletion;
+    private PluginRecallKind? _lastSuccessfulRecallKind;
+    private PluginRecallLocation? _lifestoneLocation;
+    private PluginRecallLocation? _marketplaceLocation;
+    private PluginRecallLocation? _mansionLocation;
+    private PluginRecallLocation? _allegianceLocation;
+    private long _lifestoneRevision;
+    private long _marketplaceRevision;
+    private long _mansionRevision;
+    private long _allegianceRevision;
     private Func<uint, uint, int, bool>? _sellItem;
     private Func<uint, bool>? _dismissGhost;
     private Func<PluginSelectionAction, bool>? _selectionAction;
@@ -178,6 +194,8 @@ internal sealed class RuntimeAutomationSurface
     public IEnchantmentAutomation Enchantments => this;
     public INavigationAutomation Navigation => _navigation;
     public IWorldObjectAutomation Objects => this;
+    public IRecallAutomation Recalls => this;
+    public IAllegianceAutomation Allegiance => this;
     public IWorldTimeAutomation WorldTime => this;
     public ILoginAutomation Login => this;
     public INetworkAutomation Network => this;
@@ -392,6 +410,8 @@ internal sealed class RuntimeAutomationSurface
                 _externalContainerChanged;
             runtime.ActionOwner.Transactions.AppraisalReceived +=
                 OnAppraisalReceived;
+            runtime.ActionOwner.Transactions.UseCompleted +=
+                OnUseCompleted;
             _character = character;
             _cast = cast;
             _spellbook = spellbook;
@@ -619,6 +639,8 @@ internal sealed class RuntimeAutomationSurface
             }
             runtime.ActionOwner.Transactions.AppraisalReceived -=
                 OnAppraisalReceived;
+            runtime.ActionOwner.Transactions.UseCompleted -=
+                OnUseCompleted;
         }
         if (_communication is not null)
             _communication.LocalPlayerDied -= OnLocalPlayerDied;
@@ -629,6 +651,10 @@ internal sealed class RuntimeAutomationSurface
         _runtimeEventSubscription?.Dispose();
         _runtimeEventSubscription = null;
         _wasInWorld = false;
+        _lastPublishedPortalSnapshot = null;
+        _lastRecallRequest = default;
+        _recallRequestRevision = 0;
+        _pendingRecallRequestRevision = 0;
         _chatMessages.Clear();
         if (_spellbook is not null)
         {
@@ -1219,6 +1245,19 @@ internal sealed class RuntimeAutomationSurface
             if (_disposed || _wasInWorld == isInWorld)
                 return;
             _wasInWorld = isInWorld;
+
+            // Clear pending activations on logoff.
+            if (!isInWorld && _pendingActivationObjectIds.Count > 0)
+            {
+                long revision = ++_activationRevision;
+                foreach (uint objId in _pendingActivationObjectIds.Keys)
+                {
+                    _lastActivationCompletion = new PluginActivationCompletion(
+                        revision, objId, PluginActivationOutcome.Interrupted, 0u);
+                    _pluginEvents?.FireActivationCompleted(_lastActivationCompletion);
+                }
+                _pendingActivationObjectIds.Clear();
+            }
         }
 
         if (isInWorld)
@@ -1250,9 +1289,11 @@ internal sealed class RuntimeAutomationSurface
             RuntimeEntityChange.Deleted => PluginObjectChangeKind.Released,
             _ => PluginObjectChangeKind.Updated,
         };
-        events.FireObjectChanged(new PluginObjectChange(
-            delta.Entity.Identity.ServerGuid,
-            kind));
+        uint objectId = delta.Entity.Identity.ServerGuid;
+        events.FireObjectChanged(new PluginObjectChange(objectId, kind)
+        {
+            Current = CaptureCurrentObject(objectId),
+        });
     }
 
     /// <summary>
@@ -1274,14 +1315,84 @@ internal sealed class RuntimeAutomationSurface
             RuntimeInventoryChange.Removed => PluginObjectChangeKind.Released,
             _ => PluginObjectChangeKind.Updated,
         };
-        events.FireObjectChanged(new PluginObjectChange(
-            delta.Item.ObjectId,
-            kind));
+        uint objectId = delta.Item.ObjectId;
+        events.FireObjectChanged(new PluginObjectChange(objectId, kind)
+        {
+            Current = CaptureCurrentObject(objectId),
+        });
     }
 
     void IRuntimeEventObserver.OnChat(in RuntimeChatDelta delta) { }
     void IRuntimeEventObserver.OnMovement(in RuntimeMovementDelta delta) { }
-    void IRuntimeEventObserver.OnPortal(in RuntimePortalDelta delta) { }
+    void IRuntimeEventObserver.OnPortal(in RuntimePortalDelta delta)
+    {
+        long recallRequestRevision;
+        lock (_gate)
+        {
+            if (_lastPublishedPortalSnapshot is { } previous
+                && previous.Equals(delta.Portal))
+                return;
+            _lastPublishedPortalSnapshot = delta.Portal;
+            recallRequestRevision = _pendingRecallRequestRevision;
+            _pendingRecallRequestRevision = 0;
+        }
+        _pluginEvents?.FirePortalTransition(new PluginPortalTransition(
+            Revision: 0,
+            Generation: delta.Portal.Generation,
+            DestinationCell: delta.Portal.DestinationCell,
+            IsReady: delta.Portal.IsReady,
+            IsMaterialized: delta.Portal.IsMaterialized,
+            IsCompleted: delta.Portal.IsCompleted,
+            IsCancelled: delta.Portal.IsCancelled)
+        {
+            RecallRequestRevision = recallRequestRevision,
+            Kind = delta.Portal.Kind switch
+            {
+                RuntimePortalKind.Login => PluginPortalTransitionKind.Login,
+                RuntimePortalKind.Portal => PluginPortalTransitionKind.Portal,
+                _ => PluginPortalTransitionKind.Unknown,
+            },
+        });
+
+        // When a portal transition completes or cancels, resolve any
+        // pending activation that may be awaiting this transition.
+        if (delta.Portal.IsCompleted || delta.Portal.IsCancelled)
+        {
+            PluginActivationOutcome outcome = delta.Portal.IsCompleted
+                ? PluginActivationOutcome.Completed
+                : PluginActivationOutcome.Interrupted;
+            lock (_gate)
+            {
+                if (_pendingActivationObjectIds.Count > 0)
+                {
+                    // Clear all pending activations -- the transition
+                    // resolves any outstanding world interaction.
+                    long revision = ++_activationRevision;
+                    foreach (uint objId in _pendingActivationObjectIds.Keys)
+                    {
+                        _lastActivationCompletion = new PluginActivationCompletion(
+                            revision,
+                            objId,
+                            outcome,
+                            WeenieError: 0u);
+                        _pluginEvents?.FireActivationCompleted(_lastActivationCompletion);
+                    }
+                    _pendingActivationObjectIds.Clear();
+                }
+
+                // When a portal transition completes with a correlated recall
+                // request, learn the destination as a recall location.
+                if (delta.Portal.IsCompleted && recallRequestRevision > 0
+                    && _lastSuccessfulRecallKind is { } kind)
+                {
+                    GameRuntime? rt = _runtime;
+                    if (rt is not null)
+                        CaptureRecallLocation(kind, rt, recallRequestRevision, delta.Portal.DestinationCell);
+                    _lastSuccessfulRecallKind = null;
+                }
+            }
+        }
+    }
     void IRuntimeEventObserver.OnCombat(in RuntimeCombatDelta delta) { }
 
     private void OnLocalPlayerDied(string deathMessage) =>
@@ -1306,10 +1417,49 @@ internal sealed class RuntimeAutomationSurface
         }
     }
 
+    private void OnUseCompleted(uint _)
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        if (runtime is null)
+            return;
+        RuntimeItemUseCompletion completion =
+            runtime.ActionOwner.Transactions.LastItemUseCompletion;
+        _pluginEvents?.FireItemUseCompleted(new PluginItemUseCompletion(
+            completion.Revision,
+            completion.SourceObjectId,
+            completion.TargetObjectId,
+            completion.WeenieError));
+    }
+
     private void OnAppraisalReceived(uint objectId) =>
         _pluginEvents?.FireObjectChanged(new PluginObjectChange(
             objectId,
-            PluginObjectChangeKind.IdentReceived));
+            PluginObjectChangeKind.IdentReceived)
+        {
+            Current = CaptureCurrentObject(objectId),
+        });
+
+    private PluginWorldObject? CaptureCurrentObject(uint objectId)
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        if (runtime is null || objectId == 0u)
+            return null;
+        runtime.EntityObjects.Entities.TryGetActive(
+            objectId,
+            out RuntimeEntityRecord? record);
+        ClientObject? item = runtime.InventoryOwner.Objects.Get(objectId);
+        if (record is null && item is null)
+            return null;
+        return ProjectWorldObject(
+            runtime,
+            record,
+            item,
+            runtime.PlayerIdentity.ServerGuid);
+    }
 
     // ── IDialogAutomation ────────────────────────────────────────────────
     IDialogAutomation IAutomationSurface.Dialogs => this;
@@ -1912,6 +2062,205 @@ internal sealed class RuntimeAutomationSurface
     // ── IWorldObjectAutomation ────────────────────────────────────────────
     bool IWorldObjectAutomation.IsAvailable => IsAvailable;
 
+    bool IRecallAutomation.IsAvailable => IsAvailable;
+
+    bool IAllegianceAutomation.IsAvailable => IsAvailable;
+
+    PluginActivationCompletion IWorldObjectAutomation.LastActivationCompletion
+    {
+        get { lock (_gate) return _lastActivationCompletion; }
+    }
+
+    PluginAllegianceSnapshot IAllegianceAutomation.Snapshot
+    {
+        get
+        {
+            GameRuntime? runtime;
+            lock (_gate)
+                runtime = _runtime;
+            if (runtime is null || !IsAvailable)
+                return default;
+            RuntimeAllegianceSnapshot snapshot = runtime.Allegiance.Snapshot;
+            return new PluginAllegianceSnapshot(
+                snapshot.Revision,
+                snapshot.HasProfile,
+                snapshot.AllegianceName,
+                snapshot.Rank,
+                snapshot.TotalMembers,
+                snapshot.TotalVassals,
+                snapshot.MonarchGuid);
+        }
+    }
+
+    PluginRecallRequest IRecallAutomation.LastRequest
+    {
+        get { lock (_gate) return _lastRecallRequest; }
+    }
+
+    IReadOnlyList<PluginRecallLocation> IRecallAutomation.CaptureLocations()
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        if (runtime is null || !IsAvailable)
+            return Array.Empty<PluginRecallLocation>();
+
+        var results = new List<PluginRecallLocation>(5);
+
+        // House location from the house owner data.
+        AcDream.Core.Net.Messages.CreateObject.ServerPosition? house =
+            runtime.HouseOwner.Position;
+        AcDream.Core.Physics.Position? position =
+            RuntimeWorldObjectProjection.ConvertPosition(house);
+        if (position is not null)
+        {
+            results.Add(new PluginRecallLocation(
+                PluginRecallKind.House,
+                RuntimeWorldObjectProjection.ProjectNavigationPosition(position.Value),
+                "House",
+                runtime.HouseOwner.Revision,
+                true));
+        }
+
+        // Learned recall locations.
+        if (_lifestoneLocation is { } ls && ls.IsKnown)
+            results.Add(ls);
+        if (_marketplaceLocation is { } mp && mp.IsKnown)
+            results.Add(mp);
+        if (_mansionLocation is { } mn && mn.IsKnown)
+            results.Add(mn);
+        if (_allegianceLocation is { } al && al.IsKnown)
+            results.Add(al);
+
+        return results;
+    }
+
+    PluginRecallResult IRecallAutomation.Recall(PluginRecallKind kind)
+    {
+        GameRuntime? runtime;
+        IGameRuntimeCommands? commands;
+        lock (_gate)
+        {
+            runtime = _runtime;
+            commands = _sessionCommands;
+        }
+        if (runtime is null || commands is null || !IsAvailable)
+            return new(PluginRecallStatus.Unavailable);
+
+        RuntimePortalCommand command = kind switch
+        {
+            PluginRecallKind.Lifestone => RuntimePortalCommand.RecallLifestone,
+            PluginRecallKind.Marketplace => RuntimePortalCommand.RecallMarketplace,
+            PluginRecallKind.House => RuntimePortalCommand.RecallHouse,
+            PluginRecallKind.Mansion => RuntimePortalCommand.RecallMansion,
+            PluginRecallKind.Allegiance => RuntimePortalCommand.RecallAllegiance,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
+        RuntimeCommandResult result = commands.Portal.Execute(runtime.Generation, command);
+        PluginRecallStatus status = result.Status switch
+        {
+            RuntimeCommandStatus.Accepted => PluginRecallStatus.Started,
+            RuntimeCommandStatus.Unsupported => PluginRecallStatus.Unsupported,
+            _ => PluginRecallStatus.Refused,
+        };
+        lock (_gate)
+        {
+            _lastRecallRequest = new PluginRecallRequest(
+                ++_recallRequestRevision,
+                kind,
+                status);
+            _pendingRecallRequestRevision = status == PluginRecallStatus.Started
+                ? _lastRecallRequest.Revision
+                : 0;
+            if (status == PluginRecallStatus.Started)
+                _lastSuccessfulRecallKind = kind;
+        }
+        return new(status, status == PluginRecallStatus.Refused
+            ? result.Status.ToString()
+            : null);
+    }
+
+    private void CaptureRecallLocation(
+        PluginRecallKind kind, GameRuntime runtime, long revision, uint destinationCell)
+    {
+        // Learn the arrival position after a successful recall.
+        // For marketplace, use a known fixed location since the
+        // destination is always the same.
+        if (kind == PluginRecallKind.Marketplace)
+        {
+            // Marketplace town center. The cell is 0x0166 in the
+            // original client; the position is the standard arrival
+            // point after a marketplace recall.
+            _marketplaceLocation = new PluginRecallLocation(
+                PluginRecallKind.Marketplace,
+                new PluginNavigationPosition(
+                    CellId: 0x0166u,
+                    EastWest: 0.05, NorthSouth: 0.05, Elevation: 0.0,
+                    HeadingDegrees: 0.0f,
+                    IsOutdoor: true),
+                "Marketplace",
+                ++_marketplaceRevision,
+                true);
+            return;
+        }
+
+        // For house, use the data already available from the house owner.
+        if (kind == PluginRecallKind.House)
+        {
+            // Already tracked by CaptureLocations() from runtime.HouseOwner.
+            return;
+        }
+
+        // For mansion, check if the house data has a mansion position.
+        if (kind == PluginRecallKind.Mansion)
+        {
+            AcDream.Core.Net.Messages.CreateObject.ServerPosition? house =
+                runtime.HouseOwner.Position;
+            AcDream.Core.Physics.Position? position =
+                RuntimeWorldObjectProjection.ConvertPosition(house);
+            if (position is not null)
+            {
+                _mansionLocation = new PluginRecallLocation(
+                    PluginRecallKind.Mansion,
+                    RuntimeWorldObjectProjection.ProjectNavigationPosition(position.Value),
+                    "Mansion",
+                    ++_mansionRevision,
+                    true);
+            }
+            return;
+        }
+
+        // For lifestone, capture the destination cell from the portal transition.
+        if (kind == PluginRecallKind.Lifestone && destinationCell != 0u)
+        {
+            _lifestoneLocation = new PluginRecallLocation(
+                PluginRecallKind.Lifestone,
+                new PluginNavigationPosition(
+                    CellId: destinationCell,
+                    EastWest: 0.0, NorthSouth: 0.0, Elevation: 0.0,
+                    HeadingDegrees: 0.0f,
+                    IsOutdoor: true),
+                "Lifestone",
+                ++_lifestoneRevision,
+                true);
+        }
+
+        // For allegiance hometown, capture the destination cell from the portal transition.
+        if (kind == PluginRecallKind.Allegiance && destinationCell != 0u)
+        {
+            _allegianceLocation = new PluginRecallLocation(
+                PluginRecallKind.Allegiance,
+                new PluginNavigationPosition(
+                    CellId: destinationCell,
+                    EastWest: 0.0, NorthSouth: 0.0, Elevation: 0.0,
+                    HeadingDegrees: 0.0f,
+                    IsOutdoor: true),
+                "Allegiance Hometown",
+                ++_allegianceRevision,
+                true);
+        }
+    }
+
     uint IWorldObjectAutomation.OpenContainerObjectId
     {
         get
@@ -2002,6 +2351,45 @@ internal sealed class RuntimeAutomationSurface
     // owned inventory, equipped, landscape, a vendor listing, or an open
     // container's content -- unlike ILootAutomation.Identify, which is
     // deliberately scoped to the currently open corpse/container.
+    PluginItemCommandResult IWorldObjectAutomation.Activate(uint objectId)
+    {
+        GameRuntime? runtime;
+        Func<uint, PluginItemCommandResult>? useWorldObject;
+        lock (_gate)
+        {
+            runtime = _runtime;
+            useWorldObject = _useWorldObject;
+        }
+        if (runtime is null || useWorldObject is null || !IsAvailable)
+            return new(PluginItemCommandStatus.Unavailable);
+        if (objectId == 0u || runtime.InventoryOwner.Objects.Get(objectId) is not { } item)
+            return new(PluginItemCommandStatus.InvalidTarget);
+        uint playerId = runtime.PlayerIdentity.ServerGuid;
+        if (RuntimeWorldObjectProjection.IsPlayerOwned(
+                item,
+                playerId,
+                runtime.InventoryOwner.Objects))
+            return new(PluginItemCommandStatus.InvalidTarget,
+                "Activate is for world objects; use Items.Use for owned items.");
+        PluginItemCommandResult result = useWorldObject(objectId);
+        if (result.Accepted)
+        {
+            lock (_gate)
+            {
+                if (_pendingActivationObjectIds.TryGetValue(objectId, out long existing))
+                {
+                    // Already tracking this object; update revision.
+                    _pendingActivationObjectIds[objectId] = ++_activationRevision;
+                }
+                else
+                {
+                    _pendingActivationObjectIds.Add(objectId, ++_activationRevision);
+                }
+            }
+        }
+        return result;
+    }
+
     PluginItemCommandResult IWorldObjectAutomation.Identify(uint objectId)
     {
         GameRuntime? runtime;

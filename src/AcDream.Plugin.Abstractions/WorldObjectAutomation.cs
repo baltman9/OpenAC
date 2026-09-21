@@ -1,6 +1,30 @@
 namespace AcDream.Plugin.Abstractions;
 
 /// <summary>
+/// Semantic operations and roles the host recognizes for an object.
+/// </summary>
+[Flags]
+public enum PluginObjectCapabilities
+{
+    /// <summary>No normalized capability is known.</summary>
+    None = 0,
+    /// <summary>The object can be activated or otherwise interacted with.</summary>
+    Interactable = 1 << 0,
+    /// <summary>The object is a portal device or portal target.</summary>
+    Portal = 1 << 1,
+    /// <summary>The object is a door.</summary>
+    Door = 1 << 2,
+    /// <summary>The object is a vendor.</summary>
+    Vendor = 1 << 3,
+    /// <summary>The object is a container.</summary>
+    Container = 1 << 4,
+    /// <summary>The object is a player character.</summary>
+    Player = 1 << 5,
+    /// <summary>The object is a non-player character.</summary>
+    Npc = 1 << 6,
+}
+
+/// <summary>
 /// A broad category for an object, worked out from its item type and its
 /// public flags. It is a convenience for plugins that want to say "this is a
 /// weapon" without decoding bit masks themselves.
@@ -221,6 +245,28 @@ public static class PluginObjectClassifier
             result = PluginObjectClass.CombatPet;
         return result;
     }
+
+    /// <summary>Maps a normalized object class to semantic interaction capabilities.</summary>
+    public static PluginObjectCapabilities Capabilities(PluginObjectClass objectClass) =>
+        objectClass switch
+        {
+            PluginObjectClass.Portal => PluginObjectCapabilities.Interactable
+                | PluginObjectCapabilities.Portal,
+            PluginObjectClass.Door => PluginObjectCapabilities.Interactable
+                | PluginObjectCapabilities.Door,
+            PluginObjectClass.Vendor => PluginObjectCapabilities.Interactable
+                | PluginObjectCapabilities.Vendor,
+            PluginObjectClass.Container => PluginObjectCapabilities.Interactable
+                | PluginObjectCapabilities.Container,
+            PluginObjectClass.Player => PluginObjectCapabilities.Interactable
+                | PluginObjectCapabilities.Player,
+            PluginObjectClass.Npc => PluginObjectCapabilities.Interactable
+                | PluginObjectCapabilities.Npc,
+            PluginObjectClass.Corpse
+                or PluginObjectClass.Lifestone
+                or PluginObjectClass.Services => PluginObjectCapabilities.Interactable,
+            _ => PluginObjectCapabilities.None,
+        };
 }
 
 /// <summary>
@@ -253,6 +299,17 @@ public readonly record struct PluginWorldObject(
     uint ContainerObjectId,
     uint WielderObjectId)
 {
+    /// <summary>
+    /// Semantic operations the host can perform or recognize for this object.
+    /// Plugins should use these flags instead of decoding item-type or public
+    /// weenie bitfields themselves.
+    /// </summary>
+    public PluginObjectCapabilities Capabilities { get; init; }
+
+    /// <summary>True when the host recognizes an activation interaction.</summary>
+    public bool CanActivate =>
+        (Capabilities & PluginObjectCapabilities.Interactable) != 0;
+
     /// <summary>
     /// True when the local player owns the object, counting anything nested
     /// inside a pack they carry.
@@ -316,6 +373,66 @@ public readonly record struct PluginWorldObject(
 }
 
 /// <summary>
+/// The outcome of a world-object activation (portal, door, NPC, or other
+/// interactable landscape object). This reports how the activation
+/// completed, including failure and interruption states.
+/// </summary>
+/// <param name="Revision">
+/// Counts up by one for every completion, so a plugin can tell a fresh one
+/// from one it has already seen. Zero means nothing has completed yet.
+/// </param>
+/// <param name="ObjectId">The object that was activated.</param>
+/// <param name="Outcome">The activation outcome.</param>
+/// <param name="WeenieError">
+/// The server's error code, when applicable; zero means success.
+/// </param>
+public readonly record struct PluginActivationCompletion(
+    long Revision,
+    uint ObjectId,
+    PluginActivationOutcome Outcome,
+    uint WeenieError)
+{
+    /// <summary>
+    /// True when the activation completed successfully with no error.
+    /// </summary>
+    public bool IsSuccess => Revision != 0 && Outcome == PluginActivationOutcome.Completed && WeenieError == 0u;
+}
+
+/// <summary>How a world-object activation concluded.</summary>
+public enum PluginActivationOutcome
+{
+    /// <summary>No activation has completed yet, or the outcome is unknown.</summary>
+    None = 0,
+
+    /// <summary>The activation completed successfully.</summary>
+    Completed,
+
+    /// <summary>
+    /// The activation was refused by the server; check
+    /// <see cref="PluginActivationCompletion.WeenieError"/>.
+    /// </summary>
+    Refused,
+
+    /// <summary>
+    /// The approach to the target was interrupted (movement cancelled,
+    /// target went out of range, or the player moved).
+    /// </summary>
+    Interrupted,
+
+    /// <summary>
+    /// The target became invalid or was destroyed before the activation
+    /// could complete.
+    /// </summary>
+    TargetLost,
+
+    /// <summary>The host could not reach the target (blocked path).</summary>
+    Blocked,
+
+    /// <summary>The activation timed out waiting for a server response.</summary>
+    TimedOut,
+}
+
+/// <summary>
 /// Reads the objects the client currently knows about -- everything in the
 /// world around the player as well as everything they carry -- and asks the
 /// server to appraise one of them.
@@ -363,6 +480,12 @@ public interface IWorldObjectAutomation
     }
 
     /// <summary>
+    /// The most recent activation completion. Default until anything
+    /// completes, fails, or is interrupted.
+    /// </summary>
+    PluginActivationCompletion LastActivationCompletion => default;
+
+    /// <summary>
     /// Requests an appraisal of any object present in the object table --
     /// owned inventory, equipped, landscape, a vendor listing, or an open
     /// container's content -- through the same appraisal request the
@@ -371,5 +494,16 @@ public interface IWorldObjectAutomation
     /// which only accepts the currently open corpse/container's contents.
     /// </summary>
     PluginItemCommandResult Identify(uint objectId) =>
+        new(PluginItemCommandStatus.Unavailable);
+
+    /// <summary>
+    /// Activates a known world object such as a portal, door, vendor, NPC, or
+    /// external container. The host may approach an out-of-range object first;
+    /// <see cref="PluginItemCommandStatus.Started"/> means the interaction
+    /// was accepted, not that the world transition has completed. Use
+    /// <see cref="IEvents.PortalTransition"/> and object changes for follow-up
+    /// state.
+    /// </summary>
+    PluginItemCommandResult Activate(uint objectId) =>
         new(PluginItemCommandStatus.Unavailable);
 }

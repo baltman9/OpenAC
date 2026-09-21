@@ -32,6 +32,26 @@ public sealed class FakePluginHostContractTests
     }
 
     [Fact]
+    public void AllegianceSurfaceIsInertWhenUnavailable()
+    {
+        var host = new FakePluginHost();
+        Assert.False(host.Automation.Allegiance.IsAvailable);
+        Assert.False(host.Automation.Allegiance.Snapshot.IsKnown);
+        Assert.Equal(0u, host.Automation.Allegiance.Snapshot.MonarchObjectId);
+    }
+
+    [Fact]
+    public void RecallSurfaceIsInertWhenUnavailable()
+    {
+        var host = new FakePluginHost();
+        Assert.False(host.Automation.Recalls.IsAvailable);
+        Assert.False(host.Automation.Recalls.Recall(PluginRecallKind.House).Accepted);
+        Assert.Equal(
+            PluginRecallStatus.Unavailable,
+            host.Automation.Recalls.Recall(PluginRecallKind.Allegiance).Status);
+    }
+
+    [Fact]
     public void DefaultUiRegistryIsNoOp()
     {
         var host = new FakePluginHost();
@@ -145,6 +165,34 @@ public sealed class FakePluginHostContractTests
             new PluginObjectChange(0x50000001u, PluginObjectChangeKind.Created));
         Assert.NotNull(received);
         Assert.Equal(0x50000001u, received.Value.ObjectId);
+        Assert.True(received.Value.ChangedFields.HasFlag(
+            PluginObjectChangeFields.Lifecycle));
+    }
+
+    [Fact]
+    public void PortalTransitionFiresRegisteredHandlers()
+    {
+        var host = new FakePluginHost();
+        PluginPortalTransition? received = null;
+        host.Events.PortalTransition += transition => received = transition;
+        host.PluginEvents.RaisePortalTransition(
+            new PluginPortalTransition(4, 9, 0x1234u, true, true, false, false));
+        Assert.NotNull(received);
+        Assert.Equal(9, received.Value.Generation);
+        Assert.Equal(0x1234u, received.Value.DestinationCell);
+    }
+
+    [Fact]
+    public void ItemUseCompletedFiresRegisteredHandlers()
+    {
+        var host = new FakePluginHost();
+        PluginItemUseCompletion? received = null;
+        host.Events.ItemUseCompleted += completion => received = completion;
+        host.PluginEvents.RaiseItemUseCompleted(
+            new PluginItemUseCompletion(3, 10u, 11u, 0u));
+        Assert.NotNull(received);
+        Assert.Equal(10u, received.Value.SourceObjectId);
+        Assert.True(received.Value.IsSuccess);
     }
 
     [Fact]

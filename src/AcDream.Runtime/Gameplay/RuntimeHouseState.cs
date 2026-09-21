@@ -15,6 +15,7 @@ public sealed class RuntimeHouseState
     private readonly object _gate = new();
     private bool _hasReceivedNotice;
     private bool _ownsHouse;
+    private long _revision;
     private GameEvents.HouseData? _houseData;
     private IReadOnlyList<string> _lines = Array.Empty<string>();
     private IReadOnlyList<HousePanelLine> _panelLines = Array.Empty<HousePanelLine>();
@@ -24,6 +25,12 @@ public sealed class RuntimeHouseState
     {
         _objects = objects;
         _timeProvider = timeProvider ?? TimeProvider.System;
+    }
+
+    /// <summary>Monotonically increases when authoritative house data changes.</summary>
+    public long Revision
+    {
+        get { lock (_gate) return _revision; }
     }
 
     public IReadOnlyList<string> Lines
@@ -62,6 +69,7 @@ public sealed class RuntimeHouseState
         {
             _hasReceivedNotice = true;
             _ownsHouse = true;
+            _revision++;
             _houseData = Copy(data);
             Recompute(selfGuid);
         }
@@ -77,6 +85,7 @@ public sealed class RuntimeHouseState
             GameEvents.HousePayment[] rent = data.Rent
                 .Select(static payment => payment with { Paid = 0 })
                 .ToArray();
+            _revision++;
             _houseData = data with { RentTime = rentTime, Rent = rent };
             Recompute(selfGuid);
         }
@@ -91,6 +100,7 @@ public sealed class RuntimeHouseState
             if (_houseData is not { } data)
                 return;
 
+            _revision++;
             _houseData = data with { Rent = rent.ToArray() };
             Recompute(selfGuid);
         }
@@ -103,6 +113,7 @@ public sealed class RuntimeHouseState
         {
             _hasReceivedNotice = true;
             _ownsHouse = false;
+            _revision++;
             _houseData = null;
             Recompute(selfGuid);
         }
@@ -114,6 +125,7 @@ public sealed class RuntimeHouseState
         {
             _hasReceivedNotice = false;
             _ownsHouse = false;
+            _revision = 0;
             _houseData = null;
             _lines = Array.Empty<string>();
             _panelLines = Array.Empty<HousePanelLine>();
