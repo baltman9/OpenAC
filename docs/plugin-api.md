@@ -484,9 +484,9 @@ character list.
 
 A classifier is registered under `<pluginId>/<classifierId>` — the id a
 plugin passes to `Register` is scoped by its own manifest id before other
-plugins ever see it. MossTank, for example, registers `"moss-tank"` and is
-visible to the rest of the client as `"<its plugin id>/moss-tank"`; use the
-scoped id, not the bare one, when calling `TryNeedsIdentification` or
+plugins ever see it. A plugin that registers `"loot-rules"` is visible to the
+rest of the client as `"<its plugin id>/loot-rules"`; use the scoped id, not
+the bare one, when calling `TryNeedsIdentification` or
 `TryClassifyWithProfile` from a different plugin.
 
 Beyond the live-profile `Classify` a registered `IPluginLootClassifier`
@@ -511,8 +511,8 @@ profile instead of the classifier's live one, such as VTank's "vendor" and
 "trader" list files. It returns `false` when the named profile does not
 exist; a classifier with no notion of named profiles defaults to the same.
 
-`PluginLootAction` covers MossTank's full vocabulary, including its two
-mana-transfer actions (`ManaStone`, `ManaTank`); a classifier reporting one
+`PluginLootAction` covers the original tool's full vocabulary, including its
+two mana-transfer actions (`ManaStone`, `ManaTank`); a classifier reporting one
 of those is a real match with `Matched` true and `RuleName` set, exactly
 like any other action.
 

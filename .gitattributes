@@ -1,10 +1,2 @@
 * text=auto eol=lf
 *.ps1 text eol=lf
-
-# VTank file-compatibility fixtures: real VTank .usd/.ast/.utl profiles and real
-# metaf .af/.met/.nav samples whose exact CRLF-vs-LF byte layout is asserted by
-# round-trip tests. `-text` disables git's line-ending normalization so a
-# checkout on any OS or core.autocrlf setting reproduces the committed bytes.
-# The bundled plugin's default profile is the same byte-exact VTank format.
-# The automation-session proof's profile inputs are real profiles too, and the
-# proof feeds them to the plugin exactly as they sit on disk.
