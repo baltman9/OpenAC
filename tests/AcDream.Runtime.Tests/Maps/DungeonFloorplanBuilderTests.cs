@@ -92,6 +92,41 @@ public sealed class DungeonFloorplanBuilderTests
         Assert.Null(builder.TryBuild(TwoRoomLandblock.EmptyLandblock));
     }
 
+    [Fact]
+    public void ATallRoomsUpperCellFoldsIntoTheBandOfTheCellBelow()
+    {
+        var dats = new StackedRoomLandblock();
+        var builder = new DungeonFloorplanBuilder(dats, dats.Lock);
+
+        DungeonFloorplan? plan = builder.TryBuild(StackedRoomLandblock.Landblock);
+
+        Assert.NotNull(plan);
+        // The lower cell's origin is at z = 3.5, a storey up, but its floor
+        // is at z = 2.5; the upper cell's origin is at 8.5 and it has no
+        // floor; the lonely cell is at 15 and has no floor and no doorway.
+        Assert.Equal([0f, 18f], plan.Layers.Select(static layer => layer.Z).ToArray());
+
+        DungeonFloorplanLayer ground = plan.Layers[0];
+        Assert.Single(ground.Floors);
+        // Eight wall polygons, four per cell, one on top of the other: four lines.
+        Assert.Equal(4, ground.Walls.Length);
+        Assert.Contains(ground.Walls, wall =>
+            Matches(wall, new Vector2(20f, 30f), new Vector2(30f, 30f)));
+
+        DungeonFloorplanLayer lonely = plan.Layers[1];
+        Assert.Empty(lonely.Floors);
+        Assert.Equal(4, lonely.Walls.Length);
+
+        Assert.Equal(
+            [0f, 0f, 18f],
+            plan.Cells.Select(static cell => cell.LayerZ).ToArray());
+        Assert.Equal(1, plan.Counts.Floors);
+        Assert.Equal(2, plan.Counts.Ceilings);
+        Assert.Equal(1, plan.Counts.Portals);
+        Assert.Equal(12, plan.Counts.Walls);
+        Assert.Equal(8, plan.Counts.WallsAfterMerge);
+    }
+
     private static bool Matches(DungeonFloorplanWall wall, Vector2 a, Vector2 b) =>
         (Near(wall.Start, a) && Near(wall.End, b))
         || (Near(wall.Start, b) && Near(wall.End, a));
