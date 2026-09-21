@@ -24,7 +24,10 @@ public sealed class AppPluginHost : IPluginHost, IPerPluginSessionSettings
         IHotkeyRegistry? hotkeys = null,
         IHostWindow? window = null,
         IPluginWorldLines? worldLines = null,
-        PluginSessionSettings? sessionSettings = null)
+        PluginSessionSettings? sessionSettings = null,
+        IPluginMapRegistry? maps = null,
+        IPluginMapResourceCatalog? mapResources = null,
+        IPluginRenderRegistry? rendering = null)
     {
         Log = log;
         State = state;
@@ -42,6 +45,9 @@ public sealed class AppPluginHost : IPluginHost, IPerPluginSessionSettings
         Window = window ?? NoOpHostWindow.Instance;
         WorldLines = worldLines ?? NoOpPluginWorldLines.Instance;
         _sessionSettings = sessionSettings ?? PluginSessionSettings.Empty;
+        Maps = maps ?? NoOpPluginMapRegistry.Instance;
+        MapResources = mapResources ?? NoOpPluginMapResourceCatalog.Instance;
+        Rendering = rendering ?? NoOpPluginRenderRegistry.Instance;
     }
 
     public bool HasUi => true;
@@ -67,4 +73,7 @@ public sealed class AppPluginHost : IPluginHost, IPerPluginSessionSettings
     /// <param name="pluginId">Which plugin is asking.</param>
     public IReadOnlyDictionary<string, string> SessionSettingsFor(string pluginId) =>
         _sessionSettings.SessionSettingsFor(pluginId);
+    public IPluginMapRegistry Maps { get; }
+    public IPluginMapResourceCatalog MapResources { get; }
+    public IPluginRenderRegistry Rendering { get; }
 }

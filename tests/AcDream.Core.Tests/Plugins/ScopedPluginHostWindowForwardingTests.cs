@@ -78,9 +78,14 @@ public sealed class ScopedPluginHostWindowForwardingTests
             checkedMembers.Add(property.Name);
         }
 
+        // Resources, Maps, MapResources and Rendering are forwarded as they
+        // are while no client implements them. A registration a plugin makes
+        // through Maps or Rendering has to be let go when the plugin is, so
+        // those two move to WrappedMembers with the first real implementation.
         Assert.True(
-            checkedMembers.Count == 5,
-            "Expected exactly 5 direct-forward members (Log, State, "
+            checkedMembers.Count == 9,
+            "Expected exactly 9 direct-forward members (Log, State, "
+                + "Resources, Maps, MapResources, Rendering, "
                 + "VtankProfiles, Clipboard, Window); found "
                 + checkedMembers.Count + ": "
                 + string.Join(", ", checkedMembers)
@@ -136,6 +141,38 @@ public sealed class ScopedPluginHostWindowForwardingTests
         public IPluginStorage VtankProfiles { get; } = new FakePluginStorage();
         public IPluginClipboard Clipboard { get; } = new FakeClipboard();
         public IHostWindow Window { get; } = new FakeHostWindow();
+        public IPluginResourceCatalog Resources { get; } = new FakeResources();
+        public IPluginMapRegistry Maps { get; } = new FakeMaps();
+        public IPluginMapResourceCatalog MapResources { get; } = new FakeMapResources();
+        public IPluginRenderRegistry Rendering { get; } = new FakeRendering();
+
+        // Identity is all this test reads from these; nothing calls them.
+        private sealed class FakeResources : IPluginResourceCatalog
+        {
+            public Stream? OpenRead(string resourceId) => null;
+            public IReadOnlyList<string> List(string prefix = "") => [];
+            public IReadOnlyList<string> ListDataFiles(string relativeDirectory) => [];
+        }
+
+        private sealed class FakeMaps : IPluginMapRegistry
+        {
+            public IPluginMapSurface AddMap(string mapId, PluginMapViewport initialViewport) =>
+                throw new NotSupportedException();
+        }
+
+        private sealed class FakeMapResources : IPluginMapResourceCatalog
+        {
+            public ValueTask<IPluginTiledMapResource?> OpenMapAsync(
+                string resourceId, CancellationToken cancellationToken = default) =>
+                ValueTask.FromResult<IPluginTiledMapResource?>(null);
+        }
+
+        private sealed class FakeRendering : IPluginRenderRegistry
+        {
+            public IPluginHudRegistration AddHud(PluginHudDescriptor descriptor) =>
+                throw new NotSupportedException();
+            public IPluginTexture? LoadTexture(string resourceId) => null;
+        }
 
         private sealed class FakePluginStorage : IPluginStorage;
         private sealed class FakeClipboard : IPluginClipboard;
