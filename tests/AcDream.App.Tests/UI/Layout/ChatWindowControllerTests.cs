@@ -252,6 +252,7 @@ public class ChatWindowControllerTests
         int lookups = 0;
         ChatWindowController? ctrl = ChatWindowController.Bind(
             rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex,
+            new RuntimeChatEntryOwner(),
             chatStrings: key =>
             {
                 lookups++;

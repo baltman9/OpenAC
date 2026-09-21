@@ -36,9 +36,93 @@ Removing a server removes its saved characters. Keep server names unchanged
 to retain their character settings. If profiles change while an editor is open,
 reopen the editor before saving.
 
-Use a named character row's **…** action for plugins and one-command-per-line
-logon commands. **Logon commands** in the bottom bar provides the complete
+A row's **…** action always opens the same dialog: which installed plugins load
+for that row (see **Plugins** below). With a named character chosen it edits that
+character, including its one-command-per-line logon commands. With **Character
+select** chosen it edits every character on the account at once. **Logon commands** in the bottom bar provides the complete
 structured command list for bulk editing.
+
+## Plugins
+
+The **Plugins** tab lists what is installed and what is available to install
+from the curated list. **Discover** shows plugins not yet installed, except
+any the curated list blocks, and only once each one's release has been
+checked and found usable; a row appears as its check finishes, and if GitHub
+is rate limiting or unreachable, a line says so instead of a shorter list.
+**Install** downloads and unzips one, but never runs it. **Installed** shows
+what is on disk, with a source badge (**Listed**
+or **Unlisted** for a launcher-managed plugin, **Direct install** or
+**Bundled** otherwise), **Update** for plugins the launcher itself installed,
+and **Remove** for those plus a Direct install. Removing a plugin also
+unticks it for every character that had it enabled, so reinstalling it always
+starts from none. **Refresh list** reloads
+both lists; the launcher also checks once at startup, without delaying the
+window. **Add from URL** adds a plugin from a `https://github.com/owner/name`
+repository not on the list. Right after a curated-list release publishes,
+GitHub's "latest" link can keep serving the previous release for under a
+minute; wait a moment and press **Refresh list** again.
+
+A launcher-managed plugin (Listed or Unlisted) has a **Beta updates** toggle
+on its Installed card. On, its update check also offers the newest
+pre-release on the repository's release feed, if it is newer than the latest
+stable release; installing one shows a **beta** tag. A beta player still gets
+a stable release once one passes the beta. Turning the toggle off never
+downgrades an installed beta; it just stops offering pre-releases until a
+stable release passes it. The release feed can lag a new release by up to a
+minute.
+
+The **Show beta plugins** checkbox, in Launcher settings behind the gear icon
+on the tab row, is off by default and covers Discover and Add from URL
+instead: on, a plugin with no stable release yet can be found and installed,
+landing on the beta channel with the same pre-release notice; off, only its
+stable releases are offered.
+
+Every row shows its compatibility with the installed client: compatible and
+which version, graphical-only or headless-only when the plugin restricts
+itself to one host, the incompatibility reason, or that no client is
+installed yet.
+
+Every install and update dialog shows a short notice: plugins are made by
+third parties, not OpenAC, and installing one is the player's choice and
+responsibility; an unlisted plugin adds that it is not on the curated list.
+The plugin is downloaded and unzipped, never run automatically, and stays
+disabled until the player chooses to enable it.
+
+Installing never enables a plugin. Choose **None** to install without
+enabling anything, **All characters**, or **Choose** to pick specific
+characters; an update carries no such choice, since it can only affect a
+plugin already enabled where it was chosen before. A character's own **…**
+action opens a checklist of installed plugins compatible with its launch
+mode; only checked plugins load, and a blank list loads nothing, bundled
+plugins included. A row set to **Character select** picks its character inside
+the client, after the plugin list is already fixed, so it loads only the plugins
+every character on that account has enabled; its **…** action ticks a plugin for
+all of them in one step. Existing profiles are not migrated: anyone who relied on a
+plugin loading by default, MossTank included, must tick it once.
+
+A blocked plugin (listed as unsafe by the curated list) shows a red
+"Blocked: <reason>" badge, cannot be installed or updated to, and is filtered
+out of every character's list at launch, with a status line saying so. A
+blocked plugin not yet installed does not appear in Discover at all.
+
+A plugin folder unzipped by hand into the plugins directory, with no matching
+install record, is a **Direct install**. It is checked against every install
+rule that does not need a GitHub release: no links or reparse points, regular
+files only, safe paths, the size and count limits, the allowed file types, the
+manifest, and the icon rules; Finder and Explorer metadata files
+(`.DS_Store`, `._*`, `Thumbs.db`, `desktop.ini`) are ignored rather than
+refused. A folder that fails shows a red "Refused: <reason>" badge, is never
+offered to a character, and is left out of every session's plugin list even
+if a character had it enabled before it broke. A second copy of an already
+installed id, in any plugin folder, is flagged "Duplicate" on every copy and
+loaded by neither, because the client itself refuses to load a duplicated id.
+Passing or refused, a Direct install can be removed like any other. This
+checking is advisory, not a security boundary: anyone who can write the
+plugins folder can change a plugin's files after it passes, and a
+launcher-managed plugin is never re-checked once installed.
+
+`--plugin-list-uri <https-uri>` overrides the curated list for testing, the
+same way `--update-manifest-uri` overrides the update feed.
 
 ## Installation and updates
 

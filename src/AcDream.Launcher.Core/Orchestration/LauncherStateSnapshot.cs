@@ -18,7 +18,9 @@ public sealed record LauncherAccountSnapshot(
     string AccountName,
     IReadOnlyList<LauncherCharacterSnapshot> Characters,
     bool HasRunningActivity,
-    string ActivityStatus);
+    string ActivityStatus,
+    string? SelectedCharacter = null,
+    LaunchMode? SelectedLaunchMode = null);
 
 public sealed record LauncherServerSnapshot(
     string Name,
@@ -58,7 +60,8 @@ public sealed record LauncherSessionSnapshot(
     string? Error,
     DateTimeOffset CreatedAt,
     string? ExitReason = null,
-    bool ExitedGracefully = false)
+    bool ExitedGracefully = false,
+    string? PluginNotice = null)
 {
     public bool IsActive => State is not (
         LauncherActivityState.Exited
@@ -72,7 +75,8 @@ public sealed record LauncherStateSnapshot(
     LauncherPlatformCapabilities Platform,
     bool IsInstallationReady,
     string InstallationStatus,
-    IReadOnlyList<string>? SharedAccountNames = null);
+    IReadOnlyList<string>? SharedAccountNames = null,
+    bool ShowBetaPlugins = false);
 
 public sealed class LauncherOperationException : Exception
 {

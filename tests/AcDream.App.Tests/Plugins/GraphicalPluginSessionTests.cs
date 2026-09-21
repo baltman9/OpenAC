@@ -23,7 +23,7 @@ public sealed class GraphicalPluginSessionTests
     {
         using var temporary = new TemporaryDirectory();
         ApplicationPathSet paths = Paths(temporary.Path);
-        InstallFixture(paths.PluginsDirectory, FixtureId);
+        string pluginDirectory = InstallFixture(paths.PluginsDirectory, FixtureId);
         string statusPath = Path.Combine(temporary.Path, "status.jsonl");
         var logger = new CapturingLogger();
         var state = new WorldGameState();
@@ -43,7 +43,7 @@ public sealed class GraphicalPluginSessionTests
 
         Assert.Equal(1, plugins.LoadedCount);
         Assert.True(host.HasUi);
-        AssertPanelWasRegisteredAndReleaseBinding(ui);
+        AssertPanelWasRegisteredAndReleaseBinding(ui, pluginDirectory);
         Assert.Contains(
             logger.Messages,
             message => message.Contains("fixture-enabled:hasUi=True", StringComparison.Ordinal));
@@ -221,6 +221,40 @@ public sealed class GraphicalPluginSessionTests
         Assert.False(context.IsAlive);
     }
 
+    [Fact]
+    public void HeadlessOnlyPluginRequestedOnGraphicalHostReportsPluginFailed()
+    {
+        using var temporary = new TemporaryDirectory();
+        ApplicationPathSet paths = Paths(temporary.Path);
+        const string headlessOnlyId = "acdream.test.headless-only";
+        InstallFixture(paths.PluginsDirectory, headlessOnlyId, hosts: ["headless"]);
+        string statusPath = Path.Combine(temporary.Path, "status.jsonl");
+        var ui = new BufferedUiRegistry();
+        var host = new AppPluginHost(
+            new CapturingLogger(),
+            new WorldGameState(),
+            new WorldEvents(),
+            new SelectionState(),
+            ui,
+            NoOpAutomationSurface.Instance);
+
+        using GraphicalPluginSession plugins = GraphicalPluginSession.Create(
+            paths,
+            [headlessOnlyId],
+            "gui-session",
+            host,
+            new SessionStatusWriter(statusPath));
+        plugins.Start();
+
+        Assert.Equal(0, plugins.LoadedCount);
+        JsonElement[] statuses = ReadStatuses(statusPath);
+        Assert.Equal(["started", "pluginFailed"], EventNames(statuses));
+        Assert.Equal(headlessOnlyId, statuses[1].GetProperty("plugin").GetString());
+        Assert.Contains(
+            "runs only on the headless host",
+            statuses[1].GetProperty("error").GetString());
+    }
+
     private static ApplicationPathSet Paths(string root) => new(
         Path.Combine(root, "config"),
         Path.Combine(root, "data"),
@@ -229,7 +263,8 @@ public sealed class GraphicalPluginSessionTests
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void AssertPanelWasRegisteredAndReleaseBinding(
-        BufferedUiRegistry ui)
+        BufferedUiRegistry ui,
+        string pluginDirectory)
     {
         BufferedUiRegistry.Pending panel = Assert.Single(ui.Drain());
         Assert.EndsWith(
@@ -243,6 +278,7 @@ public sealed class GraphicalPluginSessionTests
         Assert.Equal(
             "AcDream.Plugin.Tests.Fixtures.HostPlugin",
             panel.Binding.GetType().Assembly.GetName().Name);
+        Assert.Equal(pluginDirectory, panel.PluginDirectory);
     }
 
     private static JsonElement[] ReadStatuses(string path) =>
@@ -256,7 +292,8 @@ public sealed class GraphicalPluginSessionTests
     private static string InstallFixture(
         string root,
         string id,
-        string directoryName = "host-fixture")
+        string directoryName = "host-fixture",
+        IReadOnlyList<string>? hosts = null)
     {
         string source = FixtureAssemblyPath();
         Assert.True(File.Exists(source), $"fixture DLL not found: {source}");
@@ -273,6 +310,7 @@ public sealed class GraphicalPluginSessionTests
                 version = "1.0.0",
                 entryDll = fileName,
                 apiVersion = 1,
+                hosts,
             }));
         return pluginDirectory;
     }

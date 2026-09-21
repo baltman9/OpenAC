@@ -142,6 +142,14 @@ folder; [OpenAC-MagTools](https://github.com/eriknihlen/OpenAC-MagTools) is
 an external plugin built that way. The same plugin runs unchanged in the
 headless host for bots and tests.
 
+Shipping one to other players goes through the launcher: publish a GitHub
+release it can install, check it first with the bundled validator so you know
+it meets the current rules, and ask for a listing so it shows up in the
+launcher's Discover panel. [docs/plugin-development.md](docs/plugin-development.md)
+walks the whole path and [docs/plugin-manifest.md](docs/plugin-manifest.md)
+is the field-by-field contract, including the icon rules, the size caps, beta
+releases, and the capabilities a plugin declares before a player installs it.
+
 **MossTank** is the bundled plugin: a re-implementation of VirindiTank, the
 automation plugin most Asheron's Call players ran for years. It reads
 VirindiTank's own profile and navigation files so existing setups carry over,

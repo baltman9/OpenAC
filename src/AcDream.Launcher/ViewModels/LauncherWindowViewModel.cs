@@ -3,6 +3,7 @@ using System.ComponentModel;
 using AcDream.Launcher.Core.Installation;
 using AcDream.Launcher.Core.Launching;
 using AcDream.Launcher.Core.Orchestration;
+using AcDream.Launcher.Core.Plugins;
 using AcDream.Launcher.Core.Profiles;
 using AcDream.Launcher.Core.Updates;
 
@@ -31,7 +32,6 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
     private string? _lastError;
     private string _operationStatus = "Ready";
     private LaunchMode _characterLaunchMode;
-    private string _characterPluginsText = string.Empty;
     private string _characterLoginCommandsText = string.Empty;
 
     public LauncherWindowViewModel(
@@ -40,10 +40,12 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         ILauncherInstaller? installer = null,
         ILauncherUpdater? updater = null,
         Func<CancellationToken, Task<bool>>? applyLauncherUpdateAsync = null,
-        Action? requestShutdown = null)
+        Action? requestShutdown = null,
+        PluginInventory? pluginInventory = null)
     {
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
+        _pluginInventory = pluginInventory;
         _orchestrator.StateChanged += OnOrchestratorStateChanged;
 
         EditorDialog = new ProfileEditorDialogViewModel();
@@ -96,6 +98,7 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
             VerifyContentAsync,
             () => CanInteract && Sessions.All(session => !session.IsActive));
         InitializeDesktop();
+        InitializePlugins();
     }
 
     public ObservableCollection<LauncherTreeNodeViewModel> Servers { get; } = [];
@@ -154,7 +157,10 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         || UpdatePrompt.IsOpen
         || (TextEditor?.IsOpen ?? false)
         || IsCharacterOptionsOpen
-        || IsSessionLogOpen;
+        || IsSessionLogOpen
+        || IsSettingsOpen
+        || Plugins.InstallDialog.IsOpen
+        || Plugins.IsRemoveDialogOpen;
 
     private bool CanInteract => !IsBusy && !IsModalOpen;
 
@@ -187,12 +193,6 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
     {
         get => _characterLaunchMode;
         set => SetProperty(ref _characterLaunchMode, value);
-    }
-
-    public string CharacterPluginsText
-    {
-        get => _characterPluginsText;
-        set => SetProperty(ref _characterPluginsText, value);
     }
 
     public string CharacterLoginCommandsText
@@ -306,6 +306,9 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         try
         {
             _orchestrator.LoadProfiles();
+            // The plugin panel is configured before this runs (App.axaml.cs), so it read the
+            // unloaded store's default; hand it the saved value now the profiles are in.
+            Plugins.RestoreShowBetaPluginsFromProfile();
             LastError = null;
         }
         catch (Exception ex)
@@ -369,9 +372,12 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         EditorDialog.PropertyChanged -= OnModalPropertyChanged;
         FirstRunWizardShell.PropertyChanged -= OnModalPropertyChanged;
         UpdatePrompt.PropertyChanged -= OnModalPropertyChanged;
+        Plugins.InstallDialog.PropertyChanged -= OnModalPropertyChanged;
+        Plugins.PropertyChanged -= OnModalPropertyChanged;
         UpdatePrompt.StartupCheckCompleted -= OnStartupUpdateCheckCompleted;
         FirstRunWizardShell.Dispose();
         UpdatePrompt.Dispose();
+        Plugins.Dispose();
         _startupCancellation.Dispose();
     }
 
@@ -456,21 +462,17 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
             OnPropertyChanged(nameof(ShowInstallationBanner));
             OnPropertyChanged(nameof(InstallationBannerTitle));
             OnPropertyChanged(nameof(InstallationStatus));
+            OnPropertyChanged(nameof(VersionText));
             RefreshFromCore();
         }
     }
 
-    private string DescribeStartupUpdateCheckOutcome()
-    {
-        if (!UpdatePrompt.StartupCheckSucceeded)
-        {
-            return "Update check unavailable; the launcher works offline.";
-        }
-
-        return UpdatePrompt.IsClientUpdateAvailable || UpdatePrompt.IsLauncherUpdateAvailable
-            ? "Update available."
-            : "Up to date.";
-    }
+    // An available update has its own banner and being current needs no announcement, so the
+    // status line speaks only when the check itself could not run.
+    private string DescribeStartupUpdateCheckOutcome() =>
+        UpdatePrompt.StartupCheckSucceeded
+            ? ""
+            : "Update check unavailable; the launcher works offline.";
 
     private void OnOrchestratorStateChanged(object? sender, EventArgs e) =>
         _dispatcher.Post(() =>
@@ -486,7 +488,9 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         if (e.PropertyName != nameof(ProfileEditorDialogViewModel.IsOpen)
             && e.PropertyName != nameof(LauncherShellViewModel.IsOpen)
             && e.PropertyName != nameof(FirstRunInstallerViewModel.IsOpen)
-            && e.PropertyName != nameof(LauncherUpdateViewModel.IsOpen))
+            && e.PropertyName != nameof(LauncherUpdateViewModel.IsOpen)
+            && e.PropertyName != nameof(PluginInstallDialogViewModel.IsOpen)
+            && e.PropertyName != nameof(LauncherPluginsViewModel.IsRemoveDialogOpen))
         {
             return;
         }
@@ -498,6 +502,7 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         OnPropertyChanged(nameof(ShowGuiLaunchDisabledReason));
         OnPropertyChanged(nameof(ShowHeadlessLaunchDisabledReason));
         NotifyCommandStates();
+
         if (ReferenceEquals(sender, FirstRunWizardShell)
             && e.PropertyName == nameof(FirstRunInstallerViewModel.IsOpen)
             && !FirstRunWizardShell.IsOpen
@@ -526,6 +531,14 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         else if (UpdatePrompt.IsOpen)
         {
             UpdatePrompt.Close();
+        }
+        else if (Plugins.InstallDialog.IsOpen)
+        {
+            Plugins.InstallDialog.Close();
+        }
+        else if (Plugins.IsRemoveDialogOpen)
+        {
+            Plugins.CloseRemoveDialog();
         }
     }
 
@@ -561,6 +574,7 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         OnPropertyChanged(nameof(IsFirstRunRequired));
         OnPropertyChanged(nameof(ShowInstallationBanner));
         OnPropertyChanged(nameof(InstallationStatus));
+        OnPropertyChanged(nameof(VersionText));
         OnPropertyChanged(nameof(ShowGraphicalLaunchNotice));
         OnPropertyChanged(nameof(GraphicalLaunchNotice));
         OnPropertyChanged(nameof(CanLaunchGui));
@@ -615,9 +629,7 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
     {
         LauncherCharacterSnapshot? character = GetSelectedCharacterSnapshot();
         CharacterLaunchMode = character?.LaunchMode ?? LaunchMode.GuiSelect;
-        CharacterPluginsText = character is null
-            ? string.Empty
-            : string.Join(Environment.NewLine, character.Plugins);
+        LoadCharacterPluginChoices(character);
         CharacterLoginCommandsText = character is null
             ? string.Empty
             : string.Join(Environment.NewLine, character.LoginCommands);
@@ -849,7 +861,7 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
                 character.AccountName,
                 character.Name,
                 CharacterLaunchMode,
-                ParseLines(CharacterPluginsText, distinct: true),
+                CheckedCharacterPluginIds(),
                 ParseLines(CharacterLoginCommandsText, distinct: false));
             LastError = null;
             OperationStatus = $"Saved launch settings for {character.Name}.";
@@ -1261,6 +1273,7 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         }
         FirstRunWizardShell.NotifyCommandStates();
         UpdatePrompt.NotifyCommandStates();
+        Plugins.NotifyCommandStates();
     }
 
     private readonly record struct SelectionKey(

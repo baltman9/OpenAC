@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 
 namespace AcDream.Core.Plugins;
@@ -9,6 +10,15 @@ public enum PluginKind
     RenderPack,
 }
 
+/// <summary>Runtime a manifest declares support for via <c>hosts</c> in <c>plugin.json</c>, distinct
+/// from <see cref="PluginKind"/>: a mismatch here is a <see cref="PluginHostCompatibilityException"/>,
+/// not the <see cref="PluginHostKindException"/> that a <see cref="PluginKind"/> mismatch reports.</summary>
+public enum PluginHostKind
+{
+    Graphical,
+    Headless,
+}
+
 public sealed record PluginManifest(
     string Id,
     string DisplayName,
@@ -18,6 +28,11 @@ public sealed record PluginManifest(
     IReadOnlyList<string> Dependencies)
 {
     public IReadOnlyList<PluginKind> Kinds { get; init; } = [PluginKind.Gameplay];
+    public PluginHostVersion? MinHostVersion { get; init; }
+    public PluginHostVersion? MaxHostVersion { get; init; }
+    public IReadOnlyList<PluginHostVersion> SkipHostVersions { get; init; } = [];
+    public IReadOnlyList<PluginHostKind> Hosts { get; init; } =
+        [PluginHostKind.Graphical, PluginHostKind.Headless];
 
     public PluginManifest(
         string Id,
@@ -44,6 +59,7 @@ public sealed record PluginManifest(
         PluginManifestDto? dto;
         try
         {
+            RejectDuplicateProperties(json);
             dto = JsonSerializer.Deserialize<PluginManifestDto>(json, JsonOptions);
         }
         catch (JsonException ex)
@@ -62,6 +78,15 @@ public sealed record PluginManifest(
             throw new PluginManifestException("apiVersion must be >= 1");
 
         IReadOnlyList<PluginKind> kinds = ParseKinds(dto.Kinds);
+        PluginHostVersion? minHostVersion = ParseHostVersion(dto.MinHostVersion, "minHostVersion");
+        PluginHostVersion? maxHostVersion = ParseHostVersion(dto.MaxHostVersion, "maxHostVersion");
+        if (minHostVersion is { } min && maxHostVersion is { } max && min.CompareTo(max) > 0)
+        {
+            throw new PluginManifestException(
+                $"minHostVersion ({min}) is greater than maxHostVersion ({max})");
+        }
+        IReadOnlyList<PluginHostVersion> skipHostVersions = ParseSkipHostVersions(dto.SkipHostVersions);
+        IReadOnlyList<PluginHostKind> hosts = ParseHosts(dto.Hosts);
 
         return new PluginManifest(
             dto.Id!,
@@ -70,7 +95,13 @@ public sealed record PluginManifest(
             dto.EntryDll!,
             dto.ApiVersion,
             dto.Dependencies ?? Array.Empty<string>(),
-            kinds);
+            kinds)
+        {
+            MinHostVersion = minHostVersion,
+            MaxHostVersion = maxHostVersion,
+            SkipHostVersions = skipHostVersions,
+            Hosts = hosts,
+        };
     }
 
     private static IReadOnlyList<PluginKind> ParseKinds(IReadOnlyList<string>? values)
@@ -97,6 +128,81 @@ public sealed record PluginManifest(
         return kinds;
     }
 
+    private static PluginHostVersion? ParseHostVersion(string? value, string jsonFieldName)
+    {
+        if (value is null)
+            return null;
+        if (!PluginHostVersion.TryParse(value, out PluginHostVersion version))
+            throw new PluginManifestException($"malformed {jsonFieldName}: {value}");
+        return version;
+    }
+
+    private static IReadOnlyList<PluginHostVersion> ParseSkipHostVersions(
+        IReadOnlyList<string>? values)
+    {
+        if (values is null)
+            return [];
+
+        var skipVersions = new List<PluginHostVersion>(values.Count);
+        foreach (string? value in values)
+        {
+            if (!PluginHostVersion.TryParse(value, out PluginHostVersion version))
+            {
+                throw new PluginManifestException(
+                    $"malformed skipHostVersions entry: {value ?? "<null>"}");
+            }
+            skipVersions.Add(version);
+        }
+        return skipVersions;
+    }
+
+    private static IReadOnlyList<PluginHostKind> ParseHosts(IReadOnlyList<string>? values)
+    {
+        if (values is null)
+            return [PluginHostKind.Graphical, PluginHostKind.Headless];
+        if (values.Count == 0)
+            throw new PluginManifestException("hosts must contain at least one entry");
+
+        var hosts = new List<PluginHostKind>(values.Count);
+        foreach (string? value in values)
+        {
+            if (string.IsNullOrWhiteSpace(value)
+                || !Enum.TryParse(value, ignoreCase: true, out PluginHostKind host)
+                || !Enum.IsDefined(host))
+            {
+                throw new PluginManifestException(
+                    $"unknown host: {value ?? "<null>"}");
+            }
+
+            if (!hosts.Contains(host))
+                hosts.Add(host);
+        }
+        return hosts;
+    }
+
+    private static void RejectDuplicateProperties(string json)
+    {
+        var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(json));
+        var scopes = new Stack<HashSet<string>>();
+        while (reader.Read())
+        {
+            switch (reader.TokenType)
+            {
+                case JsonTokenType.StartObject:
+                    scopes.Push(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+                    break;
+                case JsonTokenType.EndObject:
+                    scopes.Pop();
+                    break;
+                case JsonTokenType.PropertyName:
+                    string name = reader.GetString()!;
+                    if (!scopes.Peek().Add(name))
+                        throw new PluginManifestException($"duplicate property: {name}");
+                    break;
+            }
+        }
+    }
+
     private static void Require(string? value, string jsonFieldName)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -118,6 +224,10 @@ public sealed record PluginManifest(
         public int ApiVersion { get; set; }
         public IReadOnlyList<string>? Dependencies { get; set; }
         public IReadOnlyList<string>? Kinds { get; set; }
+        public string? MinHostVersion { get; set; }
+        public string? MaxHostVersion { get; set; }
+        public IReadOnlyList<string>? SkipHostVersions { get; set; }
+        public IReadOnlyList<string>? Hosts { get; set; }
     }
 }
 

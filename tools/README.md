@@ -8,4 +8,5 @@
 | `build-linux.sh` | Linux-friendly Release build. Keeps .NET, NuGet, MSBuild, and generated lock state outside the checkout; pass `--test` for the portable test filter. |
 | `run-release-gate.ps1` | The complete bounded local test gate: locked restore, Release build, every test assembly in its own timed process, TRX and hash evidence under `artifacts/release-gate/`. Its default `-TestFilter` is the portable filter CI copies. |
 | `publish-bin.ps1` | Builds the self-contained client and launcher payloads and `manifest.json`. CI runs it in the release job; locally it is for inspection. |
+| `run-launcher-trial.ps1` | Builds this branch's client and launcher and runs them together, isolated in `artifacts/launcher-trial/` from the tester's real OpenAC install. |
 | `update-package-locks.ps1` | Regenerates every neutral and RID NuGet lock file after a dependency change. |
