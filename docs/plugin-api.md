@@ -115,6 +115,61 @@ writes in one of the client's own text classes, so a plugin's own output can
 use the colour the class carries. `Submit(text)` still runs the full chat
 pipeline, commands included.
 
+### Intercepting what the player types
+
+```csharp
+IDisposable alias = host.Automation.Chat.RegisterInputInterceptor(typed =>
+{
+    if (typed.Contains("[loc]"))
+        return PluginChatInputDecision.Rewrite(typed.Replace("[loc]", Here()));
+    if (typed.StartsWith("!macro "))
+    {
+        RunMacro(typed[7..]);
+        return PluginChatInputDecision.Suppress;
+    }
+    return PluginChatInputDecision.Pass;
+});
+```
+
+An interceptor sees every line the player sends from the chat entry, on
+either client, and every line a plugin sends through `Submit`. It is given
+the line trimmed and otherwise as typed, and answers one of three things:
+
+| Decision | Effect |
+|---|---|
+| `Pass` | Leave the line alone; the next interceptor, if any, sees it. |
+| `Rewrite(text)` | Send `text` instead. It goes back through the pipeline from the start, so it may be a plugin verb, a tell, a channel line, or be intercepted again. A blank rewrite counts as `Suppress`. |
+| `Suppress` | Drop the line. It is sent nowhere, no command runs for it, it is not written into the feed, and nothing is said to the player unless the plugin says it. |
+
+Where it sits in the order is the part to rely on:
+
+1. The client's own command catalogue, and its help, are consulted first. A
+   line the client claims as one of its own commands never reaches an
+   interceptor, so no plugin can shadow or rewrite a client command.
+2. Interceptors, in registration order across every plugin. The first one
+   that does not pass decides.
+3. Plugin verbs, then the channel and tell dispatch.
+
+So a rewrite can turn a plain alias into a plugin verb, or replace a marker
+inside a tell before the tell is sent, but it can never change what
+`/lifestone` does.
+
+- Rewrites are bounded at `ChatCommandRouter.MaximumRewritePasses` (8)
+  passes per line. Past that the last text is sent as it stands, so an
+  interceptor that always produces something new cannot loop.
+- An interceptor that throws is logged once and skipped for that line; the
+  next interceptor sees the line and chat carries on.
+- A plugin may have at most `IPluginChat.MaximumInputInterceptors` (16)
+  installed at once; the next registration throws `InvalidOperationException`.
+- Dispose the handle to remove one interceptor. The host removes every
+  interceptor a plugin installed when that plugin unloads, so a plugin cannot
+  leave a rewrite behind after it is gone.
+- An interceptor registered before login still applies to the next session.
+- Interceptors are client-wide: a line one plugin suppresses is gone for
+  every other plugin and for the player. Match narrowly.
+- A host with no chat pipeline returns a handle that revokes nothing and
+  never calls the interceptor.
+
 ## Lifecycle
 
 ```csharp
@@ -1208,8 +1263,9 @@ not, so it is empty here.
 ### Chat, and the console
 
 `Chat` is real on both: `PostMessage`, `Submit`, `Compose`, `CaptureMessages`,
-`Received`, `IsInputActive` and the suppression filters all sit on the shared
-surface. `Compose` stages a line in the one chat entry both front ends type
+`Received`, `IsInputActive`, the suppression filters and the input
+interceptors all sit on the shared surface, and a line typed at the console
+passes the interceptors the same way a line typed in a chat box does. `Compose` stages a line in the one chat entry both front ends type
 into, so on a windowless client it appears at the console and the next Enter
 sends it.
 
