@@ -1143,6 +1143,161 @@ polygons to overlap where cells meet and fill them rather than stitch them.
 have, for one with no indoor cells, and on a client with no lease on the
 game data.
 
+## Clients on this computer
+
+```csharp
+INetworkAutomation peers = host.Automation.Network;
+foreach (PluginNetworkClient client in peers.CaptureClients())
+{
+    if (client.Tags.Contains("healer", StringComparer.OrdinalIgnoreCase))
+        Console.WriteLine($"{client.Name} on {client.WorldName}: {client.CurrentHealth}/{client.MaxHealth}");
+}
+```
+
+`Network` is for playing several characters side by side: each client
+running on this computer publishes a little about its own character, and
+reads what the others published, so a plugin can tell where the group's
+other characters are, how they are doing, and what they have just cast.
+Nothing here goes to the game server and nothing leaves the machine. The
+clients find each other through the file system: each one leaves a small
+note in a `plugin-peers` folder beneath its data directory, rewritten about
+every five seconds while the character is in the world and withdrawn on
+the next heartbeat after it leaves. So two clients see each other only when they share a data
+directory (`docs/plugin-development.md` says where it is); two pointed at
+different ones never meet. There is no discovery beyond that folder, and
+none is needed.
+
+`IsAvailable` is true on both clients for the whole session. `CaptureClients`
+answers the other clients on this computer, never the caller's own, sorted
+by character name. A note that has not been rewritten in the last fifteen
+seconds is treated as gone, so a client that crashed or was killed drops
+out of the list within that window rather than lingering; a note that is
+malformed or over 64 KB is skipped. Every record is a snapshot of what that
+client last wrote, up to five seconds old, and reading it costs a scan of
+the folder, so read it on a heartbeat of your own rather than every tick.
+
+A `PluginNetworkClient` carries:
+
+- `ClientId`, a stable non-zero number for that client instance for as long
+  as it runs (a client relaunched gets a new one), and `PlayerId`, its
+  character's object id;
+- `Name` and `WorldName`;
+- `Position`, a `PluginNavigationPosition` with cell, coordinates,
+  elevation and whether it is outdoors, and `Heading` in degrees clockwise
+  from north, as of that client's last note;
+- current and maximum health, mana and stamina;
+- `Tags`, the words the player started that client with -- `ACDREAM_PLUGIN_TAGS`
+  on the windowed client, `pluginTags` in the headless configuration, as
+  `docs/building-and-running.md` describes. Tags are trimmed, de-duplicated
+  ignoring case and capped at 128; a client started without any publishes an
+  empty list. They mean whatever the plugin decides they mean: a role, a
+  group name, a job for a bot. A plugin cannot set them; the player does.
+
+### Cast sharing
+
+```csharp
+long cursor = 0L;
+host.Events.Tick += _ =>
+{
+    foreach (PluginPeerCast cast in peers.CaptureCasts(cursor))
+    {
+        cursor = cast.Sequence;
+        if (cast.Landed)
+            host.Automation.Enchantments.ReportCast(
+                cast.TargetObjectId, cast.SpellId, cast.SecondsRemaining);
+        else
+            HoldOff(cast.TargetObjectId, cast.SpellId);
+    }
+};
+
+// When this character starts a spell, and again when it lands:
+peers.AnnounceCastAttempt(targetId, spellId, effectiveSkill);
+peers.AnnounceCastSuccess(targetId, spellId, effectiveSkill, durationSeconds);
+```
+
+Two characters buffing the same group, or debuffing the same creature, will
+happily land the same spell twice unless they tell each other. The
+announcements ride in the same note as the client record. `AnnounceCastAttempt`
+says this character has begun a spell at a target, before it is known
+whether it lands, so a second character can decide not to start the same
+one; `AnnounceCastSuccess` says it landed and how long the effect lasts.
+An announcement goes out as soon as a quarter of a second has passed since
+the last note was written -- a burst of casts shares one write rather than
+costing one each -- and both return true once the cast is accepted for
+publishing, not when a peer has read it.
+
+`CaptureCasts` hands back what the other clients said, oldest first. Each
+cast carries a `Sequence` that only grows, in the order this client first
+read it: hand the highest one back on the next call and each cast arrives
+exactly once. A read does not consume anything -- several plugins share one
+client, and each keeps its own cursor -- so `CaptureCasts(0)` always
+answers everything still recent. Sequences can skip: a peer cast this client
+could not make sense of is counted and then dropped. What comes back:
+
+- `ClientId` and `CasterObjectId` -- the publishing client and its
+  character -- `TargetObjectId`, `SpellId`, and `EffectiveSkill`, the magic
+  skill the caster said it was casting with, or zero when it said nothing;
+- `Landed`: true for a success, false for an attempt that may still fizzle
+  or be resisted;
+- `SecondsRemaining`, already age-adjusted: the duration the caster
+  published, less however long ago it said the cast happened, never below
+  zero. A success read five seconds after it landed reads five seconds
+  shorter, so it can go straight into `Enchantments.ReportCast` as the
+  duration. An attempt carries no duration and always reads zero.
+
+None of it is authoritative: it is what the other client believed about its
+own cast, not a fact from the server, so treat it as a hint about what is
+already on a target. Nothing is applied to this client's own bookkeeping by
+reading it; a plugin that wants a landed cast counted as an effect in place
+passes it to `Enchantments.ReportCast` itself, as above.
+
+The host checks every peer cast before handing it over and drops:
+
+- casts from a client logged in to a **different world**, compared by world
+  name ignoring case -- its object ids name other creatures entirely, so
+  `CaptureCasts` is empty when no other client on this computer is in the
+  same world;
+- the client's **own** casts, so a character never reads its own
+  announcements back as somebody else's;
+- a **spell this client's own spell table cannot identify**. The id is the
+  only thing carried; everything about the spell is looked up here, never
+  believed from the note;
+- a cast **older than fifteen seconds**, or stamped more than fifteen
+  seconds in the future by a note whose clock cannot be trusted;
+- a note with any entry that is malformed -- a zero caster, target or spell,
+  a negative skill, a duration that is not a finite number of seconds
+  between zero and a day, a success with no duration. One bad entry refuses
+  the whole note, because an honest client never writes one.
+
+The announce side is held to the same rule, so a cast this client would
+refuse to read is one it never writes. `AnnounceCastAttempt` and
+`AnnounceCastSuccess` return false, and nothing is published, for a zero
+target, a spell this client's spell table does not know, a negative skill,
+a character that is not in the world, and -- for a success -- a duration
+that is not a finite positive number of seconds or is longer than a day.
+The day is a sanity limit rather than a game rule: nothing lasts that long,
+and a reader that believed a longer one would hold a target as enchanted
+for ever.
+
+The caps: a client's note carries its last 32 casts, and a reader keeps up
+to 128 unread ones from all peers together, so a plugin that polls slower
+than the group casts can miss some. Fifteen seconds is the window for
+everything: a cast older than that is gone whether or not it was read, and
+so is a client not heard from. A plugin polling on every tick, or every
+second, sees every cast; one polling every twenty seconds does not.
+
+What the surface does **not** carry yet: what a peer is holding or how many
+of something it has, its enchantments, its target, or any free-form message
+channel between plugins. A plugin that needs to tell another client
+something the record does not say has to arrange that itself.
+
+Both clients publish and read the same way, from the same data-directory
+rule and on the same heartbeat, so a windowed client and a headless bot on
+one machine see each other. Cast sharing needs the spell table on both
+sides: on a session without the installed data files -- see the "Headless"
+section -- `AnnounceCastAttempt` and `AnnounceCastSuccess` return false and
+`CaptureCasts` is empty, while `CaptureClients` is real either way.
+
 ## Headless
 
 A windowless client binds this same surface through the same binding pass the
@@ -1262,6 +1417,10 @@ with a window does the work:
   same files. Without them `IsSealedDungeon` is false and `CaptureFloorplan`
   is empty; `CurrentLandblockId` comes from the character's body and is real
   either way.
+- `Network`'s cast sharing classifies every spell in the same catalogue, so
+  without it `AnnounceCastAttempt` and `AnnounceCastSuccess` return false
+  and `CaptureCasts` is empty. `CaptureClients` and this client's own note
+  to the other clients on the machine are real either way.
 
 Other creatures' bodies come off the same lease. The server says where a
 creature is a few times a second and every client fills the gaps itself from
