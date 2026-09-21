@@ -138,6 +138,79 @@ message has arrived. The server sends this once, at login: it is a snapshot,
 not a live count, and it does not change again for the rest of the session
 even as players come and go.
 
+## Character
+
+### How a stat was bought
+
+Skills, attributes and the three pools each report how they got where they
+are, which is what a cost table is indexed by:
+
+```csharp
+ICharacterInfo character = host.Automation.Character;
+
+if (character.TryGetSkill(skillId, out PluginSkillInfo skill))
+{
+    uint boughtSoFar = skill.Ranks;          // rows already paid for
+    ulong banked     = skill.ExperienceSpent; // experience already in it
+}
+
+foreach (PluginAttributeInfo attribute in character.Attributes)
+{
+    // attribute.Ranks, attribute.ExperienceSpent
+}
+```
+
+`Vitals` is health, stamina and mana in that order, each carrying the same
+pair plus what the pool is worth:
+
+```csharp
+foreach (PluginVitalInfo vital in character.Vitals)
+{
+    // vital.Current, vital.Maximum, vital.Base (no enchantments),
+    // vital.Ranks, vital.ExperienceSpent
+}
+
+character.TryGetVital(1, out PluginVitalInfo stamina); // 0 health, 1 stamina, 2 mana
+```
+
+`Ranks` and `ExperienceSpent` read 0 until the server has stated the stat,
+and `Vitals` is empty until then, so check `IsInWorld` first and treat a zero
+as "not said yet" rather than "never raised".
+
+### Spending on a stat
+
+```csharp
+PluginAdvancementResult result = character.RequestAdvancement(
+    PluginAdvancementKind.Skill,
+    skill.SkillId,
+    costOfTheNextRank);
+
+if (!result.Accepted)
+    host.Log.Warn($"{result.Status}: {result.Notice}");
+```
+
+The stat id is the one the record you read it from carries:
+`PluginAttributeInfo.StatId` for an attribute, `PluginVitalInfo.StatId` for a
+pool, and `PluginSkillInfo.SkillId` for a skill. Attribute and pool ids are
+not the same numbers as their `Kind`, which is only a position in the list.
+
+`PluginAdvancementKind.TrainSkill` spends skill credits rather than
+experience, so its cost is a small number.
+
+The client checks the request before it sends it, and answers:
+
+| `Status` | when |
+|---|---|
+| `Sent` | the request went to the server; its answer arrives later as an updated stat |
+| `Unavailable` | the character is not in the world, or there is no session |
+| `UnknownStat` | a stat id of zero, an attribute or pool number that does not exist, or a skill the client has not been told the character has |
+| `InvalidCost` | a cost of zero, or one above `PluginAdvancement.MaxExperienceCost` (or `MaxSkillCredits` when training) |
+| `Refused` | the client declined it; `Notice` says why |
+
+`Sent` means the request left the client, not that the spend happened: the
+server decides whether it is allowed, and says so by restating the skill,
+attribute or pool. Watch the record you asked about rather than assuming.
+
 ## Spells
 
 `host.Automation.Spells` gains the whole table, not just what the character
