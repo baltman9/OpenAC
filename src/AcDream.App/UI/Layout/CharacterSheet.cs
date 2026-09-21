@@ -71,6 +71,14 @@ public sealed class CharacterSheet
 
     public int[] AttributeBaseValues { get; init; } = Array.Empty<int>();
 
+    /// <summary>
+    /// What each attribute started at, before any experience was spent on it
+    /// and with no enchantment counted: Strength, Endurance, Coordination,
+    /// Quickness, Focus, Self. This is what "innate" means on the character
+    /// information page.
+    /// </summary>
+    public int[] AttributeInnateValues { get; init; } = Array.Empty<int>();
+
 
     public int UnspentSkillCredits     { get; init; }
     public int SpecializedSkillCredits { get; init; }

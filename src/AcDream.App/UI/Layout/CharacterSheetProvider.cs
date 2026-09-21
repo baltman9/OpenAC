@@ -175,6 +175,15 @@ public sealed class CharacterSheetProvider
                 AttrCurrent(LocalPlayerState.AttributeKind.Focus),
                 AttrCurrent(LocalPlayerState.AttributeKind.Self),
             },
+            AttributeInnateValues = new[]
+            {
+                AttrInnate(LocalPlayerState.AttributeKind.Strength),
+                AttrInnate(LocalPlayerState.AttributeKind.Endurance),
+                AttrInnate(LocalPlayerState.AttributeKind.Coordination),
+                AttrInnate(LocalPlayerState.AttributeKind.Quickness),
+                AttrInnate(LocalPlayerState.AttributeKind.Focus),
+                AttrInnate(LocalPlayerState.AttributeKind.Self),
+            },
             Skills = BuildLiveCharacterSkills(props),
             BurdenCurrent = props.GetInt(5u),
             BurdenMax = props.GetInt(96u),
@@ -490,6 +499,9 @@ public sealed class CharacterSheetProvider
 
     private int AttrCurrent(LocalPlayerState.AttributeKind kind) =>
         _localPlayer.GetAttribute(kind) is { } attr ? checked((int)Math.Min(int.MaxValue, attr.Current)) : 0;
+
+    private int AttrInnate(LocalPlayerState.AttributeKind kind) =>
+        _localPlayer.GetAttribute(kind) is { } attr ? checked((int)Math.Min(int.MaxValue, attr.Start)) : 0;
 
     private int AttrEffective(LocalPlayerState.AttributeKind kind) =>
         _localPlayer.GetEffectiveAttribute(kind) ?? 0;

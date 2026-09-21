@@ -95,6 +95,21 @@ public sealed class CharacterSheetProviderTests
     }
 
 
+    // OpenAC #144: "innate" is what the attribute started at. Ranks bought
+    // with experience are not part of it, and neither is an enchantment.
+    [Fact]
+    public void BuildSheet_InnateAttributeIsTheStartingValue()
+    {
+        var h = new Harness();
+        h.AddPlayerObject(unassignedXp: 0L);
+        h.Player.OnAttributeUpdate(atType: 1u, ranks: 90u, start: 100u, xp: 10u);
+
+        var sheet = h.Provider.BuildSheet();
+
+        Assert.Equal(190, sheet.Strength);
+        Assert.Equal(100, sheet.AttributeInnateValues[0]);
+    }
+
     [Fact]
     public void BuildSheet_WithAllegianceRank_PrefixesNameWithRankTitle()
     {
