@@ -200,14 +200,24 @@ public sealed class ChatLog
         });
     }
 
-    public void OnSelfSent(ChatKind kind, string text, uint logTextType, string targetOrChannel = "")
+    /// <param name="channelId">
+    /// The numbered channel the text went to, when it went to one. Such a
+    /// line is worded by its channel, so it is recorded by number and not by
+    /// a display name.
+    /// </param>
+    public void OnSelfSent(
+        ChatKind kind,
+        string text,
+        uint logTextType,
+        string targetOrChannel = "",
+        uint channelId = 0u)
     {
         Append(new ChatEntry(
             Kind: kind,
             Sender: kind == ChatKind.Tell ? targetOrChannel : "",
             Text: text,
             SenderGuid: 0,
-            ChannelId: 0)
+            ChannelId: channelId)
         {
             ChannelName = kind == ChatKind.Channel ? targetOrChannel : "",
             LogTextType = logTextType,

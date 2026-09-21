@@ -296,7 +296,7 @@ public sealed class LiveChatCommandRoute
         bindings.Chat.OnSelfSent(
             ChatKind.Channel,
             text,
-            targetOrChannel: legacy.Value.DisplayName,
+            channelId: legacy.Value.ChannelId,
             logTextType: LegacyChannelChatType.Resolve(
                 legacy.Value.ChannelId,
                 ownSend: true));

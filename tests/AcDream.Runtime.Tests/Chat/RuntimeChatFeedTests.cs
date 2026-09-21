@@ -34,7 +34,7 @@ public sealed class RuntimeChatFeedTests
                 ChannelName = "Fellowship",
             }));
         Assert.Equal(
-            "[ch 7] Bob says, \"group up\"",
+            "Bob says on the <unknown> channel, \"group up\"",
             Word(new ChatEntry(
                 ChatKind.Channel, "Bob", "group up", OtherPlayerGuid, 7u)));
         Assert.Equal(

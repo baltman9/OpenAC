@@ -120,7 +120,8 @@ public sealed class ChatCommandTargetState : IDisposable
                 return;
             }
 
-            if (entry.Kind != ChatKind.Channel)
+            // The player's own line on a channel names nobody to reply to.
+            if (entry.Kind != ChatKind.Channel || string.IsNullOrEmpty(entry.Sender))
                 return;
             if (entry.ChannelId == 0x00004000u)
                 _lastMonarchSender = entry.Sender;

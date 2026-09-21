@@ -198,9 +198,7 @@ public sealed class RuntimeChatFeed : IDisposable
         ChatKind.RangedSpeech  => IsOwnSpeaker(entry.Sender)
             ? $"You shout, \"{entry.Text}\""
             : $"{decorateSender(entry.Sender)} shouts, \"{entry.Text}\"",
-        ChatKind.Channel       => IsOwnSpeaker(entry.Sender)
-            ? $"[{ChannelLabel(entry)}] You say, \"{entry.Text}\""
-            : $"[{ChannelLabel(entry)}] {decorateSender(entry.Sender)} says, \"{entry.Text}\"",
+        ChatKind.Channel       => ChannelLine(entry, decorateSender),
         ChatKind.Tell          => entry.SenderGuid != 0
             ? $"{decorateSender(entry.Sender)} tells you, \"{entry.Text}\""
             : $"You tell {entry.Sender}, \"{entry.Text}\"",
@@ -215,8 +213,24 @@ public sealed class RuntimeChatFeed : IDisposable
     private static bool IsOwnSpeaker(string sender) =>
         string.IsNullOrEmpty(sender) || sender == "You";
 
-    private static string ChannelLabel(ChatEntry entry) =>
-        string.IsNullOrEmpty(entry.ChannelName)
-            ? $"ch {entry.ChannelId}"
-            : entry.ChannelName;
+    /// <summary>
+    /// A channel that arrives with a name is shown under that name. One that
+    /// arrives as a bare number is one of the fixed channels, and each of
+    /// those has a sentence of its own.
+    /// </summary>
+    private static string ChannelLine(
+        ChatEntry entry, Func<string, string> decorateSender)
+    {
+        bool own = IsOwnSpeaker(entry.Sender);
+        if (string.IsNullOrEmpty(entry.ChannelName))
+        {
+            return own
+                ? LegacyChannelSentence.Sent(entry.ChannelId, entry.Text)
+                : LegacyChannelSentence.Heard(
+                    entry.ChannelId, decorateSender(entry.Sender), entry.Text);
+        }
+        return own
+            ? $"[{entry.ChannelName}] You say, \"{entry.Text}\""
+            : $"[{entry.ChannelName}] {decorateSender(entry.Sender)} says, \"{entry.Text}\"";
+    }
 }
