@@ -1161,7 +1161,14 @@ public sealed class HeadlessPluginSessionTests
         public IPEndPoint ResolveEndpoint(string host, int port) =>
             new(IPAddress.Loopback, port);
 
-        public WorldSession CreateSession(IPEndPoint endpoint) => new(endpoint);
+        public WorldSession CreateSession(IPEndPoint endpoint)
+        {
+            // This scripted server never prompts the client to complete its
+            // login, so the session is taken as already past it.
+            var session = new WorldSession(endpoint);
+            session.AssumeLoginCompleteForTesting();
+            return session;
+        }
 
         public void Connect(WorldSession session, string user, string password)
         {

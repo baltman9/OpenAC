@@ -116,6 +116,34 @@ public sealed class HeadlessSessionHostTests
             BinaryPrimitives.ReadUInt32LittleEndian(captured[3].AsSpan(12)));
     }
 
+    /// <summary>
+    /// A login command may be one the server carries out, and the server
+    /// takes nothing from a character whose login is not complete. The list
+    /// waits for that rather than losing its first entry.
+    /// </summary>
+    [Fact]
+    public void LoginCommandsWaitUntilTheServerIsListening()
+    {
+        var captured = new List<byte[]>();
+        var operations = new FixtureSessionOperations
+        {
+            GameActionCapture = body => captured.Add(body),
+            ServerListensFromTheStart = false,
+        };
+        using var diagnosticsOutput = new StringWriter();
+        using var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(loginCommands: ["hello"], loginCommandDelayMs: 0),
+            credential,
+            new HeadlessDiagnosticWriter(diagnosticsOutput),
+            operations);
+
+        Assert.Equal(RuntimeSessionStartStatus.Connected, host.Start().Status);
+        host.Tick(0.015d);
+
+        Assert.DoesNotContain(ChatRequests.TalkOpcode, captured.Select(ActionOpcode));
+    }
+
     [Fact]
     public void PluginDrivenLogoutRoutesThroughTheHostsOwnStopAndClearsTheSession()
     {
@@ -4447,6 +4475,7 @@ public sealed class HeadlessSessionHostTests
         public string? LastUser { get; private set; }
         public string? LastPassword { get; private set; }
         public Action<byte[]>? GameActionCapture { get; init; }
+        public bool ServerListensFromTheStart { get; init; } = true;
         public bool ThrowOnDisposeSession { get; set; }
         public int EnterWorldCallCount =>
             Volatile.Read(ref _enterWorldCallCount);
@@ -4477,6 +4506,11 @@ public sealed class HeadlessSessionHostTests
             CreatedSessionCount++;
             var session = new WorldSession(endpoint);
             session.GameActionCapture = GameActionCapture;
+            // This scripted server never sends the character's own object, so
+            // the client is never prompted to complete its login. A test that
+            // is about that wait turns this off.
+            if (ServerListensFromTheStart)
+                session.AssumeLoginCompleteForTesting();
             Sessions.Add(session);
             return session;
         }

@@ -139,7 +139,7 @@ public sealed class RuntimeLiveEntitySessionController
                 && !_initialLoginCompleteSent)
             {
                 _initialLoginCompleteSent = true;
-                _session.SendGameAction(GameActionLoginComplete.Build());
+                _session.SendLoginComplete();
                 _session.SendHouseQuery();
                 _onLoginCompleteSent?.Invoke();
             }
@@ -530,7 +530,7 @@ public sealed class RuntimeLiveEntitySessionController
             projection,
             RuntimeWorldHostAcknowledgementStage.TerminalProjected);
 
-        _session.SendGameAction(GameActionLoginComplete.Build());
+        _session.SendLoginComplete();
         transit.EndTeleport();
         _log(
             $"headless: portal complete generation={generation} "

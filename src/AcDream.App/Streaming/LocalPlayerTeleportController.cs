@@ -363,8 +363,7 @@ internal sealed class LocalPlayerTeleportSession : ILocalPlayerTeleportSession
 
     public void SendLoginComplete()
     {
-        _session.CurrentSession?.SendGameAction(
-            GameActionLoginComplete.Build());
+        _session.CurrentSession?.SendLoginComplete();
         // Anything that has been waiting for the login to be complete before
         // it asks the server for something runs here.
         _onLoginCompleteSent?.Invoke();

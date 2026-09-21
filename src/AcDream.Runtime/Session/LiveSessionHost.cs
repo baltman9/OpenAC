@@ -180,7 +180,7 @@ public sealed class LiveSessionHost
     public void Tick()
     {
         _controller.Tick();
-        _loginCommands?.Tick(_controller.Generation, _controller.IsInWorld);
+        _loginCommands?.Tick(_controller.Generation, IsListeningForCommands);
         // The async connect-to-in-world (and any leaving-world) edge lands
         // here, not at a command boundary -- BeginConnect polling completes
         // over several ticks, well after Start/Reconnect already returned
@@ -246,8 +246,19 @@ public sealed class LiveSessionHost
         _enteredWorld.LoadCharacterSettings(name);
         _enteredWorld.ArmPlayerModeAutoEntry();
         _characterEntered(selection);
-        _loginCommands?.EnteredWorld(_controller.Generation);
+        _loginCommands?.EnteredWorld(
+            _controller.Generation, IsListeningForCommands);
     }
+
+    /// <summary>
+    /// A login command may be one the server carries out. The server takes
+    /// nothing from a character until the client has said its login is
+    /// complete, which happens some time after the world is entered, so the
+    /// commands wait for both.
+    /// </summary>
+    private bool IsListeningForCommands =>
+        _controller.IsInWorld
+        && _controller.CurrentSession?.LoginCompleteSent == true;
 
     private void RethrowWithRetryableRollback(
         Exception creationError,

@@ -36,6 +36,37 @@ public sealed class LoginCommandSequenceTests
         Assert.False(sequence.IsActive);
     }
 
+    /// <summary>
+    /// The world is entered before the server is told the login is complete,
+    /// and until it is told, it takes nothing from the character. A first
+    /// command sent in that gap was lost; the whole list waits for it.
+    /// </summary>
+    [Fact]
+    public void NothingIsSentUntilTheServerIsListening()
+    {
+        var time = new ManualTimeProvider();
+        var sent = new List<string>();
+        var sequence = new LoginCommandSequence(
+            ["one", "two"],
+            TimeSpan.FromMilliseconds(500),
+            new RecordingFeedback(),
+            TalkBus(sent),
+            timeProvider: time);
+        var generation = new RuntimeGenerationToken(7);
+
+        sequence.EnteredWorld(generation, isListening: false);
+        time.Advance(TimeSpan.FromSeconds(5));
+        sequence.Tick(generation, isInWorld: false);
+        Assert.Empty(sent);
+
+        sequence.Tick(generation, isInWorld: true);
+        Assert.Equal(["one"], sent);
+
+        time.Advance(TimeSpan.FromMilliseconds(500));
+        sequence.Tick(generation, isInWorld: true);
+        Assert.Equal(["one", "two"], sent);
+    }
+
     [Fact]
     public void HandlerRuntimeDoesNotConsumeTheInterCommandDelay()
     {
