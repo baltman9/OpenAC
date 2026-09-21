@@ -147,6 +147,13 @@ internal sealed class HeadlessPluginHost
         _automation.TryHandlePluginCommand(commandLine);
 
     /// <summary>
+    /// What the plugins on the one surface make of a typed line, so the chat
+    /// route can ask before offering it to verbs or sending it.
+    /// </summary>
+    internal PluginChatInputDecision InterceptChatInput(string typed) =>
+        _automation.InterceptChatInput(typed);
+
+    /// <summary>
     /// Whether a verb is already spoken for on that one registry. A front end
     /// with a verb of its own asks before answering it.
     /// </summary>

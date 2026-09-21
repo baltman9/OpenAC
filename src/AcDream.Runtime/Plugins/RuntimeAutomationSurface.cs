@@ -119,6 +119,11 @@ internal sealed class RuntimeAutomationSurface
     /// the log so they survive a session being replaced.
     /// </summary>
     private readonly ChatSuppressionFilters _chatFilters = new();
+    /// <summary>
+    /// Interceptors installed by plugins over the lines the player types. On
+    /// the surface for the same reason as the filters: they outlive a session.
+    /// </summary>
+    private readonly ChatInputInterceptors _chatInterceptors = new();
     private IDisposable? _chatFilterInstallation;
     private IDisposable? _runtimeEventSubscription;
     private bool _wasInWorld;
@@ -172,6 +177,8 @@ internal sealed class RuntimeAutomationSurface
         _navigation = new AcDream.Runtime.Navigation.RuntimeNavigationAutomation(() => IsAvailable);
         _activeSpellIdsForPlayer = _ => _enchantments.Select(static enchantment => enchantment.SpellId).ToArray();
         _pluginCommands = new PluginCommandRegistry(ReportPluginCommandFailure);
+        _chatInterceptors.InterceptorFaulted = error =>
+            ReportPluginCommandFailure("chat-input-interceptor", error);
         _events = events;
         _peers = peers ?? new LocalPluginPeerRegistry(Path.Combine(
             AcDream.Platform.ApplicationPathSet.Resolve().DataDirectory,
@@ -285,6 +292,13 @@ internal sealed class RuntimeAutomationSurface
 
     internal bool TryHandlePluginCommand(string commandLine) =>
         _pluginCommands.TryHandle(commandLine);
+
+    /// <summary>
+    /// What the plugins on this surface make of a line the player typed. The
+    /// chat route asks before offering the line to plugin verbs or sending it.
+    /// </summary>
+    internal PluginChatInputDecision InterceptChatInput(string typed) =>
+        _chatInterceptors.Decide(typed);
 
     /// <summary>
     /// Whether a verb is already spoken for on this registry. A front end
@@ -2236,6 +2250,13 @@ internal sealed class RuntimeAutomationSurface
     {
         ArgumentNullException.ThrowIfNull(suppress);
         return _chatFilters.Register(suppress);
+    }
+
+    public IDisposable RegisterInputInterceptor(
+        Func<string, PluginChatInputDecision> intercept)
+    {
+        ArgumentNullException.ThrowIfNull(intercept);
+        return _chatInterceptors.Register(intercept);
     }
 
     public void OnChat(in RuntimeCommunicationEvent delta)

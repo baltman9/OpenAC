@@ -1,3 +1,4 @@
+using AcDream.Plugin.Abstractions;
 using AcDream.Core.Net;
 using AcDream.Runtime.Session;
 using AcDream.UI.Abstractions;
@@ -31,11 +32,15 @@ internal sealed class LiveSessionCommandSurface : IPluginCommandBus
 {
     private readonly object _gate = new();
     private readonly Func<string, bool>? _tryHandlePluginCommand;
+    private readonly Func<string, PluginChatInputDecision>? _interceptChatInput;
     private LiveSessionCommandRouter? _active;
 
-    public LiveSessionCommandSurface(Func<string, bool>? tryHandlePluginCommand = null)
+    public LiveSessionCommandSurface(
+        Func<string, bool>? tryHandlePluginCommand = null,
+        Func<string, PluginChatInputDecision>? interceptChatInput = null)
     {
         _tryHandlePluginCommand = tryHandlePluginCommand;
+        _interceptChatInput = interceptChatInput;
     }
 
     public ILiveSessionCommandRouting Attach(LiveSessionCommandRouter route)
@@ -64,6 +69,9 @@ internal sealed class LiveSessionCommandSurface : IPluginCommandBus
 
     public bool TryHandlePluginCommand(string commandLine) =>
         _tryHandlePluginCommand?.Invoke(commandLine) == true;
+
+    public PluginChatInputDecision InterceptChatInput(string typed) =>
+        _interceptChatInput?.Invoke(typed) ?? PluginChatInputDecision.Pass;
 
     private void Release(LiveSessionCommandRouter expected)
     {
