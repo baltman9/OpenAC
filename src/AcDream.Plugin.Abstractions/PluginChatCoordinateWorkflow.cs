@@ -1,4 +1,3 @@
-#pragma warning disable CS1591
 using System.Globalization;
 using System.Text.RegularExpressions;
 
@@ -11,6 +10,12 @@ public static partial class PluginChatCoordinateParser
     private static partial Regex PairPattern();
 
     /// <summary>Finds every unambiguous coordinate pair in a message.</summary>
+    /// <param name="text">The chat text to search.</param>
+    /// <returns>
+    /// Each pair found, in the order it appears; empty for none. A pair is one
+    /// north-or-south value and one east-or-west value, in either order, such
+    /// as "42.1N 33.5E" or "33.5E, 42.1N". South and west come back negative.
+    /// </returns>
     public static IReadOnlyList<PluginChatCoordinate> ParseAll(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return Array.Empty<PluginChatCoordinate>();
@@ -32,6 +37,9 @@ public static partial class PluginChatCoordinateParser
     }
 
     /// <summary>Parses exactly one coordinate pair and rejects ambiguous text.</summary>
+    /// <param name="text">The text to parse.</param>
+    /// <param name="coordinate">The pair, when the text holds exactly one.</param>
+    /// <returns>True when the text holds exactly one pair; false for none or for more than one.</returns>
     public static bool TryParse(string? text, out PluginChatCoordinate coordinate)
     {
         IReadOnlyList<PluginChatCoordinate> values = ParseAll(text);
@@ -46,6 +54,11 @@ public sealed class PluginChatCoordinateLinkRouter : IDisposable
     private readonly IPluginChat _chat;
     private readonly Action<PluginChatCoordinate> _destination;
     private bool _disposed;
+
+    /// <summary>Starts routing coordinate clicks from a chat surface.</summary>
+    /// <param name="chat">The chat surface whose link clicks are watched.</param>
+    /// <param name="destination">Called with the coordinate each time the player clicks one.</param>
+    /// <exception cref="ArgumentNullException">Either argument is null.</exception>
     public PluginChatCoordinateLinkRouter(IPluginChat chat, Action<PluginChatCoordinate> destination)
     {
         _chat = chat ?? throw new ArgumentNullException(nameof(chat));
@@ -57,6 +70,8 @@ public sealed class PluginChatCoordinateLinkRouter : IDisposable
         if (!_disposed && link.Kind == PluginChatLinkKind.Coordinate && link.Coordinate is { } coordinate)
             _destination(coordinate);
     }
+
+    /// <summary>Stops routing. Clicks after this reach nothing.</summary>
     public void Dispose()
     {
         if (_disposed) return;
