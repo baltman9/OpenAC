@@ -1807,6 +1807,21 @@ public class InventoryControllerTests
             ctrl.OnDragOver(grid, grid.GetItem(0)!, Payload(0xFFFFu)));               // grid → green
     }
 
+    // OpenAC #146 follow-up: a focus sits in the side column but carries
+    // nothing. Holding an item over it refuses, as over a full pack.
+    [Fact]
+    public void OnDragOver_aThingInTheSideColumnThatCarriesNothing_refuses()
+    {
+        var (layout, _, containers, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedBag(objects, 0xC, slot: 0, itemsCapacity: 0);
+        objects.AddOrUpdate(new ClientObject { ObjectId = 0xFFFFu });
+        var ctrl = (IItemListDragHandler)Bind(layout, objects);
+
+        Assert.Equal(ItemDragAcceptance.Reject,
+            ctrl.OnDragOver(containers, containers.GetItem(0)!, Payload(0xFFFFu)));
+    }
+
     [Fact]
     public void MainPackFullness_countsLooseItems_notSideBags_afterAFreeSlotAppears()
     {

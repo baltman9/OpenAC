@@ -805,6 +805,15 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         // is no refusal while the drop has somewhere to go.
         bool overAPackIcon = !sourceIsBag
             && !ReferenceEquals(targetList, _contentsGrid);
+        // The side column also holds things that carry nothing at all, a
+        // focus for one. No slots is no room: it refuses like a full pack.
+        if (overAPackIcon
+            && legality == InventoryContainerPlacementRejection.None
+            && ReferenceEquals(targetList, _containerList)
+            && _objects.Get(targetCell.ItemId) is { ItemsCapacity: 0 })
+        {
+            return ItemDragAcceptance.Reject;
+        }
         if (IsCapacityRejection(legality)
             && !overAPackIcon
             && ResolveFallthroughContainer(payload.ObjId, destination, out _) != 0u)
