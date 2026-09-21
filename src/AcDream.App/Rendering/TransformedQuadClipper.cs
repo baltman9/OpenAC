@@ -39,9 +39,16 @@ internal struct UiQuadVertex
 /// Sutherland-Hodgman method. Each pass can add at most one corner (the one
 /// place where the outline crosses that edge and comes back), so four passes
 /// take a quad from four corners to at most eight.</para>
+///
+/// <para>That bound is why the entry point refuses a wider shape than a
+/// quad: the buffers are sized for eight, and the count has to fit at every
+/// pass, not only at the end.</para>
 /// </summary>
 internal static class TransformedQuadClipper
 {
+    /// <summary>The four sides a shape is cut against.</summary>
+    private const int ClipEdges = 4;
+
     /// <summary>
     /// The largest number of corners a clipped quad can have: four to start
     /// with, plus one for each of the four clip edges it crosses.
@@ -49,10 +56,19 @@ internal static class TransformedQuadClipper
     public const int MaxClippedVertices = 8;
 
     /// <summary>
+    /// The most corners an input shape may have. Each pass can add one, so a
+    /// shape wider than this can outgrow the buffers part-way through being
+    /// clipped -- and a shape that is not convex can outgrow them faster
+    /// still.
+    /// </summary>
+    public const int MaxInputVertices = MaxClippedVertices - ClipEdges;
+
+    /// <summary>
     /// Writes the part of <paramref name="polygon"/> inside the clip rectangle
     /// into <paramref name="destination"/> and returns how many corners that
     /// took. Zero means the shape fell entirely outside and draws nothing.
-    /// <paramref name="destination"/> must hold <see cref="MaxClippedVertices"/>.
+    /// <paramref name="destination"/> must hold <see cref="MaxClippedVertices"/>
+    /// and <paramref name="polygon"/> at most <see cref="MaxInputVertices"/>.
     /// </summary>
     public static int Clip(
         float clipLeft,
@@ -66,6 +82,14 @@ internal static class TransformedQuadClipper
             throw new ArgumentException(
                 $"A clipped quad needs room for {MaxClippedVertices} corners.",
                 nameof(destination));
+        // Guarding only the destination is not enough: the buffers have to
+        // hold what the shape grows to part-way through, not just what comes
+        // out at the end.
+        if (polygon.Length > MaxInputVertices)
+            throw new ArgumentException(
+                $"A shape of more than {MaxInputVertices} corners can grow "
+                + $"past {MaxClippedVertices} while it is being clipped.",
+                nameof(polygon));
         if (polygon.Length < 3 || clipRight <= clipLeft || clipBottom <= clipTop)
             return 0;
 

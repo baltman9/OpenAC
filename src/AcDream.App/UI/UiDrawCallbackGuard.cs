@@ -25,10 +25,15 @@ namespace AcDream.App.UI;
 ///
 /// <para>The depth can be put back; the values cannot. A callback that popped
 /// a level belonging to its caller destroyed the clip rectangle or origin
-/// that level held, and no one outside knows what it was. Restoring the depth
-/// keeps the rest of the frame's pushes and pops paired, which is the most
-/// that can be salvaged -- and since such a callback is dropped on the spot,
-/// it is at most one frame of damage.</para>
+/// that level held, and no one outside knows what it was. What is pushed back
+/// in its place is whatever is current after the over-popping: the caller's
+/// OUTER clip, which is wider, or no clipping at all if the callback emptied
+/// the stack. So the rest of that scope can draw outside the window it
+/// belongs to, not merely inside a smaller piece of it -- the damage is
+/// content in the wrong place rather than content missing. Restoring the
+/// depth keeps the rest of the frame's pushes and pops paired, which is the
+/// most that can be salvaged, and since such a callback is dropped on the
+/// spot it is at most one frame of it.</para>
 /// </summary>
 internal sealed class UiDrawCallbackGuard
 {

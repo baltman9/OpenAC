@@ -132,7 +132,9 @@ public sealed class UiRenderContext
     /// Deepens the clip stack by one without changing what is clipped, the way
     /// <c>PushTransform(0, 0)</c> and <c>PushAlpha(1)</c> deepen theirs. Only
     /// use is putting the depth back after a drawing callback popped more than
-    /// it pushed and ate a level belonging to its caller.
+    /// it pushed and ate a level belonging to its caller. What it deepens with
+    /// is whatever the over-popping left current -- a wider rectangle, or none
+    /// at all -- so this restores the count, not the cropping.
     /// </summary>
     internal void PushClipUnchanged() => _clipStack.Add(_clip);
 
