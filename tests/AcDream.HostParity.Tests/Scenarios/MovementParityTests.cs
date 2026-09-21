@@ -73,14 +73,52 @@ public sealed class MovementParityTests
             _ = ParityWorld.Stage(arm);
             INavigationAutomation navigation = arm.Host.Automation.Navigation;
             _ = arm.Operations.TakeOutbound();
+            double startedAtEast = navigation.Snapshot.Position.EastWest;
+            double startedAtNorth = navigation.Snapshot.Position.NorthSouth;
 
             transcript.Step("turn to face east");
-            transcript.Record("plugin.status", navigation.FaceHeading(90f));
-            for (int step = 0; step < TicksForTwoHundredMilliseconds * 4; step++)
+            PluginNavigationCommandStatus status = navigation.FaceHeading(East);
+            transcript.Record("plugin.status", status);
+            for (int step = 0; step < TicksForTheWholeTurn; step++)
                 arm.Advance();
             RecordWhere(transcript, navigation);
             transcript.RecordOutbound(arm);
+
+            // The turn was taken, and it really got there: a client that
+            // turned at a different rate, or not at all, ends up facing
+            // somewhere else. Two clients both facing north would agree
+            // line for line and prove nothing.
+            Assert.Equal(PluginNavigationCommandStatus.Accepted, status);
+            Assert.Equal(
+                East, navigation.Snapshot.Position.HeadingDegrees, 0);
+            // And on the spot: turning is not walking, so the character is
+            // where it started and the creatures are as far off as they
+            // were -- three metres and seven.
+            Assert.Equal(
+                startedAtEast, navigation.Snapshot.Position.EastWest, 3);
+            Assert.Equal(
+                startedAtNorth, navigation.Snapshot.Position.NorthSouth, 3);
+            Assert.Equal(3d, Distance(navigation, ParityWorld.Monster), 3);
+            Assert.Equal(
+                7d, Distance(navigation, ParityWorld.SecondMonster), 3);
         });
+
+    /// <summary>A quarter turn to the right, in degrees.</summary>
+    private const float East = 90f;
+
+    /// <summary>
+    /// Long enough for a quarter turn to finish at the shared step length:
+    /// the character turns at something under a hundred degrees a second.
+    /// </summary>
+    private const int TicksForTheWholeTurn = 150;
+
+    /// <summary>How far off something is, across the ground, in metres.</summary>
+    private static double Distance(
+        INavigationAutomation navigation, uint objectId) =>
+        navigation.TryGetObject(objectId, out PluginNavigationObject value)
+            ? navigation.Snapshot.Position.HorizontalDistanceMeters(
+                value.Position)
+            : double.NaN;
 
     /// <summary>
     /// Where the character thinks it is and how far off the creatures are.

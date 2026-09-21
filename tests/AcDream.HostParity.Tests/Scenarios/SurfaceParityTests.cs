@@ -31,29 +31,49 @@ public sealed class SurfaceParityTests
             selection.Changed += change => seen.Add(change);
 
             transcript.Step("select a creature");
-            transcript.Record("accepted", selection.Select(ParityWorld.Monster));
+            bool first = selection.Select(ParityWorld.Monster);
+            transcript.Record("accepted", first);
             transcript.Record("selected", selection.SelectedObjectId);
             transcript.Record("previous", selection.PreviousObjectId);
             arm.Advance();
+            // The creature is really selected, with nothing behind it.
+            Assert.True(first, $"{arm.Name} would not select the creature.");
+            Assert.Equal(ParityWorld.Monster, selection.SelectedObjectId);
+            Assert.Null(selection.PreviousObjectId);
 
             transcript.Step("select another");
-            transcript.Record(
-                "accepted", selection.Select(ParityWorld.SecondMonster));
+            bool second = selection.Select(ParityWorld.SecondMonster);
+            transcript.Record("accepted", second);
             transcript.Record("selected", selection.SelectedObjectId);
             transcript.Record("previous", selection.PreviousObjectId);
             arm.Advance();
+            // The new one is selected and the old one is what came before,
+            // which is what a plugin steps back to.
+            Assert.True(second, $"{arm.Name} would not select the second.");
+            Assert.Equal(ParityWorld.SecondMonster, selection.SelectedObjectId);
+            Assert.Equal(ParityWorld.Monster, selection.PreviousObjectId);
 
             transcript.Step("select the same again");
-            transcript.Record(
-                "accepted", selection.Select(ParityWorld.SecondMonster));
+            bool sameAgain = selection.Select(ParityWorld.SecondMonster);
+            transcript.Record("accepted", sameAgain);
             transcript.Record("selected", selection.SelectedObjectId);
             arm.Advance();
+            // Selecting what is already selected changes nothing and says
+            // so, rather than telling every plugin about a change that did
+            // not happen.
+            Assert.False(
+                sameAgain,
+                $"{arm.Name} treated re-selecting the same creature as a "
+                + "change.");
+            Assert.Equal(ParityWorld.SecondMonster, selection.SelectedObjectId);
 
             transcript.Step("clear");
             selection.Clear();
             transcript.Record("selected", selection.SelectedObjectId);
             transcript.Record("previous", selection.PreviousObjectId);
             arm.Advance();
+            Assert.Null(selection.SelectedObjectId);
+            Assert.Equal(ParityWorld.SecondMonster, selection.PreviousObjectId);
 
             transcript.Step("what the plugin was told");
             transcript.Record("count", seen.Count);
@@ -64,6 +84,18 @@ public sealed class SurfaceParityTests
                 transcript.Record(
                     $"change[{index}].selected", seen[index].SelectedObjectId);
             }
+            // Three changes and no more: the two selections and the clear.
+            // A client that told a plugin nothing at all would agree with
+            // another that did the same.
+            Assert.Equal(
+                new (uint?, uint?)[]
+                {
+                    (null, ParityWorld.Monster),
+                    (ParityWorld.Monster, ParityWorld.SecondMonster),
+                    (ParityWorld.SecondMonster, null),
+                },
+                seen.Select(static change =>
+                    (change.PreviousObjectId, change.SelectedObjectId)));
         });
 
     /// <summary>
