@@ -511,6 +511,8 @@ internal sealed class CurrentGameRuntimeCommandAdapter
                 ClientCommandId.HouseRecall,
             RuntimePortalCommand.RecallMansion =>
                 ClientCommandId.MansionRecall,
+            RuntimePortalCommand.RecallAllegiance =>
+                ClientCommandId.AllegianceHometown,
             _ => null,
         };
         if (commandId is null)

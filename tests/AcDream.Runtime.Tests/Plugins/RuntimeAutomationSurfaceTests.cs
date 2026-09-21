@@ -86,6 +86,22 @@ public sealed class RuntimeAutomationSurfaceTests
     }
 
     [Theory]
+    [InlineData(PluginObjectClass.Portal, PluginObjectCapabilities.Interactable | PluginObjectCapabilities.Portal)]
+    [InlineData(PluginObjectClass.Door, PluginObjectCapabilities.Interactable | PluginObjectCapabilities.Door)]
+    [InlineData(PluginObjectClass.Vendor, PluginObjectCapabilities.Interactable | PluginObjectCapabilities.Vendor)]
+    [InlineData(PluginObjectClass.Npc, PluginObjectCapabilities.Interactable | PluginObjectCapabilities.Npc)]
+    [InlineData(PluginObjectClass.Lifestone, PluginObjectCapabilities.Interactable)]
+    [InlineData(PluginObjectClass.Services, PluginObjectCapabilities.Interactable)]
+    [InlineData(PluginObjectClass.Corpse, PluginObjectCapabilities.Interactable)]
+    [InlineData(PluginObjectClass.MeleeWeapon, PluginObjectCapabilities.None)]
+    public void ObjectCapabilitiesAreStableSemanticFlags(
+        PluginObjectClass objectClass,
+        PluginObjectCapabilities expected)
+    {
+        Assert.Equal(expected, PluginObjectClassifier.Capabilities(objectClass));
+    }
+
+    [Theory]
     [InlineData((uint)ItemType.MeleeWeapon, 0u)]
     [InlineData((uint)ItemType.Armor, 0u)]
     [InlineData((uint)ItemType.Creature, 0x10u)]
@@ -148,6 +164,48 @@ public sealed class RuntimeAutomationSurfaceTests
         Assert.Equal(0.8d, nextBlock.EastWest, 8);
         Assert.Equal(0.8d, nextBlock.NorthSouth, 8);
         Assert.False(nextBlock.IsOutdoor);
+    }
+
+    [Fact]
+    public void AllegianceSnapshotIsUnavailableBeforeAuthoritativeProfile()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+
+        PluginAllegianceSnapshot snapshot = surface.Allegiance.Snapshot;
+        Assert.False(snapshot.IsKnown);
+        Assert.Equal(0L, snapshot.Revision);
+        Assert.False(snapshot.HasMonarch);
+    }
+
+    [Fact]
+    public void PortalTransitionCoalescesDuplicateRuntimeSnapshots()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        var events = new AcDream.Core.Plugins.WorldEvents();
+        using var surface = new RuntimeAutomationSurface(events);
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        var seen = new List<PluginPortalTransition>();
+        events.PortalTransition += seen.Add;
+        var snapshot = RuntimePortalSnapshot.Idle with
+        {
+            Generation = 3,
+            Kind = RuntimePortalKind.Portal,
+        };
+        var observer = (IRuntimeEventObserver)surface;
+
+        observer.OnPortal(new RuntimePortalDelta(default, snapshot));
+        observer.OnPortal(new RuntimePortalDelta(default, snapshot));
+        observer.OnPortal(new RuntimePortalDelta(
+            default,
+            snapshot with { Materialized = true }));
+
+        Assert.Equal(2, seen.Count);
+        Assert.Equal([1L, 2L], seen.Select(static item => item.Revision));
+        Assert.All(seen, static item => Assert.Equal(
+            PluginPortalTransitionKind.Portal,
+            item.Kind));
     }
 
     [Fact]

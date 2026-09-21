@@ -1,4 +1,4 @@
-using AcDream.Plugin.Abstractions;
+﻿using AcDream.Plugin.Abstractions;
 
 namespace AcDream.Core.Plugins;
 
@@ -27,6 +27,29 @@ public interface IPluginEventSink : IEvents
     /// <summary>An object appeared, moved, changed or went away.</summary>
     /// <param name="change">Which object, and what happened to it.</param>
     void FireObjectChanged(PluginObjectChange change);
+
+    /// <summary>
+    /// The character went through a portal, or a login placed it in the
+    /// world. Raised from the one runtime owner that watches the portal, so
+    /// both clients report the same transition once, in the same order. The
+    /// sink stamps the revision; the caller passes zero.
+    /// </summary>
+    /// <param name="transition">Where the character went, and how far along.</param>
+    void FirePortalTransition(PluginPortalTransition transition);
+
+    /// <summary>
+    /// A use the character started on an object finished, with whatever the
+    /// server said about it.
+    /// </summary>
+    /// <param name="completion">Which use finished, and with what result.</param>
+    void FireItemUseCompleted(PluginItemUseCompletion completion);
+
+    /// <summary>
+    /// An activation the character started on an object -- a lever, a door,
+    /// a portal -- completed, failed or was interrupted.
+    /// </summary>
+    /// <param name="completion">Which activation ended, and how.</param>
+    void FireActivationCompleted(PluginActivationCompletion completion);
 
     /// <summary>
     /// The walk the client is driving reached a new state: it started, made

@@ -20,6 +20,97 @@ public class WorldEventsTests
         Rotation: Quaternion.Identity);
 
     [Fact]
+    public void RecallLocationRevisionCanRejectStaleState()
+    {
+        var location = new PluginRecallLocation(
+            PluginRecallKind.House,
+            default,
+            "House",
+            2,
+            true);
+        Assert.False(location.IsStaleComparedTo(1));
+        Assert.True(location.IsStaleComparedTo(2));
+    }
+
+    [Fact]
+    public void PortalTransitionRevisionCanRejectStaleNotifications()
+    {
+        var transition = new PluginPortalTransition(6, 2, 3u, true, true, false, false);
+
+        Assert.False(transition.IsStaleComparedTo(5));
+        Assert.True(transition.IsStaleComparedTo(6));
+        Assert.True(transition.IsStaleComparedTo(7));
+        Assert.False(transition.IsTerminal);
+        Assert.True((transition with { IsCompleted = true }).IsTerminal);
+        Assert.True((transition with { IsCancelled = true }).IsTerminal);
+    }
+
+    [Fact]
+    public void ObjectChangeRevisionCanRejectStaleNotifications()
+    {
+        var change = new PluginObjectChange(1u, PluginObjectChangeKind.Updated)
+        {
+            Revision = 4,
+        };
+
+        Assert.False(change.IsStaleComparedTo(3));
+        Assert.True(change.IsStaleComparedTo(4));
+        Assert.True(change.IsStaleComparedTo(5));
+        Assert.False(new PluginObjectChange(1u, PluginObjectChangeKind.Updated)
+            .IsStaleComparedTo(5));
+    }
+
+    [Fact]
+    public void PortalTransition_AssignsMonotonicRevisions()
+    {
+        var events = new WorldEvents();
+        var seen = new List<PluginPortalTransition>();
+        events.PortalTransition += seen.Add;
+
+        events.FirePortalTransition(new PluginPortalTransition(0, 7, 0x1234u, true, false, false, false));
+        events.FirePortalTransition(new PluginPortalTransition(0, 7, 0x1234u, true, true, false, false));
+
+        Assert.Equal([1L, 2L], seen.Select(static transition => transition.Revision));
+        Assert.All(seen, static transition => Assert.Equal(7L, transition.Generation));
+    }
+
+    [Fact]
+    public void ObjectChanged_AssignsMonotonicSessionRevisions()
+    {
+        var events = new WorldEvents();
+        var seen = new List<PluginObjectChange>();
+        events.ObjectChanged += seen.Add;
+        var current = new PluginWorldObject(
+            1u, 100u, "Portal", PluginObjectClass.Portal, 0u, 0u, 0u)
+        {
+            Capabilities = PluginObjectCapabilities.Interactable
+                | PluginObjectCapabilities.Portal,
+        };
+
+        events.FireObjectChanged(new PluginObjectChange(1, PluginObjectChangeKind.Created)
+        {
+            Current = current,
+        });
+        events.FireObjectChanged(new PluginObjectChange(1, PluginObjectChangeKind.Updated)
+        {
+            Current = current with { Name = "Updated portal" },
+        });
+        events.FireObjectChanged(new PluginObjectChange(1, PluginObjectChangeKind.Released));
+
+        Assert.Equal([1L, 2L, 3L], seen.Select(static change => change.Revision));
+        Assert.Equal("Updated portal", seen[1].Current?.Name);
+        Assert.True(seen[1].Current?.CanActivate);
+        Assert.Equal(
+            PluginObjectChangeFields.Identity,
+            seen[1].ChangedFields);
+        Assert.Equal(
+            PluginObjectChangeFields.Lifecycle,
+            seen[2].ChangedFields);
+        Assert.Null(seen[2].Current);
+        Assert.All(seen, static change => Assert.Equal(1u, change.ObjectId));
+    }
+
+    [Fact]
     public void NavigationChanged_DeliversAndUnsubscribes()
     {
         var events = new WorldEvents();

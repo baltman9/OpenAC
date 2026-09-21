@@ -86,6 +86,9 @@ public sealed class DirectGameRuntimeCommandAdapterTests
         RuntimeCommandResult portal = adapter.Portal.Execute(
             runtime.Generation,
             RuntimePortalCommand.RecallLifestone);
+        RuntimeCommandResult allegianceRecall = adapter.Portal.Execute(
+            runtime.Generation,
+            RuntimePortalCommand.RecallAllegiance);
         runtime.CommunicationOwner.TurbineChat.OnChannelsReceived(
             allegianceRoom: 0x10u,
             generalRoom: 0x11u,
@@ -233,6 +236,7 @@ public sealed class DirectGameRuntimeCommandAdapterTests
             reconnected.Status);
         Assert.True(chat.Accepted);
         Assert.True(portal.Accepted);
+        Assert.True(allegianceRecall.Accepted);
         Assert.All(
             stateAndWireCommands,
             result => Assert.Equal(

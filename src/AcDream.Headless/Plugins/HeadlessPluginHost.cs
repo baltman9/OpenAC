@@ -1,8 +1,9 @@
-using AcDream.Content;
+﻿using AcDream.Content;
 using AcDream.Core.Items;
 using AcDream.Headless.Hosting;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
+using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Navigation;
 using AcDream.Runtime.Plugins;
 
@@ -31,10 +32,15 @@ internal sealed class HeadlessPluginHost
     private Action? _logoff;
     private Action<string>? _localPlayerDied;
     private Action<PluginObjectChange>? _objectChanged;
+    private long _objectChangeRevision;
+    private Action<PluginPortalTransition>? _portalTransition;
+    private long _portalTransitionRevision;
+    private Action<PluginItemUseCompletion>? _itemUseCompleted;
     private Action<PluginGoToReport>? _navigationChanged;
     private Action<uint>? _containerOpened;
     private Action<uint>? _containerClosed;
     private Action<PluginConfirmation>? _confirmationRequested;
+    private Action<PluginActivationCompletion>? _activationCompleted;
     private bool _disposed;
 
     internal HeadlessPluginHost(
@@ -379,6 +385,40 @@ internal sealed class HeadlessPluginHost
         }
     }
 
+    public event Action<PluginPortalTransition> PortalTransition
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_tickGate)
+                _portalTransition += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_tickGate)
+                _portalTransition -= value;
+        }
+    }
+
+    public event Action<PluginItemUseCompletion> ItemUseCompleted
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_tickGate)
+                _itemUseCompleted += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_tickGate)
+                _itemUseCompleted -= value;
+        }
+    }
+
     public event Action<PluginGoToReport> NavigationChanged
     {
         add
@@ -447,6 +487,23 @@ internal sealed class HeadlessPluginHost
         }
     }
 
+    public event Action<PluginActivationCompletion> ActivationCompleted
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_tickGate)
+                _activationCompleted += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_tickGate)
+                _activationCompleted -= value;
+        }
+    }
+
     /// <summary>
     /// An object appeared, moved, changed or went away. Which runtime
     /// happening that was -- an object arriving, an inventory move, an
@@ -458,7 +515,18 @@ internal sealed class HeadlessPluginHost
     {
         Action<PluginObjectChange>? handlers;
         lock (_tickGate)
+        {
+            // Stamped here, the same way the windowed client's events object
+            // stamps it: a plugin orders and de-duplicates object changes by
+            // this revision, so an unstamped change on one client is a
+            // plugin that silently works on one client only.
+            change = change with
+            {
+                Revision = ++_objectChangeRevision,
+                ChangedFields = PluginObjectChange.FieldsFor(change.Kind),
+            };
             handlers = _objectChanged;
+        }
         if (handlers is null)
             return;
         foreach (Delegate handler in handlers.GetInvocationList())
@@ -467,6 +535,83 @@ internal sealed class HeadlessPluginHost
             catch (Exception error)
             {
                 Log.Warn($"Plugin object-change handler threw: {error}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// The character went through a portal, or a login placed it in the
+    /// world. The shared surface decides what a portal change means and
+    /// raises it once; this stamps the revision the same way the windowed
+    /// client's events object does, so a plugin can order transitions
+    /// identically on either client.
+    /// </summary>
+    /// <param name="transition">Where the character went, and how far along.</param>
+    public void FirePortalTransition(PluginPortalTransition transition)
+    {
+        Action<PluginPortalTransition>? handlers;
+        lock (_tickGate)
+        {
+            transition = transition with
+            {
+                Revision = ++_portalTransitionRevision,
+            };
+            handlers = _portalTransition;
+        }
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginPortalTransition>)handler)(transition); }
+            catch (Exception error)
+            {
+                Log.Warn($"Plugin portal-transition handler threw: {error}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// A use the character started on an object finished. Raised by the
+    /// shared surface off the runtime's own completion, so both clients
+    /// report the same result under the same revision.
+    /// </summary>
+    /// <param name="completion">Which use finished, and with what result.</param>
+    public void FireItemUseCompleted(PluginItemUseCompletion completion)
+    {
+        Action<PluginItemUseCompletion>? handlers;
+        lock (_tickGate)
+            handlers = _itemUseCompleted;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginItemUseCompletion>)handler)(completion); }
+            catch (Exception error)
+            {
+                Log.Warn($"Plugin item-use handler threw: {error}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// An activation the character started on an object completed, failed or
+    /// was interrupted. The correlation between the activation and what ended
+    /// it belongs to the shared surface, so it is the same on both clients.
+    /// </summary>
+    /// <param name="completion">Which activation ended, and how.</param>
+    public void FireActivationCompleted(PluginActivationCompletion completion)
+    {
+        Action<PluginActivationCompletion>? handlers;
+        lock (_tickGate)
+            handlers = _activationCompleted;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginActivationCompletion>)handler)(completion); }
+            catch (Exception error)
+            {
+                Log.Warn($"Plugin activation-completion handler threw: {error}");
             }
         }
     }

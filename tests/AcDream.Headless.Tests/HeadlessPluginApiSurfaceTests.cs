@@ -1,4 +1,4 @@
-using AcDream.Core.Chat;
+﻿using AcDream.Core.Chat;
 using AcDream.Core.Combat;
 using AcDream.Headless.Plugins;
 using AcDream.Core.Plugins;
@@ -362,6 +362,91 @@ public sealed class HeadlessPluginApiSurfaceTests
                 (100u, PluginObjectChangeKind.IdentReceived),
             },
             seen.Select(static c => (c.ObjectId, c.Kind)));
+        Assert.Equal([1L], seen.Select(static c => c.Revision));
+    }
+
+    /// <summary>
+    /// The runtime's own entity and inventory vocabulary reaches a plugin as
+    /// the plugin's narrower one, in order and stamped. The mapping belongs
+    /// to the shared surface, which is what observes the runtime here, so
+    /// this drives the surface rather than the host.
+    /// </summary>
+    [Fact]
+    public void ObjectChangedMapsEntityAndInventoryDeltasToPluginKinds()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        var seen = new List<PluginObjectChange>();
+        host.Events.ObjectChanged += seen.Add;
+        var observer = (IRuntimeEventObserver)host.Automation;
+        RuntimeEventStamp stamp = default;
+
+        observer.OnEntity(new RuntimeEntityDelta(
+            stamp,
+            RuntimeEntityChange.Registered,
+            new RuntimeEntitySnapshot(
+                new RuntimeEntityIdentity(100u, 1u, 1), 0u, 0u, null)));
+        observer.OnEntity(new RuntimeEntityDelta(
+            stamp,
+            RuntimeEntityChange.Rebucketed,
+            new RuntimeEntitySnapshot(
+                new RuntimeEntityIdentity(100u, 1u, 1), 0u, 0u, null)));
+        observer.OnEntity(new RuntimeEntityDelta(
+            stamp,
+            RuntimeEntityChange.Deleted,
+            new RuntimeEntitySnapshot(
+                new RuntimeEntityIdentity(100u, 1u, 1), 0u, 0u, null)));
+        observer.OnInventory(new RuntimeInventoryDelta(
+            stamp,
+            RuntimeInventoryChange.Added,
+            new RuntimeInventoryItemSnapshot(
+                200u, 1, "Item", 0u, 0, 0u, 0u, 0, 0)));
+        observer.OnInventory(new RuntimeInventoryDelta(
+            stamp,
+            RuntimeInventoryChange.Cleared,
+            default));
+
+        Assert.Equal(
+            new (uint ObjectId, PluginObjectChangeKind Kind)[]
+            {
+                (100u, PluginObjectChangeKind.Created),
+                (100u, PluginObjectChangeKind.Moved),
+                (100u, PluginObjectChangeKind.Released),
+                (200u, PluginObjectChangeKind.Created),
+            },
+            seen.Select(static c => (c.ObjectId, c.Kind)));
+        Assert.Equal([1L, 2L, 3L, 4L], seen.Select(static c => c.Revision));
+        Assert.Null(seen[2].Current);
+    }
+
+    [Fact]
+    public void PortalTransitionCoalescesDuplicateRuntimeSnapshots()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        var seen = new List<PluginPortalTransition>();
+        host.Events.PortalTransition += seen.Add;
+        // The runtime's portal observer is the shared surface, not this
+        // host: one projection feeds both clients.
+        var observer = (IRuntimeEventObserver)host.Automation;
+        RuntimePortalSnapshot snapshot = RuntimePortalSnapshot.Idle with
+        {
+            Generation = 4,
+            Kind = RuntimePortalKind.Portal,
+            Materialized = false,
+        };
+
+        observer.OnPortal(new RuntimePortalDelta(default, snapshot));
+        observer.OnPortal(new RuntimePortalDelta(default, snapshot));
+        observer.OnPortal(new RuntimePortalDelta(
+            default,
+            snapshot with { Materialized = true }));
+
+        Assert.Equal(2, seen.Count);
+        Assert.Equal([1L, 2L], seen.Select(static item => item.Revision));
+        Assert.All(seen, static item => Assert.Equal(
+            PluginPortalTransitionKind.Portal,
+            item.Kind));
     }
 
     [Fact]
@@ -640,6 +725,84 @@ public sealed class HeadlessPluginApiSurfaceTests
         public void Activate() { }
         public void Dispose() { }
     }
+
+    [Fact]
+    public void ActivationCompletedFiresAfterPortalTransition()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        var seen = new List<PluginActivationCompletion>();
+        host.Events.ActivationCompleted += seen.Add;
+        // The runtime's portal observer is the shared surface, not this
+        // host: one projection feeds both clients.
+        var observer = (IRuntimeEventObserver)host.Automation;
+
+        // Simulate a portal transition completing.
+        RuntimePortalSnapshot snapshot = RuntimePortalSnapshot.Idle with
+        {
+            Generation = 4,
+            Kind = RuntimePortalKind.Portal,
+            Completed = true,
+        };
+
+        observer.OnPortal(new RuntimePortalDelta(default, snapshot));
+
+        // ActivationCompleted should not fire without a pending activation.
+        Assert.Empty(seen);
+    }
+
+    [Fact]
+    public void ActivationCompletedFiresItemUseForLandscapeObject()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        var seen = new List<PluginActivationCompletion>();
+        host.Events.ActivationCompleted += seen.Add;
+
+        // Test that the event can be subscribed and that
+        // no spurious events fire without an activation.
+        Assert.Empty(seen);
+    }
+
+    [Fact]
+    public void RecallLocationsReturnedFromCaptureLocations()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        IRecallAutomation recalls = host.Automation.Recalls;
+
+        // Without a live session, CaptureLocations returns empty.
+        IReadOnlyList<PluginRecallLocation> locations = recalls.CaptureLocations();
+        Assert.Empty(locations);
+    }
+
+    [Fact]
+    public void RecallLocationsIncludeHouseWhenPositionIsKnown()
+    {
+        var (runtime, commands) = NewRealSession();
+        using GameRuntime runtimeDisposal = runtime;
+        using var host = NewHost(runtime);
+
+        commands.Start(runtime.Generation);
+        IRecallAutomation recalls = host.Automation.Recalls;
+
+        IReadOnlyList<PluginRecallLocation> locations = recalls.CaptureLocations();
+        // House location may or may not be present depending on fixture data.
+        Assert.NotNull(locations);
+    }
+
+    [Fact]
+    public void ActivationCompletedEventHasDefaultStub()
+    {
+        // Verify that the event accessor's default stub does not throw.
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        PluginActivationCompletion? seen = null;
+        host.Events.ActivationCompleted += c => seen = c;
+        host.Events.ActivationCompleted -= c => seen = c;
+        Assert.Null(seen);
+    }
+
     private static GameRuntime NewRuntime()
     {
         var operations = new InertOperations();

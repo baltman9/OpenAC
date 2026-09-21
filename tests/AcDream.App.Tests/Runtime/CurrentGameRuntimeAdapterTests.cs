@@ -98,12 +98,17 @@ public sealed class CurrentGameRuntimeAdapterTests
             ((IGameRuntimeCommands)harness.Runtime).Portal.Execute(
                 generation,
                 RuntimePortalCommand.RecallLifestone);
+        RuntimeCommandResult allegianceRecall =
+            ((IGameRuntimeCommands)harness.Runtime).Portal.Execute(
+                generation,
+                RuntimePortalCommand.RecallAllegiance);
 
         Assert.True(selection.Accepted);
         Assert.True(movement.Accepted);
         Assert.True(combat.Accepted);
         Assert.True(chat.Accepted);
         Assert.True(portal.Accepted);
+        Assert.True(allegianceRecall.Accepted);
         Assert.Equal(Harness.TargetGuid, harness.Selection.SelectedObjectId);
         Assert.True(harness.MovementInput.AutoRunActive);
         Assert.Equal(
@@ -164,6 +169,7 @@ public sealed class CurrentGameRuntimeAdapterTests
                 RuntimeCommandDomain.Movement,
                 RuntimeCommandDomain.Combat,
                 RuntimeCommandDomain.Chat,
+                RuntimeCommandDomain.Portal,
                 RuntimeCommandDomain.Portal,
             ],
             trace.Entries

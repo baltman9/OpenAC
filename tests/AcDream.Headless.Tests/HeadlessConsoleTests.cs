@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Net;
 using System.Text;
@@ -817,6 +817,7 @@ public sealed class HeadlessConsoleTests
         string statusPathBeta = Path.Combine(
             Path.GetTempPath(),
             $"acdream-headless-requestclose-beta-{Guid.NewGuid():N}.jsonl");
+
         try
         {
             HeadlessSessionDescriptor StandardInputDescriptor(
