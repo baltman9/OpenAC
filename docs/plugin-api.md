@@ -845,6 +845,42 @@ at once. Without `--console` there is no `/quit` to type, so
 `Window.RequestClose()` is the one graceful way a plugin has to end its own
 headless session from the inside.
 
+## Images
+
+A plugin that draws its own map or HUD gets its images through
+`host.Ui.Images`. There are four sources and no raw pixel uploads:
+
+```csharp
+IPluginImages images = host.Ui.Images;
+
+PluginImage art   = images.FromClientArt(0x06001234u);   // client art by surface id, or a bare index
+PluginImage spell = images.FromSpellIcon(spellId);        // the icon the spell bar draws
+PluginImage item  = images.FromObjectIcon(objectId);      // the icon the inventory draws, layers and all
+PluginImage own   = images.FromStream("art/compass.png",  // the plugin's own art, decoded by the host
+    () => File.OpenRead(Path.Combine(pluginDirectory, "art", "compass.png")));
+
+if (own.IsValid) { /* own.Width, own.Height */ }
+images.Release(own);
+```
+
+Every request is counted once per distinct thing asked for and held as
+many times as it was asked for: asking twice for the same surface returns
+the same `PluginImage`, and it takes two releases to let it go. The plugin
+may hold at most `MaximumCount` images (256), and its own decoded art at
+most `MaximumBytes` (32 MB) of texture memory, with no image wider or
+taller than `MaximumDimension` (2048). A request past any of these answers
+`PluginImage.None` and is reported once in the client's log. Client art
+and composed icons are shared with the client's own windows and every
+other plugin, so they cost nothing against the byte budget.
+
+`FromStream` accepts PNG, JPEG, BMP, TGA and GIF; the stream is opened only
+when the host does not already hold an image under that name, and disposed
+by the host. Call all of this from the tick thread, as with every other UI
+call. Without a window, or before the client's interface is up,
+`IsAvailable` is false and every request answers `PluginImage.None`;
+images are dropped when the interface is torn down (for example on a
+reconnect), after which the plugin asks again.
+
 ## Headless
 
 A windowless client binds this same surface through the same binding pass the

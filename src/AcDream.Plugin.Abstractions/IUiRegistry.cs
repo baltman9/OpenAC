@@ -139,6 +139,13 @@ public interface IUiRegistry
 
     /// <summary>Whether one of the client's own windows is currently visible.</summary>
     bool IsClientWindowVisible(PluginClientWindow window) => false;
+
+    /// <summary>
+    /// The images this plugin may draw with: client art, composed icons and
+    /// the plugin's own decoded art, held to a per-plugin budget. Inert on a
+    /// host that draws nothing.
+    /// </summary>
+    IPluginImages Images => NoOpPluginImages.Instance;
 }
 
 /// <summary>
@@ -209,6 +216,15 @@ public interface IScopedUiRegistry : IUiRegistry
 
     /// <summary>Moves keyboard focus to one plugin input control.</summary>
     bool FocusControl(PluginUiOwner owner, string viewName, string controlName) => false;
+
+    /// <summary>
+    /// One plugin's image surface, the same object on every call for the
+    /// same owner until it is disposed. A host that draws nothing hands out
+    /// the inert surface; a host that draws hands out a surface that also
+    /// implements <see cref="IDisposable"/>, and disposing it lets go of
+    /// every image the plugin held.
+    /// </summary>
+    IPluginImages ImagesFor(PluginUiOwner owner) => NoOpPluginImages.Instance;
 }
 
 /// <summary>Shared empty registration returned by UI-less/legacy hosts.</summary>

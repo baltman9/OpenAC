@@ -1500,6 +1500,30 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         public bool IsClientWindowVisible(PluginClientWindow window) =>
             _inner.IsClientWindowVisible(window);
 
+        // The plugin's image surface is asked for once and kept; when the
+        // host's surface can be disposed it is tracked like any other
+        // registration, so the plugin's images go with the plugin.
+        private IPluginImages? _images;
+
+        public IPluginImages Images
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    if (_disposed)
+                        throw new ObjectDisposedException(nameof(ScopedUiRegistry));
+                    if (_images is null)
+                    {
+                        _images = _inner.ImagesFor(_owner);
+                        if (_images is IDisposable disposable)
+                            _registrations.Add(disposable);
+                    }
+                    return _images;
+                }
+            }
+        }
+
         private void AddRegistration(IDisposable registration)
         {
             lock (_gate)

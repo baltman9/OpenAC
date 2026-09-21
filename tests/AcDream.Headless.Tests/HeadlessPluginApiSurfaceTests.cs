@@ -861,6 +861,37 @@ public sealed class HeadlessPluginApiSurfaceTests
         Assert.Null(seen);
     }
 
+    /// <summary>
+    /// A plugin that draws a map or a HUD asks the same surface on both
+    /// hosts. Without a window there is nothing to draw on, so every image
+    /// request answers "no image" and nothing is held; the plugin's own
+    /// stream factory is never even opened.
+    /// </summary>
+    [Fact]
+    public void WithoutAWindowTheImageSurfaceAnswersInertly()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        IPluginHost pluginHost = host;
+        bool opened = false;
+
+        IPluginImages images = pluginHost.Ui.Images;
+
+        Assert.False(pluginHost.HasUi);
+        Assert.False(images.IsAvailable);
+        Assert.Equal(PluginImage.None, images.FromClientArt(0x06001234u));
+        Assert.Equal(PluginImage.None, images.FromSpellIcon(1u));
+        Assert.Equal(PluginImage.None, images.FromObjectIcon(0x80000001u));
+        Assert.Equal(PluginImage.None, images.FromStream("map.png", () =>
+        {
+            opened = true;
+            return new MemoryStream();
+        }));
+        Assert.False(opened);
+        Assert.False(images.Release(new PluginImage(1, 4, 4)));
+        Assert.Equal(0, images.Count);
+    }
+
     private static GameRuntime NewRuntime()
     {
         var operations = new InertOperations();

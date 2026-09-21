@@ -417,6 +417,12 @@ public sealed class RetailUiRuntime : IDisposable
             ShowClientWindow,
             HideClientWindow,
             IsClientWindowVisible);
+        bindings.Plugins?.BindImageServices(new RetailPluginImageBackend(
+            bindings.Assets.Dats,
+            bindings.Assets.DatLock,
+            bindings.Assets.TextureCache,
+            bindings.Assets.Icons,
+            bindings.Toolbar.Objects));
 
         ChatSettings chatSettings = bindings.Chat.Store?.LoadChat() ?? ChatSettings.Default;
         WindowLockPresentation = new RetailWindowLockPresentationController(
@@ -5008,6 +5014,9 @@ public sealed class RetailUiRuntime : IDisposable
                 if (SalvageController is { } salvage)
                     _bindings.Inventory.ItemInteraction.PolicyActionRequested -= salvage.HandlePolicyAction;
                 _bindings.Plugins?.UnbindClientWindowControl();
+                // Before the texture cache can go: every plugin's own images
+                // are given back through it.
+                _bindings.Plugins?.UnbindImageServices();
             },
             () => _itemConfirmationController?.Dispose(),
             () =>

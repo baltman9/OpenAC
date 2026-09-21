@@ -92,6 +92,89 @@ public sealed class BufferedUiRegistry : IScopedUiRegistry, IPluginDirectoryUiRe
         }
     }
 
+    // Image tables, one per plugin, made on first request and kept until the
+    // plugin's surface is disposed. The texture services behind them arrive
+    // with the retail UI runtime and leave with it, on the same thread the
+    // client-window control is bound from; a table made before that is
+    // bound the moment the services arrive.
+    private readonly Dictionary<string, PluginImages> _images = [];
+    private IPluginImageBackend? _imageBackend;
+
+    /// <summary>The per-plugin image ceiling every table is made with.</summary>
+    internal PluginImageBudget ImageBudget { get; init; } = PluginImageBudget.Default;
+
+    public IPluginImages ImagesFor(PluginUiOwner owner)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner.Id);
+        lock (_gate)
+        {
+            if (_images.TryGetValue(owner.Id, out PluginImages? existing))
+                return existing;
+            var table = new PluginImageTable(owner.Id, ImageBudget);
+            if (_imageBackend is { } backend)
+                table.Bind(backend);
+            var images = new PluginImages(table, ForgetImages);
+            _images.Add(owner.Id, images);
+            return images;
+        }
+    }
+
+    private void ForgetImages(PluginImages images)
+    {
+        lock (_gate)
+        {
+            foreach ((string ownerId, PluginImages held) in _images)
+            {
+                if (ReferenceEquals(held, images))
+                {
+                    _images.Remove(ownerId);
+                    return;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Points every plugin's image table, present and future, at the
+    /// interface's texture services. The calling thread is the one the
+    /// tables then accept requests from.
+    /// </summary>
+    internal void BindImageServices(IPluginImageBackend backend)
+    {
+        ArgumentNullException.ThrowIfNull(backend);
+        lock (_gate)
+        {
+            if (_imageBackend is not null)
+                throw new InvalidOperationException("Image services are already bound.");
+            _imageBackend = backend;
+            foreach (PluginImages images in _images.Values)
+                images.Table.Bind(backend);
+        }
+    }
+
+    /// <summary>
+    /// Lets every plugin's images go and forgets the texture services, so a
+    /// disposed interface is never reached through a stale table. Idempotent.
+    /// </summary>
+    internal void UnbindImageServices()
+    {
+        lock (_gate)
+        {
+            if (_imageBackend is null)
+                return;
+            foreach (PluginImages images in _images.Values)
+                images.Table.Unbind();
+            _imageBackend = null;
+        }
+    }
+
+    /// <summary>The image surface of one plugin, or null when none was made.</summary>
+    internal PluginImages? FindImages(PluginUiOwner owner)
+    {
+        lock (_gate)
+            return _images.GetValueOrDefault(owner.Id);
+    }
+
     public bool ToggleClientWindow(PluginClientWindow window)
     {
         Func<PluginClientWindow, bool>? toggle;
@@ -172,6 +255,9 @@ public sealed class BufferedUiRegistry : IScopedUiRegistry, IPluginDirectoryUiRe
         string controlName,
         bool visible) => SetControlVisible(
             new PluginUiOwner("unscoped", "Plugin"), viewName, controlName, visible);
+
+    public IPluginImages Images =>
+        ImagesFor(new PluginUiOwner("unscoped", "Plugin"));
 
     public IDisposable RegisterMarkupPanel(string markupPath, object binding)
         => RegisterPanel(
