@@ -298,7 +298,13 @@
               <StackPanel Spacing="5" Margin="0,0,14,0">
               <TextBlock Text="{Binding Plugins.DiscoverStatusLine}" Classes="muted" IsVisible="{Binding Plugins.HasDiscoverStatusLine}" TextWrapping="Wrap" />
               <TextBlock Text="{Binding Plugins.DiscoverCheckingText}" Classes="muted" IsVisible="{Binding Plugins.IsDiscoverChecking}" />
-              <TextBlock Text="{Binding Plugins.DiscoverEmptyText}" Classes="muted" IsVisible="{Binding Plugins.ShowDiscoverEmptyText}" />
+              <Panel IsVisible="{Binding Plugins.ShowDiscoverEmptyText}">
+                <TextBlock Text="{Binding Plugins.DiscoverEmptyText}" Classes="muted" IsVisible="{Binding Plugins.DiscoverHasFilter}" TextWrapping="Wrap" />
+                <StackPanel IsVisible="{Binding !Plugins.DiscoverHasFilter}" HorizontalAlignment="Center" Spacing="7" Margin="12,48,12,32" MaxWidth="320">
+                  <TextBlock Text="No Plugins Available" FontSize="16" FontWeight="SemiBold" Foreground="#C3D0D6" TextAlignment="Center" TextWrapping="Wrap" />
+                  <TextBlock Text="Plugins are in active development, check back soon!" FontSize="13" Foreground="#7C8F99" TextAlignment="Center" TextWrapping="Wrap" />
+                </StackPanel>
+              </Panel>
               <ItemsControl ItemsSource="{Binding Plugins.Discover}">
               <ItemsControl.ItemTemplate>
                 <DataTemplate x:DataType="vm:PluginDiscoverRowViewModel">

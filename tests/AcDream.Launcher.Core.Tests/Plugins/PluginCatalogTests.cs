@@ -47,6 +47,32 @@ public sealed class PluginCatalogTests
     }
 
     [Fact]
+    public void ParsesAListThatHasPublishedNoPluginsYet()
+    {
+        PluginCatalog catalog = PluginCatalog.Parse("""
+            {
+              "schemaVersion": 1,
+              "plugins": [],
+              "blocked": []
+            }
+            """);
+
+        Assert.Empty(catalog.Plugins);
+        Assert.Empty(catalog.Blocked);
+    }
+
+    [Fact]
+    public void RejectsAListWithNoPluginsArray()
+    {
+        Assert.Throws<LauncherUpdateException>(() => PluginCatalog.Parse("""
+            {
+              "schemaVersion": 1,
+              "blocked": []
+            }
+            """));
+    }
+
+    [Fact]
     public void RejectsAnUnknownTopLevelMember()
     {
         Assert.Throws<LauncherUpdateException>(() => PluginCatalog.Parse("""

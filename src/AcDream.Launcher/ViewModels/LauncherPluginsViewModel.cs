@@ -545,6 +545,12 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
     /// still running with nothing shown yet, <see cref="DiscoverCheckingText"/> takes its place.</summary>
     public bool ShowDiscoverEmptyText => !HasDiscover && !IsDiscoverChecking;
 
+    /// <summary>Which empty state Discover shows: a search that matched nothing is a transient, so
+    /// it keeps the one-line <see cref="DiscoverEmptyText"/>, while an empty list is a state of its
+    /// own and gets the headline and subtext. Only <see cref="ApplyFilters"/> can change it,
+    /// because only the <see cref="DiscoverFilter"/> setter reaches it.</summary>
+    public bool DiscoverHasFilter => _discoverFilter.Length > 0;
+
     private static bool Matches(string filter, params string?[] fields) =>
         filter.Length == 0
         || fields.Any(field => field is not null && field.Contains(filter, StringComparison.OrdinalIgnoreCase));
@@ -574,6 +580,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HasDiscover));
         OnPropertyChanged(nameof(InstalledEmptyText));
         OnPropertyChanged(nameof(DiscoverEmptyText));
+        OnPropertyChanged(nameof(DiscoverHasFilter));
         OnPropertyChanged(nameof(ShowDiscoverEmptyText));
     }
 

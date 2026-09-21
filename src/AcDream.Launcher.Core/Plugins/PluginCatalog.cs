@@ -114,9 +114,11 @@ public sealed record PluginCatalog(
     private static IReadOnlyList<PluginCatalogEntry> ValidateEntries(
         IReadOnlyList<EntryDocument>? entries)
     {
-        if (entries is null || entries.Count == 0)
+        // An empty array is a list that has published nothing yet, which Discover shows as its own
+        // empty state. Only a missing "plugins" property is malformed.
+        if (entries is null)
         {
-            throw new LauncherUpdateException("The plugin list has no plugins.");
+            throw new LauncherUpdateException("The plugin list is missing its plugins array.");
         }
 
         var result = new List<PluginCatalogEntry>(entries.Count);
