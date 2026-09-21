@@ -379,7 +379,16 @@ public sealed class RetailUiRuntime : IDisposable
     private UiShortcutDigitGraphics? _shortcutDigitGraphics;
     private ItemCooldownUiController? _itemCooldownController;
     private VividTargetIndicatorController? _vividTargetIndicator;
+    private Layout.UiOverlayHost? _overlayHost;
     private ProjectileDebugOverlayController? _projectileDebugOverlay;
+
+    /// <summary>
+    /// The one click-through overlay band, shared by everything that paints
+    /// over the world without taking input. Built on first use so a session
+    /// that never shows an overlay never mounts the panel.
+    /// </summary>
+    private Layout.UiOverlayHost OverlayHost =>
+        _overlayHost ??= Layout.UiOverlayHost.Mount(Host.Root);
     private Layout.VitalsSideBySideController? _vitalsSideBySide;
     private CharacterManagementUiMountCoordinator? _characterManagementMount;
     private ConnectionUiMountCoordinator? _connectionMount;
@@ -1377,7 +1386,7 @@ public sealed class RetailUiRuntime : IDisposable
         if (_bindings.ProjectileDebugSamples is not { } samples)
             return;
         _projectileDebugOverlay = ProjectileDebugOverlayController.Mount(
-            Host.Root,
+            OverlayHost,
             samples,
             _bindings.VividTarget.Camera);
         Console.WriteLine(

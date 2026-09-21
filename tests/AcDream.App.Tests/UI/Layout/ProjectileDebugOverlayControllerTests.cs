@@ -23,13 +23,16 @@ public sealed class ProjectileDebugOverlayControllerTests
             100f);
         ProjectileDebugOverlayController controller =
             ProjectileDebugOverlayController.Mount(
-                root,
+                UiOverlayHost.Mount(root),
                 () => samples,
                 () => (Matrix4x4.Identity, projection, new Vector2(800f, 600f)));
 
         controller.Tick();
 
-        UiPanel overlay = Assert.IsType<UiPanel>(Assert.Single(root.Children));
+        // The overlay is now a layer of the shared host, so it is the host's
+        // single child rather than the interface root's.
+        UiPanel overlayHost = Assert.IsType<UiOverlayLayer>(Assert.Single(root.Children));
+        UiPanel overlay = Assert.IsType<UiOverlayLayer>(Assert.Single(overlayHost.Children));
         Assert.True(overlay.Visible);
         Assert.True(overlay.ClickThrough);
         Assert.Equal(2, overlay.Children.Count);

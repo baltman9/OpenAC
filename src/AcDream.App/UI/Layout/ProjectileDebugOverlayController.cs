@@ -9,6 +9,7 @@ internal sealed class ProjectileDebugOverlayController
     private static readonly Vector4 ClearColor = new(0f, 1f, 0f, 0.95f);
     private static readonly Vector4 BlockedColor = new(1f, 0f, 0f, 0.95f);
 
+    private readonly UiOverlayHost _host;
     private readonly UiPanel _root;
     private readonly Func<IReadOnlyList<PluginProjectileDebugSample>> _samples;
     private readonly Func<(Matrix4x4 View, Matrix4x4 Projection, Vector2 Viewport)>
@@ -16,35 +17,32 @@ internal sealed class ProjectileDebugOverlayController
     private readonly List<UiPanel> _markers = [];
 
     private ProjectileDebugOverlayController(
+        UiOverlayHost host,
         UiPanel root,
         Func<IReadOnlyList<PluginProjectileDebugSample>> samples,
         Func<(Matrix4x4 View, Matrix4x4 Projection, Vector2 Viewport)> camera)
     {
+        _host = host;
         _root = root;
         _samples = samples;
         _camera = camera;
     }
 
+    /// <summary>
+    /// Takes a layer from the shared overlay host rather than mounting a panel
+    /// on the interface root: the click-through, anchor and z-order rules that
+    /// make a full-screen overlay behave now live in one place.
+    /// </summary>
     internal static ProjectileDebugOverlayController Mount(
-        UiRoot host,
+        UiOverlayHost host,
         Func<IReadOnlyList<PluginProjectileDebugSample>> samples,
         Func<(Matrix4x4 View, Matrix4x4 Projection, Vector2 Viewport)> camera)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(samples);
         ArgumentNullException.ThrowIfNull(camera);
-        var root = new UiPanel
-        {
-            Name = "PluginProjectileDebugOverlay",
-            BackgroundColor = Vector4.Zero,
-            BorderColor = Vector4.Zero,
-            ClickThrough = true,
-            Visible = false,
-            ZOrder = -9_999,
-            Anchors = AnchorEdges.None,
-        };
-        host.AddChild(root);
-        return new ProjectileDebugOverlayController(root, samples, camera);
+        UiPanel root = host.AddLayer("PluginProjectileDebugOverlay");
+        return new ProjectileDebugOverlayController(host, root, samples, camera);
     }
 
     internal void Tick()
@@ -60,10 +58,7 @@ internal sealed class ProjectileDebugOverlayController
         }
 
         EnsureMarkerCount(samples.Count);
-        _root.Left = 0f;
-        _root.Top = 0f;
-        _root.Width = camera.Viewport.X;
-        _root.Height = camera.Viewport.Y;
+        _host.SetViewport(camera.Viewport);
         int visible = 0;
         for (int index = 0; index < samples.Count; index++)
         {
