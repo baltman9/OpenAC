@@ -224,6 +224,20 @@ public readonly record struct PluginSkillInfo(
 
     /// <summary>The skill's icon, as a full icon id; 0 when it has none.</summary>
     public uint IconId { get; init; }
+
+    /// <summary>
+    /// How many times experience has been spent to raise this skill, which is
+    /// the row a cost table is read at to price the next raise. 0 on a host
+    /// that cannot tell, and before the server has stated the skill.
+    /// </summary>
+    public uint Ranks { get; init; }
+
+    /// <summary>
+    /// The experience already put into this skill towards the ranks it has.
+    /// 0 on a host that cannot tell, and before the server has stated the
+    /// skill.
+    /// </summary>
+    public ulong ExperienceSpent { get; init; }
 }
 
 /// <summary>One primary attribute. <paramref name="Kind"/> is 0..5.</summary>
@@ -234,6 +248,77 @@ public readonly record struct PluginAttributeInfo(
 {
     /// <summary>Unenchanted primary-attribute value.</summary>
     public uint Base { get; init; } = Current;
+
+    /// <summary>
+    /// The number this attribute is named by when experience is spent on it,
+    /// which is what <see cref="ICharacterInfo.RequestAdvancement"/> takes.
+    /// It is not <see cref="Kind"/>: kinds count from zero and this does not,
+    /// so a zero here means the record was never filled in.
+    /// </summary>
+    public uint StatId { get; init; } = (uint)(Kind + 1);
+
+    /// <summary>
+    /// How many times experience has been spent to raise this attribute,
+    /// which is the row a cost table is read at to price the next raise. 0 on
+    /// a host that cannot tell, and before the server has stated it.
+    /// </summary>
+    public uint Ranks { get; init; }
+
+    /// <summary>
+    /// The experience already put into this attribute towards the ranks it
+    /// has. 0 on a host that cannot tell, and before the server has stated it.
+    /// </summary>
+    public ulong ExperienceSpent { get; init; }
+}
+
+/// <summary>
+/// One of the character's three pools -- health, stamina and mana -- as both
+/// a reading and something experience can be spent on.
+/// </summary>
+/// <param name="Kind">
+/// Which pool: 0 health, 1 stamina, 2 mana. This is a position in the list,
+/// not the number the pool is named by on a request; see
+/// <see cref="StatId"/>.
+/// </param>
+/// <param name="Name">The pool's name as shown to the player.</param>
+/// <param name="Current">How much of the pool is left right now.</param>
+/// <param name="Maximum">
+/// The pool at full, enchantments included -- the same number
+/// <see cref="ICharacterInfo.MaxHealth"/> and its two siblings report.
+/// </param>
+public readonly record struct PluginVitalInfo(
+    int Kind,
+    string Name,
+    uint Current,
+    uint Maximum)
+{
+    /// <summary>
+    /// The number this pool is named by when experience is spent on it, which
+    /// is what <see cref="ICharacterInfo.RequestAdvancement"/> takes. It is
+    /// not <see cref="Kind"/>, and a zero here means the record was never
+    /// filled in.
+    /// </summary>
+    public uint StatId { get; init; } = (uint)((Kind * 2) + 1);
+
+    /// <summary>
+    /// The pool at full with every enchantment layer off. A host that does
+    /// not track the split reports <see cref="Maximum"/> instead, in which
+    /// case the two are the same number.
+    /// </summary>
+    public uint Base { get; init; } = Maximum;
+
+    /// <summary>
+    /// How many times experience has been spent to raise this pool, which is
+    /// the row a cost table is read at to price the next raise. 0 on a host
+    /// that cannot tell, and before the server has stated it.
+    /// </summary>
+    public uint Ranks { get; init; }
+
+    /// <summary>
+    /// The experience already put into this pool towards the ranks it has. 0
+    /// on a host that cannot tell, and before the server has stated it.
+    /// </summary>
+    public ulong ExperienceSpent { get; init; }
 }
 
 /// <summary>Why a cast would or would not be accepted right now.</summary>
@@ -372,6 +457,55 @@ public interface ICharacterInfo
 
     /// <summary>The six primary attributes.</summary>
     IReadOnlyList<PluginAttributeInfo> Attributes { get; }
+
+    /// <summary>
+    /// Health, stamina and mana in that order, each with what the server has
+    /// said about how it was raised. Empty before the server has stated them,
+    /// and on a host that does not project them.
+    /// </summary>
+    IReadOnlyList<PluginVitalInfo> Vitals => Array.Empty<PluginVitalInfo>();
+
+    /// <summary>
+    /// Looks up one pool by its position in <see cref="Vitals"/>: 0 health, 1
+    /// stamina, 2 mana. False when the number names no pool, when the server
+    /// has not stated it yet, or on a host that does not project them.
+    /// </summary>
+    /// <param name="kind">Which pool: 0 health, 1 stamina, 2 mana.</param>
+    /// <param name="vital">The pool, or a default record when false.</param>
+    bool TryGetVital(int kind, out PluginVitalInfo vital)
+    {
+        vital = default;
+        return false;
+    }
+
+    /// <summary>
+    /// Asks the client to spend on one stat: raising an attribute, a pool or a
+    /// skill with experience, or training a skill with skill credits. The
+    /// client checks the request and sends it; whether the spend is allowed is
+    /// the server's own decision and arrives later as an updated stat.
+    /// </summary>
+    /// <param name="kind">Which kind of stat the spend is against.</param>
+    /// <param name="statId">
+    /// Which stat: <see cref="PluginAttributeInfo.StatId"/> for an attribute,
+    /// <see cref="PluginVitalInfo.StatId"/> for a pool, and
+    /// <see cref="PluginSkillInfo.SkillId"/> for a skill, trained or raised.
+    /// Zero names nothing and is refused.
+    /// </param>
+    /// <param name="cost">
+    /// What to spend: experience for the first three kinds, skill credits for
+    /// <see cref="PluginAdvancementKind.TrainSkill"/>. Zero is refused, as is
+    /// anything above the bound in <see cref="PluginAdvancement"/>.
+    /// </param>
+    /// <returns>
+    /// What the client did with it, and why not when it refused. A host that
+    /// cannot send -- no session, or no such surface -- answers
+    /// <see cref="PluginAdvancementStatus.Unavailable"/> rather than throwing.
+    /// </returns>
+    PluginAdvancementResult RequestAdvancement(
+        PluginAdvancementKind kind,
+        uint statId,
+        ulong cost) =>
+        new(PluginAdvancementStatus.Unavailable);
 
     /// <summary>
     /// Enchantments in force on the local player. Snapshot semantics: the list

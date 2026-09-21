@@ -140,6 +140,10 @@ internal sealed class RuntimeAutomationSurface
     private static readonly string[] AttributeNames =
         ["Strength", "Endurance", "Quickness", "Coordination", "Focus", "Self"];
 
+    /// <summary>The three pools, in the order a plugin reads them.</summary>
+    private static readonly string[] VitalNames =
+        ["Health", "Stamina", "Mana"];
+
     private readonly Func<uint, IReadOnlyList<uint>> _activeSpellIdsForPlayer;
 
     public RuntimeAutomationSurface()
@@ -1427,6 +1431,8 @@ internal sealed class RuntimeAutomationSurface
         {
             Base = baseLevel,
             IconId = iconId,
+            Ranks = snapshot.Ranks,
+            ExperienceSpent = snapshot.Experience,
         };
         return true;
     }
@@ -1463,11 +1469,174 @@ internal sealed class RuntimeAutomationSurface
                         kind, AttributeNames[kind], effective)
                     {
                         Base = attribute.Current,
+                        Ranks = attribute.Ranks,
+                        ExperienceSpent = attribute.Experience,
                     });
                 }
             }
             return built;
         }
+    }
+
+    public IReadOnlyList<PluginVitalInfo> Vitals
+    {
+        get
+        {
+            var built = new List<PluginVitalInfo>(VitalNames.Length);
+            for (int kind = 0; kind < VitalNames.Length; kind++)
+            {
+                if (TryGetVital(kind, out PluginVitalInfo vital))
+                    built.Add(vital);
+            }
+            return built.Count == 0
+                ? Array.Empty<PluginVitalInfo>()
+                : built;
+        }
+    }
+
+    public bool TryGetVital(int kind, out PluginVitalInfo vital)
+    {
+        RuntimeCharacterState? character;
+        lock (_gate)
+            character = _character;
+        if (character is null
+            || (uint)kind >= (uint)VitalNames.Length
+            || !character.View.TryGetVital(kind, out RuntimeVitalSnapshot snapshot))
+        {
+            vital = default;
+            return false;
+        }
+
+        var pool = (LocalPlayerState.VitalKind)kind;
+        vital = new PluginVitalInfo(
+            kind,
+            VitalNames[kind],
+            snapshot.Current,
+            snapshot.Maximum)
+        {
+            // The one number a reader cannot work out from the snapshot: the
+            // pool at full with the enchantment layers taken off.
+            Base = character.LocalPlayer.GetBaseMaxApprox(pool)
+                ?? snapshot.Maximum,
+            Ranks = snapshot.Ranks,
+            ExperienceSpent = snapshot.Experience,
+        };
+        return true;
+    }
+
+    /// <summary>
+    /// Spending on one stat, checked here so both clients refuse the same
+    /// requests for the same reasons rather than each finding out on the wire.
+    /// </summary>
+    public PluginAdvancementResult RequestAdvancement(
+        PluginAdvancementKind kind,
+        uint statId,
+        ulong cost)
+    {
+        GameRuntime? runtime;
+        IGameRuntimeCommands? commands;
+        RuntimeCharacterState? character;
+        lock (_gate)
+        {
+            runtime = _runtime;
+            commands = _sessionCommands;
+            character = _character;
+        }
+        if (runtime is null || commands is null || character is null
+            || !IsAvailable)
+        {
+            return new(
+                PluginAdvancementStatus.Unavailable,
+                "the character is not in the world");
+        }
+
+        if (!TryMapAdvancementKind(kind, out RuntimeAdvancementKind mapped))
+        {
+            return new(
+                PluginAdvancementStatus.Refused,
+                $"{kind} is not a kind this client can spend on");
+        }
+
+        // The cost is checked before the stat so a caller that got both wrong
+        // is told about the one that is cheapest to fix.
+        ulong ceiling = mapped == RuntimeAdvancementKind.TrainSkill
+            ? PluginAdvancement.MaxSkillCredits
+            : PluginAdvancement.MaxExperienceCost;
+        if (cost == 0UL || cost > ceiling)
+        {
+            return new(
+                PluginAdvancementStatus.InvalidCost,
+                $"a cost of {cost} is outside 1..{ceiling}");
+        }
+
+        if (!IsKnownStat(character, mapped, statId))
+        {
+            return new(
+                PluginAdvancementStatus.UnknownStat,
+                $"{statId} names no {kind.ToString().ToLowerInvariant()} "
+                + "this character has");
+        }
+
+        RuntimeCommandResult result = commands.Character.Advance(
+            runtime.Generation,
+            new RuntimeAdvancementCommand(mapped, statId, cost));
+        return result.Status switch
+        {
+            RuntimeCommandStatus.Accepted =>
+                new(PluginAdvancementStatus.Sent),
+            RuntimeCommandStatus.Rejected =>
+                new(PluginAdvancementStatus.Refused, "the client declined it"),
+            _ => new(
+                PluginAdvancementStatus.Unavailable,
+                result.Status.ToString()),
+        };
+    }
+
+    private static bool TryMapAdvancementKind(
+        PluginAdvancementKind kind,
+        out RuntimeAdvancementKind mapped)
+    {
+        switch (kind)
+        {
+            case PluginAdvancementKind.Attribute:
+                mapped = RuntimeAdvancementKind.Attribute;
+                return true;
+            case PluginAdvancementKind.Vital:
+                mapped = RuntimeAdvancementKind.Vital;
+                return true;
+            case PluginAdvancementKind.Skill:
+                mapped = RuntimeAdvancementKind.Skill;
+                return true;
+            case PluginAdvancementKind.TrainSkill:
+                mapped = RuntimeAdvancementKind.TrainSkill;
+                return true;
+            default:
+                mapped = default;
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether this number names a stat the character really has. A skill is
+    /// checked against what the server has said the character carries; an
+    /// attribute and a pool are checked against the ones that exist.
+    /// </summary>
+    private static bool IsKnownStat(
+        RuntimeCharacterState character,
+        RuntimeAdvancementKind kind,
+        uint statId)
+    {
+        if (statId == 0u)
+            return false;
+        return kind switch
+        {
+            RuntimeAdvancementKind.Attribute =>
+                LocalPlayerState.AttributeIdToKind(statId) is not null,
+            // Only the three "at full" numbers may be spent on; the ids for
+            // how much is left name the same pools and are not raisable.
+            RuntimeAdvancementKind.Vital => statId is 1u or 3u or 5u,
+            _ => character.View.TryGetSkill(statId, out _),
+        };
     }
 
     // ── ISpellCatalog ─────────────────────────────────────────────────────

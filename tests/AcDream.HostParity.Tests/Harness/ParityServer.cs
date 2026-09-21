@@ -265,7 +265,8 @@ internal sealed class ParityServer(WorldSession session, Func<uint> playerGuid)
     /// </summary>
     /// <param name="skillId">Which skill; 24 is run and 22 is jump.</param>
     /// <param name="ranks">How much of it the character has trained.</param>
-    internal void SkillUpdate(uint skillId, uint ranks) =>
+    /// <param name="xp">The experience banked into it towards those ranks.</param>
+    internal void SkillUpdate(uint skillId, uint ranks, uint xp = 0u) =>
         Raise(
             nameof(WorldSession.SkillUpdated),
             new PrivateUpdateSkill.Parsed(
@@ -275,10 +276,32 @@ internal sealed class ParityServer(WorldSession session, Func<uint> playerGuid)
                 AdjustPP: 0,
                 // Trained, which is what a raised skill is.
                 AdvancementClass: 2u,
-                Xp: 0u,
+                Xp: xp,
                 Init: 0u,
                 Resistance: 0u,
                 LastUsed: 0d));
+
+    /// <summary>
+    /// The server states one of the character's primary attributes, which is
+    /// how one is raised mid-session.
+    /// </summary>
+    /// <param name="attributeId">Which attribute; 1 is strength, 2 endurance.</param>
+    /// <param name="ranks">How many times it has been raised.</param>
+    /// <param name="start">What it was before any of those raises.</param>
+    /// <param name="xp">The experience banked into it towards those ranks.</param>
+    internal void AttributeUpdate(
+        uint attributeId,
+        uint ranks,
+        uint start = 100u,
+        uint xp = 0u) =>
+        Raise(
+            nameof(WorldSession.AttributeUpdated),
+            new PrivateUpdateAttribute.Parsed(
+                Sequence: ++_characterSequence,
+                AttributeId: attributeId,
+                Ranks: ranks,
+                Start: start,
+                Xp: xp));
 
     /// <summary>
     /// The server states one of the character's vitals in full: how much of
@@ -286,15 +309,21 @@ internal sealed class ParityServer(WorldSession session, Func<uint> playerGuid)
     /// </summary>
     /// <param name="vitalId">Which vital; 4 is stamina.</param>
     /// <param name="current">How much of it is left.</param>
-    internal void VitalUpdate(uint vitalId, uint current) =>
+    /// <param name="ranks">How many times the pool has been raised.</param>
+    /// <param name="xp">The experience banked into it towards those ranks.</param>
+    internal void VitalUpdate(
+        uint vitalId,
+        uint current,
+        uint ranks = 0u,
+        uint xp = 0u) =>
         Raise(
             nameof(WorldSession.VitalUpdated),
             new PrivateUpdateVital.ParsedFull(
                 Sequence: ++_characterSequence,
                 VitalId: vitalId,
-                Ranks: 0u,
+                Ranks: ranks,
                 Start: 100u,
-                Xp: 0u,
+                Xp: xp,
                 Current: current));
 
     /// <summary>
