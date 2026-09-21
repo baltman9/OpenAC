@@ -46,6 +46,17 @@ internal static class PngTestData
 
     internal static byte[] WrongDimensions() => Build(32, 32);
 
+    /// <summary>A PNG whose header declares 16384x16384 over a pixel stream of
+    /// <paramref name="bodyLength"/> incompressible bytes, so a reader that
+    /// stops at the header consumes a few dozen bytes and one that decodes
+    /// consumes the lot before failing.</summary>
+    internal static byte[] OversizedHeader(int bodyLength)
+    {
+        var body = new byte[bodyLength];
+        new Random(Seed: 7).NextBytes(body);
+        return Build(16_384, 16_384, rawOverride: body);
+    }
+
     internal static byte[] ChunkLengthOverflow()
     {
         byte[] header = new byte[8];

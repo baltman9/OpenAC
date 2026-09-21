@@ -181,6 +181,57 @@ public sealed class PluginImageTableTests
         Assert.Equal((32, 32), (small.Width, small.Height));
     }
 
+    /// <summary>
+    /// A decode allocates the whole image, so a file that declares itself
+    /// far too large is refused on its header, before any of that: the
+    /// stream is read only as far as the header, and the refusal names the
+    /// dimension, not a decode failure.
+    /// </summary>
+    [Fact]
+    public void AnOversizedHeaderIsRefusedBeforeAnyDecodeIsAttempted()
+    {
+        (PluginImageTable table, FakeBackend backend, List<string> reports) = Bound();
+        const int bodyLength = 64 * 1024;
+        var stream = new CountingStream(PngTestData.OversizedHeader(bodyLength));
+
+        PluginImageHandle refused = table.AcquireDecoded("huge", () => stream);
+
+        Assert.False(refused.IsValid);
+        Assert.Empty(backend.Uploads);
+        Assert.Contains(reports, line => line.Contains("16384x16384", StringComparison.Ordinal));
+        Assert.DoesNotContain(reports, line => line.Contains("could not be decoded", StringComparison.Ordinal));
+        Assert.True(
+            stream.BytesRead < 1024,
+            $"the file was read {stream.BytesRead:N0} bytes deep; a header read stops well before the pixel data");
+    }
+
+    private sealed class CountingStream(byte[] bytes) : MemoryStream(bytes)
+    {
+        public long BytesRead { get; private set; }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            int read = base.Read(buffer, offset, count);
+            BytesRead += read;
+            return read;
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            int read = base.Read(buffer);
+            BytesRead += read;
+            return read;
+        }
+
+        public override int ReadByte()
+        {
+            int value = base.ReadByte();
+            if (value >= 0)
+                BytesRead++;
+            return value;
+        }
+    }
+
     [Fact]
     public void AStreamThatCannotBeDecodedIsRefusedWithoutThrowing()
     {

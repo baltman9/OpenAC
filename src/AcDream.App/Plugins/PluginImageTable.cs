@@ -227,9 +227,36 @@ internal sealed class PluginImageTable : IDisposable
         ImageResult decoded;
         try
         {
-            using Stream stream = open()
+            Stream stream = open()
                 ?? throw new InvalidOperationException("the stream factory returned null");
-            decoded = ImageResult.FromStream(stream, ColorComponents.RedGreenBlueAlpha);
+            try
+            {
+                // The header is read on its own first: a decode allocates the
+                // whole image, so an oversized file must be refused on its
+                // declared size, before that allocation, not after it. A
+                // header the library cannot read falls through to the decode,
+                // which reports the failure in its own words.
+                if (ImageInfo.FromStream(stream) is { } info
+                    && !IsWithinMaximumDimension(name, info.Width, info.Height))
+                {
+                    return PluginImageHandle.None;
+                }
+                if (stream.CanSeek)
+                {
+                    stream.Position = 0;
+                }
+                else
+                {
+                    stream.Dispose();
+                    stream = open()
+                        ?? throw new InvalidOperationException("the stream factory returned null");
+                }
+                decoded = ImageResult.FromStream(stream, ColorComponents.RedGreenBlueAlpha);
+            }
+            finally
+            {
+                stream.Dispose();
+            }
         }
         catch (Exception failure)
         {
@@ -242,14 +269,8 @@ internal sealed class PluginImageTable : IDisposable
             ReportOnce($"empty:{name}", $"image '{name}' decoded to nothing");
             return PluginImageHandle.None;
         }
-        if (decoded.Width > Budget.MaximumDimension || decoded.Height > Budget.MaximumDimension)
-        {
-            ReportOnce(
-                $"dimension:{name}",
-                $"image '{name}' is {decoded.Width}x{decoded.Height}; "
-                + $"the most a plugin image may be is {Budget.MaximumDimension} on a side");
+        if (!IsWithinMaximumDimension(name, decoded.Width, decoded.Height))
             return PluginImageHandle.None;
-        }
 
         long bytes = checked((long)decoded.Width * decoded.Height * 4L);
         if (_ownedBytes + bytes > Budget.MaximumBytes)
@@ -364,6 +385,17 @@ internal sealed class PluginImageTable : IDisposable
                 "Plugin images may only be acquired and released from the interface thread, "
                 + "the thread the plugin's own callbacks run on.");
         }
+    }
+
+    private bool IsWithinMaximumDimension(string name, int width, int height)
+    {
+        if (width <= Budget.MaximumDimension && height <= Budget.MaximumDimension)
+            return true;
+        ReportOnce(
+            $"dimension:{name}",
+            $"image '{name}' is {width}x{height}; "
+            + $"the most a plugin image may be is {Budget.MaximumDimension} on a side");
+        return false;
     }
 
     private bool HasRoomForOneMore(string what)
