@@ -402,6 +402,109 @@ internal sealed class RuntimeAutomationSurface
         return _peers.CaptureRemoteClients();
     }
 
+    bool INetworkAutomation.AnnounceCastAttempt(
+        uint targetObjectId,
+        uint spellId,
+        int effectiveSkill) =>
+        AnnounceCast(
+            targetObjectId,
+            spellId,
+            effectiveSkill,
+            durationSeconds: 0d,
+            landed: false);
+
+    bool INetworkAutomation.AnnounceCastSuccess(
+        uint targetObjectId,
+        uint spellId,
+        int effectiveSkill,
+        double durationSeconds) =>
+        AnnounceCast(
+            targetObjectId,
+            spellId,
+            effectiveSkill,
+            durationSeconds,
+            landed: true);
+
+    /// <summary>
+    /// Puts one cast in the note the other clients on this machine read.
+    /// What only this client knows is settled here -- who is casting, and
+    /// whether the spell is one its own table can name. The rest is the
+    /// ring's one rule, which is the same rule a peer's note is read by.
+    /// </summary>
+    private bool AnnounceCast(
+        uint targetObjectId,
+        uint spellId,
+        int effectiveSkill,
+        double durationSeconds,
+        bool landed)
+    {
+        ICharacterInfo character = this;
+        uint casterObjectId = character.ObjectId;
+        if (casterObjectId == 0u)
+            return false;
+        lock (_gate)
+        {
+            // A spell nobody here can name is a spell nobody here can act
+            // on, so it never leaves this client either.
+            if (_disposed
+                || _spellbook is null
+                || !_spellbook.TryGetMetadata(spellId, out _))
+            {
+                return false;
+            }
+        }
+
+        // Everything else about the cast -- no target, a skill below zero, a
+        // duration that is not a finite number of seconds or is longer than a
+        // day -- is the ring's one rule, applied in the same place for a cast
+        // this client writes and a cast it reads, so the two cannot drift.
+        if (!_peers.RecordCast(new LocalPluginCast(
+            casterObjectId,
+            targetObjectId,
+            spellId,
+            effectiveSkill,
+            durationSeconds,
+            landed)))
+        {
+            return false;
+        }
+        // A cast is an event on a transport that otherwise only carries
+        // state, so the note is rewritten for it as soon as the debounce
+        // allows rather than waiting for the next heartbeat.
+        if (_peers.IsCastWriteDue())
+            PublishPeerSnapshot();
+        return true;
+    }
+
+    IReadOnlyList<PluginPeerCast> INetworkAutomation.CaptureCasts(
+        long afterSequence)
+    {
+        if (_events is null)
+            PublishPeerSnapshot();
+        ICharacterInfo character = this;
+        IReadOnlyList<PluginPeerCast> casts = _peers.CaptureRemoteCasts(
+            afterSequence,
+            character.WorldName,
+            character.ObjectId);
+        if (casts.Count == 0)
+            return casts;
+
+        Spellbook? spellbook;
+        lock (_gate)
+            spellbook = _disposed ? null : _spellbook;
+        if (spellbook is null)
+            return Array.Empty<PluginPeerCast>();
+        // A remote cast is classified in THIS client's spell table, never
+        // believed from the note: the id is the only thing worth carrying
+        // and everything about the spell is looked up here.
+        PluginPeerCast[] known = casts
+            .Where(cast => spellbook.TryGetMetadata(cast.SpellId, out _))
+            .ToArray();
+        return known.Length == 0
+            ? Array.Empty<PluginPeerCast>()
+            : known;
+    }
+
     bool ILoginAutomation.IsAvailable
     {
         get
@@ -892,7 +995,11 @@ internal sealed class RuntimeAutomationSurface
         PublishNavigationChange();
 
         _peerHeartbeatRemaining -= Math.Max(0d, elapsedSeconds);
-        if (_peerHeartbeatRemaining > 0d)
+        // The heartbeat is for state; a cast is an event and cannot wait for
+        // it. The debounce is what keeps a burst of casts from rewriting the
+        // whole note once each, and the note carries everything either way,
+        // so a write for a cast counts as this period's heartbeat too.
+        if (_peerHeartbeatRemaining > 0d && !_peers.IsCastWriteDue())
             return;
         _peerHeartbeatRemaining = PeerHeartbeatSeconds;
         PublishPeerSnapshot();
