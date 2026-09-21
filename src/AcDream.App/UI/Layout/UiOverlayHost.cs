@@ -61,6 +61,13 @@ internal static class UiOverlayZOrder
 /// the way down, which is the rule this type exists to keep. (It is applied
 /// when the subtree is added; an element grafted on later to a plain
 /// descendant has to set its own.)</para>
+///
+/// <para>The one exception is a child that exists to take input, such as a
+/// plugin canvas that opted in to the pointer: it is added through
+/// <see cref="AddChild(UiElement, bool)"/> with its own click-through
+/// state left alone, and answers for its own rectangle only. The layer
+/// itself stays click-through, so everywhere else on it the world beneath
+/// still gets the pointer.</para>
 /// </summary>
 internal class UiOverlayLayer : UiPanel
 {
@@ -73,10 +80,18 @@ internal class UiOverlayLayer : UiPanel
         Anchors = AnchorEdges.None;
     }
 
-    public override void AddChild(UiElement child)
+    public override void AddChild(UiElement child) => AddChild(child, takesInput: false);
+
+    /// <summary>
+    /// Adds a child, made click-through all the way down unless
+    /// <paramref name="takesInput"/> says it answers for its own rectangle,
+    /// in which case its click-through state is left as it set it.
+    /// </summary>
+    public void AddChild(UiElement child, bool takesInput)
     {
         ArgumentNullException.ThrowIfNull(child);
-        MakeSubtreeClickThrough(child);
+        if (!takesInput)
+            MakeSubtreeClickThrough(child);
         base.AddChild(child);
     }
 

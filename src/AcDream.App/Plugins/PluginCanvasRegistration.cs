@@ -9,16 +9,19 @@ namespace AcDream.App.Plugins;
 /// handle is this object; the element the interface draws reads it every
 /// frame.
 ///
-/// <para>The paint delegate is dropped on dispose. It is the one reference
-/// from the client into the plugin's code that the interface holds, and a
-/// plugin assembly cannot unload while anything still points into it.</para>
+/// <para>The paint delegate and the pointer handler are dropped on
+/// dispose. They are the references from the client into the plugin's
+/// code that the interface holds, and a plugin assembly cannot unload
+/// while anything still points into it.</para>
 /// </summary>
 internal sealed class PluginCanvasRegistration : IPluginCanvas
 {
     private readonly BufferedUiRegistry _registry;
     private Action<IPluginPainter>? _paint;
+    private volatile Action<PluginPointerEvent>? _pointerHandler;
     private volatile bool _invalidated = true;
     private Action? _teardown;
+    private Action? _releasePointer;
 
     internal PluginCanvasRegistration(
         BufferedUiRegistry registry,
@@ -60,7 +63,29 @@ internal sealed class PluginCanvasRegistration : IPluginCanvas
     /// <summary>The plugin's paint callback, or null once the canvas is disposed.</summary>
     internal Action<IPluginPainter>? Paint => _paint;
 
+    /// <summary>Whether the plugin asked for pointer input when it registered the canvas.</summary>
+    internal bool AcceptsPointerInput => Descriptor.AcceptsPointerInput;
+
+    /// <summary>
+    /// Records how the element ends a press the canvas is holding, so the
+    /// plugin's <see cref="ReleasePointer"/> reaches it; cleared by the
+    /// element when it comes down.
+    /// </summary>
+    internal Action? PointerRelease
+    {
+        get => _releasePointer;
+        set => _releasePointer = value;
+    }
+
     public string CanvasId => Descriptor.CanvasId;
+
+    public Action<PluginPointerEvent>? PointerHandler
+    {
+        get => _pointerHandler;
+        set => _pointerHandler = value;
+    }
+
+    public void ReleasePointer() => _releasePointer?.Invoke();
 
     public int Width => Descriptor.Width;
 
@@ -98,17 +123,23 @@ internal sealed class PluginCanvasRegistration : IPluginCanvas
     }
 
     /// <summary>
-    /// Runs the teardown once and forgets it. The paint delegate stays
-    /// unless <paramref name="forget"/> is set: an interface that is going
-    /// away hands the canvas back to the registry to be mounted again by
-    /// the next one, and the plugin's callback must survive that.
+    /// Runs the teardown once and forgets it. The paint delegate and the
+    /// pointer handler stay unless <paramref name="forget"/> is set: an
+    /// interface that is going away hands the canvas back to the registry
+    /// to be mounted again by the next one, and the plugin's callbacks must
+    /// survive that.
     /// </summary>
     internal void Unmount(bool forget)
     {
         Action? teardown = Interlocked.Exchange(ref _teardown, null);
-        if (forget)
-            _paint = null;
+        // The element comes down first: a press it still holds is cancelled
+        // to the plugin's handler on the way, which needs the handler.
         teardown?.Invoke();
+        if (forget)
+        {
+            _paint = null;
+            _pointerHandler = null;
+        }
     }
 
     public void Dispose() => _registry.RemoveCanvas(this);
