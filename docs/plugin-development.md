@@ -57,7 +57,7 @@ targets, and it needs no client sources to build.
 
 ```xml
 <ItemGroup>
-  <PackageReference Include="AcDream.Plugin.Abstractions" Version="0.1.12"
+  <PackageReference Include="AcDream.Plugin.Abstractions" Version="0.1.13"
                     ExcludeAssets="runtime" />
 </ItemGroup>
 ```
@@ -67,7 +67,7 @@ does for a project reference: compile against the contract, ship no copy of
 it. The package carries the XML documentation, so your IDE shows the same text
 the [API reference](plugin-api.md) does.
 
-The package is not on a public feed. Every release attaches it as an asset,
+The package is not on a public feed. Every release from 0.1.13 on attaches it as an asset,
 `AcDream.Plugin.Abstractions.<version>.nupkg`, with its SHA-256 beside it; put
 the file in a folder and restore against that folder:
 
