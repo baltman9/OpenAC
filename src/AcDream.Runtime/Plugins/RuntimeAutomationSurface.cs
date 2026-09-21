@@ -33,7 +33,11 @@ internal sealed class RuntimeAutomationSurface
         _navigationCommands;
     private IDisposable? _statusCommand;
     private const int MaximumPluginChatMessages = 512;
-    private const double PeerHeartbeatSeconds = 5d;
+    // One period for both: the registry holds a write that failed or was
+    // refused back for exactly as long as the next heartbeat would have been,
+    // so a note this client cannot write costs one attempt per heartbeat.
+    private static readonly double PeerHeartbeatSeconds =
+        LocalPluginPeerRegistry.HeartbeatPeriod.TotalSeconds;
     private readonly object _gate = new();
     private readonly AcDream.Runtime.Navigation.RuntimeNavigationAutomation _navigation;
     private readonly AcDream.Core.Plugins.IPluginEventSink? _events;

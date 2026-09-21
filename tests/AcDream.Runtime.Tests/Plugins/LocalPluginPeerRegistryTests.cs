@@ -513,6 +513,104 @@ public sealed class LocalPluginPeerRegistryTests
         }
     }
 
+    /// <summary>
+    /// A position that is not a finite number of metres cannot be written as
+    /// JSON at all -- the writer refuses not-a-number and infinity outright --
+    /// so copying one into the note made the write throw, and the publish path
+    /// catches only file errors, so it left through the plugin tick. A reader
+    /// refuses such a note anyway, so the note is refused here instead.
+    ///
+    /// Mutation check (2026-09-21): without the check on the way in, every row
+    /// threw ArgumentException out of the write -- ".NET number values such as
+    /// positive and negative infinity cannot be written as valid JSON".
+    /// </summary>
+    [Theory]
+    [InlineData(double.NaN, 0d, 0d, 0f)]
+    [InlineData(0d, double.PositiveInfinity, 0d, 0f)]
+    [InlineData(0d, 0d, double.NegativeInfinity, 0f)]
+    [InlineData(0d, 0d, 0d, float.NaN)]
+    public void APositionThatIsNotANumberIsRefusedRatherThanThrownAtTheCaller(
+        double eastWest,
+        double northSouth,
+        double elevation,
+        float heading)
+    {
+        string root = TemporaryRoot();
+        var time = new ManualTimeProvider(
+            new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero));
+        try
+        {
+            using var caster = Registry(root, time, 1);
+            using var reader = Registry(root, time, 2);
+
+            Assert.Null(Record.Exception(() => caster.Publish(ClientAt(
+                caster.ClientId, eastWest, northSouth, elevation, heading))));
+
+            // Nothing was written, which is what a reader would have made of
+            // such a note in any case.
+            Assert.Empty(reader.CaptureRemoteClients());
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    /// <summary>
+    /// A write this client could not do must not become a per-frame retry. The
+    /// pending flag and the last-write stamp were only touched after a write
+    /// that worked, so a failure left a write permanently due -- and the
+    /// hosts' tick skips its early-out whenever a write is due, so a five
+    /// second heartbeat turned into an attempt every frame, silently for a
+    /// file error.
+    ///
+    /// Mutation check (2026-09-21): with the hold-off taken out, the write was
+    /// still due immediately after the attempt on both rows.
+    /// </summary>
+    [Theory]
+    // The client's own state cannot be written as JSON.
+    [InlineData("refused")]
+    // The file cannot be written: something else holds the directory's name.
+    [InlineData("failed")]
+    public void AWriteThatCouldNotBeDoneWaitsTheHeartbeatBeforeTheNextTry(
+        string how)
+    {
+        bool refused = how == "refused";
+        string root = TemporaryRoot();
+        var time = new ManualTimeProvider(
+            new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero));
+        if (!refused)
+            File.WriteAllText(root, "not a directory");
+        try
+        {
+            using var caster = Registry(root, time, 1);
+            caster.RecordCast(Landed(10u, 0x50000012u, 42u));
+            Assert.True(caster.IsCastWriteDue());
+
+            PluginNetworkClient client = refused
+                ? ClientAt(caster.ClientId, double.NaN, 0d, 0d, 0f)
+                : Client(caster.ClientId, 10u, "Alpha", []);
+            if (refused)
+                Assert.Null(Record.Exception(() => caster.Publish(client)));
+            else
+                Assert.Throws<IOException>(() => caster.Publish(client));
+
+            Assert.False(caster.IsCastWriteDue());
+            time.Advance(LocalPluginPeerRegistry.CastWriteDebounce);
+            Assert.False(caster.IsCastWriteDue());
+
+            // One attempt per heartbeat, which is what the note costs anyway.
+            time.Advance(LocalPluginPeerRegistry.HeartbeatPeriod);
+            Assert.True(caster.IsCastWriteDue());
+        }
+        finally
+        {
+            Delete(root);
+            if (File.Exists(root))
+                File.Delete(root);
+        }
+    }
+
     /// <summary>The identity every raw note in these tests claims.</summary>
     private static readonly Guid HostileInstance =
         Guid.Parse("99999999-9999-9999-9999-999999999999");
@@ -631,6 +729,26 @@ public sealed class LocalPluginPeerRegistryTests
             100u,
             100u,
             90f);
+
+    /// <summary>
+    /// The same client as <see cref="Client"/>, standing somewhere the caller
+    /// chooses -- including somewhere that is not a number.
+    /// </summary>
+    private static PluginNetworkClient ClientAt(
+        uint clientId,
+        double eastWest,
+        double northSouth,
+        double elevation,
+        float heading)
+    {
+        PluginNetworkClient client = Client(clientId, 10u, "Alpha", []);
+        return client with
+        {
+            Position = new PluginNavigationPosition(
+                0x7F7F0001u, eastWest, northSouth, elevation, heading, true),
+            Heading = heading,
+        };
+    }
 
     private sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {

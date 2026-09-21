@@ -60,6 +60,16 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         TimeSpan.FromMilliseconds(250);
 
     /// <summary>
+    /// How often the note is rewritten when nothing in particular is
+    /// happening -- the hosts tick on this period -- and how long this client
+    /// holds off asking for another write after one it could not do. The two
+    /// are the same number on purpose: a write that failed or was refused
+    /// costs exactly what the heartbeat costs anyway, instead of being retried
+    /// on every frame because the ring still has something waiting.
+    /// </summary>
+    internal static readonly TimeSpan HeartbeatPeriod = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// The longest effect a cast may claim, in seconds. A day is far beyond
     /// anything a spell lasts, so a longer one is a broken or hostile note
     /// rather than a long buff, and a reader that believed it would hold a
@@ -117,6 +127,12 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     private long _observedSequence;
     private bool _castWritePending;
     private DateTimeOffset? _lastWriteAt;
+
+    /// <summary>
+    /// When a write that failed or was refused stops holding the next one
+    /// back. Null when the last attempt got the note out.
+    /// </summary>
+    private DateTimeOffset? _holdWritesUntil;
     private bool _disposed;
 
     public LocalPluginPeerRegistry(
@@ -136,11 +152,25 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
 
     public uint ClientId { get; private set; }
 
-    public void Publish(in PluginNetworkClient client)
+    /// <summary>
+    /// Writes this client's note, replacing whatever it said before.
+    /// </summary>
+    /// <returns>
+    /// False when the note was refused rather than written, because this
+    /// client's own position or heading is not a finite number and such a
+    /// note cannot be written as JSON at all. Every reader refuses a note
+    /// like that, so refusing it here costs nothing and keeps the failure
+    /// out of the caller, which is a plugin tick.
+    /// </returns>
+    public bool Publish(in PluginNetworkClient client)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        Directory.CreateDirectory(_directory);
         DateTimeOffset now = _time.GetUtcNow();
+        if (!CanBeWritten(client))
+        {
+            HoldOffAfterWriteThatDidNotHappen(now);
+            return false;
+        }
         PeerDocument document;
         long publishedThrough;
         lock (_gate)
@@ -153,28 +183,64 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                 [.. _ring]);
         }
         string temporary = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        bool written = false;
         try
         {
+            Directory.CreateDirectory(_directory);
             File.WriteAllText(temporary, JsonSerializer.Serialize(document, JsonOptions));
             File.Move(temporary, _path, overwrite: true);
+            written = true;
         }
         finally
         {
             if (File.Exists(temporary))
                 File.Delete(temporary);
+            if (written)
+            {
+                // The note carries the whole ring, so any write -- a
+                // heartbeat as much as a cast -- is what the debounce is
+                // counting from. A cast recorded WHILE the file was being
+                // written is not in the note that just went out, so it stays
+                // waiting rather than being cleared with the ones that did.
+                lock (_gate)
+                {
+                    if (_castSequence == publishedThrough)
+                        _castWritePending = false;
+                    _lastWriteAt = now;
+                    _holdWritesUntil = null;
+                }
+            }
+            else
+            {
+                // The ring still has something waiting and the last-write
+                // stamp has not moved, so without this the write stays due
+                // and the host's tick, which skips its early-out whenever a
+                // write is due, would attempt one on every frame.
+                HoldOffAfterWriteThatDidNotHappen(now);
+            }
         }
-        // The note carries the whole ring, so any write -- a heartbeat as
-        // much as a cast -- is what the debounce is counting from. A cast
-        // recorded WHILE the file was being written is not in the note that
-        // just went out, so it stays waiting rather than being cleared with
-        // the ones that did.
-        lock (_gate)
-        {
-            if (_castSequence == publishedThrough)
-                _castWritePending = false;
-            _lastWriteAt = now;
-        }
+        return true;
     }
+
+    private void HoldOffAfterWriteThatDidNotHappen(DateTimeOffset now)
+    {
+        lock (_gate)
+            _holdWritesUntil = now + HeartbeatPeriod;
+    }
+
+    /// <summary>
+    /// Whether this client's own state can go in a note at all. A position or
+    /// heading that is not a finite number cannot be written as JSON -- the
+    /// writer refuses not-a-number and infinity outright -- and a reader
+    /// refuses a note carrying one anyway. These are the only numbers in the
+    /// document that are not whole; a cast's duration is held to the same
+    /// rule on its way into the ring.
+    /// </summary>
+    private static bool CanBeWritten(in PluginNetworkClient client) =>
+        double.IsFinite(client.Position.EastWest)
+        && double.IsFinite(client.Position.NorthSouth)
+        && double.IsFinite(client.Position.Elevation)
+        && float.IsFinite(client.Heading);
 
     /// <summary>
     /// Adds a cast to the ring this client publishes. The note itself is not
@@ -219,7 +285,9 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
 
     /// <summary>
     /// Whether a recorded cast is waiting to be published and enough time has
-    /// passed since the last write to publish it.
+    /// passed since the last write to publish it. False while a write that
+    /// could not be done is being held off: that one is retried on the
+    /// heartbeat, not on the debounce and not on the frame.
     /// </summary>
     public bool IsCastWriteDue()
     {
@@ -228,6 +296,8 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         DateTimeOffset now = _time.GetUtcNow();
         lock (_gate)
         {
+            if (_holdWritesUntil is { } until && now < until)
+                return false;
             return _castWritePending
                 && (_lastWriteAt is not { } last
                     || now - last >= CastWriteDebounce);
