@@ -276,9 +276,11 @@ public readonly record struct PluginAttributeInfo(
 /// a reading and something experience can be spent on.
 /// </summary>
 /// <param name="Kind">
-/// Which pool: 0 health, 1 stamina, 2 mana. This is a position in the list,
-/// not the number the pool is named by on a request; see
-/// <see cref="StatId"/>.
+/// Which pool: 0 health, 1 stamina, 2 mana. This is the pool's own kind, the
+/// number <see cref="ICharacterInfo.TryGetVital"/> takes; it is neither a
+/// position in <see cref="ICharacterInfo.Vitals"/>, which leaves out any
+/// pool the server has not stated, nor the number the pool is named by on a
+/// request -- see <see cref="StatId"/> for that.
 /// </param>
 /// <param name="Name">The pool's name as shown to the player.</param>
 /// <param name="Current">How much of the pool is left right now.</param>
@@ -466,9 +468,11 @@ public interface ICharacterInfo
     IReadOnlyList<PluginVitalInfo> Vitals => Array.Empty<PluginVitalInfo>();
 
     /// <summary>
-    /// Looks up one pool by its position in <see cref="Vitals"/>: 0 health, 1
-    /// stamina, 2 mana. False when the number names no pool, when the server
-    /// has not stated it yet, or on a host that does not project them.
+    /// Looks up one pool by its kind: 0 health, 1 stamina, 2 mana. This is
+    /// the pool's own number, not an index into <see cref="Vitals"/>, which
+    /// leaves out any pool the server has not stated yet and so can be
+    /// shorter than three. False when the number names no pool, when the
+    /// server has not stated it yet, or on a host that does not project them.
     /// </summary>
     /// <param name="kind">Which pool: 0 health, 1 stamina, 2 mana.</param>
     /// <param name="vital">The pool, or a default record when false.</param>

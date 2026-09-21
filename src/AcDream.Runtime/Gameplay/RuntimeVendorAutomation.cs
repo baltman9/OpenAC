@@ -108,8 +108,11 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
         get
         {
             VendorState vendor = Vendor;
+            // Not default: an all-zero profile reads as a vendor that pays
+            // nothing and buys nothing worth more than nothing, because zero
+            // is a real limit here and "no limit" is the sentinel.
             if (vendor.VendorId == 0u)
-                return default;
+                return PluginVendorProfile.Unset;
             VendorShopProfile profile = vendor.Profile;
             // BuyPrice is the rate the vendor pays the player; SellPrice is
             // what it charges, and that already reaches plugins per listing

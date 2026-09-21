@@ -13,7 +13,9 @@ namespace AcDream.HostParity.Tests;
 /// to nothing turned every request line red (Sent against Unavailable), and
 /// dropping the ranks out of the skill projection turned the reading lines
 /// red on both arms at once, which is how a shared-projection break shows up
-/// here.
+/// here. Answering Sent without publishing the command turned the spend
+/// scenario red as well, which it did not before this suite looked at what
+/// left each client rather than only at what each client said.
 /// </summary>
 public sealed class AdvancementParityTests
 {
@@ -188,6 +190,7 @@ public sealed class AdvancementParityTests
         PluginAdvancementStatus expected)
     {
         transcript.Step($"spend/{what}");
+        _ = arm.Operations.TakeOutbound();
         PluginAdvancementResult result =
             arm.Host.Automation.Character.RequestAdvancement(kind, statId, cost);
         // Two clients that both answer "no" agree line for line and prove
@@ -202,6 +205,57 @@ public sealed class AdvancementParityTests
         // only whether there is one is compared across the two clients.
         transcript.Record(
             "hasNotice", !string.IsNullOrWhiteSpace(result.Notice));
+
+        // The answer alone is not the behaviour. A client that said "sent"
+        // and then dropped the command on the floor would agree with one that
+        // really sent it, and a plugin would wait forever for a stat that was
+        // never going to change, so each arm is held to what left it: the
+        // request itself, carrying the cost that was asked for.
+        uint action = WireAction(kind);
+        ulong? sentCost = arm.Operations.Outbound
+            .Where(message => message.GameAction == action)
+            .Select(CostOnTheWire)
+            .FirstOrDefault();
+        transcript.Record("onTheWire", sentCost is not null);
+        transcript.Record("wireCost", sentCost ?? 0UL);
+        if (expected == PluginAdvancementStatus.Sent)
+        {
+            Assert.True(
+                sentCost == cost,
+                $"the {arm.Name} client answered Sent to {what} but put "
+                + $"{sentCost?.ToString() ?? "nothing"} on the wire, not {cost}");
+        }
+        else
+        {
+            Assert.True(
+                sentCost is null,
+                $"the {arm.Name} client answered {result.Status} to {what} "
+                + "and sent the request anyway");
+        }
+    }
+
+    /// <summary>The client action each kind of spend goes out as.</summary>
+    private static uint WireAction(PluginAdvancementKind kind) => kind switch
+    {
+        PluginAdvancementKind.Attribute => 0x0045u,
+        PluginAdvancementKind.Vital => 0x0044u,
+        PluginAdvancementKind.Skill => 0x0046u,
+        PluginAdvancementKind.TrainSkill => 0x0047u,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+    };
+
+    /// <summary>
+    /// The cost the request really carries, read back off the bytes: the
+    /// envelope, the sequence and the action come first, then the stat, then
+    /// the cost in the last four.
+    /// </summary>
+    private static ulong? CostOnTheWire(ParityOutbound message)
+    {
+        byte[] body = Convert.FromHexString(message.Body);
+        return body.Length < 20
+            ? null
+            : System.Buffers.Binary.BinaryPrimitives
+                .ReadUInt32LittleEndian(body.AsSpan(16));
     }
 
     /// <summary>

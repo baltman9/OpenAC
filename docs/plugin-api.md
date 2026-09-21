@@ -173,6 +173,11 @@ foreach (PluginVitalInfo vital in character.Vitals)
 character.TryGetVital(1, out PluginVitalInfo stamina); // 0 health, 1 stamina, 2 mana
 ```
 
+`TryGetVital` takes the pool's own kind, not a position in `Vitals`: `Vitals`
+leaves out any pool the server has not stated yet, so it can be shorter than
+three and the two numbers can differ. `PluginVitalInfo.Kind` is that same
+kind, which is why it is safe to hold on to.
+
 `Ranks` and `ExperienceSpent` read 0 until the server has stated the stat,
 and `Vitals` is empty until then, so check `IsInWorld` first and treat a zero
 as "not said yet" rather than "never raised".
@@ -192,7 +197,8 @@ if (!result.Accepted)
 The stat id is the one the record you read it from carries:
 `PluginAttributeInfo.StatId` for an attribute, `PluginVitalInfo.StatId` for a
 pool, and `PluginSkillInfo.SkillId` for a skill. Attribute and pool ids are
-not the same numbers as their `Kind`, which is only a position in the list.
+not the same numbers as their `Kind`, which says which attribute or pool it
+is rather than what a request calls it.
 
 `PluginAdvancementKind.TrainSkill` spends skill credits rather than
 experience, so its cost is a small number.
@@ -700,21 +706,26 @@ carries one.
 needs to plan a visit before it walks in. `BuyRate` is the share of an
 item's value this vendor pays when it buys **from** you — 0.75 means three
 quarters of the item's value — so a payout is that rate times the item's
-per-unit value, rounded to whole coin; a trade note is always paid at face
-value whatever the rate says. What the vendor *charges* is already per
-listing, as `PluginVendorItem.UnitPrice`. `DealsInItemTypes` is a bit mask
-of the categories it buys, comparable directly against a listing's
-`ItemType` or an inventory item's: no shared bit means the vendor refuses
-the item. `MinimumValue` and `MaximumValue` are its per-unit value limits,
-each reading `PluginVendorProfile.NoValueLimit` when the vendor sets no
-limit in that direction; an item worth nothing at all is refused whatever
-they say. `UsesAlternateCurrency` tells you to count
-`AlternateCurrencyWeenieClassId` rather than the character's money;
-`AlternateCurrencyAmount` is how many of it the character held when the
-listing arrived — a snapshot, not a live count — and
-`AlternateCurrencyName` its plural name for a line you write. Every field
-reads zero, and the name null, when no vendor is open, so check `IsOpen`
-first.
+per-unit value, rounded **down** to whole coin but never down to nothing: a
+payout that works out below one coin is paid as one. A trade note is always
+paid at face value whatever the rate says. What the vendor *charges* is
+already per listing, as `PluginVendorItem.UnitPrice`. `DealsInItemTypes` is
+a bit mask of the categories it buys, comparable directly against a
+listing's `ItemType` or an inventory item's: no shared bit means the vendor
+refuses the item. `MinimumValue` and `MaximumValue` are its per-unit value
+limits, each reading `PluginVendorProfile.NoValueLimit` when the vendor sets
+no limit in that direction; an item worth nothing at all is refused whatever
+they say, and a trade note is bought however far above `MaximumValue` it is,
+so a pack filtered by that ceiling has to let notes through or it drops the
+most valuable things the vendor would have taken. `UsesAlternateCurrency`
+tells you to count `AlternateCurrencyWeenieClassId` rather than the
+character's money; `AlternateCurrencyAmount` is how many of it the character
+held when the listing arrived — a snapshot, not a live count — and
+`AlternateCurrencyName` its plural name for a line you write. With no vendor
+open the whole record is `PluginVendorProfile.Unset`: the rate zero, the
+name null, and both value limits `NoValueLimit` rather than zero, because a
+zero limit is a real one and an all-zero record would read as a vendor that
+refuses everything. Check `IsOpen` first all the same.
 
 `IsBusy` reports whether this adapter's own buy/sell is in flight -- it is
 vendor-local, not the client-wide inventory-transaction busy state, which

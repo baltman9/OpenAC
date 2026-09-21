@@ -207,13 +207,51 @@ public sealed class RuntimeVendorAutomationTests
         host.Start();
         using var vendor = new RuntimeVendorAutomation(host.Runtime);
 
-        Assert.Equal(default, vendor.Profile);
+        Assert.Equal(PluginVendorProfile.Unset, vendor.Profile);
 
         host.Runtime.InventoryOwner.Vendor.Apply(0x40001000u, Profile, []);
         Assert.Equal(Profile.BuyPrice, vendor.Profile.BuyRate);
 
         host.Runtime.InventoryOwner.Vendor.Close();
-        Assert.Equal(default, vendor.Profile);
+        Assert.Equal(PluginVendorProfile.Unset, vendor.Profile);
+    }
+
+    /// <summary>
+    /// With nothing open the two value limits read "no limit", not zero.
+    /// Zero is a real limit here -- the sentinel for "no limit" is the top of
+    /// the range -- so an all-zero record reads as a vendor that refuses
+    /// everything worth more than nothing, and a plugin that checked the
+    /// profile before checking whether a shop was open would walk away from a
+    /// vendor that in fact buys anything.
+    ///
+    /// Mutation: return the all-zero record here and this test reads a
+    /// maximum of 0 where a vendor with no ceiling reads four billion.
+    /// </summary>
+    [Fact]
+    public void WithNoVendorOpenTheValueLimitsReadNoLimitRatherThanZero()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+
+        Assert.False(vendor.IsOpen);
+        Assert.Equal(PluginVendorProfile.NoValueLimit, vendor.Profile.MinimumValue);
+        Assert.Equal(PluginVendorProfile.NoValueLimit, vendor.Profile.MaximumValue);
+
+        // And the inert host answers the same way, so a plugin reads one
+        // shape whichever client it is running on.
+        Assert.Equal(
+            PluginVendorProfile.NoValueLimit,
+            InertVendor.Instance.Profile.MinimumValue);
+        Assert.Equal(
+            PluginVendorProfile.NoValueLimit,
+            InertVendor.Instance.Profile.MaximumValue);
+    }
+
+    /// <summary>A host that provides nothing, answering out of the interface.</summary>
+    private sealed class InertVendor : IVendorAutomation
+    {
+        internal static readonly IVendorAutomation Instance = new InertVendor();
     }
 
     /// <summary>

@@ -15,7 +15,9 @@ namespace AcDream.Runtime.Tests.Plugins;
 /// Mutation check (2026-09-21): dropping the ranks and banked experience out
 /// of the three projections turned the reading test red on every field, and
 /// returning <see cref="PluginAdvancementStatus.Sent"/> without checking the
-/// stat or the cost turned each refusal test red in turn.
+/// stat or the cost turned each refusal test red in turn. Putting the
+/// experience ceiling back above the width of the field turned the two cost
+/// tests red and nothing else.
 /// </summary>
 public sealed class RuntimeAutomationSurfaceAdvancementTests
 {
@@ -98,20 +100,19 @@ public sealed class RuntimeAutomationSurfaceAdvancementTests
     }
 
     /// <summary>
-    /// A stat id of zero names nothing on any of the four kinds, so none of
-    /// them may reach the wire with one.
+    /// A stat id of zero names nothing, so it never reaches the wire. One
+    /// kind proves it for all four: the zero check sits ahead of the per-kind
+    /// lookup, so a row per kind would take the same branch four times and
+    /// none of them would reach the check it looked like it was exercising.
+    /// The per-kind lookups have their own rows below.
     /// </summary>
-    [Theory]
-    [InlineData(PluginAdvancementKind.Attribute)]
-    [InlineData(PluginAdvancementKind.Vital)]
-    [InlineData(PluginAdvancementKind.Skill)]
-    [InlineData(PluginAdvancementKind.TrainSkill)]
-    public void ASpendOnStatZeroIsRefusedAndNeverSent(PluginAdvancementKind kind)
+    [Fact]
+    public void ASpendOnStatZeroIsRefusedAndNeverSent()
     {
         using Fixture fixture = Fixture.InWorld();
 
-        PluginAdvancementResult result =
-            fixture.Surface.RequestAdvancement(kind, 0u, 100UL);
+        PluginAdvancementResult result = fixture.Surface.RequestAdvancement(
+            PluginAdvancementKind.Skill, 0u, 100UL);
 
         Assert.Equal(PluginAdvancementStatus.UnknownStat, result.Status);
         Assert.False(string.IsNullOrWhiteSpace(result.Notice));
@@ -121,6 +122,9 @@ public sealed class RuntimeAutomationSurfaceAdvancementTests
     /// <summary>
     /// A number outside the attributes and pools that exist, and a skill the
     /// character was never said to have, are all refused before the wire.
+    /// One row per lookup: the attribute table, the three buyable pools, the
+    /// character's own skill list, and that training is held to that same
+    /// skill list rather than waved through.
     /// </summary>
     [Theory]
     // There is no seventh attribute.
@@ -155,20 +159,23 @@ public sealed class RuntimeAutomationSurfaceAdvancementTests
     }
 
     /// <summary>
-    /// Experience and skill credits have their own ceilings, and a cost above
-    /// either is a mistake rather than a spend: the credit one matters most,
-    /// because a number that does not fit is otherwise cut down to one that
-    /// does on its way to the wire.
+    /// Experience and skill credits have ceilings of their own, and a cost
+    /// above either is refused rather than cut down to one that fits on the
+    /// way to the wire. One row per ceiling, because both of them are a
+    /// single comparison and a second row against the same one would only
+    /// repeat it with a bigger number.
+    ///
+    /// Five billion is the experience row on purpose: it is a plain "spend
+    /// what I have banked" from a high-level character, it is well inside the
+    /// old ceiling, and it used to be accepted and arrive as roughly 705
+    /// million. The ceiling itself, and the first number past it, have their
+    /// own test above.
     /// </summary>
     [Theory]
-    [InlineData(
-        PluginAdvancementKind.Skill,
-        PluginAdvancement.MaxExperienceCost + 1UL)]
-    [InlineData(PluginAdvancementKind.Skill, ulong.MaxValue)]
+    [InlineData(PluginAdvancementKind.Skill, 5_000_000_000UL)]
     [InlineData(
         PluginAdvancementKind.TrainSkill,
         PluginAdvancement.MaxSkillCredits + 1UL)]
-    [InlineData(PluginAdvancementKind.TrainSkill, 0x1_0000_0001UL)]
     public void AnAbsurdCostIsRefusedAndNeverSent(
         PluginAdvancementKind kind,
         ulong cost)
