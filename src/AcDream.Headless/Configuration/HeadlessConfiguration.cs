@@ -59,6 +59,15 @@ internal sealed record HeadlessSessionDescriptor
 
     public List<string>? Plugins { get; init; }
 
+    /// <summary>
+    /// The words this session wants to be found by. Plugins on the clients
+    /// running on this machine can see one another's tags and filter on them,
+    /// so a bot that should look like part of a group carries the group's
+    /// word here. The graphical client takes the same list from its own
+    /// launch options.
+    /// </summary>
+    public List<string>? PluginTags { get; init; }
+
     public List<string>? LoginCommands { get; init; }
 
     public int LoginCommandDelayMs { get; init; } = 500;

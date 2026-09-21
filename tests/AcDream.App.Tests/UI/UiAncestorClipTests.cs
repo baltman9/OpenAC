@@ -285,7 +285,7 @@ public sealed class UiAncestorClipTests
             Left = 50f, Top = 50f, Width = 200f, Height = 100f,
             BackgroundColor = default, BorderColor = default,
         };
-        var label = new UiLabel { Left = 10f, Top = 10f, Text = "MossTank status line" };
+        var label = new UiLabel { Left = 10f, Top = 10f, Text = "A plugin status line" };
         var probe = new UiPanel
         {
             Left = 0f, Top = 0f, Width = 100f, Height = 10f,
@@ -300,7 +300,7 @@ public sealed class UiAncestorClipTests
 
         Assert.True(
             AnyQuadAt(renderer, (x, y) => x >= 60f && x <= 160f && y >= 60f && y <= 70f),
-            "the unsized label self-clipped its subtree away (MossTank regression)");
+            "the unsized label self-clipped its subtree away");
         // The box became truthful (fallback-measured without a font), not degenerate.
         Assert.True(label.Width > 0f && label.Height > 0f,
             $"label box stayed degenerate: {label.Width}x{label.Height}");

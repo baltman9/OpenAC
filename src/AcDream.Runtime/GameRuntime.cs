@@ -17,6 +17,10 @@ public sealed record GameRuntimeDependencies(
     Action<string>? Log = null,
     Action<string>? TimeSyncDiagnostic = null,
     ILiveSessionOperations? SessionOperations = null,
+    /// <summary>
+    /// Where the attack power-up reads the time from. Left out, it is the
+    /// runtime's own simulation clock, which is what both hosts want.
+    /// </summary>
     Func<double>? CombatTime = null,
     uint FirstLocalEntityId = RuntimeEntityDirectory.FirstLocalEntityId,
     int MaximumChatEntries = 500,
@@ -107,6 +111,7 @@ internal enum GameRuntimeConstructionPoint
     HouseCreated,
     MovementCreated,
     ActionsCreated,
+    ItemInteractionCreated,
     EnvironmentCreated,
     TransitCreated,
     EventsCreated,
@@ -129,6 +134,7 @@ internal sealed class GameRuntimeConstructionContext
     public RuntimeHouseState? House { get; set; }
     public RuntimeLocalPlayerMovementState? Movement { get; set; }
     public RuntimeActionState? Actions { get; set; }
+    public RuntimeItemInteraction? ItemInteraction { get; set; }
     public GameRuntimeEventHub? Events { get; set; }
 }
 
@@ -305,10 +311,28 @@ public sealed class GameRuntime
                 dependencies.CombatTargetOperations,
                 dependencies.CombatModeOperations,
                 dependencies.SpellCastOperations,
-                dependencies.CombatTime);
+                // The power-up is timed off the simulation clock unless a
+                // host insists otherwise, so both clients build a swing at
+                // the same rate whether or not there is a window to draw it.
+                dependencies.CombatTime
+                    ?? (() => clock.SimulationTimeSeconds));
             construction.Own(context.Actions);
             Fault(
                 GameRuntimeConstructionPoint.ActionsCreated,
+                context,
+                faultInjection);
+
+            context.ItemInteraction = RuntimeItemInteractionComposition.Create(
+                context.Session,
+                context.PlayerIdentity,
+                context.Inventory,
+                context.Actions,
+                context.Character,
+                context.Communication,
+                clock);
+            construction.Own(context.ItemInteraction);
+            Fault(
+                GameRuntimeConstructionPoint.ItemInteractionCreated,
                 context,
                 faultInjection);
 
@@ -386,10 +410,68 @@ public sealed class GameRuntime
             HouseOwner = context.House;
             MovementOwner = context.Movement;
             ActionOwner = context.Actions;
+            ItemInteractionOwner = context.ItemInteraction;
             EnvironmentOwner = environment;
             TransitOwner = transit;
             GenerationReset = generationReset;
             _events = context.Events;
+
+            // The walk-to-then-use route. It is built here, from runtime
+            // state alone, so a client with no window reaches an object the
+            // character does not own exactly the way a client with one does.
+            // The selection follows the world: when the object the player
+            // has selected is taken out of it, or the world stops showing
+            // it, the selection lets it go. One owner, for every client.
+            _selectionFollowsEntities = new RuntimeSelectionEntityFollower(
+                context.EntityObjects.Events,
+                context.Actions.Selection);
+
+            ApproachCompletions = new RuntimeApproachCompletionState();
+            context.Movement.AttachApproachCompletions(ApproachCompletions);
+            var approachSource = new RuntimeApproachSource(
+                this,
+                ApproachCompletions);
+            WorldObjectUseOwner = new RuntimeWorldObjectUse(
+                context.ItemInteraction,
+                new RuntimeSessionInteractionTransport(
+                    () => context.Session.CurrentSession),
+                approachSource,
+                guid =>
+                    guid != 0u
+                    && context.EntityObjects.Entities.TryGetActive(
+                        guid,
+                        out Entities.RuntimeEntityRecord record)
+                        ? record.Snapshot.Useability
+                        : null,
+                dependencies.Log);
+            // The end of that walk: arrival sends what was armed for it, and a
+            // walk that has stopped getting anywhere is given up on. Both are
+            // taken once per frame, from the per-frame local-player step every
+            // client takes, so a use out of reach finishes with or without a
+            // window.
+            ArmedApproachDrive = new RuntimeInteractionApproachDriver(
+                ApproachCompletions,
+                context.ItemInteraction.RuntimeTransactions,
+                WorldObjectUseOwner,
+                approachSource,
+                dependencies.Log);
+            // How fast the character runs and jumps follows what the server
+            // says about its skills, burden and stamina. One owner, so a
+            // client without a window does not read stale speeds.
+            MovementStats = new Gameplay.RuntimeMovementStatsApplier(
+                context.Movement,
+                context.Character.MovementSkills,
+                dependencies.Log ?? (static _ => { }));
+            GhostDismissalOwner = new Entities.RuntimeGhostDismissal(
+                context.EntityObjects,
+                () => PlayerIdentity.ServerGuid);
+            SelectionCycleOwner = new RuntimeSelectionCycle(this);
+            // The character carries itself forward by its own animation
+            // cycles on every client. What a client with something to
+            // draw adds is the pose work, hung off the same one advance.
+            LocalPlayerMotion = new Gameplay.RuntimeLocalPlayerMotionArming(
+                context.EntityObjects,
+                () => PlayerIdentity.ServerGuid);
 
             context.Session.ConfigureAutoSaveTick(
                 session =>
@@ -439,7 +521,38 @@ public sealed class GameRuntime
             options.TryFlush(SendBlob);
     }
 
+    /// <summary>
+    /// The stop a swing asks for, on its way out. It carries no movement
+    /// diagnostic: what it sends is one packet at one moment, not a stream
+    /// worth watching.
+    /// </summary>
+    private readonly LocalPlayerOutboundController _attackRequestOutbound =
+        new(static (_, _, _, _, _, _) => { });
+
+    /// <summary>Clears the selection when its object leaves the world.</summary>
+    private readonly RuntimeSelectionEntityFollower? _selectionFollowsEntities;
+
     public GameRuntimeClock Clock { get; }
+
+    /// <summary>
+    /// Takes one host frame off the clock, for whichever client is running.
+    /// The frame number counts host frames and always moves. Simulation time
+    /// is the world's own clock, and it only moves while there is a world to
+    /// simulate: between giving up the world the character was standing in
+    /// and standing up the next one -- through a portal, or arriving at
+    /// login -- elapsed time means nothing, and time that ran through the gap
+    /// would be handed in one lump to whatever moves on the first frame
+    /// after it.
+    /// </summary>
+    /// <param name="hostDeltaSeconds">
+    /// How long the host frame took. Anything that is not a finite, positive
+    /// number of seconds counts as no time at all.
+    /// </param>
+    public RuntimeFrameTime AdvanceFrameClock(double hostDeltaSeconds) =>
+        Clock.Advance(
+            hostDeltaSeconds,
+            TransitOwner.IsWorldSimulationAvailable);
+
     public LiveSessionController Session { get; }
     public RuntimeLocalPlayerIdentityState PlayerIdentity { get; }
     public RuntimeEntityObjectLifetime EntityObjects { get; }
@@ -456,7 +569,63 @@ public sealed class GameRuntime
 
     public RuntimeHouseState HouseOwner { get; }
     public RuntimeActionState ActionOwner { get; }
+
+    /// <summary>
+    /// The one owner of item and equipment requests. Both hosts borrow it,
+    /// so a plugin gets the same answers with or without a window.
+    /// </summary>
+    public RuntimeItemInteraction ItemInteractionOwner { get; }
+
+    /// <summary>
+    /// The one walk-to-then-use route for objects the character does not own.
+    /// Both clients answer a plugin from this, so a corpse several meters off
+    /// is walked to and opened the same way with or without a window.
+    /// </summary>
+    internal RuntimeWorldObjectUse WorldObjectUseOwner { get; }
+
+    /// <summary>
+    /// Letting go of an object the client still believes in. The decision is
+    /// the same on every client; a client that draws lends the route that
+    /// takes down what it drew.
+    /// </summary>
+    public Entities.RuntimeGhostDismissal GhostDismissalOwner { get; }
+
+    /// <summary>
+    /// Stepping the selection from one nearby character to the next. The
+    /// order is over the entity directory, so a key press and a plugin call
+    /// land on the same character on either client.
+    /// </summary>
+    public RuntimeSelectionCycle SelectionCycleOwner { get; }
+
+    /// <summary>
+    /// Where walks sent by that route report that they arrived or were called
+    /// off. Whoever gives the character its body begins a run of walks here
+    /// and ends it when the body goes.
+    /// </summary>
+    internal RuntimeApproachCompletionState ApproachCompletions { get; }
+
+    /// <summary>
+    /// Ends the walks armed to act on something once they are over. Driven
+    /// once per frame from the per-frame local-player step, on every client;
+    /// a client with something to draw on lends it the walk-then-pickup half
+    /// and the words a person who clicked is told.
+    /// </summary>
+    internal RuntimeInteractionApproachDriver ArmedApproachDrive { get; }
     public RuntimeLocalPlayerMovementState MovementOwner { get; }
+
+    /// <summary>
+    /// Gives the character its own locomotion, on whichever client is
+    /// running. One owner, so the character covers the same ground and turns
+    /// through the same angle with or without a window.
+    /// </summary>
+    internal Gameplay.RuntimeLocalPlayerMotionArming LocalPlayerMotion { get; }
+
+    /// <summary>
+    /// Re-derives the character's run and jump speed from the numbers the
+    /// server last sent. Both clients bind their character-session hooks to
+    /// this one instance.
+    /// </summary>
+    internal Gameplay.RuntimeMovementStatsApplier MovementStats { get; }
     internal RuntimeLocalPlayerPhysicsPublicationState
         LocalPlayerPhysicsPublication => MovementOwner.PhysicsPublication;
     public RuntimeWorldEnvironmentState EnvironmentOwner { get; }
@@ -561,25 +730,127 @@ public sealed class GameRuntime
             Fellowship.Snapshot,
             Allegiance.Snapshot);
 
+    /// <summary>
+    /// Stops the character for a swing and tells the server it stopped.
+    /// A character asked to swing while it is running has to stand still
+    /// first, and the server has to hear about that at once or it works the
+    /// swing out from where it still believed the character was. One
+    /// implementation, so a swing costs the same wherever it was asked for.
+    /// </summary>
+    public void PrepareLocalPlayerForAttackRequest()
+    {
+        ObjectDisposedException.ThrowIf(_disposeRequested || _disposed, this);
+        if (!MovementOwner.PrepareForAttackRequest()
+            || MovementOwner.Controller is not { } controller)
+        {
+            return;
+        }
+
+        _ = _attackRequestOutbound.TrySendMovement(
+            Session.CurrentSession,
+            controller,
+            controller.CaptureMovementResult(mouseLookEvent: false));
+    }
+
+    /// <summary>
+    /// Tells everything watching the character where it has got to. A walk
+    /// somebody else is running at this character is re-aimed from here, once
+    /// per frame.
+    /// </summary>
+    /// <remarks>
+    /// The character's own body only. A creature this character is walking at
+    /// tells its own watchers where IT has got to as the last stage of its own
+    /// step, so a client that carries other creatures' bodies forward already
+    /// re-aims the walk -- and doing it from here as well would re-aim it
+    /// twice a frame on one client and once on another, which is the
+    /// difference rather than the fix.
+    /// </remarks>
+    public void HandleLocalPlayerTargeting()
+    {
+        ObjectDisposedException.ThrowIf(_disposeRequested || _disposed, this);
+        uint player = PlayerIdentity.ServerGuid;
+        if (player == 0u
+            || !EntityObjects.Physics.TryGetPhysicsHost(player, out var self)
+            || self is not EntityPhysicsHost localBody)
+        {
+            return;
+        }
+
+        localBody.HandleTargetting();
+    }
+
+    /// <summary>
+    /// Closes this frame's pass over other creatures' bodies, and re-aims a
+    /// walk this character is running at a creature the pass did not carry.
+    /// </summary>
+    /// <remarks>
+    /// A creature tells everything watching it where it has got to as the last
+    /// stage of its own step, so a walk aimed at a creature whose body is
+    /// being carried forward is re-aimed by that. A creature whose body is not
+    /// being carried -- one this client has no animation content for, one too
+    /// far away to be worth carrying, one that never moves, one carrying
+    /// something in flight -- would otherwise never say so, and the walk would
+    /// keep running at where that creature was when it was last heard from.
+    /// This covers exactly those, once a frame, on every client.
+    /// </remarks>
+    public void FinishRemoteBodyPass()
+    {
+        ObjectDisposedException.ThrowIf(_disposeRequested || _disposed, this);
+        AcDream.Runtime.Physics.RuntimePhysicsState physics =
+            EntityObjects.Physics;
+        try
+        {
+            uint player = PlayerIdentity.ServerGuid;
+            uint sought =
+                MovementOwner.Controller?.Movement.MoveTo?.TopLevelObjectId
+                ?? 0u;
+            if (sought == 0u
+                || sought == player
+                || physics.DidCarryRemoteBody(sought))
+            {
+                return;
+            }
+
+            if (physics.ResolveObjectTableHost(sought)
+                is AcDream.Runtime.Physics.EntityPhysicsHost soughtBody)
+            {
+                soughtBody.HandleTargetting();
+            }
+        }
+        finally
+        {
+            physics.ForgetRemoteBodiesCarried();
+        }
+    }
+
     public RuntimeLocalPlayerFrameController CreateLocalPlayerFrameController(
         IRuntimeLocalPlayerFrameHost host,
         IRuntimeMovementInputSource input)
     {
         ObjectDisposedException.ThrowIf(_disposeRequested || _disposed, this);
-        return new RuntimeLocalPlayerFrameController(
+        var frame = new RuntimeLocalPlayerFrameController(
             host,
             new RuntimeScriptedMovementInputSource(MovementOwner, input),
             () =>
             {
                 _events.EmitMovement(MovementOwner.Snapshot);
                 RuntimeVendorRangeQuery.EnforceRange(this);
-            });
+            },
+            ArmedApproachDrive);
+        frame.BindMotionArming(LocalPlayerMotion);
+        return frame;
     }
 
     public void ResetGeneration(
         RuntimeGenerationToken retiringGeneration,
-        IRuntimeGenerationResetHost host) =>
+        IRuntimeGenerationResetHost host)
+    {
+        // A new generation starts without an opinion about whether the
+        // character was out of stamina, so the first update after it says so
+        // is a crossing and not a repeat.
+        MovementStats.Reset();
         GenerationReset.Reset(retiringGeneration, host);
+    }
 
     public IDisposable Subscribe(IRuntimeEventObserver observer)
     {
@@ -796,6 +1067,7 @@ public sealed class GameRuntime
                 }
                 return true;
             case 1:
+                _selectionFollowsEntities?.Dispose();
                 _events.Dispose();
                 return _events.CaptureOwnership().IsConverged;
             case 2:
@@ -806,6 +1078,9 @@ public sealed class GameRuntime
                 TransitOwner.ResetSession();
                 return TransitOwner.CaptureOwnership().IsSessionIdle;
             case 4:
+                // The item owner only borrows the action and inventory
+                // state it subscribes to, so it detaches first.
+                ItemInteractionOwner.Dispose();
                 ActionOwner.Dispose();
                 return ActionOwner.CaptureOwnership().IsConverged;
             case 5:

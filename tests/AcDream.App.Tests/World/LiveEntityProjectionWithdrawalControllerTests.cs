@@ -29,7 +29,6 @@ public sealed class LiveEntityProjectionWithdrawalControllerTests
             fixture.Controller.Withdraw(Guid, localPlayerGuid: 0u));
 
         Assert.True(record.IsSpatiallyProjected);
-        Assert.Empty(fixture.GameState.Entities);
         Assert.Equal(0, fixture.Poses.Count);
         Assert.DoesNotContain(
             fixture.Physics.ShadowObjects.GetObjectsInCell(Cell),
@@ -56,7 +55,6 @@ public sealed class LiveEntityProjectionWithdrawalControllerTests
 
         Assert.False(record.IsSpatiallyProjected);
         Assert.False(record.IsSpatiallyVisible);
-        Assert.Empty(fixture.GameState.Entities);
         Assert.Equal(0, fixture.Poses.Count);
 
         static void ThrowOnHidden(LiveEntityRecord _, bool visible)
@@ -130,8 +128,8 @@ public sealed class LiveEntityProjectionWithdrawalControllerTests
         Assert.True(record.IsSpatiallyProjected);
         Assert.True(record.IsSpatiallyVisible);
         Assert.Equal(new Vector3(8f, 7f, 6f), record.WorldEntity!.Position);
-        Assert.Contains(fixture.GameState.Entities, entity => entity.Id == record.WorldEntity.Id);
         Assert.Equal(1, fixture.Poses.Count);
+        Assert.True(fixture.Poses.TryGetRootPose(record.WorldEntity.Id, out _));
 
         void OnPoseChanged(uint localId)
         {
@@ -162,13 +160,6 @@ public sealed class LiveEntityProjectionWithdrawalControllerTests
             Assert.True(fixture.Live.RebucketLiveEntity(
                 Guid,
                 accepted.Position!.Value.LandblockId));
-            var snapshot = new WorldEntitySnapshot(
-                record.WorldEntity.Id,
-                record.WorldEntity.SourceGfxObjOrSetupId,
-                record.WorldEntity.Position,
-                record.WorldEntity.Rotation);
-            fixture.GameState.Add(snapshot);
-            fixture.Events.UpsertCurrent(snapshot);
             fixture.Poses.PublishMeshRefs(record.WorldEntity);
         }
     }
@@ -206,8 +197,6 @@ public sealed class LiveEntityProjectionWithdrawalControllerTests
             Controller = new LiveEntityProjectionWithdrawalController(
                 Live,
                 Projectiles,
-                GameState,
-                Events,
                 Physics.ShadowObjects,
                 Poses,
                 LocalShadow);
@@ -224,8 +213,6 @@ public sealed class LiveEntityProjectionWithdrawalControllerTests
         internal LiveEntityRuntime Live { get; }
         internal PhysicsEngine Physics { get; } = new();
         internal ProjectileController Projectiles { get; }
-        internal WorldGameState GameState { get; } = new();
-        internal WorldEvents Events { get; } = new();
         internal EntityEffectPoseRegistry Poses { get; } = new();
         internal LocalPlayerShadowState LocalShadow { get; } = new();
         internal LiveEntityProjectionWithdrawalController Controller { get; }
@@ -263,13 +250,6 @@ public sealed class LiveEntityProjectionWithdrawalControllerTests
                     ParentCellId = Cell,
                 });
             WorldEntity entity = Assert.IsType<WorldEntity>(record.WorldEntity);
-            var snapshot = new WorldEntitySnapshot(
-                entity.Id,
-                entity.SourceGfxObjOrSetupId,
-                entity.Position,
-                entity.Rotation);
-            GameState.Add(snapshot);
-            Events.UpsertCurrent(snapshot);
             Poses.PublishMeshRefs(entity);
             Physics.ShadowObjects.Register(
                 entity.Id,

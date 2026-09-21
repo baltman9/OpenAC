@@ -101,7 +101,7 @@ public sealed class RetailWindowLockPresentationControllerTests
             new ChatWindowState(),
             null,
             null,
-            NoTex);
+            NoTex, new RuntimeChatEntryOwner());
         var root = new UiRoot { Width = 800, Height = 600 };
         root.AddChild(layout.Root);
         root.RegisterWindow("chat", layout.Root, layout.Root);
@@ -138,7 +138,7 @@ public sealed class RetailWindowLockPresentationControllerTests
             new ChatWindowState(),
             null,
             null,
-            NoTex);
+            NoTex, new RuntimeChatEntryOwner());
 
         root.AddChild(layout.Root);
         root.RegisterWindow("late-chat", layout.Root, layout.Root);

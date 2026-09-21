@@ -45,7 +45,7 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
     private readonly Action<uint> _useItem;                   // guid → fire UseObject
     private readonly Action<ShortcutEntry>? _sendAddShortcut;
     private readonly Action<uint>? _sendRemoveShortcut;      // (index)
-    private readonly ItemInteractionController? _itemInteraction;
+    private readonly RuntimeItemInteraction? _itemInteraction;
     private readonly Action<uint>? _selectItem;
     private readonly Func<uint> _selectedObjectId;
     private readonly SelectionState? _selection;
@@ -70,7 +70,7 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
         uint[]? regularDigits,
         uint[]? ghostedDigits,
         uint[]? emptyDigits,
-        ItemInteractionController? itemInteraction = null,
+        RuntimeItemInteraction? itemInteraction = null,
         Action<ShortcutEntry>? sendAddShortcut = null,
         Action<uint>? sendRemoveShortcut = null,
         Action? toggleCombat = null,
@@ -277,7 +277,7 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
         uint[]? regularDigits = null,
         uint[]? ghostedDigits = null,
         uint[]? emptyDigits = null,
-        ItemInteractionController? itemInteraction = null,
+        RuntimeItemInteraction? itemInteraction = null,
         Action<ShortcutEntry>? sendAddShortcut = null,
         Action<uint>? sendRemoveShortcut = null,
         Action? toggleCombat = null,

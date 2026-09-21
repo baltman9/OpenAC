@@ -13,7 +13,9 @@ namespace AcDream.Plugin.Abstractions;
 /// <param name="CurrentMana">The member's current mana.</param>
 /// <param name="MaxMana">The member's maximum mana.</param>
 /// <param name="Distance">
-/// Distance from the local player in metres; zero for the local player's own
+/// Straight-line distance from the local player in metres, centre to centre
+/// and height included -- the same measure
+/// <see cref="PluginCombatTarget.Distance"/> uses; zero for the local player's own
 /// entry.
 /// </param>
 public readonly record struct PluginFellowMember(
@@ -29,6 +31,13 @@ public readonly record struct PluginFellowMember(
 {
     /// <summary>True when the member takes a share of fellowship loot.</summary>
     public bool ShareLoot { get; init; }
+
+    /// <summary>
+    /// Seconds since the server last streamed this fellow's vitals; null when
+    /// it never has. The stream runs only while the host holds a vitals
+    /// subscription (see <see cref="IFellowshipAutomation.RequestVitals"/>).
+    /// </summary>
+    public double? VitalsAgeSeconds { get; init; }
 }
 
 /// <summary>How the client answered a plugin's fellowship command.</summary>
@@ -139,5 +148,13 @@ public interface IFellowshipAutomation
     /// to close it again.
     /// </summary>
     PluginFellowshipCommandResult SetOpen(bool isOpen) =>
+        new(PluginFellowshipCommandStatus.Unavailable);
+
+    /// <summary>
+    /// Ask the host to keep the server's fellow-vitals stream flowing (the
+    /// server sends it only to a client that has declared its fellowship
+    /// panel open). Idempotent; released automatically at session reset.
+    /// </summary>
+    PluginFellowshipCommandResult RequestVitals(bool requested) =>
         new(PluginFellowshipCommandStatus.Unavailable);
 }

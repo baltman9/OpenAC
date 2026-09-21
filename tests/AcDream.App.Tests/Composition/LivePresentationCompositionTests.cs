@@ -198,6 +198,13 @@ public sealed class LivePresentationCompositionTests
         {
         }
 
+        public AcDream.Runtime.Physics.RuntimeRemoteArmingHostFacts HostFacts =>
+            throw new NotSupportedException();
+
+        public void BindArming(
+            AcDream.Runtime.Physics.RuntimeRemoteArming arming) =>
+            throw new NotSupportedException();
+
         public IPhysicsObjHost? ResolvePhysicsHost(
             uint serverGuid) => null;
     }

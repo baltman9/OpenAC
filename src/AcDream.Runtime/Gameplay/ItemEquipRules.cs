@@ -2,7 +2,7 @@ using AcDream.Core.Items;
 
 namespace AcDream.Runtime.Gameplay;
 
-internal static class ItemEquipRules
+public static class ItemEquipRules
 {
     public const EquipMask AutoWearMask =
         EquipMask.HeadWear

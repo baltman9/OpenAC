@@ -4,6 +4,7 @@ using AcDream.Core.Combat;
 using AcDream.Core.Items;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
+using AcDream.Core.Physics;
 using AcDream.Core.Spells;
 using AcDream.Runtime.Entities;
 using AcDream.Runtime.Gameplay;
@@ -871,6 +872,59 @@ public sealed class DirectGameRuntimeCommandAdapterTests
         runtime.Dispose();
     }
 
+    /// <summary>
+    /// The graphical client's select-closest-monster key comes through here.
+    /// Mutation: pass <c>HostileTargetScope.Classified</c> in the
+    /// <c>SelectClosestHostile</c> arm and the key selects the nearer hidden
+    /// creature instead of the visible one.
+    /// </summary>
+    [Fact]
+    public void SelectClosestHostile_SkipsHiddenAndDeadCreatures()
+    {
+        (GameRuntime runtime, DirectGameRuntimeCommandAdapter adapter, _) =
+            CreateStartedHarness();
+        const uint player = 0x50000001u;
+        const uint hidden = 0x50000010u;
+        const uint dead = 0x50000011u;
+        const uint visible = 0x50000012u;
+        runtime.PlayerIdentity.ServerGuid = player;
+        RuntimeEntityTestSpawns.Add(
+            runtime,
+            player,
+            10f,
+            10f,
+            RuntimeEntityTestSpawns.PlayerObject(player));
+        RuntimeEntityTestSpawns.Add(
+            runtime,
+            hidden,
+            11f,
+            10f,
+            RuntimeEntityTestSpawns.Monster(hidden),
+            PhysicsStateFlags.Hidden);
+        RuntimeEntityTestSpawns.Add(
+            runtime,
+            dead,
+            12f,
+            10f,
+            RuntimeEntityTestSpawns.Monster(dead));
+        runtime.ActionOwner.Combat.OnUpdateHealth(dead, 0f);
+        RuntimeEntityTestSpawns.Add(
+            runtime,
+            visible,
+            13f,
+            10f,
+            RuntimeEntityTestSpawns.Monster(visible));
+
+        RuntimeCommandResult result = adapter.Selection.Execute(
+            runtime.Generation,
+            RuntimeSelectionCommand.SelectClosestHostile);
+
+        Assert.True(result.Accepted);
+        Assert.Equal(
+            visible,
+            runtime.ActionOwner.Selection.SelectedObjectId);
+    }
+
     [Fact]
     public void PutInContainerSplitAndMerge_RefuseWithNoRoute()
     {
@@ -1139,12 +1193,12 @@ public sealed class DirectGameRuntimeCommandAdapterTests
         private GameRuntime? _runtime;
 
         public void Bind(GameRuntime runtime) => _runtime = runtime;
-        public bool CanStartAttack() => false;
+        public bool CanStartAttack(bool allowAutoTarget) => false;
         public void PrepareAttackRequest()
         {
         }
 
-        public bool SendAttack(AttackHeight height, float power) => false;
+        public bool SendAttack(AttackHeight height, float power, bool allowAutoTarget) => false;
         public void SendCancelAttack()
         {
         }

@@ -118,6 +118,8 @@ public sealed class GraphicalPluginSessionTests
             string.Empty);
         string statusPath = Path.Combine(temporary.Path, "status.jsonl");
         var events = new WorldEvents();
+        var worldEntities = new RaisableWorldEntities();
+        events.BindWorldEntities(worldEntities);
         var selection = new SelectionState();
         var ui = new BufferedUiRegistry();
         var host = new AppPluginHost(
@@ -139,7 +141,7 @@ public sealed class GraphicalPluginSessionTests
         Assert.Equal(0, plugins.LoadedCount);
         Assert.Empty(ui.Drain());
         Assert.Equal(0, ui.RegistrationCount);
-        events.FireEntitySpawned(new WorldEntitySnapshot(
+        worldEntities.Raise(new WorldEntitySnapshot(
             1u,
             2u,
             default,
@@ -172,6 +174,8 @@ public sealed class GraphicalPluginSessionTests
             string.Empty);
         string statusPath = Path.Combine(temporary.Path, "status.jsonl");
         var events = new WorldEvents();
+        var worldEntities = new RaisableWorldEntities();
+        events.BindWorldEntities(worldEntities);
         var selection = new SelectionState();
         var ui = new BufferedUiRegistry();
         var host = new AppPluginHost(
@@ -195,10 +199,10 @@ public sealed class GraphicalPluginSessionTests
         Assert.Equal(0, ui.RegistrationCount);
         Assert.Equal(
             "ui=True;events=True;selection=True",
-            File.ReadAllText(Path.Combine(
+            ReadSharedText(Path.Combine(
                 pluginDirectory,
                 "unload-observation")));
-        events.FireEntitySpawned(new WorldEntitySnapshot(
+        worldEntities.Raise(new WorldEntitySnapshot(
             1u,
             2u,
             default,
@@ -278,7 +282,7 @@ public sealed class GraphicalPluginSessionTests
     }
 
     private static JsonElement[] ReadStatuses(string path) =>
-        File.ReadAllLines(path)
+        ReadSharedLines(path)
             .Select(static line => JsonDocument.Parse(line).RootElement.Clone())
             .ToArray();
 
@@ -353,6 +357,30 @@ public sealed class GraphicalPluginSessionTests
         }
     }
 
+    /// <summary>
+    /// A stand-in for the client's world-object producer, so a test can make
+    /// an object appear the way the running client does.
+    /// </summary>
+    private sealed class RaisableWorldEntities
+        : AcDream.Core.Plugins.IPluginWorldEntities
+    {
+        private readonly List<Action<WorldEntitySnapshot>> _handlers = [];
+
+        public IReadOnlyList<WorldEntitySnapshot> Entities => [];
+
+        public void Subscribe(Action<WorldEntitySnapshot> handler) =>
+            _handlers.Add(handler);
+
+        public void Unsubscribe(Action<WorldEntitySnapshot> handler) =>
+            _handlers.Remove(handler);
+
+        internal void Raise(WorldEntitySnapshot snapshot)
+        {
+            foreach (Action<WorldEntitySnapshot> handler in _handlers.ToArray())
+                handler(snapshot);
+        }
+    }
+
     private sealed class CapturingLogger : IPluginLogger
     {
         internal List<string> Messages { get; } = [];
@@ -395,4 +423,18 @@ public sealed class GraphicalPluginSessionTests
             }
         }
     }
-}
+
+    // A status file belongs to a session that may still be writing it, and a
+    // reader that does not share the file for writing is refused while it is.
+    private static string ReadSharedText(string path)
+    {
+        using var stream = new FileStream(
+            path, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    private static string[] ReadSharedLines(string path) =>
+        ReadSharedText(path).Split(
+            ["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries);}

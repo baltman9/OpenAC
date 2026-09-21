@@ -153,6 +153,35 @@ internal sealed class SkyPesActivationGateSlot : ISkyPesActivationGate
     }
 }
 
+/// <summary>
+/// Closes a frame's pass over other creatures' bodies, once every body that
+/// this client carries has been carried forward.
+/// </summary>
+internal interface IRemoteBodyPassPhase
+{
+    void FinishRemoteBodyPass();
+}
+
+/// <summary>The runtime's own close, which is where it comes from in a real run.</summary>
+internal sealed class RuntimeRemoteBodyPass(AcDream.Runtime.GameRuntime runtime)
+    : IRemoteBodyPassPhase
+{
+    private readonly AcDream.Runtime.GameRuntime _runtime =
+        runtime ?? throw new ArgumentNullException(nameof(runtime));
+
+    public void FinishRemoteBodyPass() => _runtime.FinishRemoteBodyPass();
+}
+
+/// <summary>Nothing to close, for a frame built without a runtime.</summary>
+internal sealed class NoRemoteBodyPass : IRemoteBodyPassPhase
+{
+    internal static readonly NoRemoteBodyPass Instance = new();
+
+    public void FinishRemoteBodyPass()
+    {
+    }
+}
+
 internal sealed class LiveObjectFrameController : ILiveObjectFramePhase
 {
     private readonly RetailInboundEventDispatcher _inboundEvents;
@@ -172,6 +201,7 @@ internal sealed class LiveObjectFrameController : ILiveObjectFramePhase
     private readonly ILiveRenderProjectionSink? _renderProjections;
     private readonly StaticRenderProjectionJournal? _staticRenderProjections;
     private readonly List<WorldEntity> _activeStaticProjectionScratch = [];
+    private readonly IRemoteBodyPassPhase _remoteBodyPass;
 
     public LiveObjectFrameController(
         RetailInboundEventDispatcher inboundEvents,
@@ -187,7 +217,8 @@ internal sealed class LiveObjectFrameController : ILiveObjectFramePhase
         EquippedChildRenderController equippedChildren,
         LiveEffectFrameController effects,
         ILiveRenderProjectionSink? renderProjections = null,
-        StaticRenderProjectionJournal? staticRenderProjections = null)
+        StaticRenderProjectionJournal? staticRenderProjections = null,
+        IRemoteBodyPassPhase? remoteBodyPass = null)
     {
         _inboundEvents = inboundEvents ?? throw new ArgumentNullException(nameof(inboundEvents));
         _localPlayerFrame = localPlayerFrame
@@ -208,6 +239,7 @@ internal sealed class LiveObjectFrameController : ILiveObjectFramePhase
         _effects = effects ?? throw new ArgumentNullException(nameof(effects));
         _renderProjections = renderProjections;
         _staticRenderProjections = staticRenderProjections;
+        _remoteBodyPass = remoteBodyPass ?? NoRemoteBodyPass.Instance;
     }
 
     public void Tick(float deltaSeconds) =>
@@ -238,6 +270,7 @@ internal sealed class LiveObjectFrameController : ILiveObjectFramePhase
                 _origin.CenterX,
                 _origin.CenterY,
                 _animationPresenter.PrepareAnimation);
+        _remoteBodyPass.FinishRemoteBodyPass();
 
         _staticAnimations.Tick(deltaSeconds);
         if (_animatedEntities.Count > 0)

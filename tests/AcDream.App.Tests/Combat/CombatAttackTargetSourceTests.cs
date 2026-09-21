@@ -1,17 +1,12 @@
-using System.Numerics;
 using AcDream.App.Combat;
-using AcDream.App.Input;
-using AcDream.App.Rendering;
-using AcDream.App.Streaming;
-using AcDream.App.World;
 using AcDream.Core.Combat;
 using AcDream.Core.Items;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 using AcDream.Core.Selection;
-using AcDream.Core.World;
-using DatReaderWriter.DBObjs;
+using AcDream.Runtime;
+using AcDream.Runtime.Entities;
 
 namespace AcDream.App.Tests.Combat;
 
@@ -22,262 +17,306 @@ public sealed class CombatAttackTargetSourceTests
     [Fact]
     public void ExplicitSelectedHostileIsAcceptedWithoutAutoTarget()
     {
-        var harness = new Harness();
+        using var harness = new Harness();
         const uint target = 0x7000_0001u;
-        harness.Add(target, new Vector3(2f, 0f, 0f), attackable: true);
-        harness.Selection.Select(target, SelectionChangeSource.Keyboard);
+        harness.AddMonster(target, x: 12f);
+        harness.Select(target);
 
         Assert.Equal(
             target,
-            harness.Targets.GetSelectedOrClosestCombatTarget(autoTarget: false));
+            harness.Targets.GetSelectedOrClosestCombatTarget(allowAutoTarget: false));
     }
 
     [Fact]
     public void ExplicitSelectedPkLitePlayerIsAcceptedWithoutAutoTarget()
     {
-        var harness = new Harness();
+        using var harness = new Harness();
         harness.SetLocalPlayerPvpFlags(SelectedObjectHealthPolicy.BfPkLiteStatus);
         const uint target = 0x7000_0002u;
         harness.Add(
             target,
-            new Vector3(2f, 0f, 0f),
-            attackable: false,
-            isPlayer: true,
-            extraFlags: SelectedObjectHealthPolicy.BfPkLiteStatus);
-        harness.Selection.Select(target, SelectionChangeSource.Keyboard);
+            x: 12f,
+            flags: SelectedObjectHealthPolicy.BfPlayer
+                | SelectedObjectHealthPolicy.BfPkLiteStatus);
+        harness.Select(target);
 
         Assert.Equal(
             target,
-            harness.Targets.GetSelectedOrClosestCombatTarget(autoTarget: false));
+            harness.Targets.GetSelectedOrClosestCombatTarget(allowAutoTarget: false));
     }
 
     [Fact]
     public void ExplicitSelectedNonPkPlayerIsRefused()
     {
-        var harness = new Harness();
+        using var harness = new Harness();
         const uint target = 0x7000_0003u;
-        harness.Add(
-            target,
-            new Vector3(2f, 0f, 0f),
-            attackable: false,
-            isPlayer: true);
-        harness.Selection.Select(target, SelectionChangeSource.Keyboard);
+        harness.Add(target, x: 12f, flags: SelectedObjectHealthPolicy.BfPlayer);
+        harness.Select(target);
 
         Assert.Null(
-            harness.Targets.GetSelectedOrClosestCombatTarget(autoTarget: false));
+            harness.Targets.GetSelectedOrClosestCombatTarget(allowAutoTarget: false));
     }
 
     [Fact]
     public void ExplicitSelectedAttackablePetIsRefused()
     {
-        var harness = new Harness();
+        using var harness = new Harness();
         const uint pet = 0x7000_0007u;
         harness.Add(
             pet,
-            new Vector3(2f, 0f, 0f),
-            attackable: true,
+            x: 12f,
+            flags: SelectedObjectHealthPolicy.BfAttackable,
             petOwnerId: Player);
-        harness.Selection.Select(pet, SelectionChangeSource.Keyboard);
+        harness.Select(pet);
 
         Assert.Null(
-            harness.Targets.GetSelectedOrClosestCombatTarget(autoTarget: false));
+            harness.Targets.GetSelectedOrClosestCombatTarget(allowAutoTarget: false));
     }
 
     [Fact]
     public void AutoTargetNeverAcquiresAPlayerOverAMonster()
     {
-        var harness = new Harness();
+        using var harness = new Harness(autoTarget: true);
         harness.SetLocalPlayerPvpFlags(SelectedObjectHealthPolicy.BfPkLiteStatus);
         const uint monster = 0x7000_0004u;
         const uint pkLitePlayer = 0x7000_0005u;
-        harness.Add(monster, new Vector3(8f, 0f, 0f), attackable: true);
+        harness.AddMonster(monster, x: 18f);
         harness.Add(
             pkLitePlayer,
-            new Vector3(1f, 0f, 0f),
-            attackable: false,
-            isPlayer: true,
-            extraFlags: SelectedObjectHealthPolicy.BfPkLiteStatus);
+            x: 11f,
+            flags: SelectedObjectHealthPolicy.BfPlayer
+                | SelectedObjectHealthPolicy.BfPkLiteStatus);
 
         uint? selected = harness.Targets.GetSelectedOrClosestCombatTarget(
-            autoTarget: true);
+            allowAutoTarget: true);
 
         Assert.Equal(monster, selected);
-        Assert.Equal(monster, harness.Selection.SelectedObjectId);
+        Assert.Equal(monster, harness.Runtime.ActionOwner.Selection.SelectedObjectId);
     }
 
     [Fact]
     public void AutoTargetNeverAcquiresAPlayerWhenNoMonsterIsInRange()
     {
-        var harness = new Harness();
+        using var harness = new Harness(autoTarget: true);
         harness.SetLocalPlayerPvpFlags(SelectedObjectHealthPolicy.BfPkLiteStatus);
-        const uint pkLitePlayer = 0x7000_0006u;
         harness.Add(
-            pkLitePlayer,
-            new Vector3(1f, 0f, 0f),
-            attackable: false,
-            isPlayer: true,
-            extraFlags: SelectedObjectHealthPolicy.BfPkLiteStatus);
+            0x7000_0006u,
+            x: 11f,
+            flags: SelectedObjectHealthPolicy.BfPlayer
+                | SelectedObjectHealthPolicy.BfPkLiteStatus);
 
-        uint? selected = harness.Targets.GetSelectedOrClosestCombatTarget(
-            autoTarget: true);
-
-        Assert.Null(selected);
-        Assert.Null(harness.Selection.SelectedObjectId);
+        Assert.Null(
+            harness.Targets.GetSelectedOrClosestCombatTarget(allowAutoTarget: true));
+        Assert.Null(harness.Runtime.ActionOwner.Selection.SelectedObjectId);
     }
 
     [Fact]
     public void AutoTargetUsesNearestEligibleLiveHostile()
     {
-        var harness = new Harness();
+        using var harness = new Harness(autoTarget: true);
         const uint valid = 0x7000_0010u;
-        harness.Add(valid, new Vector3(8f, 0f, 0f), attackable: true);
-        harness.Add(0x7000_0011u, new Vector3(2f, 0f, 0f), attackable: false);
-        WorldEntity dead = harness.Add(
-            0x7000_0012u,
-            new Vector3(3f, 0f, 0f),
-            attackable: true);
-        harness.Runtime.SetAnimationRuntime(
-            dead.ServerGuid,
-            new Animation(dead, MotionCommand.Dead));
-        WorldEntity hidden = harness.Add(
-            0x7000_0013u,
-            new Vector3(4f, 0f, 0f),
-            attackable: true);
-        Assert.True(harness.Runtime.TryApplyState(
-            new SetState.Parsed(
-                hidden.ServerGuid,
-                (uint)(PhysicsStateFlags.ReportCollisions | PhysicsStateFlags.Hidden),
-                InstanceSequence: 1,
-                StateSequence: 2),
-            out _));
-        WorldEntity pending = harness.Add(
-            0x7000_0014u,
-            new Vector3(5f, 0f, 0f),
-            attackable: true);
-        Assert.True(harness.Runtime.WithdrawLiveEntityProjection(pending.ServerGuid));
+        harness.AddMonster(valid, x: 18f);
+        harness.Add(0x7000_0011u, x: 12f, flags: 0u);
+        const uint dead = 0x7000_0012u;
+        harness.AddMonster(dead, x: 13f);
+        harness.Runtime.ActionOwner.Combat.OnUpdateHealth(dead, 0f);
+        harness.AddMonster(0x7000_0013u, x: 14f, state: PhysicsStateFlags.Hidden);
+        harness.AddMonster(0x7000_0014u, x: 15f, state: PhysicsStateFlags.NoDraw);
 
         uint? selected = harness.Targets.GetSelectedOrClosestCombatTarget(
-            autoTarget: true);
+            allowAutoTarget: true);
 
         Assert.Equal(valid, selected);
-        Assert.Equal(valid, harness.Selection.SelectedObjectId);
+        Assert.Equal(valid, harness.Runtime.ActionOwner.Selection.SelectedObjectId);
     }
 
     [Fact]
     public void MissingAutoTargetClearsAnInvalidSelection()
     {
-        var harness = new Harness();
+        using var harness = new Harness(autoTarget: true);
         const uint nonHostile = 0x7000_0020u;
-        harness.Add(nonHostile, Vector3.UnitX, attackable: false);
-        harness.Selection.Select(nonHostile, SelectionChangeSource.Keyboard);
+        harness.Add(nonHostile, x: 11f, flags: 0u);
+        harness.Select(nonHostile);
 
-        Assert.Null(harness.Targets.GetSelectedOrClosestCombatTarget(autoTarget: true));
-
-        Assert.Null(harness.Selection.SelectedObjectId);
+        Assert.Null(
+            harness.Targets.GetSelectedOrClosestCombatTarget(allowAutoTarget: true));
+        Assert.Null(harness.Runtime.ActionOwner.Selection.SelectedObjectId);
     }
 
-    private sealed class Harness
+    /// <summary>
+    /// The option is the player's, and it only ever adds the substitution: a
+    /// selected monster is attacked whether the option is on or off.
+    /// Mutation: make the closest-hostile fallback unconditional and the
+    /// second case below acquires the monster instead of refusing.
+    /// </summary>
+    [Fact]
+    public void WithoutTheAutoTargetOptionOnlyTheSelectionIsAttacked()
     {
-        public ClientObjectTable Objects { get; } = new();
-        public SelectionState Selection { get; } = new();
-        public LiveEntityRuntime Runtime { get; }
+        using var harness = new Harness();
+        const uint monster = 0x7000_0030u;
+        harness.AddMonster(monster, x: 12f);
+
+        harness.Select(monster);
+        Assert.Equal(
+            monster,
+            harness.Targets.GetSelectedOrClosestCombatTarget(allowAutoTarget: true));
+
+        harness.Runtime.ActionOwner.Selection.Clear(SelectionChangeSource.Keyboard);
+        Assert.Null(
+            harness.Targets.GetSelectedOrClosestCombatTarget(allowAutoTarget: true));
+    }
+
+    /// <summary>
+    /// The defect this pins: a monster the runtime calls attackable is
+    /// attackable under a window too. A plugin names a target, the runtime
+    /// selects it, and the graphical host must swing at that one and no
+    /// other, whatever the selection held a moment before, and with the
+    /// player's auto-target option off.
+    /// Mutation: answer from anything other than the runtime's own
+    /// attack-target owner and both cases below go null.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void APluginNamedTargetIsTheOneAttacked(bool selectionHeldSomethingElse)
+    {
+        using var harness = new Harness();
+        const uint corpse = 0x7000_0040u;
+        const uint named = 0x7000_0041u;
+        harness.Add(corpse, x: 11f, flags: 0u, type: ItemType.Container);
+        harness.AddMonster(named, x: 13f);
+        if (selectionHeldSomethingElse)
+            harness.Select(corpse);
+
+        // What the automation surface does on the plugin's behalf.
+        harness.Runtime.ActionOwner.Selection.Select(
+            named,
+            SelectionChangeSource.Plugin);
+
+        Assert.Equal(
+            named,
+            harness.Targets.GetSelectedOrClosestCombatTarget(allowAutoTarget: false));
+    }
+
+    /// <summary>
+    /// Host parity: the same runtime, the same question, the same answer,
+    /// because both hosts now ask one owner.
+    /// Mutation: give the graphical host a rule of its own and this diverges.
+    /// </summary>
+    [Fact]
+    public void BothHostsResolveTheSameTargetForTheSameCall()
+    {
+        using var harness = new Harness();
+        const uint named = 0x7000_0050u;
+        harness.AddMonster(named, x: 13f);
+        harness.Runtime.ActionOwner.Selection.Select(
+            named,
+            SelectionChangeSource.Plugin);
+
+        Assert.Equal(
+            RuntimeAttackTargetResolver.Resolve(
+                harness.Runtime,
+                allowAutoTarget: false).Target,
+            harness.Targets.GetSelectedOrClosestCombatTarget(allowAutoTarget: false));
+    }
+
+    private sealed class Harness : IDisposable
+    {
+        public GameRuntime Runtime { get; }
         public CombatAttackTargetSource Targets { get; }
 
-        public Harness()
+        public Harness(bool autoTarget = false)
         {
-            var spatial = new GpuWorldState();
-            spatial.AddLandblock(new LoadedLandblock(
-                0x0101_FFFFu,
-                new LandBlock(),
-                Array.Empty<WorldEntity>()));
-            Runtime = LiveEntityRuntimeFixture.Create(spatial, new Resources());
-            var identity = new LocalPlayerIdentityState { ServerGuid = Player };
-            Targets = new CombatAttackTargetSource(
-                Selection,
-                Runtime,
-                Objects,
-                identity);
-            Add(Player, Vector3.Zero, attackable: false, isPlayer: true);
+            Runtime = GameRuntimeTestFactory.Create();
+            Runtime.PlayerIdentity.ServerGuid = Player;
+            Runtime.CharacterOwner.Options.SetOptionBit(
+                (uint)CharacterOptionId.AutoTarget,
+                autoTarget);
+            Add(Player, x: 10f, flags: SelectedObjectHealthPolicy.BfPlayer);
+            Targets = new CombatAttackTargetSource(Runtime);
         }
 
+        public void Select(uint objectId) =>
+            Runtime.ActionOwner.Selection.Select(
+                objectId,
+                SelectionChangeSource.Keyboard);
+
         public void SetLocalPlayerPvpFlags(uint extraFlags) =>
-            Objects.AddOrUpdate(new ClientObject
+            Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
             {
                 ObjectId = Player,
                 Name = $"Object {Player:X8}",
                 Type = ItemType.Creature,
-                PublicWeenieBitfield = SelectedObjectHealthPolicy.BfPlayer | extraFlags,
+                PublicWeenieBitfield =
+                    SelectedObjectHealthPolicy.BfPlayer | extraFlags,
             });
 
-        public WorldEntity Add(
+        public void AddMonster(
             uint guid,
-            Vector3 position,
-            bool attackable,
-            bool isPlayer = false,
-            uint extraFlags = 0u,
-            uint petOwnerId = 0u)
+            float x,
+            PhysicsStateFlags state = 0) =>
+            Add(guid, x, SelectedObjectHealthPolicy.BfAttackable, state: state);
+
+        public void Add(
+            uint guid,
+            float x,
+            uint flags,
+            uint petOwnerId = 0u,
+            ItemType type = ItemType.Creature,
+            PhysicsStateFlags state = 0)
         {
-            Runtime.RegisterLiveEntity(Spawn(guid));
-            WorldEntity entity = Runtime.MaterializeLiveEntity(
-                guid,
-                0x0101_0001u,
-                id => new WorldEntity
-                {
-                    Id = id,
-                    ServerGuid = guid,
-                    SourceGfxObjOrSetupId = 0x0200_0001u,
-                    Position = position,
-                    Rotation = Quaternion.Identity,
-                    Scale = 1f,
-                    MeshRefs = [],
-                })!;
-            uint flags = attackable ? SelectedObjectHealthPolicy.BfAttackable : 0u;
-            if (isPlayer)
-                flags |= SelectedObjectHealthPolicy.BfPlayer;
-            flags |= extraFlags;
-            Objects.AddOrUpdate(new ClientObject
+            RuntimeEntityRecord record = Runtime.EntityObjects
+                .RegisterEntity(Spawn(guid, x, state))
+                .Canonical!;
+            Runtime.EntityObjects.ApplyAcceptedSpawn(
+                record,
+                record.CreateIntegrationVersion,
+                record.Snapshot,
+                replaceGeneration: false);
+            Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
             {
                 ObjectId = guid,
                 Name = $"Object {guid:X8}",
-                Type = ItemType.Creature,
+                Type = type,
                 PublicWeenieBitfield = flags,
                 PetOwnerId = petOwnerId,
             });
-            return entity;
         }
+
+        public void Dispose() => Runtime.Dispose();
     }
 
-    private sealed record Animation(WorldEntity Entity, uint CurrentMotion)
-        : ILiveEntityAnimationRuntime;
-
-    private sealed class Resources : ILiveEntityResourceLifecycle
-    {
-        public void Register(WorldEntity entity)
-        {
-        }
-        public void Unregister(WorldEntity entity)
-        {
-        }
-    }
-
-    private static WorldSession.EntitySpawn Spawn(uint guid)
+    private static WorldSession.EntitySpawn Spawn(
+        uint guid,
+        float x,
+        PhysicsStateFlags state)
     {
         var position = new CreateObject.ServerPosition(
             0x0101_0001u,
-            10f,
+            x,
             10f,
             5f,
             1f,
             0f,
             0f,
             0f);
+        var timestamps = new PhysicsTimestamps(
+            Position: 1,
+            Movement: 1,
+            State: 1,
+            Vector: 1,
+            Teleport: 0,
+            ServerControlledMove: 1,
+            ForcePosition: 0,
+            ObjDesc: 1,
+            Instance: 1);
         var physics = new PhysicsSpawnData(
-            RawState: (uint)PhysicsStateFlags.ReportCollisions,
+            RawState: (uint)state,
             Position: position,
             Movement: null,
             AnimationFrame: null,
             SetupTableId: 0x0200_0001u,
-            MotionTableId: 0x0900_0001u,
+            MotionTableId: null,
             SoundTableId: null,
             PhysicsScriptTableId: null,
             Parent: null,
@@ -291,7 +330,7 @@ public sealed class CombatAttackTargetSourceTests
             AngularVelocity: null,
             DefaultScriptType: null,
             DefaultScriptIntensity: null,
-            Timestamps: new PhysicsTimestamps(1, 1, 1, 1, 0, 1, 0, 1, 1));
+            Timestamps: timestamps);
         return new WorldSession.EntitySpawn(
             guid,
             position,
@@ -301,11 +340,11 @@ public sealed class CombatAttackTargetSourceTests
             [],
             null,
             null,
-            "fixture",
+            guid.ToString("X8"),
             null,
             null,
-            0x0900_0001u,
-            PhysicsState: (uint)PhysicsStateFlags.ReportCollisions,
+            null,
+            PhysicsState: physics.RawState,
             InstanceSequence: 1,
             MovementSequence: 1,
             ServerControlSequence: 1,

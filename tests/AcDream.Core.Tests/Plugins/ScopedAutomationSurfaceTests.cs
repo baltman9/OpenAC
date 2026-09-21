@@ -113,9 +113,9 @@ public sealed class ScopedAutomationSurfaceTests
         EventInfo[] events = typeof(IPluginChat)
             .GetEvents(BindingFlags.Public | BindingFlags.Instance);
         Assert.True(
-            methods.Length == 9 && events.Length == 2,
+            methods.Length == 11 && events.Length == 2,
             "IPluginChat should still have exactly the members this test "
-                + "knows about (9 methods incl. event accessors, 2 events) -- "
+                + "knows about (11 methods incl. event accessors, 2 events) -- "
                 + "a member was added or removed without updating this test.");
 
         chat.CaptureMessages(0);
@@ -129,6 +129,12 @@ public sealed class ScopedAutomationSurfaceTests
 
         chat.Submit("a");
         Assert.Equal(1, recording.SubmitCalls);
+
+        chat.Compose("a");
+        Assert.Equal(1, recording.ComposeCalls);
+
+        Assert.True(chat.IsInputActive);
+        Assert.Equal(1, recording.IsInputActiveReads);
 
         chat.RegisterFilter(static _ => true);
         Assert.Equal(1, recording.FilterCount);
@@ -161,6 +167,23 @@ public sealed class ScopedAutomationSurfaceTests
         internal int PostSystemMessageCalls { get; private set; }
         internal int PostMessageCalls { get; private set; }
         internal int SubmitCalls { get; private set; }
+        internal int ComposeCalls { get; private set; }
+        internal int IsInputActiveReads { get; private set; }
+
+        public bool IsInputActive
+        {
+            get
+            {
+                IsInputActiveReads++;
+                return true;
+            }
+        }
+
+        public bool Compose(string text)
+        {
+            ComposeCalls++;
+            return true;
+        }
         internal int FilterCount => _filters.Count;
         internal int LinkClickedSubscriberCount =>
             _linkClicked?.GetInvocationList().Length ?? 0;

@@ -24,6 +24,7 @@ using AcDream.Core.Social;
 using AcDream.Core.Spells;
 using AcDream.Core.World;
 using AcDream.Content;
+using AcDream.Content.Skills;
 using AcDream.Runtime;
 using AcDream.Runtime.Entities;
 using AcDream.Runtime.Gameplay;
@@ -61,7 +62,7 @@ internal sealed record LiveSessionInteractionRuntime(
     GameplayInputFrameController GameplayInput,
     PlayerModeController PlayerMode,
     PlayerModeAutoEntry PlayerModeAutoEntry,
-    ItemInteractionController ItemInteraction,
+    RuntimeItemInteraction ItemInteraction,
     RuntimeCombatAttackState CombatAttack,
     SelectionInteractionController SelectionInteractions);
 
@@ -102,15 +103,16 @@ internal sealed class LiveSessionRuntimeFactory
     private readonly LiveSessionWorldRuntime _world;
     private readonly LiveSessionCommandSurface _commands;
     private readonly Action<string> _log;
-    private readonly LiveMovementStatsApplier _movementStats;
     private readonly SessionStatusWriter _statusWriter;
     private readonly string _sessionId;
     private readonly IReadOnlyList<string> _loginCommands;
     private readonly TimeSpan _loginCommandDelay;
     private readonly TimeProvider _timeProvider;
-    private readonly DatChatPoseCatalog _chatPoses;
 
     private readonly string _chatLogDirectory;
+
+    /// <summary>Told when the server has seeded the character options.</summary>
+    private readonly Action _noteOptionsSeeded;
 
     private ChatSessionLog? _chatSessionLog;
 
@@ -129,8 +131,10 @@ internal sealed class LiveSessionRuntimeFactory
         IReadOnlyList<string>? loginCommands = null,
         int loginCommandDelayMs = 500,
         TimeProvider? timeProvider = null,
-        string? chatLogDirectory = null)
+        string? chatLogDirectory = null,
+        Action? noteOptionsSeeded = null)
     {
+        _noteOptionsSeeded = noteOptionsSeeded ?? (() => { });
         _player = player ?? throw new ArgumentNullException(nameof(player));
         _domain = domain ?? throw new ArgumentNullException(nameof(domain));
         _ui = ui ?? throw new ArgumentNullException(nameof(ui));
@@ -151,11 +155,6 @@ internal sealed class LiveSessionRuntimeFactory
         _loginCommands = loginCommands is null ? [] : [.. loginCommands];
         _loginCommandDelay = TimeSpan.FromMilliseconds(loginCommandDelayMs);
         _timeProvider = timeProvider ?? TimeProvider.System;
-        _chatPoses = DatChatPoseCatalog.Load(_world.Dats, _world.DatLock);
-        _movementStats = new LiveMovementStatsApplier(
-            _player.Controller,
-            _domain.Character.MovementSkills,
-            _log);
     }
 
     public LiveSessionHost Create(
@@ -181,64 +180,33 @@ internal sealed class LiveSessionRuntimeFactory
                 failure.Command,
                 failure.Error),
             _timeProvider);
-        return new LiveSessionHost(controller, new LiveSessionHostBindings(
-            Routing: new(
-                CreateEventRouter,
-                session => _commands.Attach(new LiveSessionCommandRouter(
-                    CreateCommandBindings(session)))),
-            Reset: reset.Execute,
-            Selection: new(
-                SetPlayerIdentity: id => _player.Identity.ServerGuid = id,
-                SetVitalsIdentity: id => _ui.Vitals?.SetLocalPlayerGuid(id),
-                SetChatIdentity: _domain.Communication.Chat.SetLocalPlayerGuid,
-                MarkPersistent: _world.WorldState.MarkPersistent,
-                SetVanishProbeIdentity: id => EntityVanishProbe.PlayerGuid = id,
-                ClearCombat: _domain.Actions.Combat.Clear,
-                ArmLoginTunnel: _world.Teleport.ArmLoginTunnel),
-            EnteredWorld: new(
-                SetActiveCharacter: _interaction.Settings.SetActiveCharacter,
-                RestoreLayout: () =>
-                {
-                    _interaction.Settings.SetGameplayDisplay(true);
-                    _ui.RetailUi?.RestoreLayout();
-                    _ui.RetailUi?.InventoryPanelController?.Populate();
-                    _ui.Paperdoll?.MarkDirty();
-                    _ui.RetailUi?.RedeclareSocialPanelAfterWorldEntry();
-                },
-                SyncToolbar: () => _ui.RetailUi?.SyncToolbarWindowButtons(),
-                LoadCharacterSettings: name =>
-                {
-                    _interaction.Settings.LoadCharacterContext(name);
-                    _ui.RetailUi?.LoadJournal(name);
-                },
-                ArmPlayerModeAutoEntry: _interaction.PlayerModeAutoEntry.Arm,
-                ResumeWorldAudio: () => _world.WorldAudio?.ResumeForWorldEntry()),
-            Connecting: (host, port, user) =>
-                _domain.Communication.Chat.OnSystemMessage(
-                    $"connecting to {host}:{port} as {user}",
-                    chatType: 1),
-            Connected: () =>
-            {
-                _domain.Communication.Chat.OnSystemMessage(
-                    "connected — character list received",
-                    chatType: 1);
-                _statusWriter.Connected(_sessionId);
-            },
-            Roster: roster => _statusWriter.CharacterList(_sessionId, roster),
-            CharacterEntered: selection => _statusWriter.EnteredWorld(
-                _sessionId,
-                selection.CharacterId,
-                selection.CharacterName),
-            LoginCommands: loginCommands,
-            CharacterCreated: identity => _statusWriter.CharacterCreated(
-                _sessionId,
-                identity.Guid,
-                identity.Name),
-            CreationFailed: rejection => _statusWriter.CreationFailed(
-                _sessionId,
-                rejection.RawCode,
-                rejection.Reason,
-                rejection.AttemptedName)),
+        return new LiveSessionHost(
+            controller,
+            AcDream.App.Plugins.GraphicalAutomationCapabilities
+                .BuildSessionHostBindings(
+                    new AcDream.App.Plugins.GraphicalSessionHostParts
+                    {
+                        CreateEvents = CreateEventRouter,
+                        CreateCommands = session => _commands.Attach(
+                            new LiveSessionCommandRouter(
+                                CreateCommandBindings(session))),
+                        Reset = reset.Execute,
+                        Identity = _player.Identity,
+                        Communication = _domain.Communication,
+                        Combat = _domain.Actions.Combat,
+                        Settings = _interaction.Settings,
+                        PlayerModeAutoEntry = _interaction.PlayerModeAutoEntry,
+                        WorldState = _world.WorldState,
+                        Teleport = _world.Teleport,
+                        StatusWriter = _statusWriter,
+                        SessionId = _sessionId,
+                        Vitals = _ui.Vitals,
+                        RetainedUi = _ui.RetailUi,
+                        Paperdoll = _ui.Paperdoll,
+                        WorldAudio = _world.WorldAudio,
+                        LoginCommands = loginCommands,
+                        Warn = _log,
+                    }),
             connectOptions with { PollConnectionDuringTicks = true },
             _domain.Runtime);
     }
@@ -291,7 +259,6 @@ internal sealed class LiveSessionRuntimeFactory
 
     private void ResetPlayerPresentation()
     {
-        _movementStats.Reset();
         _interaction.PlayerMode.ResetSession();
         _world.SpawnClaims.Reset();
     }
@@ -352,7 +319,8 @@ internal sealed class LiveSessionRuntimeFactory
                 Contracts: _domain.Runtime.ContractsOwner,
                 PlayerGuid: () => _player.Identity.ServerGuid,
                 OnLocalPlayerDeath:
-                    _domain.Communication.ReportLocalPlayerDeath));
+                    _domain.Communication.ReportLocalPlayerDeath),
+            actions: _domain.Runtime.ActionOwner);
         return new GraphicalSessionEventRoute(
             route,
             _domain.Runtime,
@@ -397,286 +365,59 @@ internal sealed class LiveSessionRuntimeFactory
         SkillTable? skillTable)
     {
         var skillCreditResolver = new LiveSkillCreditResolver(skillTable);
-        return new LiveCharacterSessionBindings(
-            _domain.Actions.Combat,
-            _domain.Character,
-            ResolveSkillFormulaBonus: skillCreditResolver.Resolve,
-            OnSkillsUpdated: (runSkill, jumpSkill) =>
-                _movementStats.Apply("skills"),
-            OnConfirmationRequest: request =>
-                _ui.RetailUi?.HandleConfirmationRequest(request),
-            OnConfirmationDone: done =>
-                _ui.RetailUi?.HandleConfirmationDone(done),
-            ClientTime: ClientTimerNow,
-            OnMovementStatsUpdated: () => _movementStats.Apply("stats"),
-            OnCharacterOptionsChanged: (_, options2) =>
-            {
-                _interaction.Settings.SyncChatFromServerOptions(options2);
-                _interaction.Settings.SetUiLocked(
-                    _domain.Character.Options.GetOptionBit(CharacterOptionId.LockUI));
-                // OP4 re-review R2: open option-bearing panels re-read live
-                // bits at every seed (login + reconnect) — see
-                // RuntimeSettingsController.ServerOptionsSeeded.
-                _interaction.Settings.NotifyServerOptionsSeeded();
-            });
+        return AcDream.App.Plugins.GraphicalAutomationCapabilities
+            .BuildCharacterSessionBindings(
+                new AcDream.App.Plugins.GraphicalCharacterSessionParts
+                {
+                    Character = _domain.Character,
+                    Combat = _domain.Actions.Combat,
+                    Settings = _interaction.Settings,
+                    MovementStats = _domain.Runtime.MovementStats,
+                    ResolveSkillFormulaBonus = skillCreditResolver.Resolve,
+                    ClientTime = ClientTimerNow,
+                    RetainedUi = _ui.RetailUi,
+                    NoteOptionsSeeded = _noteOptionsSeeded,
+                    Warn = _log,
+                });
     }
 
     private LiveSessionCommandBindings CreateCommandBindings(
-        WorldSession session)
-    {
-        void SendSingleCharacterOption(uint optionId, bool value) =>
-            _domain.Character.Options.TrySetOption(
-                optionId,
-                value,
-                sendAutoSave: session.SendSetSingleCharacterOption);
-
-        void SaveCharacterOptionsIfDirty() =>
-            _domain.Character.Options.TryFlush(() =>
-            {
-                CharacterOptionsBlobEcho echo = CharacterOptionsBlobSource.Capture(
-                    _domain.Character,
-                    _domain.Inventory.Shortcuts);
-                session.SendSetCharacterOptions(
-                    echo.Options1,
-                    echo.Options2,
-                    echo.Shortcuts,
-                    echo.FavoriteSpells,
-                    echo.DesiredComponents,
-                    echo.SpellbookFilters);
-            });
-
-        return new(
-        ClientCommands: new ClientCommandController.Bindings(
-            TeleportToLifestone: session.SendTeleportToLifestone,
-            TeleportToMarketplace: session.SendTeleportToMarketplace,
-            TeleportToPkArena: session.SendTeleportToPkArena,
-            TeleportToPkLiteArena: session.SendTeleportToPkLiteArena,
-            TeleportToHouse: session.SendTeleportToHouse,
-            TeleportToMansion: session.SendTeleportToMansion,
-            QueryAge: session.SendQueryAge,
-            QueryBirth: session.SendQueryBirth,
-            ToggleFrameRate: _interaction.Settings.ToggleFrameRate,
-            ToggleUiLock: () =>
-            {
-                bool locked = !_domain.Character.Options.GetOptionBit(
-                    CharacterOptionId.LockUI);
-                SendSingleCharacterOption((uint)CharacterOptionId.LockUI, locked);
-                _interaction.Settings.SetUiLocked(locked);
-            },
-            ShowSystemMessage:
-                text => _domain.Communication.Chat.OnSystemMessage(text, 0x00u),
-            ShowClientLocalMessage:
-                text => _domain.Communication.AddText(
-                    text, RetailLogTextType.ClientLocal),
-            ShowWeenieError:
-                code =>
+        WorldSession session) =>
+        LiveSessionCommandBindingFactory.Create(
+            _domain.Runtime,
+            session,
+            RuntimeClientCommandBindings.Build(
+                _domain.Runtime,
+                session,
+                new RuntimeClientCommandHostBindings
                 {
-                    (string? text, RetailLogTextType type) = WeenieErrorMessages.Resolve(code, null);
-                    if (text is not null)
-                        _domain.Communication.AddText(text, type);
-                    else
-                        Console.WriteLine($"[weenie-error] unmapped code=0x{code:X4}");
+                    ToggleFrameRate = _interaction.Settings.ToggleFrameRate,
+                    SetUiLocked = _interaction.Settings.SetUiLocked,
+                    ShowConfirmation = (message, completed) =>
+                        _ui.RetailUi?.ShowConfirmation(message, completed),
+                    SaveUi = name => _ui.RetailUi?.SaveNamedLayout(name),
+                    LoadUi = name => _ui.RetailUi?.RestoreNamedLayout(name),
+                    SaveAutoUi = () => _ui.RetailUi?.SaveLayout(),
+                    LoadAutoUi = () => _ui.RetailUi?.RestoreLayout(),
+                    FillComponentBuyList = (category, maximumPrice) =>
+                        _ui.RetailUi?.FillComponentBuyList(
+                            category ?? VendorComponentFill.AnyCategory,
+                            maximumPrice),
+                    SetLandscapeRadius = radius =>
+                        _interaction.Settings.SaveDisplay(
+                            _interaction.Settings.Display with
+                            {
+                                LandscapeDrawDistance = radius,
+                            }),
+                    SetFieldOfView = degrees =>
+                        _interaction.Settings.SaveDisplay(
+                            _interaction.Settings.Display with
+                            {
+                                FieldOfView = degrees,
+                            }),
                 },
-            PlayerPublicWeenieBitfield: () =>
-                _domain.EntityObjects.Objects.Get(_player.Identity.ServerGuid)?
-                    .PublicWeenieBitfield,
-            ClientVersion: () =>
-                typeof(LiveSessionRuntimeFactory).Assembly
-                    .GetName().Version?.ToString(3)
-                ?? "unknown",
-            CurrentPosition: () => _player.Controller.Controller?.CellPosition,
-            LastOutsideCorpsePosition: () =>
-                _domain.Character.LocalPlayer.GetPosition(0x0Eu),
-            ShowConfirmation: (message, completed) =>
-                _ui.RetailUi?.ShowConfirmation(message, completed),
-            Suicide: session.SendSuicide,
-            ClearChat: _ => _domain.Communication.Chat.Clear(),
-            SetChatLogFile: SetChatLogFile,
-            SaveUi: name => _ui.RetailUi?.SaveNamedLayout(name),
-            LoadUi: name => _ui.RetailUi?.RestoreNamedLayout(name),
-            SaveAutoUi: () => _ui.RetailUi?.SaveLayout(),
-            LoadAutoUi: () => _ui.RetailUi?.RestoreLayout(),
-            IsAway: () =>
-                _domain.EntityObjects.Objects.Get(_player.Identity.ServerGuid)?
-                    .Properties.GetBool(0x6Eu) == true,
-            SetAway: session.SendSetAfkMode,
-            SetAwayMessage: session.SendSetAfkMessage,
-            AcceptLootPermits: () =>
-                _domain.Character.Options.GetOptionBit(
-                    CharacterOptionId.AcceptLootPermits),
-            SetAcceptLootPermits: value =>
-                SendSingleCharacterOption(
-                    (uint)CharacterOptionId.AcceptLootPermits, value),
-            DisplayConsent: session.SendDisplayConsent,
-            ClearConsent: session.SendClearConsent,
-            RemoveConsent: session.SendRemoveConsent,
-            SendEmote: session.SendEmote,
-            _domain.Communication.Friends,
-            AddFriend: session.SendAddFriend,
-            RemoveFriend: session.SendRemoveFriend,
-            ClearFriends: session.SendClearFriends,
-            RequestLegacyFriends: session.SendLegacyFriendsListRequest,
-            _domain.Communication.Squelch,
-            ModifyCharacterSquelch: session.SendModifyCharacterSquelch,
-            ModifyAccountSquelch: session.SendModifyAccountSquelch,
-            ModifyGlobalSquelch: session.SendModifyGlobalSquelch,
-            LastTeller: () =>
-                _domain.Communication.CommandTargets.LastIncomingTellSender,
-            ClearDesiredComponents: () =>
-            {
-                session.SendClearDesiredComponents();
-            },
-            HasOpenVendor: () => _domain.Inventory.Vendor.VendorId != 0u,
-            FillComponentBuyList: (category, maximumPrice) =>
-                _ui.RetailUi?.FillComponentBuyList(
-                    category ?? VendorComponentFill.AnyCategory,
-                    maximumPrice),
-            EnterPkLite: session.SendEnterPkLite,
-            IsUsingTurbineChat: () => _domain.Communication.TurbineChat.Enabled,
-            SetChatTitle: _ => { },
-            SetSingleCharacterOption: SendSingleCharacterOption,
-            AddPlayerPermission: session.SendAddPlayerPermission,
-            RemovePlayerPermission: session.SendRemovePlayerPermission,
-            RequestAvailableHouses: session.SendListAvailableHouses,
-            RequestChannelIndex: session.SendIndexChannels,
-            RequestChannelList: session.SendListChannel,
-            JoinGmChannel: session.SendOnChannel,
-            LeaveGmChannel: session.SendOffChannel,
-            RecallAllegianceHometown: session.SendRecallAllegianceHometown,
-            RequestAllegianceInfo: session.SendAllegianceInfoRequest,
-            AbandonHouse: session.SendAbandonHouse,
-            Administration: new ClientCommandController.AdministrationBindings(
-                BreakAllegianceBoot: session.SendBreakAllegianceBoot,
-                AllegianceChatBoot: session.SendAllegianceChatBoot,
-                AllegianceChatGag: session.SendAllegianceChatGag,
-                AllegianceBroadcast: text =>
-                    session.SendChannel(0x02000000u, text),
-                ListAllegianceBans: session.SendListAllegianceBans,
-                AddAllegianceBan: session.SendAddAllegianceBan,
-                RemoveAllegianceBan: session.SendRemoveAllegianceBan,
-                ListAllegianceOfficers: session.SendListAllegianceOfficers,
-                ClearAllegianceOfficers: session.SendClearAllegianceOfficers,
-                SetAllegianceOfficer: session.SendSetAllegianceOfficer,
-                RemoveAllegianceOfficer: session.SendRemoveAllegianceOfficer,
-                ListAllegianceOfficerTitles: session.SendListAllegianceOfficerTitles,
-                ClearAllegianceOfficerTitles: session.SendClearAllegianceOfficerTitles,
-                SetAllegianceOfficerTitle: session.SendSetAllegianceOfficerTitle,
-                QueryAllegianceName: session.SendQueryAllegianceName,
-                SetAllegianceName: session.SendSetAllegianceName,
-                ClearAllegianceName: session.SendClearAllegianceName,
-                AllegianceLockAction: session.SendAllegianceLockAction,
-                SetAllegianceApprovedVassal: session.SendSetAllegianceApprovedVassal,
-                AllegianceHouseAction: session.SendAllegianceHouseAction,
-                QueryMotd: session.SendQueryMotd,
-                SetMotd: session.SendSetMotd,
-                ClearMotd: session.SendClearMotd,
-                SetOpenHouseStatus: session.SendSetOpenHouseStatus,
-                AddPermanentGuest: session.SendAddPermanentGuest,
-                RemovePermanentGuest: session.SendRemovePermanentGuest,
-                RemoveAllPermanentGuests: session.SendRemoveAllPermanentGuests,
-                ChangeStoragePermission: session.SendChangeStoragePermission,
-                AddAllStoragePermission: session.SendAddAllStoragePermission,
-                RemoveAllStoragePermission: session.SendRemoveAllStoragePermission,
-                RequestFullGuestList: session.SendRequestFullGuestList,
-                BootSpecificHouseGuest: session.SendBootSpecificHouseGuest,
-                BootEveryone: session.SendBootEveryone,
-                SetHooksVisibility: session.SendSetHooksVisibility,
-                ModifyAllegianceGuestPermission:
-                    session.SendModifyAllegianceGuestPermission,
-                ModifyAllegianceStoragePermission:
-                    session.SendModifyAllegianceStoragePermission),
-            IsPersistentDaylight: () =>
-                _domain.Character.Options.GetOptionBit(
-                    CharacterOptionId.PersistentAtDay),
-            SetPersistentDaylight: enabled =>
-                SendSingleCharacterOption(
-                    (uint)CharacterOptionId.PersistentAtDay,
-                    enabled),
-            SetLandscapeRadius: radius =>
-                _interaction.Settings.SaveDisplay(
-                    _interaction.Settings.Display with
-                    {
-                        LandscapeDrawDistance = radius,
-                    }),
-            SetFieldOfView: degrees =>
-                _interaction.Settings.SaveDisplay(
-                    _interaction.Settings.Display with
-                    {
-                        FieldOfView = degrees,
-                    })),
-        _domain.Communication.Chat,
-        _domain.Communication.TurbineChat,
-        PlayerGuid: () => _player.Identity.ServerGuid,
-        SendTalk: session.SendTalk,
-        SendTell: session.SendTell,
-        SendTalkDirect: session.SendTalkDirect,
-        SendChannel: session.SendChannel,
-        SendTurbineChat: (
-            roomId,
-            chatType,
-            dispatchType,
-            senderGuid,
-            text,
-            cookie) => session.SendTurbineChatTo(
-                roomId,
-                chatType,
-                dispatchType,
-                senderGuid,
-                text,
-                cookie),
-        AddShortcut: session.SendAddShortcut,
-        RemoveShortcut: session.SendRemoveShortcut,
-        AddFavorite: session.SendAddSpellFavorite,
-        RemoveFavorite: session.SendRemoveSpellFavorite,
-        SetSpellbookFilter: session.SendSpellbookFilter,
-        ForgetSpell: session.SendRemoveSpell,
-        SetDesiredComponent: session.SendSetDesiredComponentLevel,
-        ClearDesiredComponents: session.SendClearDesiredComponents,
-        RaiseAttribute: session.SendRaiseAttribute,
-        RaiseVital: session.SendRaiseVital,
-        RaiseSkill: session.SendRaiseSkill,
-        TrainSkill: session.SendTrainSkill,
-        AddFriend: session.SendAddFriend,
-        RemoveFriend: session.SendRemoveFriend,
-        ClearFriends: session.SendClearFriends,
-        RequestLegacyFriends: session.SendLegacyFriendsListRequest,
-        OpenTradeNegotiations: session.SendOpenTradeNegotiations,
-        CloseTradeNegotiations: session.SendCloseTradeNegotiations,
-        AddToTrade: item => session.SendAddToTrade(item),
-        AcceptTrade: (partner, selfAccepted, partnerAccepted) =>
-            session.SendAcceptTrade(
-                partner, 0d, 0u, partner, selfAccepted, partnerAccepted),
-        DeclineTrade: session.SendDeclineTrade,
-        ResetTrade: session.SendResetTrade,
-        ModifyCharacterSquelch: session.SendModifyCharacterSquelch,
-        ModifyAccountSquelch: session.SendModifyAccountSquelch,
-        ModifyGlobalSquelch: session.SendModifyGlobalSquelch,
-        Communication: _domain.Communication,
-        CharacterState: _domain.Character,
-        SendSingleCharacterOption: SendSingleCharacterOption,
-        SaveCharacterOptions: SaveCharacterOptionsIfDirty,
-        SendSetTitle: session.SendSetTitle,
-        SendFellowshipCreate: session.SendFellowshipCreate,
-        SendFellowshipRecruit: session.SendFellowshipRecruit,
-        SendFellowshipDismiss: session.SendFellowshipDismiss,
-        SendFellowshipQuit: session.SendFellowshipQuit,
-        SendFellowshipAssignNewLeader: session.SendFellowshipAssignNewLeader,
-        SendFellowshipChangeOpenness: session.SendFellowshipChangeOpenness,
-        SendFellowshipUpdateRequest: session.SendFellowshipUpdateRequest,
-        SendAllegianceSwear: session.SendAllegianceSwear,
-        SendAllegianceBreak: session.SendAllegianceBreak,
-        SendAllegianceKick: session.SendAllegianceKick,
-        SendAllegianceInfoRequest: session.SendAllegianceInfoRequest,
-        SendAllegianceUpdateRequest: session.SendAllegianceUpdateRequest,
-        Log: _log,
-        ResolvePose: command => _chatPoses.Resolve(
-            command,
-            male: _domain.EntityObjects.Objects
-                .Get(_player.Identity.ServerGuid)?
-                .Properties.GetInt(0x71u) == 1),
-        ExecuteMotion: motion => _player.Controller.ExecuteMotion(motion),
-        SendSoulEmote: session.SendSoulEmote);
-    }
+                SetChatLogFile),
+            _log);
 
     private static double ClientTimerNow() =>
         Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;

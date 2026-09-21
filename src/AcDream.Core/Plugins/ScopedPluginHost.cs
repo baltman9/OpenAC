@@ -1,4 +1,4 @@
-using AcDream.Plugin.Abstractions;
+﻿using AcDream.Plugin.Abstractions;
 
 namespace AcDream.Core.Plugins;
 
@@ -15,6 +15,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     private readonly ScopedAutomationSurface _automation;
     private readonly ScopedHotkeyRegistry _hotkeys;
     private bool _disposed;
+    private readonly ScopedWorldLines _worldLines;
 
     internal ScopedPluginHost(
         IPluginHost inner,
@@ -23,6 +24,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         string? pluginDirectory = null)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+        _worldLines = new ScopedWorldLines(inner.WorldLines);
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginDisplayName);
         _pluginId = pluginId;
@@ -48,6 +50,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     public IEvents Events => _events;
     public ISelectionService Selection => _selection;
     public IUiRegistry Ui => _ui;
+    public IPluginWorldLines WorldLines => _worldLines;
     public IPluginStorage Storage => _storage;
     public IPluginStorage VtankProfiles => _inner.VtankProfiles;
     public IPluginCommandRegistry Commands => _commands;
@@ -113,6 +116,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             return;
         _disposed = true;
         _events.Dispose();
+        _worldLines.Dispose();
         _selection.Dispose();
         _ui.Dispose();
         _commands.Dispose();
@@ -252,6 +256,14 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             inner.PostMessage(text, logTextType);
+        }
+
+        public bool IsInputActive => inner.IsInputActive;
+
+        public bool Compose(string text)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return inner.Compose(text);
         }
 
         public bool Submit(string text)
@@ -434,6 +446,32 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
 
             public void Dispose() => Interlocked.Exchange(ref _owner, null)?
                 .RemoveFilter(registration);
+        }
+    }
+
+    /// <summary>
+    /// The layers one plugin drew, let go together when the plugin is.
+    /// </summary>
+    private sealed class ScopedWorldLines(IPluginWorldLines inner) : IPluginWorldLines, IDisposable
+    {
+        private readonly List<IPluginWorldLineLayer> _layers = [];
+        private bool _disposed;
+
+        public IPluginWorldLineLayer? CreateLayer()
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            IPluginWorldLineLayer? layer = inner.CreateLayer();
+            if (layer is not null)
+                _layers.Add(layer);
+            return layer;
+        }
+
+        public void Dispose()
+        {
+            _disposed = true;
+            foreach (IPluginWorldLineLayer layer in _layers)
+                layer.Dispose();
+            _layers.Clear();
         }
     }
 
@@ -731,6 +769,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         private readonly List<Action<uint>> _containerOpenedRegistrations = [];
         private readonly List<Action<uint>> _containerClosedRegistrations = [];
         private readonly List<Action<PluginConfirmation>> _confirmationRequestedRegistrations = [];
+        private readonly List<Action<PluginActivationCompletion>> _activationCompletedRegistrations = [];
         private bool _disposed;
 
         public event Action<double> Tick
@@ -1023,6 +1062,33 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             }
         }
 
+        public event Action<PluginActivationCompletion> ActivationCompleted
+        {
+            add
+            {
+                ArgumentNullException.ThrowIfNull(value);
+                inner.ActivationCompleted += value;
+                lock (_gate)
+                {
+                    if (!_disposed)
+                    {
+                        _activationCompletedRegistrations.Add(value);
+                        return;
+                    }
+                }
+                inner.ActivationCompleted -= value;
+                throw new ObjectDisposedException(nameof(ScopedEvents));
+            }
+            remove
+            {
+                if (value is null)
+                    return;
+                inner.ActivationCompleted -= value;
+                lock (_gate)
+                    _activationCompletedRegistrations.Remove(value);
+            }
+        }
+
         public event Action<PluginGoToReport> NavigationChanged
         {
             add
@@ -1189,6 +1255,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             Action<uint>[] containerOpenedRegistrations;
             Action<uint>[] containerClosedRegistrations;
             Action<PluginConfirmation>[] confirmationRequestedRegistrations;
+            Action<PluginActivationCompletion>[] activationCompletedRegistrations;
             lock (_gate)
             {
                 if (_disposed)
@@ -1210,6 +1277,9 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
                 _portalTransitionRegistrations.Clear();
                 itemUseCompletedRegistrations = _itemUseCompletedRegistrations.ToArray();
                 _itemUseCompletedRegistrations.Clear();
+                activationCompletedRegistrations =
+                    _activationCompletedRegistrations.ToArray();
+                _activationCompletedRegistrations.Clear();
                 navigationChangedRegistrations = _navigationChangedRegistrations.ToArray();
                 _navigationChangedRegistrations.Clear();
                 containerOpenedRegistrations = _containerOpenedRegistrations.ToArray();
@@ -1266,6 +1336,12 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             for (int index = itemUseCompletedRegistrations.Length - 1; index >= 0; index--)
             {
                 try { inner.ItemUseCompleted -= itemUseCompletedRegistrations[index]; }
+                catch { }
+            }
+
+            for (int index = activationCompletedRegistrations.Length - 1; index >= 0; index--)
+            {
+                try { inner.ActivationCompleted -= activationCompletedRegistrations[index]; }
                 catch { }
             }
 

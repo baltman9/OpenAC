@@ -34,6 +34,7 @@
     <Project Path="tests/AcDream.Core.Tests/AcDream.Core.Tests.csproj" />
     <Project Path="tests/AcDream.Core.Net.Tests/AcDream.Core.Net.Tests.csproj" />
     <Project Path="tests/AcDream.Headless.Tests/AcDream.Headless.Tests.csproj" />
+    <Project Path="tests/AcDream.HostParity.Tests/AcDream.HostParity.Tests.csproj" />
     <Project Path="tests/AcDream.Launcher.Core.Tests.Fixtures.InstallLeaseHolder/AcDream.Launcher.Core.Tests.Fixtures.InstallLeaseHolder.csproj" />
     <Project Path="tests/AcDream.Launcher.Core.Tests.Fixtures.ConsoleSignalChild/AcDream.Launcher.Core.Tests.Fixtures.ConsoleSignalChild.csproj" />
     <Project Path="tests/AcDream.Launcher.Core.Tests.Fixtures.ConsolelessSupervisorParent/AcDream.Launcher.Core.Tests.Fixtures.ConsolelessSupervisorParent.csproj" />

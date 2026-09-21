@@ -12,12 +12,18 @@
       "endpoint": { "host": "127.0.0.1", "port": 9000 },
       "account": "sharedaccount",
       "character": { "name": "SharedToon" },
+      "characterOptions": { "UseChargeAttack": true, "AutoRepeatAttack": false },
       "policy": { "id": "idle" },
       "credential": {
         "provider": "standardInput",
         "reference": "session"
       },
       "plugins": ["ExamplePlugin", "AnotherPlugin"],
+      "pluginTags": ["shared-fixture-group", "second-word"],
+      "pluginSettings": {
+        "ExamplePlugin": { "profile": "shared", "mode": "escort" },
+        "AnotherPlugin": { "profile": "other" }
+      },
       "loginCommands": ["/tell someone, hi", "/vt start"],
       "loginCommandDelayMs": 750,
       "statusFile": "shared-fixture-status.jsonl"

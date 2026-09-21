@@ -203,7 +203,7 @@ internal sealed class RuntimeNavigationGoalSource : INavigationGoalSource
             nearestFootprint.Centre,
             nearestFootprint.Radius,
             Moves: item is not null && Moves(item),
-            Hostile: item is not null && Moves(item) && RuntimeHostileTargetQuery.IsHostile(_runtime, objectId));
+            Hostile: item is not null && Moves(item) && RuntimeHostileTargetQuery.IsHostile(_runtime, objectId, HostileTargetScope.Selectable));
         return true;
     }
 

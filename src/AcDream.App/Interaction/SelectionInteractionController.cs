@@ -9,7 +9,22 @@ using AcDream.UI.Abstractions.Input;
 
 namespace AcDream.App.Interaction;
 
+/// <summary>
+/// Acting on a selection key or a selection menu entry. The client's session
+/// commands route a plugin's selection request through this, and a client with
+/// no presentation tree has none, which is why it is a seam of its own rather
+/// than a hard reference to the controller that draws.
+/// </summary>
+internal interface ISelectionInputActions
+{
+    /// <summary>Acts on one selection request.</summary>
+    /// <param name="action">What was asked for.</param>
+    /// <returns>False when nothing here acts on it.</returns>
+    bool HandleInputAction(InputAction action);
+}
+
 internal sealed class SelectionInteractionController
+    : ISelectionInputActions, IRuntimeInteractionArrivalPresentation
 {
     /// <summary>
     /// How many consecutive stalled ticks of the local player's active
@@ -34,40 +49,47 @@ internal sealed class SelectionInteractionController
     /// genuinely stuck approach within a session without being trigger
     /// happy about it.
     /// </summary>
-    internal const uint StalledApproachGiveUpTicks = 150;
+    internal const uint StalledApproachGiveUpTicks =
+        RuntimeWorldObjectUse.StalledApproachGiveUpTicks;
 
     private readonly SelectionState _selection;
     private readonly IWorldSelectionQuery _query;
-    private readonly ItemInteractionController _items;
+    private readonly RuntimeItemInteraction _items;
     private readonly RuntimeInteractionTransactionState _transactions;
     private readonly IRuntimeInteractionTransport _transport;
     private readonly IPlayerInteractionMovementSink _movement;
-    private readonly PlayerApproachCompletionState _approachCompletions;
+    private readonly RuntimeApproachCompletionState _approachCompletions;
     private readonly Action<string>? _toast;
     private readonly Func<uint, bool>? _splitStack;
     private readonly Func<IEnumerable<uint>> _fellowshipMembers;
     private readonly RuntimeCombatTargetState _combatTarget;
 
-    // Whether the currently armed pending Use came from the click route
-    // (RequestUse, toast: true) rather than the automation route
-    // (TryUseForAutomation, toast: false). Read only when expiring a
-    // stalled approach, so the toast contract that route was given at
-    // arm time is honoured on the way out too -- previously the expiry
-    // toasted unconditionally regardless of which route armed it.
-    private bool _pendingUseToastEnabled;
+    // The one walk-then-use route. A person's click arms it from here with
+    // the interruption and the spoken feedback a click is allowed; a plugin
+    // reaches the same route from the runtime, without a window in the way.
+    private readonly RuntimeWorldObjectUse _worldObjectUse;
 
-    // Same shape as _pendingUseToastEnabled, for the pickup expiry.
+    // Who ends a walk armed to act on something, once per frame, on every
+    // client. This one lends it the pickup half and the words a person who
+    // clicked is told; it does not end anything itself.
+    private readonly RuntimeInteractionApproachDriver _armedApproaches;
+
+    // Whether the currently armed pending pickup wants to be told in words
+    // when its walk is given up on. Every route that arms one does today;
+    // tracking it keeps the shape ready for one that does not.
     private bool _pendingPickupToastEnabled;
 
     public SelectionInteractionController(
         SelectionState selection,
         IWorldSelectionQuery query,
-        ItemInteractionController items,
+        RuntimeItemInteraction items,
         IRuntimeInteractionTransport transport,
         IPlayerInteractionMovementSink movement,
         RuntimeCombatTargetState combatTarget,
+        RuntimeWorldObjectUse worldObjectUse,
+        RuntimeInteractionApproachDriver armedApproaches,
         Action<string>? toast = null,
-        PlayerApproachCompletionState? approachCompletions = null,
+        RuntimeApproachCompletionState? approachCompletions = null,
         Func<uint, bool>? splitStack = null,
         Func<IEnumerable<uint>>? fellowshipMembers = null)
     {
@@ -79,9 +101,13 @@ internal sealed class SelectionInteractionController
         _movement = movement ?? throw new ArgumentNullException(nameof(movement));
         _combatTarget = combatTarget
             ?? throw new ArgumentNullException(nameof(combatTarget));
+        _worldObjectUse = worldObjectUse
+            ?? throw new ArgumentNullException(nameof(worldObjectUse));
+        _armedApproaches = armedApproaches
+            ?? throw new ArgumentNullException(nameof(armedApproaches));
         _toast = toast;
         _approachCompletions = approachCompletions
-            ?? new PlayerApproachCompletionState();
+            ?? new RuntimeApproachCompletionState();
         _splitStack = splitStack;
         _fellowshipMembers = fellowshipMembers ?? (() => Array.Empty<uint>());
     }
@@ -415,99 +441,24 @@ internal sealed class SelectionInteractionController
         => RequestUse(serverGuid, reservation: null);
 
     /// <summary>
-    /// The plugin surface's entry point for using a world object it does
-    /// not own (a vendor, a corpse, a chest, an NPC). Runs through the same
-    /// walk-then-use path a click on that object takes -- an out-of-range
-    /// target gets a queued approach that dispatches the use on arrival --
-    /// instead of the inventory-only path the item automation surface uses
-    /// for owned items. Unlike a click, this can arrive at any cadence a
-    /// plugin chooses (called from IEvents.Tick as the plugin API
-    /// requires, but not necessarily once per tick or in response to any
-    /// particular game event), so it is held to every gate a click (or an
-    /// owned item's own automation entry point) is held to: the
-    /// use-throttle, the one-request-at-a-time inventory gate, and "don't
-    /// preempt whatever is already in flight" rather than cancelling it.
+    /// A person's own request to use a world object, from a click or a key.
+    /// It takes the same walk-then-use route a plugin takes, with the two
+    /// things a person is allowed that an automation call is not: the newest
+    /// request supersedes whatever was armed a moment ago, and a refusal is
+    /// said in words.
     /// </summary>
-    public AutomationUseOutcome TryUseForAutomation(uint serverGuid)
-    {
-        // Every exit from this method is logged at Information level: it
-        // is the plugin surface's only entry point for using a world
-        // object it does not own, it can fire at any cadence a plugin
-        // chooses (from the Tick thread, per the plugin API's own
-        // contract), and PerformUse itself never logs for this route
-        // (log: false below) -- without a line here a "Started" that
-        // silently never completes (see HandleUseApproachCompletion) left
-        // no trace at all in the host's own log.
-        AutomationUseOutcome outcome = TryUseForAutomationCore(serverGuid);
-        Console.WriteLine(
-            $"[interaction] automation use guid=0x{serverGuid:X8} outcome={outcome}");
-        return outcome;
-    }
-
-    private AutomationUseOutcome TryUseForAutomationCore(uint serverGuid)
-    {
-        if (serverGuid == 0u)
-            return AutomationUseOutcome.NotUseable;
-        // A plugin using another player would otherwise silently open a
-        // secure trade (PerformUse's first branch, shared with the click
-        // path) -- refuse it here instead; a player-to-player exchange
-        // goes through the Trade surface, not Use.
-        if (_items.IsPlayerTarget(serverGuid))
-            return AutomationUseOutcome.NotUseable;
-        if (!_items.TryConsumeUseThrottleForAutomation())
-            return AutomationUseOutcome.Busy;
-        if (!_items.EnsureInventoryRequestReady())
-            return AutomationUseOutcome.Busy;
-
-        ItemUseRequestReservation reservation = _items.BeginAutomationUseReservation();
-        // The reservation holds the busy count from this point; a throw
-        // downstream (transport fault, reset mid-call) must give it back or
-        // the one-request-at-a-time gate stays wedged for the session --
-        // the same shape the confirmed-use and vendor routes use.
-        try
-        {
-            return PerformUse(
-                serverGuid,
-                reservation,
-                toast: false,
-                log: false,
-                preemptPending: false);
-        }
-        catch
-        {
-            reservation.CancelBeforeDispatch();
-            throw;
-        }
-    }
-
     public void RequestUse(
         uint serverGuid,
         ItemUseRequestReservation? reservation)
-        => PerformUse(serverGuid, reservation, toast: true, log: true, preemptPending: true);
+        => PerformUse(serverGuid, reservation);
 
     private AutomationUseOutcome PerformUse(
         uint serverGuid,
-        ItemUseRequestReservation? reservation,
-        bool toast,
-        bool log,
-        bool preemptPending)
+        ItemUseRequestReservation? reservation)
     {
-        if (preemptPending)
-        {
-            // A new SendPickup/RequestUse from the user supersedes
-            // whatever approach was previously armed (G3) -- the newest
-            // click wins.
-            CancelPendingApproach();
-        }
-        else if (_transactions.HasPendingUse || _transactions.HasPendingPickup)
-        {
-            // The automation path never preempts an in-flight approach or
-            // pickup; it reports Busy and leaves whatever is already
-            // queued (a user's own pending click, or an earlier automation
-            // call) alone.
-            reservation?.CancelBeforeDispatch();
-            return AutomationUseOutcome.Busy;
-        }
+        // A new SendPickup/RequestUse from the user supersedes whatever
+        // approach was previously armed -- the newest click wins.
+        CancelPendingApproach();
 
         if (_items.TryOpenSecureTradeWithPlayer(serverGuid))
         {
@@ -532,12 +483,11 @@ internal sealed class SelectionInteractionController
                         ownedByPlayer,
                         useable,
                         reservation,
-                        new RuntimeInteractionApproachToken(
-                            token.ControllerLifetime,
-                            token.ApproachGeneration),
+                        token,
                         out _);
+                    // A person asked for this one, so give up on it out loud.
                     if (armed)
-                        _pendingUseToastEnabled = toast;
+                        _worldObjectUse.NoteArmedUseIsSpokenFor();
                 });
             if (!started || !armed)
             {
@@ -565,8 +515,7 @@ internal sealed class SelectionInteractionController
                 out uint sequence);
         if (result == RuntimeInteractionDispatchResult.NotInWorld)
         {
-            if (toast)
-                _toast?.Invoke("Not in world");
+            _toast?.Invoke("Not in world");
             return AutomationUseOutcome.NotInWorld;
         }
         if (result == RuntimeInteractionDispatchResult.Dispatched)
@@ -583,8 +532,7 @@ internal sealed class SelectionInteractionController
             // never went anywhere -- dropping the real, in-flight
             // response for the container that was actually open.
             _items.ArmLandscapeContainerRequest(serverGuid);
-            if (log)
-                Console.WriteLine($"[interaction] use guid=0x{serverGuid:X8} seq={sequence}");
+            Console.WriteLine($"[interaction] use guid=0x{serverGuid:X8} seq={sequence}");
             return AutomationUseOutcome.Started;
         }
         if (result == RuntimeInteractionDispatchResult.NotUseable)
@@ -737,36 +685,27 @@ internal sealed class SelectionInteractionController
     {
         if (_transactions.TryGetPendingPickup(out RuntimePendingPickup pendingPickup))
         {
-            HandleApproachCompletion(pendingPickup.ApproachToken, natural: true);
+            _armedApproaches.ResolveApproachCompletion(
+                pendingPickup.ApproachToken,
+                natural: true);
             return;
         }
         if (_transactions.TryGetPendingUse(out RuntimePendingUse pendingUse))
-            HandleApproachCompletion(pendingUse.ApproachToken, natural: true);
-    }
-
-    private void HandleApproachCompletion(
-        RuntimeInteractionApproachToken approachToken,
-        bool natural)
-    {
-        bool pickupAccepted = _transactions.TryResolveApproachCompletion(
-            approachToken,
-            natural,
-            out RuntimePendingPickup pendingPickup);
-        if (pendingPickup.Token != 0u)
         {
-            HandlePickupApproachCompletion(pendingPickup, pickupAccepted);
-            return;
+            _armedApproaches.ResolveApproachCompletion(
+                pendingUse.ApproachToken,
+                natural: true);
         }
-
-        bool useAccepted = _transactions.TryResolveUseApproachCompletion(
-            approachToken,
-            natural,
-            out RuntimePendingUse pendingUse);
-        if (pendingUse.Token != 0u)
-            HandleUseApproachCompletion(pendingUse, useAccepted);
     }
 
-    private void HandlePickupApproachCompletion(
+    /// <summary>
+    /// The walk armed for a pickup has ended. What comes of it is a change to
+    /// what this client draws, which is why this half stays here while the
+    /// shared route owns the decision to take it.
+    /// </summary>
+    /// <param name="pending">What was armed.</param>
+    /// <param name="accepted">Whether the walk arrived rather than being called off.</param>
+    public void CompletePickupApproach(
         RuntimePendingPickup pending,
         bool accepted)
     {
@@ -804,125 +743,46 @@ internal sealed class SelectionInteractionController
         }
     }
 
-    private void HandleUseApproachCompletion(
-        RuntimePendingUse pending,
-        bool accepted)
-    {
-        if (!accepted)
-        {
-            pending.Reservation?.CancelBeforeDispatch();
-            return;
-        }
-
-        // NOTE: an earlier version of this method re-verified use range
-        // here via a fresh _query.TryGetApproach(...).IsCloseRange check
-        // before dispatching. Live testing proved that check wrong: it
-        // compares raw center-to-center 2D distance against UseRadius with
-        // no collision-radius allowance, while the approach's own arrival
-        // criterion (MoveToManager's cylinder-aware distance, keyed off
-        // the same UseRadius) is more lenient. The mismatch produced false
-        // refusals on targets the player had genuinely just arrived at --
-        // reproduced live on a corpse still in melee range immediately
-        // after the kill. A natural completion (accepted == true) already
-        // means the approach's own criterion was satisfied; trust it
-        // rather than re-deriving a second, inconsistent one here.
-        RuntimeInteractionDispatchResult result =
-            _transactions.TryDispatchUse(
-                pending.ServerGuid,
-                pending.OwnedByPlayer,
-                pending.Useable,
-                pending.Reservation,
-                _transport,
-                out uint sequence);
-        if (result == RuntimeInteractionDispatchResult.NotInWorld)
-            _toast?.Invoke("Not in world");
-        if (result == RuntimeInteractionDispatchResult.Dispatched)
-        {
-            // Same rule as the immediate-dispatch branch above: arm only
-            // once Use has actually gone out, not before -- a walk that
-            // arrives but then fails to dispatch (NotInWorld/Rejected/
-            // NotUseable) must not touch the user's already-open
-            // container.
-            _items.ArmLandscapeContainerRequest(pending.ServerGuid);
-            Console.WriteLine(
-                $"[interaction] use guid=0x{pending.ServerGuid:X8} seq={sequence} (arrival-gated)");
-        }
-    }
-
-    public void DrainOutbound()
-    {
-        while (_approachCompletions.TryTake(out PlayerApproachCompletion completion))
-        {
-            HandleApproachCompletion(
-                new RuntimeInteractionApproachToken(
-                    completion.Token.ControllerLifetime,
-                    completion.Token.ApproachGeneration),
-                completion.IsNatural);
-        }
-        ExpireStalledApproach();
-        _transactions.DrainOutbound(DispatchQueuedInteraction);
-    }
+    /// <summary>Says to whoever clicked what came of it.</summary>
+    /// <param name="text">What to tell them.</param>
+    public void Say(string text) => _toast?.Invoke(text);
 
     /// <summary>
-    /// Forces a definite outcome on an armed walk-then-use or
-    /// walk-then-pickup whose move-to has stalled for
-    /// <see cref="StalledApproachGiveUpTicks"/> consecutive ticks with no
-    /// arrival signal (see that constant's own comment for why the
-    /// movement layer alone never resolves this). Without this, an
-    /// obstructed target left the reservation held and HasPendingUse (or
-    /// HasPendingPickup) true for the rest of the session -- every later
-    /// Use or pickup, from a click or a plugin, reported Busy forever.
-    /// Only one of the two can be pending at a time (arming either always
-    /// supersedes or is refused against the other), so one shared read of
-    /// the active move-to's stall counter is enough to judge both.
+    /// Sends what this client's own clicks have queued. Ending the walks
+    /// armed to act on something is not here any more: that is one shared
+    /// step, taken once a frame by every client from the per-frame
+    /// local-player step, so a use out of reach finishes without a window
+    /// too.
     /// </summary>
-    private void ExpireStalledApproach()
+    public void DrainOutbound() =>
+        _transactions.DrainOutbound(DispatchQueuedInteraction);
+
+    /// <summary>
+    /// Gives up on an armed walk-then-pickup whose move-to has stalled for
+    /// <see cref="StalledApproachGiveUpTicks"/> consecutive ticks with no
+    /// arrival signal. Whether that threshold has been reached, and whether
+    /// an armed use gets the same treatment first, is the shared route's
+    /// judgement; only what this client drew about the pickup is here.
+    /// Without the give-up, an obstructed target left the reservation held
+    /// and HasPendingPickup true for the rest of the session -- every later
+    /// pickup, from a click or a plugin, reported Busy forever.
+    /// </summary>
+    /// <param name="stalledTicks">How long the walk has been stalled.</param>
+    public void GiveUpOnStalledPickupApproach(uint stalledTicks)
     {
-        if (_movement.CurrentApproachFailProgressCount() is not { } failCount)
+        if (!_transactions.TryCancelPendingPickup(
+                out RuntimePendingPickup pendingPickup))
         {
-            // No move-to is actively in progress at all. This should be
-            // unreachable while a use/pickup is still pending: arming
-            // either always starts a move-to, and PlayerModeController
-            // wires both MoveToComplete and MoveToCancelled to publish a
-            // completion unconditionally, which clears the pending state
-            // through HandleApproachCompletion either way. If this ever
-            // logs, the real bug is upstream of this method (a pending
-            // state surviving a move-to that already ended some other
-            // way) -- log it rather than guessing at a watchdog to paper
-            // over an invariant that should never break.
-            if (_transactions.HasPendingUse || _transactions.HasPendingPickup)
-            {
-                Console.WriteLine(
-                    "[interaction] invariant violation: a pending use or pickup is armed with no active move-to in progress");
-            }
             return;
         }
-
-        if (failCount < StalledApproachGiveUpTicks)
-            return;
-
-        if (_transactions.TryCancelPendingUse(out RuntimePendingUse pendingUse))
-        {
-            _movement.CancelApproach();
-            pendingUse.Reservation?.CancelBeforeDispatch();
-            Console.WriteLine(
-                $"[interaction] use guid=0x{pendingUse.ServerGuid:X8} approach stalled for {failCount} tick(s) -- refused");
-            if (_pendingUseToastEnabled)
-                _toast?.Invoke("Your approach never completed.");
-            return;
-        }
-
-        if (_transactions.TryCancelPendingPickup(out RuntimePendingPickup pendingPickup))
-        {
-            _movement.CancelApproach();
-            CancelPickupPresentation(
-                pendingPickup.ServerGuid,
-                pendingPickup.PendingPlacementToken);
-            Console.WriteLine(
-                $"[interaction] pickup item=0x{pendingPickup.ServerGuid:X8} approach stalled for {failCount} tick(s) -- refused");
-            if (_pendingPickupToastEnabled)
-                _toast?.Invoke("Your approach never completed.");
-        }
+        _movement.CancelApproach();
+        CancelPickupPresentation(
+            pendingPickup.ServerGuid,
+            pendingPickup.PendingPlacementToken);
+        Console.WriteLine(
+            $"[interaction] pickup item=0x{pendingPickup.ServerGuid:X8} approach stalled for {stalledTicks} tick(s) -- refused");
+        if (_pendingPickupToastEnabled)
+            _toast?.Invoke("Your approach never completed.");
     }
 
     public void OnMoveToCancelled(WeenieError _) => CancelPendingApproach();
@@ -941,12 +801,6 @@ internal sealed class SelectionInteractionController
         }
         if (_transactions.TryCancelPendingUse(serverGuid, out RuntimePendingUse cancelledUse))
             cancelledUse.Reservation?.CancelBeforeDispatch();
-        if (_selection.SelectedObjectId == serverGuid)
-        {
-            _selection.Clear(
-                SelectionChangeSource.System,
-                SelectionChangeReason.Cleared);
-        }
     }
 
     public void OnEntityRemoved(LiveEntityRecord record, bool replacementExists)

@@ -125,7 +125,7 @@ public sealed class SelectionInteractionControllerTests
         }
     }
 
-    private sealed class Movement(IPlayerApproachTokenSource approachTokens)
+    private sealed class Movement(IRuntimeApproachTokenSource approachTokens)
         : IPlayerInteractionMovementSink
     {
         public List<InteractionApproach> Approaches { get; } = new();
@@ -136,10 +136,10 @@ public sealed class SelectionInteractionControllerTests
 
         public bool BeginApproach(
             InteractionApproach approach,
-            Action<PlayerApproachToken>? armAfterCancel = null)
+            Action<RuntimeInteractionApproachToken>? armAfterCancel = null)
         {
             Approaches.Add(approach);
-            if (!Starts || !approachTokens.TryBeginApproach(out PlayerApproachToken token))
+            if (!Starts || !approachTokens.TryBeginApproach(out RuntimeInteractionApproachToken token))
                 return false;
             armAfterCancel?.Invoke(token);
             AfterArm?.Invoke();
@@ -149,6 +149,47 @@ public sealed class SelectionInteractionControllerTests
         public uint? CurrentApproachFailProgressCount() => FailProgressCount;
 
         public void CancelApproach() => CancelCount++;
+    }
+
+    /// <summary>
+    /// Lets the shared walk-then-use route reach this suite's own world and
+    /// its own body, so the route under test is the production one.
+    /// </summary>
+    private sealed class ApproachAdapter(Query query, Movement movement)
+        : IRuntimeApproachSource
+    {
+        private InteractionApproach _planned;
+
+        public bool TryPlanApproach(uint serverGuid, out RuntimeApproachPlan plan)
+        {
+            if (!query.TryGetApproach(serverGuid, out InteractionApproach approach))
+            {
+                plan = default;
+                return false;
+            }
+            _planned = approach;
+            plan = new RuntimeApproachPlan(
+                approach.Target.ServerGuid,
+                approach.Target.LocalEntityId,
+                approach.Target.Entity.Position,
+                approach.Player.CellId,
+                approach.UseRadius,
+                approach.IsCloseRange,
+                approach.CanCharge,
+                approach.TargetRadius,
+                approach.TargetHeight);
+            return true;
+        }
+
+        public bool BeginApproach(
+            in RuntimeApproachPlan plan,
+            Action<RuntimeInteractionApproachToken>? arm = null) =>
+            movement.BeginApproach(_planned, arm);
+
+        public uint? StalledTicks() =>
+            movement.CurrentApproachFailProgressCount();
+
+        public void CancelApproach() => movement.CancelApproach();
     }
 
     private sealed class CombatTargetOperations(SelectionState selection)
@@ -172,8 +213,8 @@ public sealed class SelectionInteractionControllerTests
     {
         public readonly Query Query = new();
         public readonly Transport Transport = new();
-        public readonly PlayerApproachCompletionState Completions = new();
-        public readonly IPlayerApproachCompletionSink CompletionLifetime;
+        public readonly RuntimeApproachCompletionState Completions = new();
+        public readonly IRuntimeApproachCompletionSink CompletionLifetime;
         public readonly Movement Movement;
         public readonly SelectionState Selection = new();
         public readonly ClientObjectTable Objects = new();
@@ -181,13 +222,33 @@ public sealed class SelectionInteractionControllerTests
         public readonly List<uint> Examines = new();
         public readonly List<PendingBackpackPlacement> PendingPlacements = new();
         public readonly List<PendingBackpackPlacement> CancelledPlacements = new();
-        public readonly ItemInteractionController Items;
+        public readonly RuntimeItemInteraction Items;
         public readonly CombatState Combat = new();
         public readonly CombatTargetOperations CombatTargetOperations;
         public readonly RuntimeCombatTargetState CombatTarget;
         public readonly SelectionInteractionController Controller;
+        public readonly RuntimeWorldObjectUse WorldObjectUse;
+
+        /// <summary>
+        /// The shared per-frame step that ends an armed walk. The client that
+        /// draws no longer takes it itself, so the harness takes it where the
+        /// per-frame local-player step would.
+        /// </summary>
+        public readonly RuntimeInteractionApproachDriver ArmedApproaches;
+
         public uint GroundObjectId { get; set; }
         public uint? RequestedExternalContainerId { get; private set; }
+
+        /// <summary>
+        /// One frame's worth of interaction work in the order a client does
+        /// it: the shared drive ends the walks that have ended, then this
+        /// client sends what its own clicks have queued.
+        /// </summary>
+        public void DriveFrame()
+        {
+            ArmedApproaches.DriveArmedApproaches();
+            Controller.DrainOutbound();
+        }
 
         public Harness()
         {
@@ -207,7 +268,7 @@ public sealed class SelectionInteractionControllerTests
                 Useability = ItemUseability.Remote,
                 PublicWeenieBitfield = (uint)PublicWeenieFlags.Stuck,
             });
-            Items = new ItemInteractionController(
+            Items = new RuntimeItemInteraction(
                 Objects,
                 new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(Objects)),
                 new InteractionState(),
@@ -232,6 +293,16 @@ public sealed class SelectionInteractionControllerTests
                 Combat,
                 Selection,
                 CombatTargetOperations);
+            WorldObjectUse = new RuntimeWorldObjectUse(
+                Items,
+                Transport,
+                new ApproachAdapter(Query, Movement),
+                guid => Query.IsUseable(guid) ? ItemUseability.Remote : null);
+            ArmedApproaches = new RuntimeInteractionApproachDriver(
+                Completions,
+                Items.RuntimeTransactions,
+                WorldObjectUse,
+                new ApproachAdapter(Query, Movement));
             Controller = controller = new SelectionInteractionController(
                 Selection,
                 Query,
@@ -239,8 +310,11 @@ public sealed class SelectionInteractionControllerTests
                 Transport,
                 Movement,
                 CombatTarget,
+                WorldObjectUse,
+                ArmedApproaches,
                 Toasts.Add,
                 Completions);
+            _ = ArmedApproaches.BindPresentationOwned(controller);
             Items.PendingBackpackPlacementRequested += PendingPlacements.Add;
             Items.PendingBackpackPlacementCancelled += CancelledPlacements.Add;
         }
@@ -437,13 +511,13 @@ public sealed class SelectionInteractionControllerTests
         h.Selection.Select(Target, SelectionChangeSource.World);
 
         h.Controller.HandleInputAction(InputAction.UseSelected);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(1, h.Items.BusyCount);
         Assert.Equal(new[] { Target }, h.Transport.Uses);
 
         h.CompletionLifetime.PublishCancellation(WeenieError.ActionCancelled);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(1, h.Items.BusyCount);
         Assert.False(h.Items.CanMakeInventoryRequest);
@@ -462,7 +536,7 @@ public sealed class SelectionInteractionControllerTests
         h.Selection.Select(Target, SelectionChangeSource.World);
 
         h.Controller.HandleInputAction(InputAction.UseSelected);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(new[] { Target }, h.Transport.Uses);
         Assert.Equal(1, h.Items.BusyCount);
@@ -482,7 +556,7 @@ public sealed class SelectionInteractionControllerTests
         h.Selection.Select(Target, SelectionChangeSource.World);
 
         h.Controller.HandleInputAction(InputAction.UseSelected);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(1, h.Items.BusyCount);
         Assert.Equal(new[] { Target }, h.Transport.Uses);
@@ -497,7 +571,7 @@ public sealed class SelectionInteractionControllerTests
         h.Selection.Select(Target, SelectionChangeSource.World);
 
         h.Controller.HandleInputAction(InputAction.UseSelected);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(0, h.Items.BusyCount);
         Assert.Empty(h.Transport.Uses);
@@ -525,7 +599,7 @@ public sealed class SelectionInteractionControllerTests
         h.Selection.Select(Target, SelectionChangeSource.World);
 
         h.Controller.HandleInputAction(InputAction.UseSelected);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(new[] { Target }, h.Transport.Uses);
         Assert.Equal(1, h.Items.BusyCount);
@@ -541,7 +615,7 @@ public sealed class SelectionInteractionControllerTests
         var h = new Harness();
         h.SetApproach(closeRange: false);
 
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(Target);
 
         Assert.Equal(AutomationUseOutcome.Started, outcome);
         PlayerInteractionMovementSinkAssertSingleApproach(h, Target);
@@ -572,7 +646,7 @@ public sealed class SelectionInteractionControllerTests
         var h = new Harness();
         h.SetApproach(closeRange: false);
 
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(Target);
         Assert.Equal(AutomationUseOutcome.Started, outcome);
         Assert.Equal(1, h.Items.BusyCount);
         Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
@@ -580,7 +654,7 @@ public sealed class SelectionInteractionControllerTests
         // Short of the threshold: the fail counter is climbing (the move
         // is stalled) but hasn't crossed the line yet, so nothing changes.
         h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks - 1;
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
         Assert.Equal(1, h.Items.BusyCount);
@@ -589,7 +663,7 @@ public sealed class SelectionInteractionControllerTests
         // At the threshold: the host gives up, frees the gate, and cancels
         // the underlying move-to so the player stops walking into it.
         h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks;
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.False(h.Items.RuntimeTransactions.HasPendingUse);
         Assert.Equal(0, h.Items.BusyCount);
@@ -607,9 +681,9 @@ public sealed class SelectionInteractionControllerTests
         var h = new Harness();
         h.SetApproach(closeRange: false);
 
-        h.Controller.TryUseForAutomation(Target);
+        h.WorldObjectUse.TryUse(Target);
         h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks;
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Empty(h.Toasts);
     }
@@ -622,7 +696,7 @@ public sealed class SelectionInteractionControllerTests
 
         h.Controller.SendUse(Target);
         h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks;
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Single(h.Toasts);
     }
@@ -638,16 +712,16 @@ public sealed class SelectionInteractionControllerTests
         var h = new Harness();
         h.SetApproach(closeRange: false);
 
-        h.Controller.TryUseForAutomation(Target);
+        h.WorldObjectUse.TryUse(Target);
 
         for (int i = 0; i < 500; i++)
         {
             // Climbs partway, then progress resets it, over and over --
             // it never accumulates to the threshold.
             h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks - 1;
-            h.Controller.DrainOutbound();
+            h.DriveFrame();
             h.Movement.FailProgressCount = 0;
-            h.Controller.DrainOutbound();
+            h.DriveFrame();
         }
 
         Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
@@ -668,7 +742,7 @@ public sealed class SelectionInteractionControllerTests
         Assert.True(h.Items.RuntimeTransactions.HasPendingPickup);
 
         h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks;
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.False(h.Items.RuntimeTransactions.HasPendingPickup);
         Assert.Equal(1, h.Movement.CancelCount);
@@ -680,7 +754,7 @@ public sealed class SelectionInteractionControllerTests
         var h = new Harness();
         h.SetApproach(closeRange: true);
 
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(Target);
 
         Assert.Equal(AutomationUseOutcome.Started, outcome);
         Assert.Empty(h.Movement.Approaches);
@@ -711,7 +785,7 @@ public sealed class SelectionInteractionControllerTests
         });
         h.SetApproach(closeRange: true);
 
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(Target);
 
         Assert.Equal(AutomationUseOutcome.Started, outcome);
         Assert.Equal(Target, h.RequestedExternalContainerId);
@@ -732,7 +806,7 @@ public sealed class SelectionInteractionControllerTests
         });
         h.SetApproach(closeRange: true);
 
-        h.Controller.TryUseForAutomation(Target);
+        h.WorldObjectUse.TryUse(Target);
 
         Assert.Null(h.RequestedExternalContainerId);
     }
@@ -755,7 +829,7 @@ public sealed class SelectionInteractionControllerTests
         });
         h.SetApproach(closeRange: true);
 
-        h.Controller.TryUseForAutomation(Target);
+        h.WorldObjectUse.TryUse(Target);
 
         Assert.Null(h.RequestedExternalContainerId);
     }
@@ -787,7 +861,7 @@ public sealed class SelectionInteractionControllerTests
         Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
 
         h.SetApproach(closeRange: true, serverGuid: otherContainer);
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(otherContainer);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(otherContainer);
 
         Assert.Equal(AutomationUseOutcome.Busy, outcome);
         Assert.Null(h.RequestedExternalContainerId);
@@ -802,7 +876,7 @@ public sealed class SelectionInteractionControllerTests
         h.Query.Useable = false;
         h.SetApproach(closeRange: false);
 
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(Target);
 
         Assert.Equal(AutomationUseOutcome.NotUseable, outcome);
         Assert.Empty(h.Movement.Approaches);
@@ -815,14 +889,14 @@ public sealed class SelectionInteractionControllerTests
         var h = new Harness();
         h.SetApproach(closeRange: true);
 
-        AutomationUseOutcome first = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome first = h.WorldObjectUse.TryUse(Target);
         Assert.Equal(AutomationUseOutcome.Started, first);
         Assert.Single(h.Transport.Uses);
 
         // A second automation call made immediately after (well inside
         // RuntimeInteractionTransactionState.RetailUseThrottleMs) must be
         // refused by the same throttle a click is held to, not bypass it.
-        AutomationUseOutcome second = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome second = h.WorldObjectUse.TryUse(Target);
 
         Assert.Equal(AutomationUseOutcome.Busy, second);
         Assert.Single(h.Transport.Uses);
@@ -839,7 +913,7 @@ public sealed class SelectionInteractionControllerTests
         ItemUseRequestReservation blocking =
             h.Items.RuntimeTransactions.BeginUseRequestReservation();
 
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(Target);
 
         Assert.Equal(AutomationUseOutcome.Busy, outcome);
         Assert.Empty(h.Transport.Uses);
@@ -858,7 +932,7 @@ public sealed class SelectionInteractionControllerTests
         h.SetApproach(closeRange: true);
         h.Transport.ThrowOnSend = new InvalidOperationException("transport fault");
 
-        Assert.Throws<InvalidOperationException>(() => h.Controller.TryUseForAutomation(Target));
+        Assert.Throws<InvalidOperationException>(() => h.WorldObjectUse.TryUse(Target));
 
         Assert.Equal(0, h.Items.BusyCount);
         Assert.True(h.Items.EnsureInventoryRequestReady());
@@ -870,7 +944,7 @@ public sealed class SelectionInteractionControllerTests
         var h = new Harness();
         h.SetApproach(closeRange: true);
 
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(Target);
 
         Assert.Equal(AutomationUseOutcome.Started, outcome);
         Assert.Equal(1, h.Items.BusyCount);
@@ -889,7 +963,7 @@ public sealed class SelectionInteractionControllerTests
         PlayerInteractionMovementSinkAssertSingleApproach(h, Target);
         Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
 
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(Target);
 
         Assert.Equal(AutomationUseOutcome.Busy, outcome);
         // The original click-driven approach is still armed, not
@@ -912,7 +986,7 @@ public sealed class SelectionInteractionControllerTests
         var tradesRequested = new List<uint>();
         h.Items.SecureTradeRequested += (guid, _) => tradesRequested.Add(guid);
 
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(otherPlayer);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(otherPlayer);
 
         Assert.Equal(AutomationUseOutcome.NotUseable, outcome);
         Assert.Empty(tradesRequested);
@@ -928,7 +1002,7 @@ public sealed class SelectionInteractionControllerTests
         // from NotInWorld and from the busy gates above.
         h.Transport.RefuseSend = true;
 
-        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(Target);
 
         Assert.Equal(AutomationUseOutcome.Unavailable, outcome);
         Assert.Empty(h.Transport.Uses);
@@ -1058,9 +1132,10 @@ public sealed class SelectionInteractionControllerTests
         h.Controller.HandleInputAction(InputAction.UseSelected);
 
         h.Controller.OnEntityHidden(Target);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
-        Assert.Null(h.Selection.SelectedObjectId);
+        // Letting the selection go is the runtime's now, for every client;
+        // what this controller still owes is the cancel.
         Assert.Empty(h.Transport.Uses);
         Assert.Equal(0, h.Items.BusyCount);
     }
@@ -1075,7 +1150,7 @@ public sealed class SelectionInteractionControllerTests
         Assert.True(h.Controller.HandleInputAction(InputAction.SelectionPickUp));
         Assert.Empty(h.Transport.Pickups);
 
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(new[] { (Target, Player, 0) }, h.Transport.Pickups);
     }
@@ -1117,7 +1192,7 @@ public sealed class SelectionInteractionControllerTests
         h.Items.InteractionState.EnterExamine();
 
         h.Controller.ResetSession();
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
         h.Controller.OnNaturalMoveToComplete();
 
         Assert.Null(h.Selection.SelectedObjectId);
@@ -1220,13 +1295,13 @@ public sealed class SelectionInteractionControllerTests
 
         h.Selection.Select(Target, SelectionChangeSource.World);
         h.Controller.HandleInputAction(InputAction.UseSelected);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(new[] { Target }, h.Transport.Uses);
         Assert.Empty(h.Transport.Pickups);
 
         h.CompletionLifetime.PublishNaturalCompletion();
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(new[] { Target }, h.Transport.Uses);
         Assert.Empty(h.Transport.Pickups);
@@ -1241,7 +1316,7 @@ public sealed class SelectionInteractionControllerTests
         h.CompletionLifetime.PublishNaturalCompletion();
 
         h.Completions.RetireControllerLifetime(h.CompletionLifetime);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Empty(h.Transport.Pickups);
         h.Controller.OnNaturalMoveToComplete();
@@ -1273,7 +1348,7 @@ public sealed class SelectionInteractionControllerTests
         h.Selection.Select(Target, SelectionChangeSource.World);
 
         h.Controller.HandleInputAction(InputAction.SelectionPickUp);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Empty(h.PendingPlacements);
         Assert.Empty(h.Transport.Pickups);
@@ -1292,7 +1367,7 @@ public sealed class SelectionInteractionControllerTests
 
         h.Controller.HandleInputAction(action);
         h.Query.Current = false;
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Empty(h.Transport.Uses);
         Assert.Empty(h.Transport.Pickups);
@@ -1305,7 +1380,7 @@ public sealed class SelectionInteractionControllerTests
         var control = new Harness();
         control.Query.Picked = Target;
         control.Controller.HandleInputAction(InputAction.SelectDblLeft);
-        control.Controller.DrainOutbound();
+        control.DriveFrame();
         Assert.NotEmpty(control.Transport.Uses);
 
         var h = new Harness();
@@ -1313,7 +1388,7 @@ public sealed class SelectionInteractionControllerTests
         h.Query.WieldedByPlayer = true;
 
         h.Controller.HandleInputAction(InputAction.SelectDblLeft);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(Target, h.Selection.SelectedObjectId);
         Assert.Contains("pulse", h.Query.Events);
@@ -1348,7 +1423,7 @@ public sealed class SelectionInteractionControllerTests
         h.Selection.Select(RemoteWeapon, SelectionChangeSource.World);
 
         Assert.True(h.Controller.HandleInputAction(InputAction.SelectionPickUp));
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Contains(
             $"The Target {RemoteWeapon:X8} is being wielded by someone else!",
@@ -1407,7 +1482,7 @@ public sealed class SelectionInteractionControllerTests
         h.Selection.Select(GroundWeapon, SelectionChangeSource.World);
 
         Assert.True(h.Controller.HandleInputAction(InputAction.SelectionPickUp));
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(new[] { (GroundWeapon, Player, 0) }, h.Transport.Pickups);
         Assert.Single(h.Movement.Approaches);
@@ -1424,7 +1499,7 @@ public sealed class SelectionInteractionControllerTests
         h.Selection.Select(OwnWeapon, SelectionChangeSource.World);
 
         Assert.True(h.Controller.HandleInputAction(InputAction.SelectionPickUp));
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Equal(new[] { (OwnWeapon, Player, 0) }, h.Transport.Pickups);
         Assert.Empty(h.Movement.Approaches);
@@ -1488,7 +1563,7 @@ public sealed class SelectionInteractionControllerTests
 
         h.Controller.HandleInputAction(InputAction.SelectLeft);
         h.Controller.HandleInputAction(InputAction.SelectDblLeft);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Null(h.Selection.SelectedObjectId);
         Assert.Empty(h.Transport.Uses);
@@ -1518,7 +1593,7 @@ public sealed class SelectionInteractionControllerTests
         h.Selection.Select(Target, SelectionChangeSource.World);
 
         h.Controller.HandleInputAction(InputAction.SelectionPickUp);
-        h.Controller.DrainOutbound();
+        h.DriveFrame();
 
         Assert.Single(h.PendingPlacements);
         Assert.Empty(h.CancelledPlacements);

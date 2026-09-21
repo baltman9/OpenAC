@@ -12,6 +12,7 @@ using AcDream.App.UI;
 using AcDream.App.UI.Layout;
 using AcDream.App.World;
 using AcDream.Content;
+using AcDream.Content.Skills;
 using AcDream.Core.Chat;
 using AcDream.Core.Combat;
 using AcDream.Core.Items;
@@ -102,7 +103,7 @@ internal sealed record RetainedUiComposition(
 internal sealed record InteractionRetainedUiResult(
     RuntimeCombatAttackState CombatAttack,
     ExternalContainerLifecycleController ExternalContainerLifecycle,
-    ItemInteractionController ItemInteraction,
+    RuntimeItemInteraction ItemInteraction,
     MagicRuntime Magic,
     RetainedUiComposition? RetainedUi,
     InteractionUiLateBindings LateBindings);
@@ -258,21 +259,21 @@ internal interface IInteractionRetainedUiCompositionFactory
         InteractionRetainedUiDependencies dependencies,
         DeferredLiveSessionUiAuthority session);
 
-    ItemInteractionController CreateItemInteraction(
+    RuntimeItemInteraction CreateItemInteraction(
         InteractionRetainedUiDependencies dependencies,
         InteractionUiLateBindings lateBindings);
 
     MagicRuntime CreateMagicRuntime(
         InteractionRetainedUiDependencies dependencies,
         InteractionUiLateBindings lateBindings,
-        ItemInteractionController itemInteraction);
+        RuntimeItemInteraction itemInteraction);
 
     RetainedUiComposition CreateRetainedUi(
         InteractionRetainedUiDependencies dependencies,
         InteractionUiLateBindings lateBindings,
         RetailUiRuntimeLease lease,
         RuntimeCombatAttackState combatAttack,
-        ItemInteractionController itemInteraction,
+        RuntimeItemInteraction itemInteraction,
         MagicRuntime magic,
         Action<InteractionRetainedUiCompositionPoint> checkpoint);
 
@@ -328,113 +329,36 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
             d.Inventory.Objects,
             guid => session.CurrentSession?.SendNoLongerViewingContents(guid));
 
-    public ItemInteractionController CreateItemInteraction(
+    /// <summary>
+    /// The item owner is the runtime's, not this host's. All the graphical
+    /// host adds is what only it knows: the walk-to-then-act route it can
+    /// drive because it can see how far away an object is, which pack the
+    /// player has open, how much of a stack the split control is asking
+    /// for, whether the player is standing, and where a toast goes.
+    /// </summary>
+    public RuntimeItemInteraction CreateItemInteraction(
         InteractionRetainedUiDependencies d,
         InteractionUiLateBindings late)
     {
-        DeferredLiveSessionUiAuthority session = late.Session;
         DeferredSelectionUiAuthority selection = late.Selection;
-        return new ItemInteractionController(
-            d.Inventory.Objects,
-            d.Actions.Transactions,
-            d.Actions.Interaction,
-            playerGuid: () => d.PlayerIdentity.ServerGuid,
-            sendUse: null,
-            sendExamine: guid => session.CurrentSession?.SendAppraise(guid),
-            sendUseWithTarget: (source, target) =>
-                session.CurrentSession?.SendUseWithTarget(source, target),
-            sendWield: (item, mask) =>
-                session.CurrentSession?.SendGetAndWieldItem(item, mask),
-            sendDrop: item => session.CurrentSession?.SendDropItem(item),
-            sendGive: (target, item, amount) =>
-                session.CurrentSession?.SendGiveObject(target, item, amount),
-            dragOnPlayerOpensSecureTrade: () =>
-                d.Character.Options.DragItemOnPlayerOpensSecureTrade,
-            mainPackPreferred: () =>
-                d.Character.Options.GetOptionBit(CharacterOptionId.MainPackPreferred),
-            confirmVolatileRareUses: () =>
-                d.Character.Options.GetOptionBit(CharacterOptionId.ConfirmVolatileRareUse),
-            toast: d.Toast,
-            readyForInventoryRequest: () => session.IsInWorld,
+        RuntimeItemInteraction items = d.Runtime.ItemInteractionOwner;
+        items.BindApproachRoute(selection.RequestUse, selection.SendPickup);
+        items.BindPresentation(
+            backpackContainerId: () => late.InventoryContainer.Current(
+                d.PlayerIdentity.ServerGuid),
+            stackSplitQuantity: d.StackSplitQuantity,
             playerOnGround: () =>
                 d.PlayerMode.IsPlayerMode
                 && d.PlayerController.Controller is { IsAirborne: false },
-            inNonCombatMode: () =>
-                d.Actions.Combat.CurrentMode == CombatMode.NonCombat,
-            combatState: d.Actions.Combat,
-            sendChangeCombatMode: mode =>
-                session.CurrentSession?.SendChangeCombatMode(mode),
-            isComponentPack: d.MagicCatalog.IsComponentPack,
-            placeInBackpack: selection.SendPickup,
-            backpackContainerId: () => late.InventoryContainer.Current(
-                d.PlayerIdentity.ServerGuid),
-            groundObjectId: () =>
-                d.Inventory.ExternalContainers.CurrentContainerId,
-            activeVendorId: () => d.Inventory.Vendor.VendorId,
-            sendSplitToWorld: (item, amount) =>
-                session.CurrentSession?.SendStackableSplitTo3D(item, amount),
-            selectedObjectId: () =>
-                d.Actions.Selection.SelectedObjectId ?? 0u,
-            stackSplitQuantity: d.StackSplitQuantity,
-            systemMessage:
-                text => d.Communication.AddText(text, RetailLogTextType.ClientLocal),
-            interfaceText: (text, type) => d.Communication.AddText(text, type),
-            sendPutItemInContainer: (item, container, placement) =>
-                session.CurrentSession?.SendPutItemInContainer(
-                    item,
-                    container,
-                    placement),
-            sendSplitToContainer: (item, container, placement, amount) =>
-                session.CurrentSession?.SendStackableSplitToContainer(
-                    item,
-                    container,
-                    placement,
-                    amount),
-            sendStackableMerge: (source, target, amount) =>
-                session.CurrentSession?.SendStackableMerge(source, target, amount),
-            requestExternalContainer: guid =>
-            {
-                ClientObject? container = d.Inventory.Objects.Get(guid);
-                bool isCorpse = container is not null
-                    && ((PublicWeenieFlags)(container.PublicWeenieBitfield ?? 0u)
-                        & PublicWeenieFlags.Corpse) != 0;
-                d.Inventory.ExternalContainers.RequestOpen(guid, isCorpse);
-            },
-            requestUse: selection.RequestUse,
-            sendBuy: (vendorGuid, itemGuid, amount, alternateCurrencyId) =>
-            {
-                if (session.CurrentSession is not { } activeSession || !session.IsInWorld)
-                    return false;
-                activeSession.SendBuy(vendorGuid, itemGuid, amount, alternateCurrencyId);
-                return true;
-            },
-            sendBuyAll: (vendorGuid, items, alternateCurrencyId) =>
-            {
-                if (session.CurrentSession is not { } activeSession || !session.IsInWorld)
-                    return false;
-                activeSession.SendBuy(vendorGuid, items, alternateCurrencyId);
-                return true;
-            },
-            sendSell: (vendorGuid, items) =>
-            {
-                if (session.CurrentSession is not { } activeSession || !session.IsInWorld)
-                    return false;
-                activeSession.SendSell(vendorGuid, items);
-                return true;
-            },
-            sendSalvage: (toolGuid, itemGuids) =>
-            {
-                if (session.CurrentSession is not { } activeSession || !session.IsInWorld)
-                    return false;
-                activeSession.SendSalvage(toolGuid, itemGuids);
-                return true;
-            });
+            toast: d.Toast);
+        items.BindComponentPackResolver(d.MagicCatalog.IsComponentPack);
+        return items;
     }
 
     public MagicRuntime CreateMagicRuntime(
         InteractionRetainedUiDependencies d,
         InteractionUiLateBindings late,
-        ItemInteractionController itemInteraction) =>
+        RuntimeItemInteraction itemInteraction) =>
         MagicRuntime.Create(
             d.MagicCatalog,
             d.Actions.SpellCast,
@@ -494,7 +418,7 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
         InteractionUiLateBindings late,
         RetailUiRuntimeLease lease,
         RuntimeCombatAttackState combatAttack,
-        ItemInteractionController itemInteraction,
+        RuntimeItemInteraction itemInteraction,
         MagicRuntime magic,
         Action<InteractionRetainedUiCompositionPoint> checkpoint)
     {
@@ -705,6 +629,7 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                     chat,
                     () => late.Session.Commands,
                     d.Communication.ChatWindows,
+                    d.Communication.ChatEntryOwner,
                     layoutStore),
                 Radar: new RadarRuntimeBindings(
                     late.Radar.Snapshot,
@@ -789,7 +714,6 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                     d.Actions.Combat.HasHealth,
                     guid =>
                         (uint)(d.Inventory.Objects.Get(guid)?.StackSize ?? 0),
-                    guid => late.Session.CurrentSession?.SendQueryHealth(guid),
                     guid => late.Session.CurrentSession?.SendQueryItemMana(guid),
                     () => d.PlayerIdentity.ServerGuid,
                     (item, container, placement) =>
@@ -1249,10 +1173,12 @@ internal sealed class InteractionRetainedUiCompositionPhase
                     late.Session),
                 _factory.Release);
             Fault(InteractionRetainedUiCompositionPoint.ExternalContainerLifecycleCreated);
+            // The item owner belongs to the runtime and outlives this
+            // composition, so a failure here must not retire it.
             var itemLease = scope.Acquire(
                 "item interaction controller",
                 () => _factory.CreateItemInteraction(_dependencies, late),
-                _factory.Release);
+                static _ => { });
             Fault(InteractionRetainedUiCompositionPoint.ItemInteractionCreated);
             var magicLease = scope.Acquire(
                 "magic runtime",

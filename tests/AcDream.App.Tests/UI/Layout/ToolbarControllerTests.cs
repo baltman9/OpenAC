@@ -446,7 +446,7 @@ public class ToolbarControllerTests
         });
         repo.MoveItem(kit, pack, 0);
         var useWithTarget = new List<(uint Source, uint Target)>();
-        var interaction = new ItemInteractionController(
+        var interaction = new RuntimeItemInteraction(
             repo,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(repo)),
             new InteractionState(),
@@ -497,7 +497,7 @@ public class ToolbarControllerTests
         repo.MoveItem(source, pack, 0);
         repo.AddOrUpdate(new ClientObject { ObjectId = target, Type = ItemType.Creature });
         var useWithTarget = new List<(uint Source, uint Target)>();
-        var interaction = new ItemInteractionController(
+        var interaction = new AcDream.Runtime.Gameplay.RuntimeItemInteraction(
             repo,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(repo)),
             new InteractionState(),
@@ -568,7 +568,7 @@ public class ToolbarControllerTests
         repo.AddOrUpdate(new ClientObject { ObjectId = item, Name = "Loot", Type = ItemType.Misc });
         var placements = new List<(uint Item, uint Container, int Placement)>();
         var directPuts = new List<(uint Item, uint Container, int Placement)>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             repo,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(repo)),
             new InteractionState(),
@@ -619,7 +619,7 @@ public class ToolbarControllerTests
         repo.MoveItem(second, pack, 1);
         var puts = new List<(uint Item, uint Container, int Placement)>();
         var messages = new List<string>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             repo,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(repo)),
             new InteractionState(),
@@ -652,7 +652,7 @@ public class ToolbarControllerTests
         Assert.True(interaction.TryGetPendingBackpackPlacement(first, out _));
         Assert.True(interaction.TryGetPendingInventoryRequest(out var request));
         Assert.Equal(first, request.ItemId);
-        Assert.Equal(new[] { ItemInteractionController.InventoryRequestBusyMessage }, messages);
+        Assert.Equal(new[] { RuntimeItemInteraction.InventoryRequestBusyMessage }, messages);
     }
 
     [Fact]
@@ -669,7 +669,7 @@ public class ToolbarControllerTests
         repo.AddOrUpdate(new ClientObject { ObjectId = item, Name = "Loot", Type = ItemType.Misc });
         repo.MoveItem(item, sidePack, 0);
         var puts = new List<(uint Item, uint Container, int Placement)>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new AcDream.Runtime.Gameplay.RuntimeItemInteraction(
             repo,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(repo)),
             new InteractionState(),
@@ -864,7 +864,7 @@ public class ToolbarControllerTests
         var uses = new List<uint>();
         var examines = new List<uint>();
         uint selected = item;
-        var interaction = new ItemInteractionController(
+        var interaction = new RuntimeItemInteraction(
             repo,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(repo)),
             new InteractionState(),
@@ -924,7 +924,7 @@ public class ToolbarControllerTests
         repo.MoveItem(healthKit, pack, 1);
 
         var selection = new SelectionState();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             repo,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(repo)),
             new InteractionState(),
@@ -991,7 +991,7 @@ public class ToolbarControllerTests
         var selection = new SelectionState();
         selection.Select(sword, SelectionChangeSource.Inventory);
         var wields = new List<(uint Item, uint Location)>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             repo,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(repo)),
             new InteractionState(),
@@ -1162,7 +1162,7 @@ public class ToolbarControllerTests
         var shortcuts = new[] { new ShortcutEntry(0, itemId, 0) };
         var selection = new SelectionState();
         var appraisals = new List<uint>();
-        using var interaction = new ItemInteractionController(
+        using var interaction = new RuntimeItemInteraction(
             repo,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(repo)),
             new InteractionState(),
@@ -1213,7 +1213,7 @@ public class ToolbarControllerTests
         repo.AddOrUpdate(new ClientObject { ObjectId = target, Type = ItemType.Creature });
         uint sentSource = 0;
         uint sentTarget = 0;
-        var interaction = new ItemInteractionController(
+        var interaction = new RuntimeItemInteraction(
             repo,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(repo)),
             new InteractionState(),
@@ -1257,7 +1257,7 @@ public class ToolbarControllerTests
         repo.MoveItem(pack, player, 0);
         repo.AddOrUpdate(new ClientObject { ObjectId = item, Type = ItemType.Misc });
         repo.MoveItem(item, pack, 0);
-        var interaction = new ItemInteractionController(
+        var interaction = new RuntimeItemInteraction(
             repo,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(repo)),
             new InteractionState(),

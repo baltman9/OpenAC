@@ -156,7 +156,7 @@ public class PaperdollFigurePartsTests
         var layout = new ImportedLayout(
             new RootElement { Width = 224, Height = 214 },
             new Dictionary<uint, UiElement>());
-        var interaction = new ItemInteractionController(
+        var interaction = new AcDream.Runtime.Gameplay.RuntimeItemInteraction(
             objects,
             new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(
                 new InventoryTransactionState(objects)),

@@ -20,6 +20,14 @@ internal interface IHeadlessCollisionNeighborhood
 
     bool IsWithinServiceWindow(uint fullCellId);
 
+    /// <summary>
+    /// Whether the collision for this cell is published right now. That is a
+    /// narrower question than being near the centre, and it is the one an
+    /// accepted re-placement of another creature's body has to ask: a body
+    /// cannot be put down where there is nothing yet to put it down on.
+    /// </summary>
+    bool IsCollisionPublished(uint fullCellId);
+
     bool IsQuiescent { get; }
 }
 
@@ -287,6 +295,9 @@ internal sealed class HeadlessCollisionNeighborhood
                 .GetCellStruct(fullCellId) is not null;
     }
 
+    public bool IsCollisionPublished(uint fullCellId) =>
+        IsCollisionCurrentlyPublished(fullCellId);
+
     bool AcDream.Runtime.Session.IRuntimeRemotePlacementServiceWindow
         .IsWithinServiceWindow(uint fullCellId) =>
         IsCollisionCurrentlyPublished(fullCellId);
@@ -524,6 +535,32 @@ internal sealed class HeadlessSessionWorldProjection
         _onNonQuiescentStall = onNonQuiescentStall;
     }
 
+    /// <summary>
+    /// The test an accepted re-placement of another creature's body must pass
+    /// before it is carried out here: the collision it would land on is
+    /// published. Without a window that is the whole of the question; a client
+    /// with one also asks whether the landblock is drawn.
+    /// </summary>
+    /// <remarks>
+    /// Made once and kept: it is read while the session is being built, and a
+    /// fresh one per read would be a new object on a path that is asked the
+    /// same question over and over.
+    /// </remarks>
+    internal IRuntimeRemotePlacementServiceWindow RemotePlacementServiceWindow =>
+        _remotePlacementServiceWindow ??=
+            new PublishedCollisionServiceWindow(_collision);
+
+    private IRuntimeRemotePlacementServiceWindow?
+        _remotePlacementServiceWindow;
+
+    private sealed class PublishedCollisionServiceWindow(
+        IHeadlessCollisionNeighborhood collision)
+        : IRuntimeRemotePlacementServiceWindow
+    {
+        public bool IsWithinServiceWindow(uint landblockId) =>
+            collision.IsCollisionPublished(landblockId);
+    }
+
     public void ProjectSpawn(
         RuntimeEntityRecord record,
         bool isLocalPlayer)
@@ -532,6 +569,18 @@ internal sealed class HeadlessSessionWorldProjection
             && record.ServerGuid == _runtime.PlayerIdentity.ServerGuid
             && record.Snapshot.Position is { LandblockId: not 0u } position)
         {
+            // Order matters, and it is the placement's, not the collision's.
+            // Publishing collision for a landblock requires quiescence over
+            // that landblock's prefix, and anything still waiting for its
+            // mover to be prepared there is cancelled outright to obtain it -
+            // a cancellation the owning initial-Create residence cannot come
+            // back from. So the placement this spawn just opened is driven to
+            // its preparation FIRST; a prepared placement whose destination
+            // cell is not resident yet parks instead of being cancelled, and
+            // the publication below is what wakes it. The conductor still
+            // never runs while an admission is open, so the pump is the
+            // quiescent case only - the same gate every other drive site uses.
+            PumpPlacementDrivesIfQuiescent();
             _requestedLocalPlayerCell = position.LandblockId;
             PrepareLocalPlacementBeforeCenterOn();
             _collision.CenterOn(position.LandblockId);
@@ -562,6 +611,9 @@ internal sealed class HeadlessSessionWorldProjection
         {
             if (record.Snapshot.Position is { LandblockId: not 0u } position)
             {
+                // Same ordering rule as ProjectSpawn: preparation before
+                // publication, or the publication cancels the preparation.
+                PumpPlacementDrivesIfQuiescent();
                 _requestedLocalPlayerCell = position.LandblockId;
                 PrepareLocalPlacementBeforeCenterOn();
                 _collision.CenterOn(position.LandblockId);
@@ -571,6 +623,22 @@ internal sealed class HeadlessSessionWorldProjection
             _firstEntry?.DriveAll();
             _acceptedPositionDrive?.Advance();
         }
+    }
+
+    /// <summary>
+    /// Advances every placement drive one pass before a collision
+    /// neighbourhood mutation, so that placements reach their prepared (and
+    /// therefore parkable) state instead of being cancelled as unprepared
+    /// debt against the prefix about to be published. Skipped while the
+    /// neighbourhood is working: the conductor never runs against a half
+    /// published collision generation.
+    /// </summary>
+    private void PumpPlacementDrivesIfQuiescent()
+    {
+        if (!_collision.IsQuiescent)
+            return;
+        _firstEntry?.DriveAll();
+        _acceptedPositionDrive?.Advance();
     }
 
     public void CenterOnAcceptedForcePosition(RuntimeEntityRecord record)

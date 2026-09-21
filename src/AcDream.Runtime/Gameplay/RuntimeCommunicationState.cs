@@ -1,5 +1,6 @@
 using AcDream.Core.Chat;
 using AcDream.Core.Social;
+using AcDream.Runtime.Chat;
 using AcDream.Plugin.Abstractions;
 
 namespace AcDream.Runtime.Gameplay;
@@ -63,6 +64,8 @@ public sealed class RuntimeCommunicationState : IDisposable
         Friends = new FriendsState();
         Squelch = new SquelchState();
         ChatWindows = new ChatWindowState();
+        ChatFeed = new RuntimeChatFeed(Chat, ChatWindows);
+        ChatEntryOwner = new RuntimeChatEntryOwner();
         View = new CommunicationView(Chat);
         SocialView = new CommunicationSocialView(
             TurbineChat,
@@ -73,6 +76,26 @@ public sealed class RuntimeCommunicationState : IDisposable
     public ChatLog Chat { get; }
 
     public ChatWindowState ChatWindows { get; }
+
+    /// <summary>
+    /// The chat box as finished lines, filtered per chat window. Every front
+    /// end that shows chat reads its text from here.
+    /// </summary>
+    public RuntimeChatFeed ChatFeed { get; }
+
+    /// <summary>
+    /// The chat entry: the line being typed, where it goes when it is sent,
+    /// and the lines sent before it. Every front end that can be typed into
+    /// drives this one owner.
+    /// </summary>
+    public RuntimeChatEntryOwner ChatEntryOwner { get; }
+
+    /// <summary>
+    /// The poses a line of speech can carry, such as <c>hello *wave*</c>.
+    /// Empty until the shared content pass reads the table out of the
+    /// installed data files; a client without them simply has no poses.
+    /// </summary>
+    public ChatPoseCatalog ChatPoses { get; set; } = ChatPoseCatalog.Empty;
 
     public SpewBoxState SpewBox { get; }
 
@@ -187,6 +210,7 @@ public sealed class RuntimeCommunicationState : IDisposable
         if (_disposed)
             return;
         _disposed = true;
+        ChatFeed.Dispose();
         _events.Dispose();
         CommandTargets.ResetSession();
         CommandTargets.Dispose();
@@ -195,6 +219,9 @@ public sealed class RuntimeCommunicationState : IDisposable
         Squelch.Clear();
         Chat.ResetSessionIdentity();
         SpewBox.Reset();
+        ChatEntryOwner.Clear();
+        ChatEntryOwner.BindInputActiveSource(null);
+        ChatEntryOwner.BindEntryFocus(null);
         ChatWindows.ResetToDefaults();
     }
 

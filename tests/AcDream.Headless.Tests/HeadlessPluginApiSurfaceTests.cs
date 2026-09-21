@@ -1,4 +1,4 @@
-using AcDream.Core.Chat;
+﻿using AcDream.Core.Chat;
 using AcDream.Core.Combat;
 using AcDream.Headless.Plugins;
 using AcDream.Core.Plugins;
@@ -14,6 +14,32 @@ namespace AcDream.Headless.Tests;
 
 public sealed class HeadlessPluginApiSurfaceTests
 {
+    [Fact]
+    public void HeadlessHostEquipmentProjectsClassAndExplicitZeroStack()
+    {
+        var (runtime, commands) = NewRealSession();
+        using GameRuntime runtimeDisposal = runtime;
+        using var host = NewHost(runtime);
+        commands.Start(runtime.Generation);
+        const uint itemId = 0x700000ACu;
+        runtime.InventoryOwner.Objects.AddOrUpdate(new AcDream.Core.Items.ClientObject
+        {
+            ObjectId = itemId,
+            Name = "Empty bow stack",
+            Type = AcDream.Core.Items.ItemType.MissileWeapon,
+            ValidLocations = AcDream.Core.Items.EquipMask.Held,
+            ContainerId = 0x50000001u,
+            StackSize = 0,
+        });
+        IPluginHost pluginHost = host;
+
+        PluginEquipmentItem item = Assert.Single(
+            pluginHost.Automation.Equipment.CaptureOwnedEquipment(),
+            item => item.ObjectId == itemId);
+        Assert.Equal(PluginObjectClass.MissileWeapon, item.ObjectClass);
+        Assert.Equal(0, item.StackSize);
+    }
+
     [Fact]
     public void ChatReceivedFiresInOrderWithTheTextClassAndCombatKind()
     {
@@ -309,7 +335,42 @@ public sealed class HeadlessPluginApiSurfaceTests
                 Directory.Delete(root, recursive: true);
         }
     }
+    /// <summary>
+    /// A client with no window turns what the runtime did into what a plugin
+    /// hears through the same shared surface the client with a window uses,
+    /// rather than through a mapping of its own. This drives the runtime and
+    /// reads what the plugin got, so the whole road is under it: an answered
+    /// description reaches a plugin as that object having been identified.
+    /// </summary>
+    [Fact]
+    public void ObjectChangesReachAPluginFromTheRuntimeWithNoWindow()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        var seen = new List<PluginObjectChange>();
+        host.Events.ObjectChanged += seen.Add;
 
+        Assert.True(runtime.ActionOwner.Transactions.TryRequestAppraisal(
+            100u,
+            static _ => { },
+            AppraisalRequestOrigin.Automation));
+        _ = runtime.ActionOwner.Transactions.AcceptAppraisalResponse(100u);
+
+        Assert.Equal(
+            new (uint ObjectId, PluginObjectChangeKind Kind)[]
+            {
+                (100u, PluginObjectChangeKind.IdentReceived),
+            },
+            seen.Select(static c => (c.ObjectId, c.Kind)));
+        Assert.Equal([1L], seen.Select(static c => c.Revision));
+    }
+
+    /// <summary>
+    /// The runtime's own entity and inventory vocabulary reaches a plugin as
+    /// the plugin's narrower one, in order and stamped. The mapping belongs
+    /// to the shared surface, which is what observes the runtime here, so
+    /// this drives the surface rather than the host.
+    /// </summary>
     [Fact]
     public void ObjectChangedMapsEntityAndInventoryDeltasToPluginKinds()
     {
@@ -317,7 +378,7 @@ public sealed class HeadlessPluginApiSurfaceTests
         using var host = NewHost(runtime);
         var seen = new List<PluginObjectChange>();
         host.Events.ObjectChanged += seen.Add;
-        var observer = (IRuntimeEventObserver)host;
+        var observer = (IRuntimeEventObserver)host.Automation;
         RuntimeEventStamp stamp = default;
 
         observer.OnEntity(new RuntimeEntityDelta(
@@ -365,7 +426,9 @@ public sealed class HeadlessPluginApiSurfaceTests
         using var host = NewHost(runtime);
         var seen = new List<PluginPortalTransition>();
         host.Events.PortalTransition += seen.Add;
-        var observer = (IRuntimeEventObserver)host;
+        // The runtime's portal observer is the shared surface, not this
+        // host: one projection feeds both clients.
+        var observer = (IRuntimeEventObserver)host.Automation;
         RuntimePortalSnapshot snapshot = RuntimePortalSnapshot.Idle with
         {
             Generation = 4,
@@ -670,7 +733,9 @@ public sealed class HeadlessPluginApiSurfaceTests
         using var host = NewHost(runtime);
         var seen = new List<PluginActivationCompletion>();
         host.Events.ActivationCompleted += seen.Add;
-        var observer = (IRuntimeEventObserver)host;
+        // The runtime's portal observer is the shared surface, not this
+        // host: one projection feeds both clients.
+        var observer = (IRuntimeEventObserver)host.Automation;
 
         // Simulate a portal transition completing.
         RuntimePortalSnapshot snapshot = RuntimePortalSnapshot.Idle with
@@ -764,9 +829,9 @@ public sealed class HeadlessPluginApiSurfaceTests
           IRuntimeCombatModeOperations,
           IRuntimeSpellCastOperations
     {
-        public bool CanStartAttack() => false;
+        public bool CanStartAttack(bool allowAutoTarget) => false;
         public void PrepareAttackRequest() { }
-        public bool SendAttack(AttackHeight height, float power) => false;
+        public bool SendAttack(AttackHeight height, float power, bool allowAutoTarget) => false;
         public void SendCancelAttack() { }
         public bool IsDualWield => false;
         public bool PlayerReadyForAttack => false;

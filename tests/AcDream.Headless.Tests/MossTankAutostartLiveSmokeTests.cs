@@ -203,7 +203,7 @@ public sealed class MossTankAutostartLiveSmokeTests
 
     private static JsonElement[] ReadStatuses(string path) =>
         File.Exists(path)
-            ? File.ReadAllLines(path)
+            ? LiveStatusFile.ReadAllLines(path)
                 .Where(static line => line.Length > 0)
                 .Select(static line => JsonDocument.Parse(line).RootElement.Clone())
                 .ToArray()

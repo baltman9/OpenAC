@@ -21,6 +21,15 @@ internal interface ILiveEntityMotionRuntimeBindings
     void StickToObjectFromWire(IPhysicsObjHost? host, uint targetGuid);
     void ClearTargetForHiddenEntity(uint serverGuid);
     IPhysicsObjHost? ResolvePhysicsHost(uint serverGuid);
+
+    /// <summary>
+    /// What this client can tell the shared arming that the arming cannot
+    /// work out for itself.
+    /// </summary>
+    AcDream.Runtime.Physics.RuntimeRemoteArmingHostFacts HostFacts { get; }
+
+    /// <summary>Hands those facts to the one arming, once per session.</summary>
+    void BindArming(AcDream.Runtime.Physics.RuntimeRemoteArming arming);
 }
 
 internal sealed class DeferredLiveEntityMotionRuntimeBindings
@@ -77,6 +86,13 @@ internal sealed class DeferredLiveEntityMotionRuntimeBindings
 
     public IPhysicsObjHost? ResolvePhysicsHost(uint serverGuid) =>
         Target.ResolvePhysicsHost(serverGuid);
+
+    public AcDream.Runtime.Physics.RuntimeRemoteArmingHostFacts HostFacts =>
+        Target.HostFacts;
+
+    public void BindArming(
+        AcDream.Runtime.Physics.RuntimeRemoteArming arming) =>
+        Target.BindArming(arming);
 
     private sealed class Binding : IDisposable
     {

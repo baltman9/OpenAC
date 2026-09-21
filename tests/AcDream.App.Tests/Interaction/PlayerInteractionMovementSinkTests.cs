@@ -16,7 +16,7 @@ public sealed class PlayerInteractionMovementSinkTests
     [Fact]
     public void MissingPlayerDoesNotArmTheIntent()
     {
-        var completions = new PlayerApproachCompletionState();
+        var completions = new RuntimeApproachCompletionState();
         var sink = new PlayerInteractionMovementSink(() => null, completions);
         bool armed = false;
 
@@ -27,7 +27,7 @@ public sealed class PlayerInteractionMovementSinkTests
     [Fact]
     public void CurrentApproachFailProgressCountIsNullWithNoPlayer()
     {
-        var completions = new PlayerApproachCompletionState();
+        var completions = new RuntimeApproachCompletionState();
         var sink = new PlayerInteractionMovementSink(() => null, completions);
 
         Assert.Null(sink.CurrentApproachFailProgressCount());
@@ -63,7 +63,7 @@ public sealed class PlayerInteractionMovementSinkTests
         controller.MoveTo = moveTo;
         var sink = new PlayerInteractionMovementSink(
             () => controller,
-            new PlayerApproachCompletionState());
+            new RuntimeApproachCompletionState());
 
         Assert.False(moveTo.IsMovingTo());
         Assert.Null(sink.CurrentApproachFailProgressCount());
@@ -111,7 +111,7 @@ public sealed class PlayerInteractionMovementSinkTests
             new Position(Cell, new Vector3(2f, 0f, 0f), Quaternion.Identity),
             new MovementParameters { UseSpheres = false });
         bool armedAfterCancellation = false;
-        var completions = new PlayerApproachCompletionState();
+        var completions = new RuntimeApproachCompletionState();
         _ = completions.BeginControllerLifetime();
         var sink = new PlayerInteractionMovementSink(
             () => controller,

@@ -345,6 +345,20 @@ public interface ICharacterInfo
     uint MaxMana { get; }
 
     /// <summary>
+    /// The unbuffed maximum health: the maximum with every enchantment layer
+    /// off — base attributes, no vital enchantments. A host that does not
+    /// track the split reports the buffed maximum instead, in which case this
+    /// and <see cref="MaxHealth"/> are the same number.
+    /// </summary>
+    uint BaseHealth => MaxHealth;
+
+    /// <inheritdoc cref="BaseHealth"/>
+    uint BaseStamina => MaxStamina;
+
+    /// <inheritdoc cref="BaseHealth"/>
+    uint BaseMana => MaxMana;
+
+    /// <summary>
     /// How many creatures the character may have summoned at once, as the
     /// server reports it; 0 when it has said nothing.
     /// </summary>
@@ -364,6 +378,10 @@ public interface ICharacterInfo
     /// is rebuilt by the host, never mutated in place under a reader.
     /// </summary>
     IReadOnlyList<PluginActiveEnchantment> ActiveEnchantments { get; }
+
+    /// <summary>Timed spell buffs, including those temporarily suppressed by
+    /// a stronger equipped effect. Equipment enchantments are excluded.</summary>
+    IReadOnlyList<PluginActiveEnchantment> TimedEnchantments => ActiveEnchantments;
 
     /// <summary>
     /// Looks up one skill by id. False when the character has no such skill
@@ -596,6 +614,21 @@ public interface IPluginChat
     /// blank or the host has no chat bar to submit to.
     /// </summary>
     bool Submit(string text) => false;
+
+    /// <summary>
+    /// Puts <paramref name="text"/> into the chat entry and focuses it,
+    /// WITHOUT sending it, so the player can finish typing. False when there
+    /// is no chat entry to type into or the player is already typing in it.
+    /// </summary>
+    bool Compose(string text) => false;
+
+    /// <summary>
+    /// True while the player is typing into the chat entry, so the keyboard is
+    /// going into text rather than driving the character. Automation that
+    /// steers by holding keys has to fall back to something else while this is
+    /// set. A host with no chat entry answers false.
+    /// </summary>
+    bool IsInputActive => false;
 }
 
 /// <summary>A registration handle from a host that has nothing to revoke.</summary>
@@ -1033,6 +1066,9 @@ public sealed class NoOpAutomationSurface
 
     /// <inheritdoc/>
     public PluginItemCommandResult Open(uint containerObjectId) =>
+        new(PluginItemCommandStatus.Unavailable);
+    /// <inheritdoc/>
+    public PluginItemCommandResult Close(uint containerObjectId) =>
         new(PluginItemCommandStatus.Unavailable);
 
     /// <inheritdoc/>

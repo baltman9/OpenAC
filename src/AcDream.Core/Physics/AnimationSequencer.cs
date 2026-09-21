@@ -222,6 +222,29 @@ public sealed class AnimationSequencer
             : BuildBlendedFrame();
     }
 
+    /// <summary>
+    /// Advance the sequence by <paramref name="dt"/> seconds, accumulating the
+    /// authored root motion into <paramref name="rootMotionFrame"/>, WITHOUT
+    /// building the blended part poses.
+    /// </summary>
+    /// <remarks>
+    /// This is the simulation half of <see cref="Advance(float, Frame?)"/> and
+    /// nothing else: the same early-outs, the same single sequence update, the
+    /// same hooks, the same resulting sequencer state. A host that only needs
+    /// to know where a body ended up — no skinning, no drawing — then pays
+    /// nothing for poses it will never look at. The two entry points may be
+    /// interleaved on one sequencer.
+    /// </remarks>
+    public void AdvanceRootMotionOnly(float dt, Frame? rootMotionFrame)
+    {
+        if (_core.CurrAnim == null && rootMotionFrame is null)
+            return;
+        if (dt <= 0f)
+            return;
+
+        _core.Update(dt, rootMotionFrame);
+    }
+
     public IReadOnlyList<PartTransform> SampleCurrentPose()
         => _core.CurrAnim == null
             ? BuildIdentityFrame(_setup.Parts.Count)

@@ -6,6 +6,8 @@
   href: navigation.md
 - name: Plugin UI markup
   href: plugin-ui-markup.md
+- name: Extracting a plugin
+  href: plugins/extracting-a-plugin.md
 - name: Architecture
   href: architecture.md
 - name: Building and running

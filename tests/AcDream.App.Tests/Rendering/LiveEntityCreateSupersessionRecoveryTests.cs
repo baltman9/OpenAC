@@ -7,6 +7,7 @@ using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 using AcDream.Core.Physics.Motion;
 using AcDream.Core.World;
+using AcDream.Runtime.Physics;
 using DatReaderWriter.DBObjs;
 using DatReaderWriter.Types;
 using DRWMotionCommand = DatReaderWriter.Enums.MotionCommand;
@@ -16,7 +17,7 @@ namespace AcDream.App.Tests.Rendering;
 public sealed class LiveEntityCreateSupersessionRecoveryTests
 {
     [Fact]
-    public void Recovery_RepublishesAppearanceThenCurrentSnapshotThenReplacesAnimation()
+    public void Recovery_RepublishesAppearanceThenReplacesAnimation()
     {
         var operations = new List<string>();
         var resources = new CountingResources();
@@ -39,7 +40,6 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
                 operations.Add("appearance");
                 return true;
             },
-            publishCurrentSnapshot: _ => operations.Add("current"),
             synchronizeAnimation: _ =>
             {
                 operations.Add("animation");
@@ -47,7 +47,7 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
             });
 
         Assert.True(recovered);
-        Assert.Equal(["capture", "appearance", "current", "animation"], operations);
+        Assert.Equal(["capture", "appearance", "animation"], operations);
         Assert.Equal(version, installedAnimationVersion);
         Assert.Equal(1, resources.RegisterCount);
         Assert.Equal(0, resources.UnregisterCount);
@@ -77,7 +77,6 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
                 record.Canonical.AdvanceCreateAuthority();
                 return true;
             },
-            publishCurrentSnapshot: _ => operations.Add("current"),
             synchronizeAnimation: _ => operations.Add("animation"));
 
         Assert.False(recovered);
@@ -91,7 +90,6 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
-    [InlineData(2)]
     public void Recovery_FailureAtEachPublicationStage_CanReplayOnRetainedOwner(
         int failingStage)
     {
@@ -100,7 +98,6 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
         LiveEntityRecord record = RegisterAndMaterialize(runtime);
         ulong version = record.CreateIntegrationVersion;
         ulong appearanceVersion = 1;
-        ulong currentVersion = 1;
         ulong animationVersion = 1;
         bool fail = true;
         void FailOnce(int stage)
@@ -124,22 +121,16 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
                 FailOnce(0);
                 return true;
             },
-            publishCurrentSnapshot: _ =>
-            {
-                currentVersion = version;
-                FailOnce(1);
-            },
             synchronizeAnimation: _ =>
             {
                 animationVersion = version;
-                FailOnce(2);
+                FailOnce(1);
             });
 
         Assert.Throws<InvalidOperationException>(() => Apply());
         Assert.True(Apply());
 
         Assert.Equal(version, appearanceVersion);
-        Assert.Equal(version, currentVersion);
         Assert.Equal(version, animationVersion);
         Assert.Same(record, AssertRecord(runtime));
         Assert.Equal(1, resources.RegisterCount);
@@ -175,7 +166,8 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
                 canonicalLowFrame: 0,
                 canonicalHighFrame: 0,
                 canonicalFramerate: 0f,
-                motionTable: table,
+                motionStates: MotionStates(table, loader),
+                motionTableId: FixtureMotionTableId,
                 wireState: Wire(Ready));
 
         Assert.False(reinitialized);
@@ -203,7 +195,7 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
             LowFrame = 2,
             HighFrame = 11,
             Framerate = 12f,
-            Scale = 1f,
+            Simulation = new RuntimeRemoteAnimationState { Scale = 1f },
             PartTemplate = [],
             PartAvailability = [],
             CurrFrame = 7.25f,
@@ -218,7 +210,8 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
                 canonicalLowFrame: 0,
                 canonicalHighFrame: 4,
                 canonicalFramerate: 30f,
-                motionTable: null,
+                motionStates: MotionStates(new MotionTable(), new Loader()),
+                motionTableId: 0u,
                 wireState: null);
 
         Assert.False(synchronized);
@@ -259,7 +252,8 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
                 canonicalLowFrame: 0,
                 canonicalHighFrame: 0,
                 canonicalFramerate: 0f,
-                motionTable: table,
+                motionStates: MotionStates(table, loader),
+                motionTableId: FixtureMotionTableId,
                 wireState: Wire(Ready));
 
         Assert.True(reinitialized);
@@ -349,7 +343,7 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
             LowFrame = 0,
             HighFrame = 0,
             Framerate = 0f,
-            Scale = 1f,
+            Simulation = new RuntimeRemoteAnimationState { Scale = 1f },
             PartTemplate = [],
             PartAvailability = [],
             Sequencer = sequencer,
@@ -417,6 +411,31 @@ public sealed class LiveEntityCreateSupersessionRecoveryTests
             Framerate = 30f,
         });
         return data;
+    }
+
+    private const uint FixtureMotionTableId = 0x09000001u;
+
+    /// <summary>
+    /// The shared builder, over a content source that knows one table under
+    /// one id: exactly the content the windowed host would have had to hand.
+    /// </summary>
+    private static RuntimeMotionStateBuilder MotionStates(
+        MotionTable table,
+        IAnimationLoader loader) =>
+        new(new FixtureMotionContent(table, loader));
+
+    private sealed class FixtureMotionContent(
+        MotionTable table,
+        IAnimationLoader loader) : IRuntimeMotionContentSource
+    {
+        public IAnimationLoader AnimationLoader => loader;
+
+        public MotionTable? TryGetMotionTable(uint motionTableId) =>
+            motionTableId == FixtureMotionTableId ? table : null;
+
+        // This fixture hands the builder a layout itself, so it has no
+        // layouts of its own to look up.
+        public DatReaderWriter.DBObjs.Setup? TryGetSetup(uint setupId) => null;
     }
 
     private sealed class Loader : IAnimationLoader

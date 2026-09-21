@@ -140,10 +140,10 @@ public sealed class RuntimePhysicsOwnershipTests
         string root = FindRepositoryRoot();
         string appRoot = Path.Combine(root, "src", "AcDream.App");
         string runtimeRoot = Path.Combine(root, "src", "AcDream.Runtime");
-        string remoteAdapter = File.ReadAllText(Path.Combine(
+        string animationScheduler = File.ReadAllText(Path.Combine(
             appRoot,
-            "Physics",
-            "RemotePhysicsUpdater.cs"));
+            "Rendering",
+            "LiveEntityAnimationScheduler.cs"));
         string ordinaryAdapter = File.ReadAllText(Path.Combine(
             appRoot,
             "Physics",
@@ -176,13 +176,17 @@ public sealed class RuntimePhysicsOwnershipTests
                     SearchOption.AllDirectories)
                 .Select(File.ReadAllText));
 
+        // Nothing in the window sweeps a body carried by the shared owner,
+        // and there is no adapter left in the window that could.
+        Assert.False(
+            File.Exists(Path.Combine(
+                appRoot,
+                "Physics",
+                "RemotePhysicsUpdater.cs")),
+            "The window no longer holds a remote physics adapter.");
         Assert.DoesNotContain(
             "ResolveWithTransition(",
-            remoteAdapter,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "RetailObjectManagerTail.Run(",
-            remoteAdapter,
+            animationScheduler,
             StringComparison.Ordinal);
         Assert.Contains(
             "ResolveWithTransition(",

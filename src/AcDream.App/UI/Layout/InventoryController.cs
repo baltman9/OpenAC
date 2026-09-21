@@ -57,7 +57,7 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
     private readonly Action<uint, uint, uint, uint>? _sendStackableSplitToContainer;
     private readonly Action<uint, uint, uint>? _sendStackableMerge;
     private readonly Action<uint, uint>? _notifyMergeAttempt;
-    private readonly ItemInteractionController? _itemInteraction;
+    private readonly RuntimeItemInteraction? _itemInteraction;
     private readonly StackSplitQuantityState? _stackSplitQuantity;
     private PendingListPlacement? _pendingListPlacement;
     private readonly ShortcutStore? _shortcuts;
@@ -92,7 +92,7 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         Action<uint, uint, uint, uint>? sendStackableSplitToContainer,
         Action<uint, uint, uint>? sendStackableMerge,
         Action<uint, uint>? notifyMergeAttempt,
-        ItemInteractionController? itemInteraction,
+        RuntimeItemInteraction? itemInteraction,
         Action? onClose,
         StackSplitQuantityState? stackSplitQuantity,
         Spellbook? burdenSpellbook,
@@ -252,7 +252,7 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         Action<uint, uint, uint, uint>? sendStackableSplitToContainer = null,
         Action<uint, uint, uint>? sendStackableMerge = null,
         Action<uint, uint>? notifyMergeAttempt = null,
-        ItemInteractionController? itemInteraction = null,
+        RuntimeItemInteraction? itemInteraction = null,
         Action? onClose = null,
         StackSplitQuantityState? stackSplitQuantity = null,
         Func<ItemType, uint, uint, uint, uint, uint>? dragIconIds = null,

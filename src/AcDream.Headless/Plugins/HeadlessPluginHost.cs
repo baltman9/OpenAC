@@ -1,4 +1,4 @@
-using AcDream.Content;
+﻿using AcDream.Content;
 using AcDream.Core.Items;
 using AcDream.Headless.Hosting;
 using AcDream.Plugin.Abstractions;
@@ -13,21 +13,19 @@ internal sealed class HeadlessPluginHost
     : IPluginHost,
       IPerPluginSessionSettings,
       IGameState,
-      IEvents,
-      IRuntimeEventObserver,
+      AcDream.Core.Plugins.IPluginEventSink,
       IDisposable
 {
     private static readonly IReadOnlyDictionary<string, string> EmptySettings =
         new Dictionary<string, string>();
 
     private readonly GameRuntime _runtime;
-    private readonly IDisposable _eventSubscription;
+    private readonly RuntimeWorldEntityProjection _worldEntities;
     private readonly object _eventGate = new();
-    private readonly List<Subscription> _subscriptions = [];
-    private Subscription[] _liveSnapshot = [];
     private readonly RuntimeAutomationSurface _automation;
-    private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>
-        _sessionSettingsByPlugin;
+    // The one snapshot both clients answer a plugin from, so the settings a
+    // session was started with read the same whichever client is running.
+    private readonly PluginSessionSettings _sessionSettings;
     private readonly object _tickGate = new();
     private Action<double>? _tick;
     private Action? _loginComplete;
@@ -37,111 +35,102 @@ internal sealed class HeadlessPluginHost
     private long _objectChangeRevision;
     private Action<PluginPortalTransition>? _portalTransition;
     private long _portalTransitionRevision;
-    private RuntimePortalSnapshot? _lastPublishedPortalSnapshot;
-    private long _lastPublishedRecallRequestRevision;
     private Action<PluginItemUseCompletion>? _itemUseCompleted;
     private Action<PluginGoToReport>? _navigationChanged;
-    private long _lastNavigationSequence;
-    private PluginGoToState _lastNavigationState;
     private Action<uint>? _containerOpened;
     private Action<uint>? _containerClosed;
     private Action<PluginConfirmation>? _confirmationRequested;
     private Action<PluginActivationCompletion>? _activationCompleted;
-    private bool _wasInWorld;
     private bool _disposed;
-
-    private readonly record struct ReplayEntity(
-        RuntimeEntityIdentity Identity,
-        WorldEntitySnapshot Snapshot);
-
-    private sealed class Subscription(Action<WorldEntitySnapshot> handler)
-    {
-        internal Action<WorldEntitySnapshot> Handler { get; } = handler;
-        internal Queue<ReplayEntity> Pending { get; } = new();
-        internal HashSet<RuntimeEntityIdentity> Delivered { get; } = [];
-        internal bool Replaying { get; set; } = true;
-        internal bool Active { get; set; } = true;
-    }
 
     internal HeadlessPluginHost(
         GameRuntime runtime,
         IPluginLogger logger,
-        IPluginCommandRegistry? commands = null,
         IPluginStorage? storage = null,
         IPluginStorage? vtankProfiles = null,
-        IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
+        PluginSessionSettings? sessionSettings = null,
         Func<string, bool>? submitChatText = null,
-        HeadlessItemAutomation? items = null,
         MagicCatalog? magicCatalog = null,
         HeadlessLogoutAutomation? logout = null,
         Func<uint, bool, bool>? answerConfirmation = null,
-        Func<bool>? requestGracefulStop = null)
+        Func<bool>? requestGracefulStop = null,
+        AcDream.Content.IDatReaderWriter? content = null,
+        IGameRuntimeCommands? sessionCommands = null,
+        NavigationWalkController? navigationWalk = null,
+        Action<string, Exception>? pluginCommandFailed = null,
+        string? dataDirectory = null,
+        IReadOnlyList<string>? pluginTags = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         Log = logger ?? throw new ArgumentNullException(nameof(logger));
-        Commands = commands ?? NoOpPluginCommandRegistry.Instance;
         Storage = storage ?? NoOpPluginStorage.Instance;
         VtankProfiles = vtankProfiles ?? NoOpPluginStorage.Instance;
-        _sessionSettingsByPlugin = CopySessionSettings(sessionSettings);
+        _sessionSettings = sessionSettings ?? PluginSessionSettings.Empty;
         Window = new HeadlessHostWindow(requestGracefulStop);
-        _automation = new RuntimeAutomationSurface();
-        _automation.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
-        _automation.BindRemoteBodiesUnsimulated();
-        _automation.BindSubmit(submitChatText);
-        if (magicCatalog is not null)
-            _automation.BindMagicCatalog(magicCatalog);
-        if (items is not null)
-        {
-            _automation.BindItems(
-                items.TryUse,
-                items.TryApply,
-                items.TryMove,
-                items.TryMerge,
-                items.TryDrop,
-                items.TryGive,
-                HeadlessItemAutomation.RefusePickup,
-                HeadlessItemAutomation.RefuseIdentify);
-            _automation.BindEquipment(items.TryEquip, () => items.EquipmentBusy);
-        }
-        if (logout is not null)
-        {
-            _automation.BindLogout(
-                logout.TryRequestLogout,
-                () => logout.CanRequestLogout);
-        }
-        if (answerConfirmation is not null)
-            _automation.BindDialogs(answerConfirmation);
-        _wasInWorld = runtime.Lifecycle.State == RuntimeLifecycleState.InWorld;
-        runtime.CommunicationOwner.LocalPlayerDied += OnLocalPlayerDied;
-        runtime.InventoryOwner.ExternalContainers.Changed += OnExternalContainerChanged;
-        runtime.ActionOwner.Transactions.AppraisalReceived += OnAppraisalReceived;
-        runtime.ActionOwner.Transactions.UseCompleted += OnUseCompleted;
-        _eventSubscription = runtime.Subscribe(this);
-    }
-
-    private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>
-        CopySessionSettings(
-            IReadOnlyDictionary<string, Dictionary<string, string>>? source)
-    {
-        if (source is null || source.Count == 0)
-            return new Dictionary<string, IReadOnlyDictionary<string, string>>();
-        var copy = new Dictionary<string, IReadOnlyDictionary<string, string>>(
-            source.Count,
-            StringComparer.Ordinal);
-        foreach ((string pluginId, Dictionary<string, string>? perPlugin) in source)
-        {
-            copy[pluginId] = perPlugin is { Count: > 0 }
-                ? new Dictionary<string, string>(perPlugin, StringComparer.Ordinal)
-                : EmptySettings;
-        }
-        return copy;
+        // One factory, shared with the windowed host. The surface announces
+        // this client to the other clients on this machine off the tick it is
+        // built with, so the tick, the folder they find each other in and the
+        // words this client answers to all have to be passed here; none of
+        // them can be bound later.
+        _automation = RuntimeAutomationBindings.CreateSurface(
+            HeadlessAutomationCapabilities.BuildSurfaceInputs(
+                new HeadlessSurfaceInputParts
+                {
+                    Events = this,
+                    DataDirectory = dataDirectory
+                        ?? AcDream.Platform.ApplicationPathSet.Resolve()
+                            .DataDirectory,
+                    PluginTags = pluginTags,
+                }));
+        // One registry, the surface's own, exactly as the windowed host does
+        // it: the verbs a plugin registers and the verbs the client registers
+        // for itself live together, so a line typed anywhere finds all of them.
+        Commands = _automation.PluginCommands;
+        if (pluginCommandFailed is not null)
+            _automation.ReportPluginCommandFailuresTo(pluginCommandFailed);
+        // One wiring, shared with the windowed host: what this host can lend
+        // the plugin surface goes in the capability record, and the runtime
+        // fills the rest.
+        RuntimeAutomationBindings.Apply(
+            _automation,
+            runtime,
+            HeadlessAutomationCapabilities.Build(new HeadlessAutomationParts
+            {
+                Runtime = runtime,
+                Warn = Log.Warn,
+                Content = content,
+                MagicCatalog = magicCatalog,
+                SubmitChatText = submitChatText,
+                SessionCommands = sessionCommands,
+                NavigationWalk = navigationWalk,
+                Logout = logout,
+                AnswerConfirmation = answerConfirmation,
+                Events = this,
+            }));
+        // Which runtime happening becomes which plugin event is the shared
+        // surface's job, on both clients: it watches the runtime and raises
+        // them here. Watching the runtime a second time from this host would
+        // mean a plugin hearing every event twice.
+        // The one producer of what a plugin sees in the world, shared with
+        // the client that has a window.
+        _worldEntities = new RuntimeWorldEntityProjection(runtime, Log.Warn);
     }
 
     public bool HasUi => false;
+
     public IPluginLogger Log { get; }
     public IPluginCommandRegistry Commands { get; }
     public IPluginStorage Storage { get; }
     public IPluginStorage VtankProfiles { get; }
+
+    /// <summary>
+    /// The session's loot classifier directory, the same one the graphical
+    /// client keeps: a plugin that publishes its loot rules loads headless
+    /// exactly as it does with a window, and another plugin can ask it for
+    /// verdicts by id.
+    /// </summary>
+    public IPluginLootClassifierRegistry LootClassifiers { get; } =
+        new AcDream.Core.Plugins.PluginLootClassifierRegistry();
     public IGameState State => this;
     public IEvents Events => this;
     public ISelectionService Selection => _runtime.ActionOwner.Selection;
@@ -150,21 +139,28 @@ internal sealed class HeadlessPluginHost
     /// <summary>The runtime navigation behind <see cref="Automation"/>; the session host binds its walk controller and commands to it.</summary>
     internal RuntimeNavigationAutomation NavigationAutomation => _automation.NavigationAutomation;
 
+    /// <summary>
+    /// Offers a typed line to the one command registry, so the chat route can
+    /// reach the verbs plugins and the client itself registered.
+    /// </summary>
+    internal bool TryHandlePluginCommand(string commandLine) =>
+        _automation.TryHandlePluginCommand(commandLine);
+
+    /// <summary>
+    /// Whether a verb is already spoken for on that one registry. A front end
+    /// with a verb of its own asks before answering it.
+    /// </summary>
+    internal bool ClaimsPluginVerb(string verb) =>
+        _automation.ClaimsPluginVerb(verb);
+
     public IUiRegistry Ui => NoOpUiRegistry.Instance;
 
     public IHostWindow Window { get; }
 
     public IReadOnlyDictionary<string, string> SessionSettings => EmptySettings;
 
-    public IReadOnlyDictionary<string, string> SessionSettingsFor(string pluginId)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
-        return _sessionSettingsByPlugin.TryGetValue(
-            pluginId,
-            out IReadOnlyDictionary<string, string>? settings)
-            ? settings
-            : EmptySettings;
-    }
+    public IReadOnlyDictionary<string, string> SessionSettingsFor(string pluginId) =>
+        _sessionSettings.SessionSettingsFor(pluginId);
 
     public event Action<double> Tick
     {
@@ -185,16 +181,10 @@ internal sealed class HeadlessPluginHost
 
     internal void FireTick(double elapsedSeconds)
     {
-        _automation.Poll();
-        _automation.NavigationAutomation.PublishSnapshotChanged();
-        PluginGoToReport report = _automation.NavigationAutomation.GoToReport;
-        if (report.Revision != 0L
-            && report.Revision != _lastNavigationSequence)
-        {
-            _lastNavigationSequence = report.Revision;
-            _lastNavigationState = report.State;
-            RaiseNavigationChanged(report);
-        }
+        // The surface polls its own owners off this tick, as the first thing
+        // subscribed to it, which is what the windowed client does too. It is
+        // not polled separately here: two polls a tick on one client and one
+        // on the other is a difference in its own right.
         Action<double>? handlers;
         lock (_tickGate)
             handlers = _tick;
@@ -215,16 +205,18 @@ internal sealed class HeadlessPluginHost
         }
     }
 
-    internal Action? ReplayCapturedForTest { get; set; }
+    internal Action? ReplayCapturedForTest
+    {
+        get => _worldEntities.ReplayCapturedForTest;
+        set => _worldEntities.ReplayCapturedForTest = value;
+    }
 
     public IReadOnlyList<WorldEntitySnapshot> Entities
     {
         get
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            var visitor = new SnapshotVisitor(_runtime);
-            _runtime.Entities.Visit(visitor);
-            return visitor.Items.Select(static item => item.Snapshot).ToArray();
+            return _worldEntities.Entities;
         }
     }
 
@@ -233,10 +225,7 @@ internal sealed class HeadlessPluginHost
         get
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            return AcDream.Runtime.Gameplay.ContractPluginProjection.Project(
-                _runtime.ContractsOwner.View,
-                catalog: null,
-                now: DateTime.UtcNow);
+            return _runtime.ContractsOwner.ProjectForPlugins();
         }
     }
 
@@ -246,79 +235,13 @@ internal sealed class HeadlessPluginHost
         {
             ArgumentNullException.ThrowIfNull(value);
             ObjectDisposedException.ThrowIf(_disposed, this);
-            var subscription = new Subscription(value);
-            lock (_eventGate)
-            {
-                ObjectDisposedException.ThrowIf(_disposed, this);
-                _subscriptions.Add(subscription);
-            }
-
-            var visitor = new SnapshotVisitor(
-                _runtime,
-                ReplayCapturedForTest);
-            _runtime.Entities.Visit(visitor);
-            ReplayEntity[] replay = visitor.Items.ToArray();
-
-            foreach (ReplayEntity item in replay)
-            {
-                lock (_eventGate)
-                {
-                    if (!subscription.Active)
-                        return;
-                    if (!_runtime.Entities.TryGet(
-                            item.Identity.ServerGuid,
-                            out RuntimeEntitySnapshot current)
-                        || current.Identity != item.Identity
-                        || !subscription.Delivered.Add(item.Identity))
-                    {
-                        continue;
-                    }
-                }
-
-                Invoke(subscription.Handler, item.Snapshot);
-            }
-
-            while (true)
-            {
-                ReplayEntity pending;
-                lock (_eventGate)
-                {
-                    if (!subscription.Active)
-                        return;
-                    if (!subscription.Pending.TryDequeue(out pending))
-                    {
-                        subscription.Replaying = false;
-                        subscription.Delivered.Clear();
-                        RebuildLiveSnapshotLocked();
-                        return;
-                    }
-                    if (!subscription.Delivered.Add(pending.Identity))
-                        continue;
-                }
-
-                Invoke(subscription.Handler, pending.Snapshot);
-            }
+            _worldEntities.Subscribe(value);
         }
         remove
         {
             if (value is null)
                 return;
-            lock (_eventGate)
-            {
-                for (int index = _subscriptions.Count - 1; index >= 0; index--)
-                {
-                    Subscription subscription = _subscriptions[index];
-                    if (subscription.Handler != value)
-                        continue;
-                    subscription.Active = false;
-                    subscription.Pending.Clear();
-                    subscription.Delivered.Clear();
-                    _subscriptions.RemoveAt(index);
-                    if (!subscription.Replaying)
-                        RebuildLiveSnapshotLocked();
-                    break;
-                }
-            }
+            _worldEntities.Unsubscribe(value);
         }
     }
 
@@ -327,17 +250,8 @@ internal sealed class HeadlessPluginHost
         if (_disposed)
             return;
         lock (_eventGate)
-        {
             _disposed = true;
-            foreach (Subscription subscription in _subscriptions)
-            {
-                subscription.Active = false;
-                subscription.Pending.Clear();
-                subscription.Delivered.Clear();
-            }
-            _subscriptions.Clear();
-            _liveSnapshot = [];
-        }
+        _worldEntities.Dispose();
         lock (_tickGate)
         {
             _tick = null;
@@ -349,63 +263,23 @@ internal sealed class HeadlessPluginHost
             _containerClosed = null;
             _confirmationRequested = null;
         }
-        _runtime.CommunicationOwner.LocalPlayerDied -= OnLocalPlayerDied;
-        _runtime.InventoryOwner.ExternalContainers.Changed -= OnExternalContainerChanged;
-        _runtime.ActionOwner.Transactions.AppraisalReceived -= OnAppraisalReceived;
-        _runtime.ActionOwner.Transactions.UseCompleted -= OnUseCompleted;
-        _eventSubscription.Dispose();
         _automation.Dispose();
     }
 
-    public void OnEntity(in RuntimeEntityDelta delta)
+    /// <summary>
+    /// The character has arrived in the world. Raised by the shared surface,
+    /// which is what decides that a lifecycle change means this.
+    /// </summary>
+    public void FireLoginComplete() => FireLifecycle(arrived: true);
+
+    /// <summary>The character has left the world.</summary>
+    public void FireLogoff() => FireLifecycle(arrived: false);
+
+    private void FireLifecycle(bool arrived)
     {
-        RaiseObjectChanged(
-            delta.Entity.Identity.ServerGuid,
-            delta.Change switch
-            {
-                RuntimeEntityChange.Registered => PluginObjectChangeKind.Created,
-                RuntimeEntityChange.Rebucketed => PluginObjectChangeKind.Moved,
-                RuntimeEntityChange.Withdrawn => PluginObjectChangeKind.Released,
-                RuntimeEntityChange.Deleted => PluginObjectChangeKind.Released,
-                _ => PluginObjectChangeKind.Updated,
-            });
-        if (delta.Change != RuntimeEntityChange.Registered)
-            return;
-        Subscription[] toNotify;
-        var pending = new ReplayEntity(
-            delta.Entity.Identity,
-            Convert(_runtime, delta.Entity));
-        lock (_eventGate)
-        {
-            if (_disposed)
-                return;
-            foreach (Subscription subscription in _subscriptions)
-            {
-                if (subscription.Active && subscription.Replaying)
-                    subscription.Pending.Enqueue(pending);
-            }
-            toNotify = _liveSnapshot;
-        }
-        if (toNotify.Length == 0)
-            return;
-
-        foreach (Subscription subscription in toNotify)
-            Invoke(subscription.Handler, pending.Snapshot);
-    }
-
-    public void OnLifecycle(in RuntimeLifecycleDelta delta)
-    {
-        bool isInWorld = delta.Current == RuntimeLifecycleState.InWorld;
-        lock (_eventGate)
-        {
-            if (_disposed || _wasInWorld == isInWorld)
-                return;
-            _wasInWorld = isInWorld;
-        }
-
         Action? handlers;
         lock (_tickGate)
-            handlers = isInWorld ? _loginComplete : _logoff;
+            handlers = arrived ? _loginComplete : _logoff;
         if (handlers is null)
             return;
         foreach (Delegate handler in handlers.GetInvocationList())
@@ -472,7 +346,9 @@ internal sealed class HeadlessPluginHost
         }
     }
 
-    private void OnLocalPlayerDied(string deathMessage)
+    /// <summary>The character died, with the message the server sent.</summary>
+    /// <param name="deathMessage">What the server said about the death.</param>
+    public void FireLocalPlayerDied(string deathMessage)
     {
         Action<string>? handlers;
         lock (_tickGate)
@@ -628,59 +504,31 @@ internal sealed class HeadlessPluginHost
         }
     }
 
-    public void OnCommand(in RuntimeCommandDelta delta) { }
-
-    public void OnInventory(in RuntimeInventoryDelta delta)
-    {
-        if (delta.Change == RuntimeInventoryChange.Cleared)
-            return;
-        RaiseObjectChanged(
-            delta.Item.ObjectId,
-            delta.Change switch
-            {
-                RuntimeInventoryChange.Added => PluginObjectChangeKind.Created,
-                RuntimeInventoryChange.Moved => PluginObjectChangeKind.Moved,
-                RuntimeInventoryChange.Removed => PluginObjectChangeKind.Released,
-                _ => PluginObjectChangeKind.Updated,
-            });
-    }
-
-    private void RaiseNavigationChanged(PluginGoToReport report)
-    {
-        Action<PluginGoToReport>? handlers;
-        lock (_tickGate)
-            handlers = _navigationChanged;
-        if (handlers is null)
-            return;
-        foreach (Delegate handler in handlers.GetInvocationList())
-        {
-            try { ((Action<PluginGoToReport>)handler)(report); }
-            catch (Exception error)
-            {
-                Log.Warn($"Plugin navigation handler threw: {error}");
-            }
-        }
-    }
-
-    private void RaiseObjectChanged(uint objectId, PluginObjectChangeKind kind)
+    /// <summary>
+    /// An object appeared, moved, changed or went away. Which runtime
+    /// happening that was -- an object arriving, an inventory move, an
+    /// answered description -- is decided by the shared surface, so both
+    /// clients report the same kind for the same happening.
+    /// </summary>
+    /// <param name="change">Which object, and what happened to it.</param>
+    public void FireObjectChanged(PluginObjectChange change)
     {
         Action<PluginObjectChange>? handlers;
         lock (_tickGate)
+        {
+            // Stamped here, the same way the windowed client's events object
+            // stamps it: a plugin orders and de-duplicates object changes by
+            // this revision, so an unstamped change on one client is a
+            // plugin that silently works on one client only.
+            change = change with
+            {
+                Revision = ++_objectChangeRevision,
+                ChangedFields = PluginObjectChange.FieldsFor(change.Kind),
+            };
             handlers = _objectChanged;
+        }
         if (handlers is null)
             return;
-        PluginWorldObject? current = null;
-        if (kind != PluginObjectChangeKind.Released
-            && ((IWorldObjectAutomation)_automation).TryGet(objectId, out PluginWorldObject snapshot))
-        {
-            current = snapshot;
-        }
-        var change = new PluginObjectChange(objectId, kind)
-        {
-            Revision = Interlocked.Increment(ref _objectChangeRevision),
-            ChangedFields = PluginObjectChange.FieldsFor(kind),
-            Current = current,
-        };
         foreach (Delegate handler in handlers.GetInvocationList())
         {
             try { ((Action<PluginObjectChange>)handler)(change); }
@@ -691,43 +539,53 @@ internal sealed class HeadlessPluginHost
         }
     }
 
-    private void OnExternalContainerChanged(
-        AcDream.Core.Items.ExternalContainerTransition transition)
+    /// <summary>
+    /// The character went through a portal, or a login placed it in the
+    /// world. The shared surface decides what a portal change means and
+    /// raises it once; this stamps the revision the same way the windowed
+    /// client's events object does, so a plugin can order transitions
+    /// identically on either client.
+    /// </summary>
+    /// <param name="transition">Where the character went, and how far along.</param>
+    public void FirePortalTransition(PluginPortalTransition transition)
     {
-        switch (transition.Kind)
+        Action<PluginPortalTransition>? handlers;
+        lock (_tickGate)
         {
-            case AcDream.Core.Items.ExternalContainerTransitionKind.Opened:
-                RaiseUInt(ref _containerOpened, transition.ContainerId);
-                break;
-            case AcDream.Core.Items.ExternalContainerTransitionKind.ReplacementRequested:
-            case AcDream.Core.Items.ExternalContainerTransitionKind.Closed:
-            case AcDream.Core.Items.ExternalContainerTransitionKind.Reset:
-                if (transition.PreviousContainerId != 0u)
-                    RaiseUInt(ref _containerClosed, transition.PreviousContainerId);
-                break;
+            transition = transition with
+            {
+                Revision = ++_portalTransitionRevision,
+            };
+            handlers = _portalTransition;
+        }
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginPortalTransition>)handler)(transition); }
+            catch (Exception error)
+            {
+                Log.Warn($"Plugin portal-transition handler threw: {error}");
+            }
         }
     }
 
-    private void OnAppraisalReceived(uint objectId) =>
-        RaiseObjectChanged(objectId, PluginObjectChangeKind.IdentReceived);
-
-    private void OnUseCompleted(uint _)
+    /// <summary>
+    /// A use the character started on an object finished. Raised by the
+    /// shared surface off the runtime's own completion, so both clients
+    /// report the same result under the same revision.
+    /// </summary>
+    /// <param name="completion">Which use finished, and with what result.</param>
+    public void FireItemUseCompleted(PluginItemUseCompletion completion)
     {
-        RuntimeItemUseCompletion completion =
-            _runtime.ActionOwner.Transactions.LastItemUseCompletion;
         Action<PluginItemUseCompletion>? handlers;
         lock (_tickGate)
             handlers = _itemUseCompleted;
         if (handlers is null)
             return;
-        var report = new PluginItemUseCompletion(
-            completion.Revision,
-            completion.SourceObjectId,
-            completion.TargetObjectId,
-            completion.WeenieError);
         foreach (Delegate handler in handlers.GetInvocationList())
         {
-            try { ((Action<PluginItemUseCompletion>)handler)(report); }
+            try { ((Action<PluginItemUseCompletion>)handler)(completion); }
             catch (Exception error)
             {
                 Log.Warn($"Plugin item-use handler threw: {error}");
@@ -735,42 +593,13 @@ internal sealed class HeadlessPluginHost
         }
     }
 
-    private void RaiseUInt(ref Action<uint>? field, uint value)
-    {
-        Action<uint>? handlers;
-        lock (_tickGate)
-            handlers = field;
-        if (handlers is null)
-            return;
-        foreach (Delegate handler in handlers.GetInvocationList())
-        {
-            try { ((Action<uint>)handler)(value); }
-            catch (Exception error)
-            {
-                Log.Warn($"Plugin container handler threw: {error}");
-            }
-        }
-    }
-
-    /// <summary>Called by the session host whenever it records a confirmation request.</summary>
-    internal void RaiseConfirmationRequested(PluginConfirmation confirmation)
-    {
-        Action<PluginConfirmation>? handlers;
-        lock (_tickGate)
-            handlers = _confirmationRequested;
-        if (handlers is null)
-            return;
-        foreach (Delegate handler in handlers.GetInvocationList())
-        {
-            try { ((Action<PluginConfirmation>)handler)(confirmation); }
-            catch (Exception error)
-            {
-                Log.Warn($"Plugin confirmation handler threw: {error}");
-            }
-        }
-    }
-
-    internal void RaiseActivationCompleted(PluginActivationCompletion completion)
+    /// <summary>
+    /// An activation the character started on an object completed, failed or
+    /// was interrupted. The correlation between the activation and what ended
+    /// it belongs to the shared surface, so it is the same on both clients.
+    /// </summary>
+    /// <param name="completion">Which activation ended, and how.</param>
+    public void FireActivationCompleted(PluginActivationCompletion completion)
     {
         Action<PluginActivationCompletion>? handlers;
         lock (_tickGate)
@@ -787,122 +616,87 @@ internal sealed class HeadlessPluginHost
         }
     }
 
-    public void OnChat(in RuntimeChatDelta delta) { }
-    public void OnMovement(in RuntimeMovementDelta delta) { }
-    public void OnPortal(in RuntimePortalDelta delta)
+    /// <summary>
+    /// The walk the client is driving reached a new state. The states and
+    /// their order are decided by the shared runtime owner, so a plugin sees
+    /// the same walk here as it does on the windowed client.
+    /// </summary>
+    /// <param name="report">Where the walk stands now.</param>
+    public void FireNavigationChanged(PluginGoToReport report)
     {
+        Action<PluginGoToReport>? handlers;
         lock (_tickGate)
-        {
-            if (_lastPublishedPortalSnapshot is { } previous
-                && previous.Equals(delta.Portal))
-                return;
-            _lastPublishedPortalSnapshot = delta.Portal;
-        }
-        long recallRequestRevision =
-            ((IRecallAutomation)_automation).LastRequest.Status == PluginRecallStatus.Started
-                ? ((IRecallAutomation)_automation).LastRequest.Revision
-                : 0;
-        if (recallRequestRevision == _lastPublishedRecallRequestRevision)
-            recallRequestRevision = 0;
-        else
-            _lastPublishedRecallRequestRevision = recallRequestRevision;
-        PluginPortalTransition transition = new(
-            Revision: Interlocked.Increment(ref _portalTransitionRevision),
-            Generation: delta.Portal.Generation,
-            DestinationCell: delta.Portal.DestinationCell,
-            IsReady: delta.Portal.IsReady,
-            IsMaterialized: delta.Portal.IsMaterialized,
-            IsCompleted: delta.Portal.IsCompleted,
-            IsCancelled: delta.Portal.IsCancelled)
-        {
-            RecallRequestRevision = recallRequestRevision,
-            Kind = delta.Portal.Kind switch
-            {
-                RuntimePortalKind.Login => PluginPortalTransitionKind.Login,
-                RuntimePortalKind.Portal => PluginPortalTransitionKind.Portal,
-                _ => PluginPortalTransitionKind.Unknown,
-            },
-        };
-        Action<PluginPortalTransition>? handlers;
-        lock (_tickGate)
-            handlers = _portalTransition;
+            handlers = _navigationChanged;
         if (handlers is null)
             return;
         foreach (Delegate handler in handlers.GetInvocationList())
         {
-            try { ((Action<PluginPortalTransition>)handler)(transition); }
+            try { ((Action<PluginGoToReport>)handler)(report); }
             catch (Exception error)
             {
-                Log.Warn($"Plugin portal-transition handler threw: {error}");
+                Log.Warn($"Plugin navigation handler threw: {error}");
             }
         }
+    }
+    /// <summary>A container the character can see inside was opened.</summary>
+    /// <param name="containerObjectId">The container that opened.</param>
+    public void FireContainerOpened(uint containerObjectId)
+    {
+        Action<uint>? handlers;
+        lock (_tickGate)
+            handlers = _containerOpened;
+        FireContainer(handlers, containerObjectId);
+    }
 
-        // When a portal transition completes that was correlated to a recall
-        // request, fire an activation completion event.
-        if ((delta.Portal.IsCompleted || delta.Portal.IsCancelled)
-            && recallRequestRevision > 0)
+    /// <summary>A container the character could see inside was closed.</summary>
+    /// <param name="containerObjectId">The container that closed.</param>
+    public void FireContainerClosed(uint containerObjectId)
+    {
+        Action<uint>? handlers;
+        lock (_tickGate)
+            handlers = _containerClosed;
+        FireContainer(handlers, containerObjectId);
+    }
+
+    private void FireContainer(Action<uint>? handlers, uint value)
+    {
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
         {
-            PluginActivationOutcome outcome = delta.Portal.IsCompleted
-                ? PluginActivationOutcome.Completed
-                : PluginActivationOutcome.Interrupted;
-            RaiseActivationCompleted(new PluginActivationCompletion(
-                Interlocked.Increment(ref _portalTransitionRevision),
-                0u, // The object id is not directly tracked in the headless host.
-                outcome,
-                0u));
-        }
-    }
-    public void OnCombat(in RuntimeCombatDelta delta) { }
-
-    private static WorldEntitySnapshot Convert(
-        GameRuntime runtime,
-        in RuntimeEntitySnapshot entity)
-    {
-        uint sourceId = runtime.EntityObjects.Entities.TryGetActive(
-            entity.Identity.ServerGuid,
-            out AcDream.Runtime.Entities.RuntimeEntityRecord record)
-            ? record.Snapshot.SetupTableId ?? 0u
-            : 0u;
-        return new WorldEntitySnapshot(
-            entity.Identity.LocalEntityId,
-            sourceId,
-            entity.Position?.Frame.Origin ?? default,
-            entity.Position?.Frame.Orientation
-                ?? System.Numerics.Quaternion.Identity);
-    }
-
-    private static void Invoke(
-        Action<WorldEntitySnapshot> handler,
-        WorldEntitySnapshot snapshot)
-    {
-        try { handler(snapshot); }
-        catch { }
-    }
-
-    private sealed class SnapshotVisitor(
-        GameRuntime runtime,
-        Action? captureBarrier = null)
-        : IRuntimeEntityVisitor
-    {
-        private Action? _captureBarrier = captureBarrier;
-
-        internal List<ReplayEntity> Items { get; } =
-            new(runtime.Entities.Count);
-
-        public void Visit(in RuntimeEntitySnapshot entity)
-        {
-            Items.Add(new ReplayEntity(
-                entity.Identity,
-                Convert(runtime, entity)));
-            Interlocked.Exchange(ref _captureBarrier, null)?.Invoke();
+            try { ((Action<uint>)handler)(value); }
+            catch (Exception error)
+            {
+                Log.Warn($"Plugin container handler threw: {error}");
+            }
         }
     }
 
-    private void RebuildLiveSnapshotLocked()
+    /// <summary>
+    /// Called by the session host whenever it records a confirmation
+    /// request. It goes through the shared surface rather than straight to
+    /// the handlers, so this client raises it by the same road as the one
+    /// with a window.
+    /// </summary>
+    internal void RaiseConfirmationRequested(PluginConfirmation confirmation) =>
+        _automation.RaiseConfirmationRequested(confirmation);
+
+    /// <summary>The player is being asked to accept or decline something.</summary>
+    /// <param name="confirmation">What is being asked, and under which id.</param>
+    public void FireConfirmationRequested(PluginConfirmation confirmation)
     {
-        _liveSnapshot = _subscriptions
-            .Where(static subscription =>
-                subscription.Active && !subscription.Replaying)
-            .ToArray();
+        Action<PluginConfirmation>? handlers;
+        lock (_tickGate)
+            handlers = _confirmationRequested;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<PluginConfirmation>)handler)(confirmation); }
+            catch (Exception error)
+            {
+                Log.Warn($"Plugin confirmation handler threw: {error}");
+            }
+        }
     }
 }

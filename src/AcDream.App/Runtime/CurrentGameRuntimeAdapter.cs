@@ -29,12 +29,11 @@ internal sealed class CurrentGameRuntimeAdapter
         GameRuntime runtime,
         LiveSessionHost sessionHost,
         ICommandBus commands,
-        SelectionInteractionController selection)
+        ISelectionInputActions? selection = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         ArgumentNullException.ThrowIfNull(sessionHost);
         ArgumentNullException.ThrowIfNull(commands);
-        ArgumentNullException.ThrowIfNull(selection);
 
         _commandBus = commands;
         _hostLease = runtime.AcquireHostLease(

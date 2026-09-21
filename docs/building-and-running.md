@@ -110,6 +110,10 @@ libraries directly. It does not require those environment variables.
 | `ACDREAM_UNCAPPED_RENDER=1` | Disable frame pacing (for measurement only) |
 | `ACDREAM_DISPLAY_PROTOCOL=auto\|x11\|wayland` | Linux window backend selection |
 | `ACDREAM_DEVTOOLS=1` | Enable the Vulkan validation and debug-utils layers |
+| `ACDREAM_HEADLESS_CONSOLE=0\|1` | Headless interactive console; defaults to on when stdin is a terminal |
+| `ACDREAM_HEADLESS_CONSOLE_STREAM=stderr\|stdout` | Which stream that console prints to; `stderr` by default |
+| `ACDREAM_PLUGIN_TAGS=a,b` | Words this client wants to be found by; plugins on the clients running on this machine can see one another's tags and filter on them. The headless config's `pluginTags` is the same option |
+| `ACDREAM_PLUGIN_SETTINGS_FILE=<path>` | Path to a JSON file holding the startup settings each plugin is given, on either client. The file is the same map the headless config names under `pluginSettings`, which outranks it; a session that names none falls back to this file. A named file that is missing, unreadable or the wrong shape stops startup with the reason; unset means no settings |
 | `ACDREAM_FRAME_PROF=1` | Print the rolling `[frame-prof]` CPU/GPU/allocation line |
 | `ACDREAM_FRAME_HISTORY=<path>` | Write one CSV row per frame to that path on exit |
 | `ACDREAM_GPU_STAGE_PROF=1` | Print the rolling `[gpu-stage]` per-stage GPU attribution line |
@@ -157,9 +161,196 @@ dotnet run --project src/AcDream.Headless/AcDream.Headless.csproj -c Release -- 
 dotnet run --project src/AcDream.Headless/AcDream.Headless.csproj -c Release -- run --config bot.json
 ```
 
+Optional per-session fields: `plugins` (which plugin ids to load),
+`pluginSettings`, `loginCommands` / `loginCommandDelayMs`, `statusFile`,
+`characterOptions`, and `pluginTags` — an array of words this session
+wants to be found by, the same option `ACDREAM_PLUGIN_TAGS` gives the
+graphical client. Plugins on the clients running on one machine can see one
+another's tags and filter on them, so a bot that should look like part of a
+group carries the group's word:
+
+```json
+"pluginTags": ["tank", "group-a"]
+```
+
+`statusFile` is one JSON line per session event, appended as it happens. A
+running session keeps that file open for its whole lifetime, so anything
+that watches it -- the launcher, a script, a person -- must open it with
+writing shared (`FileShare.ReadWrite`, or a tool that tails rather than
+locks). An ordinary exclusive read is refused while the session runs, so a
+watcher can never take the session's own writing away from it.
+
+`pluginSettings` is the startup settings each plugin is given, one object of
+settings per plugin id. A plugin reads only its own, through
+`IPluginHost.SessionSettings`:
+
+```json
+"pluginSettings": {
+  "acdream.example": { "startMacro": "true", "profile": "tank" }
+}
+```
+
+A session that names none takes the same map from a file instead, on either
+client: `ACDREAM_PLUGIN_SETTINGS_FILE=<path>`, where the whole file is that
+map and nothing else:
+
+```json
+{
+  "acdream.example": { "startMacro": "true", "profile": "tank" }
+}
+```
+
+Both clients read both places the same way, in the same order — what the
+session names wins and leaves the file unread — and refuse the same mistakes:
+a plugin id with nothing behind it, or a setting with no value, stops startup
+and says which one. A file a client was told to read and could not is a
+startup error too, never a quiet run with no settings — a plugin that decides
+what to do on login from a setting would otherwise behave differently under a
+window than it does without one.
+
+### The same document on the graphical client
+
+The graphical client reads the same session-config document:
+
+```bash
+dotnet run --project src/AcDream.App/AcDream.App.csproj -c Release -- --session-config bot.json
+```
+
+It requires exactly one session in the document, and it honours every
+per-session field that decides what a plugin sees: `character`, `plugins`,
+`pluginTags`, `pluginSettings`, `loginCommands`, `loginCommandDelayMs`,
+`characterOptions` and `statusFile`. Both clients check `characterOptions`
+against the same declarable list and seed it the same way on login, so a
+document means the same thing whichever client reads it; a client started
+without a document declares none, so a player who sets an option in the
+panels is never overruled. One field only the windowless client acts on is
+accepted and ignored here rather than refused, so one document still starts
+either client: `policy` (which bot policy drives a windowless session; a
+graphical session is driven by the player). The one field the graphical
+client refuses is `"mode": "probe"`, because a probe never selects a
+character and there is no windowed session to show.
+
+Where a document and a startup option say the same thing, the document wins:
+its `pluginTags` outranks `ACDREAM_PLUGIN_TAGS`, and its `pluginSettings`
+outranks `ACDREAM_PLUGIN_SETTINGS_FILE`, which is left unread. A field the
+document leaves out still falls back to the startup option, on either client.
+
 For a single local session, `run` also accepts `--user` and `--password`. Add
 more session entries for a multi-session process. Built-in policies:
 `idle`, `lifecycle-smoke`, `observer-movement`, `portal-route-smoke`.
+
+### The headless console
+
+`run --console` turns a headless process into an interactive client: it prints
+the chat box and reads typed lines. Chat appears with the same wording the
+graphical client's chat window uses, behind a short tag standing in for the
+colour that window would draw the line in, and honouring that window's
+message-type filters:
+
+```
+[say] Bob says, "hi there"
+[tell] Bob tells you, "meet me"
+[fellowship] [Fellowship] Bob says, "group up"
+[combat] A Drudge Slinker slashes you for 9 points of damage!
+[client] navigation route loaded
+-- entered world
+```
+
+Lines the console produces about the session itself start with `--`, so they
+can never be read as chat. `[client]` marks text the client produced for
+itself, which the graphical client shows in its status overlay.
+
+The console is on by default when standard input is a terminal.
+`ACDREAM_HEADLESS_CONSOLE=1` forces it on for a redirected stdin, and `=0`
+turns it off; `--console` overrides both.
+
+#### Typing
+
+A typed line goes into the same chat entry the graphical client's chat box
+types into, so it does exactly what that line does there:
+
+```
+hello                     say it out loud
+/f group up               say it on the fellowship channel
+@tell Bob, meet me        tell Bob
+/r on my way              reply to whoever told you last
+hello *wave*              say it and play the wave
+/loc                      a client command
+@who                      anything the client does not claim goes to the server
+/vt start                 a verb a plugin registered
+```
+
+The entry remembers the last 100 lines, and it remembers where plain text is
+aimed. Aim it with a channel verb or a tell and the next plain line follows:
+after `@tell Bob, meet me` a bare `hello` is a tell to Bob, exactly as it is in
+the chat box. A plugin that stages a line with `Chat.Compose` shows it as
+`-- draft: ...`, and pressing Enter on an empty console line sends it.
+
+#### Client commands that need a window
+
+The client's own verbs work on either client. Two of them draw something, and
+a client without a window answers in plain words rather than not knowing the
+verb:
+
+```
+/nav grid                 Navigation: this client has nothing to draw the grid on
+/nav route Bob            Navigation: this client has nothing to draw a route on
+```
+
+Everything else `/nav` and `/motor` do is identical with or without a window,
+and so is `/status`, which answers the session's generation, where it is in its
+life, and where the character stands:
+
+```
+/status
+generation=3 state=InWorld position=cell=0xC6A9002B local=(84.31,112.07,42.00)
+```
+
+`/status` is a verb of the client's, not of the console's, so the graphical
+chat box answers it with the same line. The verbs the client reserves on the
+command registry -- `nav`, `motor` and `status` -- are not available to a
+plugin.
+
+#### The console's own verbs
+
+Three verbs belong to the console rather than to the client. Each is offered
+to the session's command registry first, so a plugin that registers the same
+verb keeps it:
+
+| Verb | What it does |
+|---|---|
+| `/quit` | Ends every session in the process, gracefully. `@quit` still goes to the server. |
+| `/session <id>` | Chooses which session an unaddressed line goes to. With no id it says which one that is. |
+| `/sessions` | Lists the sessions this process is running and marks the one being talked to. |
+
+#### More than one session
+
+A process running several sessions gives them one console between them. Every
+printed line names the session it came from, and a line can be addressed to
+one session without changing which one the next line goes to:
+
+```
+-- [alpha] entered world
+-- [beta] entered world
+[alpha] [say] Bob says, "hi there"
+@beta /loc                       one line to beta
+/session beta                    every following line to beta
+-- [alpha] now talking to beta
+/sessions
+-- [alpha] session alpha
+-- [beta] session beta (talking to this one)
+```
+
+An at sign is only read as an address when it names a session this process is
+really running, so the server verbs that start with one -- `@tell`, `@who` --
+are left alone.
+
+**Two streams.** The machine-readable JSON diagnostic lines keep
+standard output, unchanged, so a script can parse them while a person watches
+the console. The console itself prints to standard error. Send it to
+standard output instead with `--console-stream stdout`, or with
+`ACDREAM_HEADLESS_CONSOLE_STREAM=stdout`; `--console-stream stderr` restores
+the default. The flag wins over the variable.
 
 ## Run the launcher from source
 

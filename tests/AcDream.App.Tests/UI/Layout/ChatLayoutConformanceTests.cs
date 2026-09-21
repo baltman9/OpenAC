@@ -71,7 +71,8 @@ public class ChatLayoutConformanceTests
         var infos = FixtureLoader.LoadChatInfos();
         var layout = LayoutImporter.Build(infos, NoTex, null);
         var controller = ChatWindowController.Bind(
-            infos, layout, new ChatVM(new ChatLog()), () => NullCommandBus.Instance, new ChatWindowState(), null, null, NoTex);
+            infos, layout, new ChatVM(new ChatLog()), () => NullCommandBus.Instance, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner());
         Assert.NotNull(controller);
 
         UiElement? indicator = layout.FindElement(indicatorId);
@@ -99,7 +100,8 @@ public class ChatLayoutConformanceTests
         var infos = FixtureLoader.LoadChatInfos();
         var layout = LayoutImporter.Build(infos, NoTex, null);
         var controller = ChatWindowController.Bind(
-            infos, layout, new ChatVM(new ChatLog()), () => NullCommandBus.Instance, new ChatWindowState(), null, null, NoTex);
+            infos, layout, new ChatVM(new ChatLog()), () => NullCommandBus.Instance, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner());
         Assert.NotNull(controller);
 
         var toggled = new List<int>();
@@ -126,7 +128,8 @@ public class ChatLayoutConformanceTests
         var infos = FixtureLoader.LoadChatInfos();
         var layout = LayoutImporter.Build(infos, NoTex, null);
         var controller = ChatWindowController.Bind(
-            infos, layout, new ChatVM(new ChatLog()), () => NullCommandBus.Instance, new ChatWindowState(), null, null, NoTex);
+            infos, layout, new ChatVM(new ChatLog()), () => NullCommandBus.Instance, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner());
         Assert.NotNull(controller);
 
         bool windowOpen = false;
@@ -165,7 +168,8 @@ public class ChatLayoutConformanceTests
         var infos = FixtureLoader.LoadChatInfos();
         var layout = LayoutImporter.Build(infos, NoTex, null);
         var controller = ChatWindowController.Bind(
-            infos, layout, new ChatVM(new ChatLog()), () => NullCommandBus.Instance, new ChatWindowState(), null, null, NoTex);
+            infos, layout, new ChatVM(new ChatLog()), () => NullCommandBus.Instance, new ChatWindowState(), null, null,
+            NoTex, new RuntimeChatEntryOwner());
         Assert.NotNull(controller);
 
         UiElement? twin = layout.FindElement(lockedTwinId);
@@ -279,7 +283,7 @@ public class ChatLayoutConformanceTests
             new ChatWindowState(),
             null,
             null,
-            NoTex);
+            NoTex, new RuntimeChatEntryOwner());
         Assert.NotNull(controller);
 
         var root = controller!.Root;
@@ -311,7 +315,7 @@ public class ChatLayoutConformanceTests
             new ChatWindowState(),
             null,
             null,
-            NoTex);
+            NoTex, new RuntimeChatEntryOwner());
         Assert.NotNull(controller);
 
         float inputLeft = controller!.Input.Left;
@@ -335,7 +339,7 @@ public class ChatLayoutConformanceTests
             new ChatWindowState(),
             null,
             null,
-            NoTex)!;
+            NoTex, new RuntimeChatEntryOwner())!;
         var root = new UiRoot { Width = 800, Height = 600 };
         RetailWindowHandle handle = RetailWindowFrame.Mount(
             root,
@@ -453,7 +457,7 @@ public class ChatLayoutConformanceTests
             new ChatWindowState(),
             null,
             null,
-            NoTex)!;
+            NoTex, new RuntimeChatEntryOwner())!;
         var root = new UiRoot { Width = 1600, Height = 1200 };
         RetailWindowHandle handle = RetailWindowFrame.Mount(
             root,
@@ -512,7 +516,7 @@ public class ChatLayoutConformanceTests
             new ChatWindowState(),
             null,
             null,
-            NoTex)!;
+            NoTex, new RuntimeChatEntryOwner())!;
         var root = new UiRoot { Width = 800, Height = 600 };
         RetailWindowHandle handle = RetailWindowFrame.Mount(
             root,
@@ -572,7 +576,7 @@ public class ChatLayoutConformanceTests
         ImportedLayout layout = LayoutImporter.Build(infos, NoTex, null);
         var controller = ChatWindowController.Bind(
             infos, layout, new ChatVM(new ChatLog()), () => NullCommandBus.Instance,
-            new ChatWindowState(), null, null, NoTex);
+            new ChatWindowState(), null, null, NoTex, new RuntimeChatEntryOwner());
         Assert.NotNull(controller);
         UiElement window = layout.FindElement(0x10000600u)!;
         var root = new UiRoot { Width = 800f, Height = 600f };
@@ -616,7 +620,7 @@ public class ChatLayoutConformanceTests
         ImportedLayout layout = LayoutImporter.Build(infos, id => (id, 8, 8), null);
         var controller = ChatWindowController.Bind(
             infos, layout, new ChatVM(new ChatLog()), () => NullCommandBus.Instance,
-            new ChatWindowState(), null, null, NoTex);
+            new ChatWindowState(), null, null, NoTex, new RuntimeChatEntryOwner());
         Assert.NotNull(controller);
         UiElement window = layout.FindElement(0x10000600u)!;
         var root = new UiRoot { Width = 800f, Height = 600f };
@@ -674,7 +678,7 @@ public class ChatLayoutConformanceTests
         var requestedFonts = new List<uint>();
         var controller = ChatWindowController.Bind(
             infos, layout, new ChatVM(new ChatLog()), () => NullCommandBus.Instance,
-            new ChatWindowState(), null, null, NoTex,
+            new ChatWindowState(), null, null, NoTex, new RuntimeChatEntryOwner(),
             resolveFont: did => { requestedFonts.Add(did); return null; });
         Assert.NotNull(controller);
 

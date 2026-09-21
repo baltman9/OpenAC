@@ -215,7 +215,11 @@ public sealed partial class WorldSession : IDisposable
         ushort InstanceSequence,
         ushort MovementSequence,
         ushort ServerControlSequence,
-        bool IsAutonomous);
+        bool IsAutonomous)
+    {
+        public byte TypeFlags { get; init; }
+        public uint? PackedMotionFlags { get; init; }
+    }
 
     public event Action<EntityMotionUpdate>? MotionUpdated;
 
@@ -1302,7 +1306,11 @@ public sealed partial class WorldSession : IDisposable
                         motion.Value.InstanceSequence,
                         motion.Value.MovementSequence,
                         motion.Value.ServerControlSequence,
-                        motion.Value.IsAutonomous));
+                        motion.Value.IsAutonomous)
+                    {
+                        TypeFlags = motion.Value.TypeFlags,
+                        PackedMotionFlags = motion.Value.PackedMotionFlags,
+                    });
                 }
             }
             else if (op == UpdatePosition.Opcode)

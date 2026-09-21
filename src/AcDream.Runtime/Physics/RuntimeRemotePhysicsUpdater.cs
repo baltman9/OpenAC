@@ -136,7 +136,11 @@ internal sealed class RuntimeRemotePhysicsUpdater
         int liveCenterY,
         System.Action<uint, AcDream.Core.Physics.AnimationSequencer>?
             processAnimationHooks = null,
-        System.Action<System.Numerics.Vector3>? applyStaleVelocityCycle = null,
+        // Whether a body whose last word from the server has gone stale
+        // should have its cycle stopped. It is a flag and not a callback
+        // because a callback here is an object built per body per step, and a
+        // crowd of bodies is a crowd of objects a frame.
+        bool applyStaleVelocityCycle = false,
         System.Func<RuntimeRemotePhysicsSnapshot, bool>?
             acknowledgeProjection = null,
         System.Func<bool>? externalOwnerValid = null,
@@ -195,8 +199,14 @@ internal sealed class RuntimeRemotePhysicsUpdater
                     {
                         rm.ServerVelocity = System.Numerics.Vector3.Zero;
                         rm.HasServerVelocity = false;
-                        applyStaleVelocityCycle?.Invoke(
-                            System.Numerics.Vector3.Zero);
+                        if (applyStaleVelocityCycle)
+                        {
+                            RemoteServerControlledVelocityCycle.Apply(
+                                serverGuid,
+                                sequencer,
+                                rm,
+                                System.Numerics.Vector3.Zero);
+                        }
                     }
                 }
 

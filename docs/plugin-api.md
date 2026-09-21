@@ -5,6 +5,45 @@ implementation, so a plugin written against an older build still compiles and
 a host that cannot provide something returns an inert value rather than
 throwing. `docs/plugin-ui-markup.md` covers the panel markup separately.
 
+## The tick
+
+```csharp
+host.Events.Tick += elapsedSeconds => { /* elapsedSeconds is always 0.015 */ };
+```
+
+`Tick` runs at a fixed 15 ms -- about 66.7 times a second -- and every tick
+carries exactly `0.015` seconds, on every client. It is not the client's
+frame: a client with a window draws far faster than this and a client
+without one takes its own turns, and neither rate reaches a plugin. Between
+them the client holds the time it has taken and spends it a whole step at a
+time, so over any stretch of real time a plugin gets the same number of
+ticks with the same total elapsed time whichever client it is loaded into.
+
+What a plugin may rely on:
+
+- the elapsed value is always the step, so counting ticks and adding up
+  elapsed time give the same answer;
+- one feed can raise several ticks in a row when the client has fallen
+  behind, so the wall clock can jump between two ticks even though the
+  elapsed value does not;
+- a stall longer than about 0.2 s is dropped rather than replayed: the
+  client does not owe a plugin the ticks it missed while it was away. So
+  elapsed time added up across ticks is a count of the steps a plugin was
+  given, not a clock: every stall leaves it further behind the wall clock,
+  and it never catches up. Time a thing by the wall clock -- when it should
+  next happen, checked each tick -- rather than by adding up steps, or a
+  macro drifts by whatever the session has stalled for since it started;
+- the tick keeps running while there is no world -- at login, and while the
+  character is between worlds going through a portal -- even though the
+  world's own clock is standing still, so a plugin waiting for the world to
+  come back keeps being asked;
+- there is no guarantee of a tick per drawn frame, and never was one worth
+  relying on. A plugin that wants to do something every frame cannot; it
+  wants the fixed step instead.
+
+Everything else here that says "on the same thread as `Tick`" means this
+one.
+
 ## Chat
 
 ### Reading lines
@@ -170,6 +209,44 @@ tracking, on the same thread as `Tick`, in the host's own delivery order.
 
 A bulk container reset carries no single object id and is not reported.
 
+A `Released` does not always mean the object is gone. When the server
+re-describes something already in the world, the client retires the
+incarnation it was holding and registers the fresh one under the same id, so
+a plugin hears `Released` and then `Created` for that id in the same batch --
+and, for an object the client also holds a row for, twice over, once from
+each source (see the note on two calls per change below). The id is still
+live afterwards. Treat a `Released` as final only if no `Created` for the
+same id follows it before the next `Tick`; a plugin that drops its target on
+the first `Released` loses the creature standing in front of it every time
+the server repeats itself. Both clients report this identically.
+
+### What is in the world: objects and scenery
+
+`host.State` carries two lists, and they are two different kinds of thing.
+
+```csharp
+foreach (var entity in host.State.Entities) { /* live objects and creatures */ }
+foreach (var piece in host.State.SceneryObjects) { /* trees, rocks, buildings */ }
+```
+
+`State.Entities` is what the world server has told this client about:
+creatures, players, items on the ground, doors, everything a command can
+name. Each entry's `Id` matches the object id every other part of this API
+uses, so a guid out of `Entities` can be selected, used, attacked or
+appraised. `Events.EntitySpawned` fires once for each entry as it appears,
+and a handler attached late is replayed the entries already there before it
+starts receiving new ones, so a plugin never has to poll to catch up. An
+entry leaves the list when the object leaves the world -- deleted, or carried
+into a pack -- and `ObjectChanged` reports that as `Released`.
+
+`State.SceneryObjects` is the fixed decoration that comes with the map rather
+than from the server. Nothing in it has a server identity: these ids are not
+object ids, they never appear in `Entities`, and no command accepts one. Read
+it to understand the shape of the surroundings, and for nothing else.
+
+Both lists are snapshots the host rebuilds rather than collections mutated
+under a reader.
+
 `host.Automation.Objects.Identify(objectId)` requests an appraisal of any
 object present in the object table -- owned inventory, equipped,
 landscape, a vendor listing, or an open container's content -- through
@@ -262,7 +339,8 @@ the right path automatically:
   arrives. `Started` here means the walk (or the immediate use, if already
   in range) began, not that a container is open yet; watch
   `IEvents.ContainerOpened` or the vendor automation's own `Opened` event
-  for that.
+  for that. The walk, the use it sends on arrival and the give-up on a walk
+  that never gets there are the same on a client with no window.
 
 The world-object path is held to the same gates a click (or an owned
 item's own automation) is held to, rather than bypassing them:
@@ -270,9 +348,10 @@ item's own automation) is held to, rather than bypassing them:
 - `Refused` means the object isn't useable at all (for example, a target
   that requires being appraised first), or is another player — a
   player-to-player exchange goes through the Trade surface, not Use.
-- `Busy` means the use-throttle refused it, an inventory request was
-  already in flight, or an approach/use was already pending — the pending
-  one is left alone rather than cancelled.
+- `Busy` means the pacing between two uses had not lapsed, an inventory
+  request was already in flight, or an approach/use was already pending —
+  the pending one is left alone rather than cancelled. The first two are
+  what `Items.IsBusy` reports; see "Busy means 'not yet'" below.
 - `Unavailable` means the send itself was rejected by the transport,
   distinct from `Busy`'s "try again shortly".
 
@@ -647,63 +726,190 @@ headless session from the inside.
 
 ## Headless
 
-A headless host implements this same contract, with a few members left as
-placeholders rather than wired to real state:
+A windowless client binds this same surface through the same binding pass the
+windowed one runs, from the same `GameRuntime`. That is not a claim in prose:
+a seam census compares what the two clients can supply, member by member, and
+fails on any difference that is not listed below with a reason. **So the rule
+is the short one: everything on `IAutomationSurface` is real without a window
+except what this section names.**
 
-- `Character` is real for identity: `Name`, `WorldName`, `AccountName`,
-  `ObjectId`, `CharacterIndex`, `IsInWorld`, and `ServerPopulation` all come
-  from the live runtime, exactly like the graphical host. Everything else on
-  `Character` -- vitals (`CurrentHealth`/`MaxHealth`/etc.), `Skills`,
-  `Attributes`, `ActiveEnchantments`, `Level`, `MainPackFreeSlots`, and
-  `SummoningMastery` -- is still the interface's inert default; no headless
-  macro reads them yet.
-- `Spells` and `Magic` are entirely no-op: `Spells.All` / `TryFindByName`
-  are always empty / always miss, and `Magic` never reports casting or
-  accepts a cast request.
-- `Objects.TryGet` and `Objects.CaptureObjects` are real, sourced from the
-  same object table and entity directory the graphical host uses, through
-  the same shared projection (name, weenie class id, item type,
-  container/wielder ids, classification, ownership, position, appraisal
-  data, capacities, stack size, door-open state, icon id all populate
-  identically on both hosts). `Objects.TryCaptureProperties`,
-  `Objects.Identify`, and `Objects.OpenContainerObjectId` remain the
-  interface's inert defaults (`false`/`Unavailable`/`0`) -- they need
-  appraisal-wire and external-container machinery no headless macro
-  exercises yet. The one field the projection cannot populate identically
-  on headless is `ActiveSpellIds` for the local player -- the graphical
-  host tracks a live active-enchantment list this one doesn't, so it is
-  always empty here.
-- `Storage` is real: a headless plugin's settings persist to
-  `<config>/plugins/<pluginId>/...`, the identical on-disk layout and root
-  the graphical host uses, so hand-editing a settings file affects
-  whichever host next loads that plugin. It is process-wide, not
-  session-scoped -- every session hosted by one headless process shares
-  the same `Storage` instance, so two bot sessions running the same
-  plugin in one process share that plugin's one settings file (exactly as
-  two plugin instances loaded into one graphical process would).
-- `CaptureMessages` is unimplemented; use `Received` instead, which does
-  work.
-- `ContainerOpened`/`ContainerClosed`, `ConfirmationRequested`, and
-  `Login.RequestLogout` (and its `Logout` alias) are real and wired to the
-  same runtime state and session-command routes the graphical host uses;
-  see the logout note above for how a headless session ends.
-- `Dialogs.Answer` is real when the headless session was configured with a
-  confirmation route; otherwise it returns `false` like any host with
-  nothing bound.
-- `Trade` and `Vendor` are real on both hosts: the same shared adapter binds
-  over the same `GameRuntime`, so a headless bot sees identical state and
-  sends the identical wire commands a graphical plugin would.
-- `Hotkeys` is the inert no-op registry — there is no keyboard to bind to
-  without a window. `Register` always returns a handle with `IsBound`
-  `false` and the handler never fires.
-- `Window.Minimize`/`Restore`/`IsMinimized` stay at the interface's inert
-  defaults -- there is no OS window on a headless host.
-  `Window.RequestClose` is real: it ends only this session, the same way
-  a bot policy already ends its own session when it decides it is done;
-  a second session hosted by the same process is untouched. Only the
-  console's own `/quit` and a SIGINT/SIGTERM end every session in the
-  process at once.
-- Everything else on `IAutomationSurface` not named above --
-  `Combat`/`Equipment`/`Items`/`Loot`/`Fellowship`/`Enchantments`/
-  `Navigation`/`WorldTime`/`Network`/`Recovery`/`Projectile`/`Selection`
-  automation -- is still the interface's inert `NoOp` default on headless.
+### Not available without a window
+
+Nothing on `IAutomationSurface` is missing because a client has no window.
+
+The selection also lets go of its object on both clients: when the server
+takes the selected object out of the world, or stops showing it, `Selection`
+clears rather than keeping a guid nothing will answer to. That used to happen
+only where there was something drawing the object.
+
+One seam is empty on **both** clients: `BindProjectileCollision`. A plugin
+that asks about projectile collision gets nothing anywhere, and it needs a
+runtime source before either client can fill it.
+
+### Walking to something and then using it
+
+`Items.Use` on a world object out of reach walks to it, sends the use once
+the character is there, and gives up on a walk that has stopped getting
+anywhere -- all of it one runtime owner, driven once a frame from the
+per-frame local-player step, so all of it happens on a client with no
+window too. `Loot.Open` on a corpse or a chest out in the world takes that
+same route, so opening a corpse and using it are the same walk and the same
+send on the same object. An openable container the plugin owns is still
+opened where it is, since there is nowhere to walk to.
+
+### Busy means "not yet", and `IsBusy` tells you when
+
+`Items.IsBusy` and `Loot.IsBusy` answer one question: would a command
+offered right now come back `Busy`? Two things put them there.
+
+- **A request of your own is still in flight.** The client sends one item
+  request at a time and waits for the server's answer. Clears when that
+  answer arrives.
+- **The pacing between two uses.** The client keeps a fifth of a second
+  between one use and the next, the same on both clients and off the same
+  clock. Closing one corpse and opening the next are two uses, so the
+  second one runs into this even though nothing is in flight.
+
+Both mean "not yet", never "no". A command refused this way has not
+failed: it should not count against an attempt limit, and it should not
+arm a back-off. Wait for `IsBusy` to read false and ask again -- a looter
+that treated the pacing as a failure spent whole seconds standing between
+one corpse and the next.
+
+There is no busy-changed event. `IsBusy` is polled, like the rest of the
+surface: read it on the `Tick` you were going to act on anyway. If your
+own heartbeat is slower than the pacing, you will never see the pacing at
+all.
+
+`IsBusy` never reads false while a command would be refused as busy. It
+can read true slightly longer than a move or a merge strictly needs,
+because those do not take the use pacing -- asking a moment later costs a
+fifth of a second at worst, and never a wrong answer.
+
+`Equipment.IsBusy` and `Vendor.IsBusy` are separate channels with their
+own meaning; see their own members.
+
+### How distances are measured
+
+Every distance a plugin is handed between two objects is the straight
+line between them, centre to centre, in metres, with height included:
+`Combat`'s `PluginCombatTarget.Distance`, `Loot`'s
+`PluginLootContainer.Distance` and `Fellowship`'s
+`PluginFellowMember.Distance` all read the same way. So something three
+metres away along the ground and four metres above reads as five metres,
+not three, and a corpse on the storey below does not read as lying at
+your feet. `PluginCombatTarget.HeightDifference` is the height term on
+its own, for a plugin that wants to leave other floors alone.
+
+The one deliberate exception says so in its name.
+`PluginNavigationPosition.HorizontalDistanceMeters` measures along the
+ground and ignores height, because it answers a walking question: how far
+the character has to travel, not how far away the thing is.
+`Navigation.TryFindObject`'s radius is measured the same way, and is
+documented as such.
+
+### Available, but only with the installed data files
+
+A windowless session holds a lease on the installed data files only when it
+was configured with content, and several parts of the surface are read out of
+those files. On a content-less bot they answer rather than act, where a client
+with a window does the work:
+
+- `Navigation`'s walks -- `GoTo`, `StandOn`, `Follow` -- need the collision
+  data the files carry. Everything else on `Navigation` -- the snapshot, the
+  move channels, `FaceHeading`, `Jump`, `TryFindObject` -- is real either way.
+- `Spells` and `Magic` come from the spell catalogue, so a content-less
+  session knows no spells and casts nothing by name.
+- Skill names and skill icons come from the skill table: without it a plugin
+  sees the character's skills unnamed.
+- The species a creature belongs to, and the colours a character was made
+  with, come from the same files.
+- `State.Contracts` is answered either way, and the character's contracts,
+  their stages and their progress are real on a content-less session. What
+  comes out of the files is the authored words about them: without the
+  files `Name`, `Description` and `Status` are empty strings and a plugin
+  has the contract id and nothing to read out.
+- How much of a skill the server credits the character with is worked out from
+  formulas in those files. Without them a content-less session reads its own
+  skills below what the server allows it -- which also means it runs at the
+  speed those lower numbers give.
+
+Other creatures' bodies come off the same lease. The server says where a
+creature is a few times a second and every client fills the gaps itself from
+the cycle that creature is playing, which needs the animation content those
+files carry. So a session with a lease reads another creature's position from
+its body, moving between updates, on both clients alike -- `Objects`,
+`Navigation.TryGetObject` and every position a plugin is handed. A
+content-less bot has no bodies to carry and reads the server's last word about
+a creature instead, which can be several tenths of a second old while that
+creature is moving. That is the one thing about position a plugin can see
+differ between sessions, and it follows from the content, not from the window.
+
+### Answered in plain words rather than missing
+
+Two of the client's own chat verbs draw something, and a client with nothing to
+draw on says so instead of not knowing the verb:
+
+```
+/nav grid    -> Navigation: this client has nothing to draw the grid on
+/nav route X -> Navigation: this client has nothing to draw a route on
+```
+
+Everything else `/nav` and `/motor` do is identical on both, because both are
+registered once, by the shared binding pass, on the one command registry each
+client hands plugins. A verb a plugin registers is reachable from a chat box
+and from the headless console alike.
+
+### Host services rather than automation
+
+These are on `IPluginHost`, not on the automation surface, and they are the
+places a windowless client genuinely has nothing behind the interface:
+
+- `Ui` is the inert no-op registry. A gameplay panel registered through
+  `IUiRegistry.AddMarkupPanel` loads without error and is never drawn.
+- `Hotkeys` is the inert no-op registry -- there is no keyboard to bind to.
+  `Register` returns a handle whose `IsBound` is `false`, and the handler never
+  fires.
+- `Clipboard` is the inert no-op clipboard.
+- `Window.Minimize`, `Window.Restore` and `Window.IsMinimized` stay at the
+  interface's inert defaults. `Window.RequestClose` is real: it ends this
+  plugin's own session, not the whole process, the same way a bot policy ends
+  its own session when it decides it is done. A second session hosted by the
+  same process is untouched; only the console's `/quit` and a SIGINT/SIGTERM
+  end every session at once.
+- `Storage` and `VtankProfiles` are real, in the same on-disk layout the
+  windowed client uses. They are process-wide rather than session-scoped, so
+  two sessions in one process share one plugin settings file -- exactly as two
+  plugin instances in one windowed process would.
+- `LootClassifiers` is real, and a classifier published by one plugin can be
+  asked for verdicts by another.
+- `Log` writes into the headless diagnostic stream rather than to a window.
+
+### The scenery list is empty
+
+`State.SceneryObjects` is a fact about a drawn world: what the client placed,
+and how far out, is decided by what it is drawing. A client that draws
+nothing answers an empty list. `State.Entities`, `Events.EntitySpawned` and
+the replay a late handler gets are the same on both clients -- one runtime
+producer answers them, keyed on the same object directory -- so only the
+scenery differs.
+
+### One field a projection cannot fill
+
+`Objects.TryGet` and `Objects.CaptureObjects` populate identically on both
+clients -- name, weenie class id, item type, container and wielder ids,
+classification, ownership, position, appraisal data, capacities, stack size,
+door-open state, icon id. The exception is `ActiveSpellIds` for the local
+player: the windowed client tracks a live active-enchantment list this one does
+not, so it is empty here.
+
+### Chat, and the console
+
+`Chat` is real on both: `PostMessage`, `Submit`, `Compose`, `CaptureMessages`,
+`Received`, `IsInputActive` and the suppression filters all sit on the shared
+surface. `Compose` stages a line in the one chat entry both front ends type
+into, so on a windowless client it appears at the console and the next Enter
+sends it.
+
+The headless console is that second front end, and `docs/building-and-running.md`
+describes what can be typed at it.

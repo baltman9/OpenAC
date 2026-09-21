@@ -3070,6 +3070,77 @@ public sealed class LiveEntityRuntimeTests
         return canonical;
     }
 
+    /// <summary>
+    /// Whether a body's clock is running is now asked in one place, and the
+    /// client with a window has to reach the same answer it always did. The
+    /// two are read side by side through every state that changes the answer:
+    /// registered but not shown, shown, frozen, and withdrawn.
+    /// </summary>
+    /// <remarks>
+    /// Mutation check (2026-09-20): making the shared answer ignore the frozen
+    /// flag turned this red on the frozen state; making it ignore whether the
+    /// thing is in the physics workset turned it red on the registered and
+    /// withdrawn states. Restoring each turned it green.
+    /// </remarks>
+    [Fact]
+    public void TheWindowedAnswerToWhetherABodysClockRunsIsTheSharedAnswer()
+    {
+        const uint guid = 0x70000101u;
+        var spatial = new GpuWorldState();
+        spatial.AddLandblock(EmptyLandblock(0x0101FFFFu));
+        var resources = new RecordingResources();
+        (LiveEntityRuntime runtime, RuntimeEntityObjectLifetime lifetime) =
+            LiveEntityRuntimeFixture.CreateWithLifetime(spatial, resources);
+        WorldSession.EntitySpawn spawn = Spawn(guid, 4, 10, 0x01010001u);
+        runtime.RegisterLiveEntity(spawn);
+        Assert.True(lifetime.Entities.TryGetActive(
+            guid,
+            out RuntimeEntityRecord canonical));
+
+        void BothAgree()
+        {
+            AcDream.Core.Physics.RetailObjectClockDisposition windowed =
+                runtime.GetRootObjectClockDisposition(guid);
+            AcDream.Core.Physics.RetailObjectClockDisposition shared =
+                AcDream.Runtime.Physics.RuntimeRemoteBodyDisposition.RootClock(
+                    lifetime.Physics,
+                    canonical);
+            Assert.Equal(windowed, shared);
+        }
+
+        BothAgree();
+
+        WorldEntity entity = runtime.MaterializeLiveEntity(
+            guid,
+            spawn.Position!.Value.LandblockId,
+            id => Entity(id, guid))!;
+        Assert.True(runtime.TryMarkWorldSpawnPublished(guid));
+        Assert.Equal(
+            AcDream.Core.Physics.RetailObjectClockDisposition.Advance,
+            runtime.GetRootObjectClockDisposition(guid));
+        BothAgree();
+
+        Assert.True(runtime.TryApplyState(
+            new SetState.Parsed(
+                guid,
+                (uint)(PhysicsStateFlags.ReportCollisions
+                    | PhysicsStateFlags.Frozen),
+                spawn.InstanceSequence,
+                2),
+            out _));
+        Assert.Equal(
+            AcDream.Core.Physics.RetailObjectClockDisposition.Suspend,
+            runtime.GetRootObjectClockDisposition(guid));
+        BothAgree();
+
+        Assert.True(runtime.WithdrawLiveEntityProjection(guid));
+        Assert.Equal(
+            AcDream.Core.Physics.RetailObjectClockDisposition.Suspend,
+            runtime.GetRootObjectClockDisposition(guid));
+        BothAgree();
+        Assert.NotNull(entity);
+    }
+
     private static WorldEntity Entity(uint id, uint guid) => new()
     {
         Id = id,

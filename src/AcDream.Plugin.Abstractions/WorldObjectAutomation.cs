@@ -1,4 +1,4 @@
-namespace AcDream.Plugin.Abstractions;
+﻿namespace AcDream.Plugin.Abstractions;
 
 /// <summary>
 /// Semantic operations and roles the host recognizes for an object.
@@ -484,6 +484,25 @@ public interface IWorldObjectAutomation
     /// completes, fails, or is interrupted.
     /// </summary>
     PluginActivationCompletion LastActivationCompletion => default;
+
+    /// <summary>
+    /// One integer property of one object. A caller reading a single property
+    /// inside a per-object predicate should use this rather than
+    /// <see cref="TryCaptureProperties"/>, which copies the object's whole
+    /// property bundle. The default answers from that copy, so a surface that
+    /// has not specialised it is correct but not cheap.
+    /// </summary>
+    bool TryGetIntProperty(uint objectId, uint property, out int value)
+    {
+        if (TryCaptureProperties(objectId, out PluginItemProperties properties)
+            && properties.Ints is { } ints
+            && ints.TryGetValue(property, out value))
+        {
+            return true;
+        }
+        value = 0;
+        return false;
+    }
 
     /// <summary>
     /// Requests an appraisal of any object present in the object table --

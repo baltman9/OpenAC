@@ -158,9 +158,9 @@ public sealed class RetailUiInteractionFlowTests
             });
         }
 
-        public ItemInteractionController BindInventoryInteraction()
+        public RuntimeItemInteraction BindInventoryInteraction()
         {
-            var interaction = new ItemInteractionController(
+            var interaction = new RuntimeItemInteraction(
                 Objects,
                 new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(Objects)),
                 new InteractionState(),
@@ -194,10 +194,10 @@ public sealed class RetailUiInteractionFlowTests
         }
 
         public void BindPaperdoll(
-            ItemInteractionController? itemInteraction = null,
+            RuntimeItemInteraction? itemInteraction = null,
             PaperdollClickMap? clickMap = null)
         {
-            itemInteraction ??= new ItemInteractionController(
+            itemInteraction ??= new RuntimeItemInteraction(
                 Objects,
                 new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(Objects)),
                 new InteractionState(),

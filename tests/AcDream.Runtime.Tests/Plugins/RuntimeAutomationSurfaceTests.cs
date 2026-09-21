@@ -258,10 +258,10 @@ public sealed class RuntimeAutomationSurfaceTests
         using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
 
-        surface.PostSystemMessage("MossTank: buffs applied.");
+        surface.PostSystemMessage("Tank: buffs applied.");
 
         var entry = Assert.Single(runtime.CommunicationOwner.Chat.Snapshot());
-        Assert.Equal("MossTank: buffs applied.", entry.Text);
+        Assert.Equal("Tank: buffs applied.", entry.Text);
         Assert.Equal((uint)RetailLogTextType.Default, entry.LogTextType);
 
         runtime.CommunicationOwner.SpewBox.Tick(0d);
@@ -296,6 +296,37 @@ public sealed class RuntimeAutomationSurfaceTests
         Assert.Equal(PluginInventoryCommandKind.Merge, completion.Kind);
         Assert.Equal(itemId, completion.SourceObjectId);
         Assert.True(completion.IsSuccess);
+    }
+
+    /// <summary>
+    /// Mutation executed: project <c>false</c> instead of the inventory
+    /// transaction's pending-request flag in <c>CaptureBusyState</c>; the
+    /// first assertion fails while the request is outstanding.
+    /// </summary>
+    [Fact]
+    public void RecoveryProjectsDispatchedInventoryUntilMatchingAuthoritativeMove()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        const uint itemId = 0x50000124u;
+        runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = itemId,
+            Name = "Stack",
+            StackSize = 10,
+            StackSizeMax = 100,
+        });
+
+        Assert.True(runtime.InventoryOwner.Transactions.TryDispatch(
+            InventoryRequestKind.Move, itemId, static () => true));
+        PluginBusyState pending = surface.Recovery.CaptureBusyState();
+        Assert.True(pending.PendingInventory);
+        Assert.Equal(0, pending.BusyCount);
+
+        Assert.True(runtime.InventoryOwner.Objects.ApplyConfirmedServerMove(
+            itemId, 0x50000001u, newWielderId: 0u));
+        Assert.False(surface.Recovery.CaptureBusyState().PendingInventory);
     }
 
     [Fact]
@@ -355,6 +386,59 @@ public sealed class RuntimeAutomationSurfaceTests
         Assert.Empty(surface.Enchantments.Capture(100u));
         Assert.Empty(surface.Enchantments.Capture(200u));
     }
+
+    [Fact]
+    public void KnownSelfBuffsLeaveOutWhatTheCharacterCannotBeATargetOf()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        runtime.CharacterOwner.InstallSpellMetadata(SpellTable.Create(
+        [
+            // Beneficial and self-targeted: a self buff.
+            TimedBeneficial(10u, "Strength Self I", flags: 0x0000000Cu, targetMask: 0x10u),
+            // Beneficial but creature-targeted with no self bit: the retail
+            // target rule refuses it on the caster, so it is not a self buff
+            // however good it sounds.
+            TimedBeneficial(11u, "Assassin's Alchemy Kit", flags: 0x00000006u, targetMask: 0x10u),
+            // Beneficial, targeted, and allowed on the caster by its mask.
+            TimedBeneficial(12u, "Blessing of Someone", flags: 0x00000006u, targetMask: 0x8107u),
+        ]));
+        runtime.CharacterOwner.Spellbook.OnSpellLearned(10u);
+        runtime.CharacterOwner.Spellbook.OnSpellLearned(11u);
+        runtime.CharacterOwner.Spellbook.OnSpellLearned(12u);
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+
+        Assert.Equal(
+            [10u, 12u],
+            surface.Spells.KnownSelfBuffs.Select(spell => spell.SpellId).Order());
+        Assert.True(surface.Spells.TryGet(11u, out _));
+    }
+
+    private static SpellMetadata TimedBeneficial(
+        uint id, string name, uint flags, uint targetMask) => new(
+        id,
+        name,
+        "Creature Enchantment",
+        id,
+        0u,
+        string.Empty,
+        60f,
+        10,
+        false,
+        false,
+        string.Empty,
+        0,
+        50,
+        flags,
+        1,
+        false,
+        false,
+        false,
+        0f,
+        0u,
+        0u,
+        targetMask,
+        1);
 
     private static SpellMetadata DurationSpell() => new(
         42u,

@@ -142,7 +142,11 @@ public sealed class UpdateFrameOrchestratorTests
     {
         var calls = new List<string>();
         var observed = new FrameObservations();
-        var transit = new RuntimeWorldTransitState();
+        // The client's world gate and its frame clock read the one runtime:
+        // a scenario that gave them separate transit state would prove
+        // nothing about the client.
+        using GameRuntime runtime = GameRuntimeTestFactory.Create();
+        RuntimeWorldTransitState transit = runtime.TransitOwner;
         var availability = new WorldGenerationAvailabilityState(transit);
         long generation =
             RuntimeWorldTransitTestDriver.BeginPortal(
@@ -151,7 +155,8 @@ public sealed class UpdateFrameOrchestratorTests
         UpdateFrameOrchestrator frame = Create(
             calls,
             observed: observed,
-            availability: availability);
+            availability: availability,
+            runtime: runtime);
 
         frame.Tick(new UpdateFrameInput(0.25));
         frame.Tick(new UpdateFrameInput(0.25));
@@ -662,20 +667,25 @@ public sealed class UpdateFrameOrchestratorTests
                 BindingFlags.Instance | BindingFlags.NonPublic),
             field => typeof(Delegate).IsAssignableFrom(field.FieldType));
 
-        FieldInfo approachCompletions = Assert.Single(
+        // Which run of walks the character is on belongs to whoever owns the
+        // body, which is the runtime on both clients. A window that kept its
+        // own hold on it could only agree with the other client by accident.
+        Assert.DoesNotContain(
             typeof(AcDream.App.Input.PlayerModeController).GetFields(
                 BindingFlags.Instance | BindingFlags.NonPublic),
-            field => field.Name == "_approachCompletions");
-        Assert.Equal(
-            typeof(AcDream.App.Interaction.IPlayerApproachCompletionLifetimeOwner),
-            approachCompletions.FieldType);
+            field => field.FieldType
+                    == typeof(AcDream.Runtime.Gameplay
+                        .IRuntimeApproachCompletionLifetimeOwner)
+                || field.FieldType
+                    == typeof(AcDream.Runtime.Gameplay
+                        .IRuntimeApproachCompletionSink));
         Assert.DoesNotContain(
             typeof(AcDream.App.Input.PlayerModeController).GetFields(
                 BindingFlags.Instance | BindingFlags.NonPublic),
             field => field.FieldType
                 == typeof(AcDream.App.Interaction.SelectionInteractionController));
         Assert.DoesNotContain(
-            typeof(AcDream.App.Interaction.PlayerApproachCompletionState).GetFields(
+            typeof(AcDream.Runtime.Gameplay.RuntimeApproachCompletionState).GetFields(
                 BindingFlags.Instance | BindingFlags.NonPublic),
             field => typeof(Delegate).IsAssignableFrom(field.FieldType));
 
@@ -903,14 +913,15 @@ public sealed class UpdateFrameOrchestratorTests
         FrameObservations? observed = null,
         bool teleportPlace = false,
         bool inboundCreatedPlayer = false,
-        IWorldGenerationAvailability? availability = null)
+        IWorldGenerationAvailability? availability = null,
+        GameRuntime? runtime = null)
     {
         teardown ??= new RecordingTeardown(calls);
         failureSink ??= new RecordingFailureSink();
         return new UpdateFrameOrchestrator(
             teardown,
             failureSink,
-            new UpdateFrameClock(),
+            new UpdateFrameClock(runtime ?? GameRuntimeTestFactory.Create()),
             new RecordingClockPublisher(calls, observed),
             new RecordingStreaming(calls),
             new RecordingInput(calls, observed),

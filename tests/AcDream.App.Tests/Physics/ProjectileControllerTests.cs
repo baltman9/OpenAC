@@ -9,6 +9,7 @@ using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 using AcDream.Core.World;
 using AcDream.Runtime.Entities;
+using AcDream.Runtime.Physics;
 using DatReaderWriter.DBObjs;
 using DatReaderWriter.Types;
 
@@ -122,18 +123,33 @@ public sealed class ProjectileControllerTests
             heading: 0f,
             isMovingTo: false,
             currentBodyPosition: remote.Body.Position);
-        var updater = new RemotePhysicsUpdater(
-            fixture.Live.Physics,
-            (_, _) => (0.48f, 1.835f),
-            (_, _) => (System.Collections.Immutable.ImmutableArray<FlatCollisionSphere>.Empty, 1f, 0.4f, 0.4f),
-            (_, _, _, _) => { });
+        var updater = new RuntimeRemoteBodyOwner(fixture.Live.Physics);
 
         int publishedRoots = 0;
-        updater.TickHiddenEntities(
-            fixture.Live,
-            localPlayerServerGuid: 0x50000001u,
-            dt: 0.1f,
-            _ => publishedRoots++);
+        ulong epoch = record.ObjectClockEpoch;
+        updater.TickHiddenBody(
+            record.Canonical,
+            remote,
+            sequencer: null,
+            0.1f,
+            new RuntimeRemoteBodyFacts(
+                0.1f,
+                entity.Position,
+                entity.Position,
+                RootClockAdvances: true,
+                ObjectScale: 1f,
+                epoch,
+                LiveCenterX: 1,
+                LiveCenterY: 1),
+            new RuntimeRemoteBodyPresentation(
+                AcceptPose: snapshot =>
+                {
+                    entity.SetPosition(snapshot.Position);
+                    entity.ParentCellId = snapshot.FullCellId;
+                    entity.Rotation = snapshot.Orientation;
+                    publishedRoots++;
+                    return true;
+                }));
         Vector3 afterNarrowTick = entity.Position;
         fixture.Controller.Tick(1.2, 1, 1, playerWorldPosition: null);
 

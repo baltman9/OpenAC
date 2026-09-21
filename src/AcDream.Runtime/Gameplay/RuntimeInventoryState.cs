@@ -49,8 +49,9 @@ public sealed class RuntimeInventoryState : IDisposable
         _entityObjects.Objects.ObjectRemoved += OnObjectRemoved;
         ItemMana = new ItemManaState();
         Shortcuts = new ShortcutStore();
-        Transactions = new InventoryTransactionState(_entityObjects.Objects);
         Vendor = new VendorState();
+        Transactions = new InventoryTransactionState(
+            _entityObjects.Objects, Vendor);
         VendorItems = new VendorShopItemMaterializer(Vendor, _entityObjects.Objects);
         View = new InventoryStateView(this);
     }

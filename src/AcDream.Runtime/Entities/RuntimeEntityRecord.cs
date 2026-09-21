@@ -54,6 +54,12 @@ public sealed class RuntimeEntityRecord
     public PhysicsBody? PhysicsBody { get; private set; }
     public bool PhysicsBodyAcquisitionInProgress { get; internal set; }
     public IRuntimeRemoteMotion? RemoteMotion { get; internal set; }
+
+    /// <summary>
+    /// This body's motion simulation state, installed by whichever host
+    /// materialized it. Null until a host says how the body animates.
+    /// </summary>
+    internal RuntimeRemoteAnimationState? RemoteAnimation { get; private set; }
     public bool RemoteMotionBindingInProgress { get; internal set; }
     public IRuntimeProjectile? Projectile { get; internal set; }
     public bool ProjectileBindingInProgress { get; internal set; }
@@ -160,6 +166,9 @@ public sealed class RuntimeEntityRecord
         PhysicsStateMutationVersion++;
         FinalPhysicsState = state;
     }
+
+    internal void SetRemoteAnimation(RuntimeRemoteAnimationState? state) =>
+        RemoteAnimation = state;
 
     internal void SetPhysicsBody(PhysicsBody? body)
     {

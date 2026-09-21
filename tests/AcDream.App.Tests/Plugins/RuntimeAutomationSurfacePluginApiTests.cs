@@ -4,6 +4,7 @@ using AcDream.Runtime.Plugins;
 using AcDream.Core.Chat;
 using AcDream.Core.Combat;
 using AcDream.Core.Plugins;
+using AcDream.Core.Selection;
 using AcDream.Core.Spells;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
@@ -18,6 +19,39 @@ namespace AcDream.App.Tests.Plugins;
 
 public sealed class RuntimeAutomationSurfacePluginApiTests
 {
+    /// <summary>
+    /// Mutation: omit ObjectClass or clamp zero in BuildOwnedEquipment;
+    /// the plugin host then loses weapon-class or empty-stack information.
+    /// </summary>
+    [Fact]
+    public void GraphicalHostEquipmentProjectsClassAndExplicitZeroStack()
+    {
+        var (runtime, commands) = CreateRealSession();
+        using var runtimeDisposal = runtime;
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        commands.Start(runtime.Generation);
+        const uint itemId = 0x700000ABu;
+        runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = itemId,
+            Name = "Empty bow stack",
+            Type = ItemType.MissileWeapon,
+            ValidLocations = EquipMask.Held,
+            ContainerId = 0x50000001u,
+            StackSize = 0,
+        });
+        IPluginHost host = new AppPluginHost(
+            new TestPluginLogger(), new WorldGameState(), new WorldEvents(),
+            new SelectionState(), NoOpUiRegistry.Instance, surface);
+
+        PluginEquipmentItem item = Assert.Single(
+            host.Automation.Equipment.CaptureOwnedEquipment(),
+            item => item.ObjectId == itemId);
+        Assert.Equal(PluginObjectClass.MissileWeapon, item.ObjectClass);
+        Assert.Equal(0, item.StackSize);
+    }
+
     [Fact]
     public void MapWorldObjectUseOutcomeMapsEveryOutcomeToItsPluginStatus()
     {
@@ -52,6 +86,34 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
         Assert.Equal("That cannot be used.", result.Notice);
     }
 
+    /// <summary>
+    /// The casting flag means a cast this session issued is still
+    /// outstanding. It once answered from the inventory transaction count,
+    /// which an appraisal or a pickup raises as readily as a cast -- so an
+    /// automation that appraises as it walks read as permanently mid-cast,
+    /// its cast gate answered Busy for ever, and every rule that casts was
+    /// refused on every pass. Mutation: answer from
+    /// <c>Transactions.BusyCount &gt; 0</c> again and the appraisal reads as
+    /// a cast.
+    /// </summary>
+    [Fact]
+    public void IsCastingIsACastInFlightAndNotAPendingInventoryRequest()
+    {
+        var (runtime, commands) = CreateRealSession();
+        using var runtimeDisposal = runtime;
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        commands.Start(runtime.Generation);
+
+        Assert.False(surface.Magic.IsCasting);
+
+        // An appraisal, a pickup or any other request in flight: the count
+        // is up, but no spell is on its way.
+        runtime.InventoryOwner.Transactions.IncrementBusyCount();
+
+        Assert.False(surface.Magic.IsCasting);
+    }
+
     [Fact]
     public void UsingAWorldObjectThePluginDoesNotOwnRoutesThroughTheWalkToUsePath()
     {
@@ -67,7 +129,8 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
             mergeItems: (_, _, _) => false,
             dropItem: (_, _) => false,
             giveItem: (_, _, _) => false,
-            pickupItem: (_, _) => false,
+            pickupItem: (_, _) => AcDream.Runtime.Gameplay
+                .RuntimeBackpackPlacementOutcome.NotThisClients,
             identifyItem: _ => false);
 
         // A landscape vendor at distance -- not in the player's
@@ -115,7 +178,8 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
             mergeItems: (_, _, _) => false,
             dropItem: (_, _) => false,
             giveItem: (_, _, _) => false,
-            pickupItem: (_, _) => false,
+            pickupItem: (_, _) => AcDream.Runtime.Gameplay
+                .RuntimeBackpackPlacementOutcome.NotThisClients,
             identifyItem: _ => false);
 
         uint playerId = runtime.PlayerIdentity.ServerGuid;
@@ -149,7 +213,8 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
             mergeItems: (_, _, _) => false,
             dropItem: (_, _) => false,
             giveItem: (_, _, _) => false,
-            pickupItem: (_, _) => false,
+            pickupItem: (_, _) => AcDream.Runtime.Gameplay
+                .RuntimeBackpackPlacementOutcome.NotThisClients,
             identifyItem: _ => false);
 
         const uint vendorId = 0x8000_0002u;
@@ -621,6 +686,35 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
         Assert.Equal(0u, loot.Appraisal.AwaitingObjectId);
     }
 
+    /// <summary>
+    /// A description in flight must not make the surface refuse the next
+    /// item action. A looter describes what it is about to take, and while
+    /// the two shared one count its own next Open or Pickup came back Busy,
+    /// so it retried the corpse it could have opened at once. Mutation:
+    /// count an appraisal on the item-action count again and the loot
+    /// surface reports itself busy.
+    /// </summary>
+    [Fact]
+    public void AnOutstandingIdentifyDoesNotMakeTheItemSurfaceBusy()
+    {
+        var events = new WorldEvents();
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new RuntimeAutomationSurface(events);
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+
+        Assert.True(runtime.ActionOwner.Transactions.TryRequestAppraisal(
+            702u,
+            static _ => { },
+            AppraisalRequestOrigin.Automation));
+
+        Assert.False(surface.Loot.IsBusy);
+        Assert.False(surface.Items.IsBusy);
+        Assert.True(runtime.InventoryOwner.Transactions.CanBeginRequest);
+
+        // And one description at a time is still the rule.
+        Assert.False(runtime.InventoryOwner.Transactions.CanBeginAppraisal);
+    }
+
     [Fact]
     public void WorldObjectIdentifyAcceptsAnOwnedInventoryItemAndReportsIdentReceived()
     {
@@ -639,7 +733,8 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
             mergeItems: (_, _, _) => false,
             dropItem: (_, _) => false,
             giveItem: (_, _, _) => false,
-            pickupItem: (_, _) => false,
+            pickupItem: (_, _) => AcDream.Runtime.Gameplay
+                .RuntimeBackpackPlacementOutcome.NotThisClients,
             identifyItem: id => runtime.ActionOwner.Transactions.TryRequestAppraisal(
                 id,
                 sent => sentTo = sent));
@@ -916,6 +1011,13 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
         public void Tick(WorldSession session) { }
 
         public void DisposeSession(WorldSession session) => session.Dispose();
+    }
+
+    private sealed class TestPluginLogger : IPluginLogger
+    {
+        public void Info(string message) { }
+        public void Warn(string message) { }
+        public void Error(string message, Exception? error = null) { }
     }
 
     private sealed class NoOpTransport : IWorldSessionTransport

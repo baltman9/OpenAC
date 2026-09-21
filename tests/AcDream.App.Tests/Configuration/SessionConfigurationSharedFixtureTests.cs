@@ -85,6 +85,17 @@ public sealed class SessionConfigurationSharedFixtureTests
             session.LoginCommands);
         Assert.Equal(750, session.LoginCommandDelayMs);
         Assert.Equal("shared-fixture-status.jsonl", session.StatusFile);
+        Assert.Equal(
+            ["shared-fixture-group", "second-word"],
+            session.PluginTags);
+        Assert.True(session.CharacterOptions!["UseChargeAttack"]);
+        Assert.False(session.CharacterOptions!["AutoRepeatAttack"]);
+        Assert.Equal(
+            "escort",
+            session.PluginSettings!["ExamplePlugin"]["mode"]);
+        Assert.Equal(
+            "other",
+            session.PluginSettings!["AnotherPlugin"]["profile"]);
     }
 
     [Fact]
@@ -179,6 +190,52 @@ public sealed class SessionConfigurationSharedFixtureTests
                   "account": "account",
                   "credential": { "provider": "environment", "reference": "X" },
                   "loginCommandDelayMs": -1
+                }
+              ]
+            }
+            """);
+
+        Assert.Throws<SessionConfigurationException>(
+            () => SessionConfigurationLoader.Load(file.Path));
+    }
+
+    [Fact]
+    public void BlankPluginTagFailsLoad()
+    {
+        using TemporaryFile file = TemporaryFile.Create(
+            """
+            {
+              "version": 1,
+              "sessions": [
+                {
+                  "id": "bad-plugin-tags",
+                  "endpoint": { "host": "127.0.0.1", "port": 9000 },
+                  "account": "account",
+                  "credential": { "provider": "environment", "reference": "X" },
+                  "pluginTags": ["ok", "   "]
+                }
+              ]
+            }
+            """);
+
+        Assert.Throws<SessionConfigurationException>(
+            () => SessionConfigurationLoader.Load(file.Path));
+    }
+
+    [Fact]
+    public void NullPluginSettingValueFailsLoad()
+    {
+        using TemporaryFile file = TemporaryFile.Create(
+            """
+            {
+              "version": 1,
+              "sessions": [
+                {
+                  "id": "bad-plugin-settings",
+                  "endpoint": { "host": "127.0.0.1", "port": 9000 },
+                  "account": "account",
+                  "credential": { "provider": "environment", "reference": "X" },
+                  "pluginSettings": { "a.plugin": { "profile": null } }
                 }
               ]
             }

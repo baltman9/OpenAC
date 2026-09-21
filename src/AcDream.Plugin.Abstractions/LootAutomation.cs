@@ -7,7 +7,12 @@ namespace AcDream.Plugin.Abstractions;
 /// <param name="ObjectId">The corpse's object id.</param>
 /// <param name="WeenieClassId">The corpse's class id.</param>
 /// <param name="Name">The corpse's display name.</param>
-/// <param name="Distance">Distance from the local player in metres.</param>
+/// <param name="Distance">
+/// Straight-line distance from the local player in metres, centre to centre
+/// and height included -- the same measure
+/// <see cref="PluginCombatTarget.Distance"/> uses, so a corpse one floor down
+/// does not read as being at your feet.
+/// </param>
 /// <param name="HasBeenOpened">
 /// True when this session has already opened that corpse at least once.
 /// </param>
@@ -39,6 +44,18 @@ public readonly record struct PluginLootContainer(
     /// fills <see cref="LongDescription"/>.
     /// </summary>
     public bool IsIdentified { get; init; }
+
+    /// <summary>
+    /// Whether <see cref="Position"/> carries a real place in the world. A
+    /// corpse the client knows of but cannot place has none.
+    /// </summary>
+    public bool HasPosition { get; init; }
+
+    /// <summary>
+    /// Where the corpse is, which is what lets a looter ask how far round the
+    /// character would have to turn to face it.
+    /// </summary>
+    public PluginNavigationPosition Position { get; init; }
 }
 
 /// <summary>
@@ -65,10 +82,20 @@ public readonly record struct PluginLootContainer(
 /// this against the id you passed to Identify to learn when your own
 /// request completed.
 /// </param>
+/// <param name="LastAbandonedObjectId">
+/// The failure signal: the object id of the most recent request that was
+/// given up on rather than answered -- because the server never replied
+/// within the slot's bound, or because the slot was taken over. Poll this
+/// against the id you passed to Identify to learn that your own request
+/// will never complete, so you can count the failure and stop asking about
+/// that object for ever. Like <paramref name="CurrentObjectId"/> it is a
+/// one-shot signal: a fresh request for that same object clears it.
+/// </param>
 public readonly record struct PluginAppraisalState(
     long Revision,
     uint AwaitingObjectId,
-    uint CurrentObjectId);
+    uint CurrentObjectId,
+    uint LastAbandonedObjectId = 0u);
 
 /// <summary>
 /// Looting: finding nearby corpses, opening one, reading what is inside, and
@@ -84,8 +111,14 @@ public interface ILootAutomation
     bool IsAvailable => false;
 
     /// <summary>
-    /// True while an inventory request is already in flight, so the next
-    /// command here would come back <see cref="PluginItemCommandStatus.Busy"/>.
+    /// True while a command here offered right now would come back
+    /// <see cref="PluginItemCommandStatus.Busy"/>. Two things put it there: a
+    /// request of your own already in flight, and the short pacing the client
+    /// keeps between one use and the next -- opening one corpse straight
+    /// after closing the last runs into the second. Both mean "not yet"
+    /// rather than "no": wait for this to read false and ask again rather
+    /// than counting the refusal as a failed attempt. It never reads false
+    /// while a command would be refused as busy.
     /// </summary>
     bool IsBusy => false;
 
@@ -99,6 +132,8 @@ public interface ILootAutomation
     /// The container currently open, or zero when none is.
     /// </summary>
     uint CurrentContainerId => 0u;
+    /// <summary>All listed contents have arrived with their basic item descriptions.</summary>
+    bool CurrentContentsReady => true;
 
     /// <summary>
     /// The server's answer to the last item use, including one this surface
@@ -158,6 +193,10 @@ public interface ILootAutomation
     /// arrive later, not from this call.
     /// </summary>
     PluginItemCommandResult Open(uint containerObjectId) =>
+        new(PluginItemCommandStatus.Unavailable);
+
+    /// <summary>Closes the open corpse or container: the inverse of <see cref="Open"/>, through the same use the client's own close sends.</summary>
+    PluginItemCommandResult Close(uint containerObjectId) =>
         new(PluginItemCommandStatus.Unavailable);
 
     /// <summary>

@@ -75,12 +75,11 @@ public sealed class LandblockStaticPresentationPublisher
     private readonly object _receiptOwner = new();
     private readonly LightingHookSink _lighting;
     private readonly TranslucencyFadeManager _translucency;
-    private readonly WorldGameState _worldState;
-    private readonly WorldEvents _worldEvents;
+    private readonly ISceneryObjectStore _scenery;
     // Per landblock, the source id of every static it published. The whole
     // snapshot used to live here, and a republication only ever reads the
-    // source id back out of it; the snapshots themselves are the plugin world
-    // state's, which is what a plugin reads.
+    // source id back out of it; the snapshots themselves are the scenery
+    // store's, which is what a plugin reads.
     private readonly Dictionary<uint, Dictionary<uint, uint>>
         _activeByLandblock = new();
     private readonly Dictionary<uint, uint> _landblockByEntityId = new();
@@ -95,14 +94,12 @@ public sealed class LandblockStaticPresentationPublisher
     public LandblockStaticPresentationPublisher(
         LightingHookSink lighting,
         TranslucencyFadeManager translucency,
-        WorldGameState worldState,
-        WorldEvents worldEvents)
+        ISceneryObjectStore scenery)
     {
         _lighting = lighting ?? throw new ArgumentNullException(nameof(lighting));
         _translucency = translucency
             ?? throw new ArgumentNullException(nameof(translucency));
-        _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
-        _worldEvents = worldEvents ?? throw new ArgumentNullException(nameof(worldEvents));
+        _scenery = scenery ?? throw new ArgumentNullException(nameof(scenery));
     }
 
     public LandblockStaticPresentationDiagnostics Diagnostics => new(
@@ -240,8 +237,7 @@ public sealed class LandblockStaticPresentationPublisher
             if (!retained)
             {
                 _translucency.ClearEntity(id);
-                _worldState.RemoveById(id);
-                _worldEvents.ForgetEntity(id);
+                _scenery.RemoveSceneryById(id);
                 _landblockByEntityId.Remove(id);
                 _pluginRemovalCount++;
             }
@@ -327,17 +323,11 @@ public sealed class LandblockStaticPresentationPublisher
         {
             (uint id, WorldEntitySnapshot snapshot) =
                 publication.OrderedSnapshots[publication.PluginCursor];
-            _worldState.Add(snapshot);
+            _scenery.AddScenery(snapshot);
             if (publication.PreviouslyActiveIds.Contains(id))
-            {
-                _worldEvents.UpsertCurrent(snapshot);
                 _pluginRefreshCount++;
-            }
             else
-            {
-                _worldEvents.FireEntitySpawned(snapshot);
                 _pluginSpawnCount++;
-            }
             _landblockByEntityId[id] = Canonicalize(publication.LandblockId);
             publication.ReplacementActive[id] = snapshot.SourceId;
             publication.PluginCursor++;
@@ -374,8 +364,7 @@ public sealed class LandblockStaticPresentationPublisher
         if (entity.ServerGuid != 0)
             return;
 
-        _worldState.RemoveById(entity.Id);
-        _worldEvents.ForgetEntity(entity.Id);
+        _scenery.RemoveSceneryById(entity.Id);
         if (_landblockByEntityId.Remove(entity.Id, out uint landblockId)
             && _activeByLandblock.TryGetValue(
                 landblockId,

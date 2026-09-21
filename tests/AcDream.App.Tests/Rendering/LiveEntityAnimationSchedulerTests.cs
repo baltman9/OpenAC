@@ -9,6 +9,7 @@ using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 using AcDream.Core.World;
+using AcDream.Runtime.Physics;
 using AcDream.Core.Vfx;
 using AcDream.Runtime.Entities;
 using DatReaderWriter.DBObjs;
@@ -632,11 +633,7 @@ public sealed class LiveEntityAnimationSchedulerTests
         ProjectileController? projectiles = null)
     {
         physics ??= live.Physics.Engine;
-        var remotePhysics = new RemotePhysicsUpdater(
-            live.Physics,
-            (_, _) => (0.48f, 1.835f),
-            (_, _) => (System.Collections.Immutable.ImmutableArray<FlatCollisionSphere>.Empty, 1f, 0.4f, 0.4f),
-            (_, _, _, _) => { });
+        var remotePhysics = new RuntimeRemoteBodyOwner(live.Physics);
         var ordinaryPhysics = new LiveEntityOrdinaryPhysicsUpdater(
             live.Physics,
             (_, _) => (0.48f, 1.835f),
@@ -721,7 +718,7 @@ public sealed class LiveEntityAnimationSchedulerTests
             LowFrame = 0,
             HighFrame = 0,
             Framerate = 0f,
-            Scale = 1f,
+            Simulation = new RuntimeRemoteAnimationState { Scale = 1f },
             PartTemplate = Array.Empty<LiveAnimationPartTemplate>(),
             PartAvailability = Array.Empty<bool>(),
             Sequencer = new AnimationSequencer(
@@ -775,7 +772,7 @@ public sealed class LiveEntityAnimationSchedulerTests
             LowFrame = 0,
             HighFrame = 3,
             Framerate = 30f,
-            Scale = 1f,
+            Simulation = new RuntimeRemoteAnimationState { Scale = 1f },
             PartTemplate = new[]
             {
                 new LiveAnimationPartTemplate(

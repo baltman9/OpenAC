@@ -465,7 +465,22 @@ internal sealed class WalkFrameDriver : IWalkEventSink, IWalkLookInViewSource
         }
         try
         {
+            BuildingDrawTrace.Begin(cameraCellId, cameraWorldPosition);
             walk.WalkFrame(cameraCellId, cameraCell, landscape, ctx, this);
+            if (BuildingDrawTrace.Active)
+            {
+                foreach (WalkLandBlock? block in landscape.Blocks)
+                {
+                    if (block is null || block.LandblockId != (BuildingDrawTrace.CellId & 0xFFFF0000u))
+                        continue;
+                    BuildingDrawTrace.Write($"block=0x{block.LandblockId:X8} ring={block.Ring} side={block.SideCellCount} view={block.InView} visitedBuildings={VisitedBuildings.Count}");
+                    for (int i = 0; i < block.CellBuildings.Length; i++)
+                    {
+                        if (block.CellBuildings[i] is { } candidate && candidate.PositionCellId == BuildingDrawTrace.CellId)
+                            BuildingDrawTrace.Write($"anchorCellIndex={i} cellView={block.CellInView[i]} gfx=0x{candidate.GfxObjId:X8} distance={ctx.ViewerDistanceTo(candidate):F2}");
+                    }
+                }
+            }
             EndFrame();
         }
         catch
@@ -946,6 +961,8 @@ internal sealed class WalkFrameDriver : IWalkEventSink, IWalkLookInViewSource
 
         MarkIfGrown();
         WalkFrameStaticRecords shell = _worldData.GetBuildingShellStatics(building);
+        if (BuildingDrawTrace.Matches(building.PositionCellId))
+            BuildingDrawTrace.Write($"shellRecords={shell.Records.Count} selected=0x{selection.GfxObjId:X8} level={selection.Level} mode={selection.Mode}");
         if (shell.Records.Count > 1)
         {
             throw new InvalidOperationException(
@@ -965,6 +982,7 @@ internal sealed class WalkFrameDriver : IWalkEventSink, IWalkLookInViewSource
                 _viewProjection,
                 in selection,
                 building.PartZeroTransform,
+                building.SortCenter,
                 _alphaSubmissions);
         }
         if (_alphaSubmissions.Count != _alphaSubmitMark)

@@ -110,29 +110,44 @@ public sealed class LinuxPlatformBoundaryTests
             files);
     }
 
+    /// <summary>The rules that stage the bundled plugin into a host's output are shared by every
+    /// host that ships it, so this reads the shared file rather than one host's project. The
+    /// portability rules are the same ones: ask the plugin's own project where its output landed
+    /// instead of assembling a path, pass the framework and runtime identifier through so the answer
+    /// is the one this build produced, and write destinations with forward slashes.</summary>
     [Fact]
     public void ShippedPluginCopiesUseResolvedTargetPathsForBuildAndPublish()
     {
-        string project = File.ReadAllText(Path.Combine(
-            AppSourceRoot(),
-            "AcDream.App.csproj"));
+        string rules = File.ReadAllText(Path.Combine(
+            RepositoryRoot(),
+            "src",
+            "AcDream.Plugins.MossTank",
+            "BundledPlugin.targets"));
 
-        Assert.Contains("$(TargetFramework)", project, StringComparison.Ordinal);
-        Assert.Contains("$(RuntimeIdentifier)", project, StringComparison.Ordinal);
-        Assert.Contains("$(OutputPath)plugins/", project, StringComparison.Ordinal);
-        Assert.Contains("$(PublishDir)plugins/", project, StringComparison.Ordinal);
+        Assert.Contains("$(TargetFramework)", rules, StringComparison.Ordinal);
+        Assert.Contains("$(RuntimeIdentifier)", rules, StringComparison.Ordinal);
+        Assert.Contains("$(OutputPath)plugins/", rules, StringComparison.Ordinal);
+        Assert.Contains("$(PublishDir)plugins/", rules, StringComparison.Ordinal);
         Assert.Equal(
             2,
-            project.Split("Targets=\"GetTargetPath\"", StringSplitOptions.None)
+            rules.Split("Targets=\"GetTargetPath\"", StringSplitOptions.None)
                 .Length - 1);
-        Assert.Contains(
-            "../AcDream.Plugins.MossTank/mosstank*.xml",
-            project,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "/bin/$(Configuration)",
-            project,
-            StringComparison.Ordinal);
+        Assert.DoesNotContain("/bin/$(Configuration)", rules, StringComparison.Ordinal);
+        Assert.DoesNotContain("plugins\\", rules, StringComparison.Ordinal);
+    }
+
+    /// <summary>Every host that ships the bundled plugin stages it from those shared rules, so no
+    /// host can reintroduce a path of its own.</summary>
+    [Theory]
+    [InlineData("AcDream.App")]
+    [InlineData("AcDream.Headless")]
+    public void EveryShippingHostStagesThePluginFromTheSharedRules(string hostProjectName)
+    {
+        string project = File.ReadAllText(Path.Combine(
+            RepositoryRoot(), "src", hostProjectName, hostProjectName + ".csproj"));
+
+        Assert.Contains("BundledPlugin.targets", project, StringComparison.Ordinal);
+        Assert.DoesNotContain("plugins/", project, StringComparison.Ordinal);
     }
 
     private static string AppSourceRoot() =>

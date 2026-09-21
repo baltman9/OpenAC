@@ -1,5 +1,6 @@
 using AcDream.Core.Combat;
 using AcDream.Core.Items;
+using AcDream.Core.Physics;
 using AcDream.Core.Selection;
 using AcDream.Core.Spells;
 using System.Diagnostics;
@@ -43,6 +44,40 @@ public readonly record struct RuntimeActionOwnershipSnapshot(
 public sealed class RuntimeActionState : IDisposable
 {
     private bool _disposed;
+    private readonly HashSet<CombatControlLease> _combatControlLeases = [];
+
+    public IDisposable AcquireCombatControl()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var lease = new CombatControlLease(this);
+        _combatControlLeases.Add(lease);
+        CombatTarget.AutomationControlled = true;
+        CombatAttack.AutomationControlled = true;
+        if (_combatControlLeases.Count == 1)
+            CombatAttack.AbortAutomaticAttack();
+        return lease;
+    }
+
+    private void ReleaseCombatControl(CombatControlLease lease)
+    {
+        if (!_combatControlLeases.Remove(lease) || _combatControlLeases.Count != 0)
+            return;
+        CombatTarget.AutomationControlled = false;
+        CombatAttack.AutomationControlled = false;
+    }
+
+    private void ResetCombatControl()
+    {
+        _combatControlLeases.Clear();
+        CombatTarget.AutomationControlled = false;
+        CombatAttack.AutomationControlled = false;
+    }
+
+    private sealed class CombatControlLease(RuntimeActionState owner) : IDisposable
+    {
+        private RuntimeActionState? _owner = owner;
+        public void Dispose() => Interlocked.Exchange(ref _owner, null)?.ReleaseCombatControl(this);
+    }
     private bool _internalSubscriptionsAttached;
     private long _selectionRevision;
     private long _combatRevision;
@@ -73,8 +108,14 @@ public sealed class RuntimeActionState : IDisposable
         Selection = new SelectionState();
         Combat = new CombatState();
         Interaction = new InteractionState();
+        // The description channel and the item-use pacing share one
+        // throttle, so they share one clock: the pacing is stamped from the
+        // simulation clock at the call site, and the give-up bound is
+        // measured against the same clock here rather than against the
+        // machine's uptime.
         Transactions = new RuntimeInteractionTransactionState(
-            inventoryTransactions);
+            inventoryTransactions,
+            () => checked((long)Math.Floor(_now() * 1000d)));
         CombatAttack = new RuntimeCombatAttackState(
             Combat,
             combatAttackOperations,
@@ -83,6 +124,7 @@ public sealed class RuntimeActionState : IDisposable
             Combat,
             Selection,
             combatTargetOperations);
+        CreatureDeath = new RuntimeCreatureDeathState();
         CombatMode = new RuntimeCombatModeState(
             Combat,
             combatModeOperations);
@@ -92,6 +134,10 @@ public sealed class RuntimeActionState : IDisposable
             spellCastOperations);
         View = new ActionView(this);
 
+        // The death the server announces is answered in one place: the
+        // selection lets a creature go the moment the client learns it died,
+        // whether or not a window is drawing that creature.
+        CreatureDeath.Died += OnCreatureDied;
         Selection.Changed += OnSelectionChanged;
         Combat.CombatModeChanged += OnCombatModeChanged;
         Combat.HealthChanged += OnHealthChanged;
@@ -107,6 +153,9 @@ public sealed class RuntimeActionState : IDisposable
     public RuntimeInteractionTransactionState Transactions { get; }
     public RuntimeCombatAttackState CombatAttack { get; }
     public RuntimeCombatTargetState CombatTarget { get; }
+
+    /// <summary>Which creatures the client has been told are dead.</summary>
+    public RuntimeCreatureDeathState CreatureDeath { get; }
     public RuntimeCombatModeState CombatMode { get; }
     public RuntimeSpellCastState SpellCast { get; }
     public IRuntimeActionView View { get; }
@@ -152,6 +201,7 @@ public sealed class RuntimeActionState : IDisposable
     public void ResetSession()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        ResetCombatControl();
         List<Exception>? failures = null;
         Try(Transactions.ResetSession, ref failures);
         Try(Interaction.ResetSession, ref failures);
@@ -159,6 +209,7 @@ public sealed class RuntimeActionState : IDisposable
         Try(CombatAttack.ResetSession, ref failures);
         Try(() => Selection.Reset(), ref failures);
         Try(Combat.Clear, ref failures);
+        Try(CreatureDeath.Clear, ref failures);
         ClearHealthActivity();
         if (failures is not null)
         {
@@ -172,6 +223,7 @@ public sealed class RuntimeActionState : IDisposable
     {
         if (_disposed)
             return;
+        ResetCombatControl();
 
         List<Exception>? failures = null;
         try
@@ -182,10 +234,12 @@ public sealed class RuntimeActionState : IDisposable
             Try(CombatAttack.ResetSession, ref failures);
             Try(() => Selection.Reset(), ref failures);
             Try(Combat.Clear, ref failures);
+            Try(CreatureDeath.Clear, ref failures);
             ClearHealthActivity();
         }
         finally
         {
+            CreatureDeath.Died -= OnCreatureDied;
             Selection.Changed -= OnSelectionChanged;
             Combat.CombatModeChanged -= OnCombatModeChanged;
             Combat.HealthChanged -= OnHealthChanged;
@@ -205,6 +259,9 @@ public sealed class RuntimeActionState : IDisposable
                 failures);
         }
     }
+
+    private void OnCreatureDied(uint objectId) =>
+        CombatTarget.OnMotionApplied(objectId, MotionCommand.Dead);
 
     private void OnSelectionChanged(SelectionTransition _) =>
         Interlocked.Increment(ref _selectionRevision);

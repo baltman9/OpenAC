@@ -1,8 +1,8 @@
 using System.Numerics;
 using AcDream.Core.Items;
-using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 using AcDream.Runtime.Entities;
+using AcDream.Runtime.Physics;
 using AcDream.Runtime.World;
 
 namespace AcDream.Runtime.Gameplay;
@@ -30,7 +30,9 @@ public static class RuntimeVendorRangeQuery
             || !runtime.EntityObjects.Entities.TryGetActive(
                 playerGuid,
                 out RuntimeEntityRecord playerRecord)
-            || playerRecord.Snapshot.Position is not { } playerPosition)
+            || !RuntimePhysicsState.TryGetAbsoluteWorldPosition(
+                playerRecord,
+                out Vector3 playerPosition))
         {
             return;
         }
@@ -38,7 +40,9 @@ public static class RuntimeVendorRangeQuery
         if (!runtime.EntityObjects.Entities.TryGetActive(
                 vendorId,
                 out RuntimeEntityRecord vendorRecord)
-            || vendorRecord.Snapshot.Position is not { } vendorPosition)
+            || !RuntimePhysicsState.TryGetAbsoluteWorldPosition(
+                vendorRecord,
+                out Vector3 vendorPosition))
         {
             vendor.Close();
             return;
@@ -53,10 +57,10 @@ public static class RuntimeVendorRangeQuery
             runtime.EntityObjects.Physics.ResolveObjectTableHost(vendorId)
                 ?.Radius ?? 0f;
         bool inRange = ObjectRangeMath.ObjectsInRange(
-            AbsolutePosition(playerPosition),
+            playerPosition,
             playerRadius,
             0f,
-            AbsolutePosition(vendorPosition),
+            vendorPosition,
             vendorRadius,
             0f,
             useRadius,
@@ -65,15 +69,5 @@ public static class RuntimeVendorRangeQuery
 
         if (!inRange)
             vendor.Close();
-    }
-
-    private static Vector3 AbsolutePosition(CreateObject.ServerPosition position)
-    {
-        int landblockX = (int)((position.LandblockId >> 24) & 0xFFu);
-        int landblockY = (int)((position.LandblockId >> 16) & 0xFFu);
-        return new Vector3(
-            position.PositionX + landblockX * 192f,
-            position.PositionY + landblockY * 192f,
-            position.PositionZ);
     }
 }

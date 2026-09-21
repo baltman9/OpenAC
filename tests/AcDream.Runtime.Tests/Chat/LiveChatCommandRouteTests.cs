@@ -23,7 +23,10 @@ public sealed class LiveChatCommandRouteTests
             (target, text) => sent.Add($"tell:{target}:{text}"),
             (guid, text) => sent.Add($"talkdirect:{guid:X8}:{text}"),
             (channel, text) => sent.Add($"channel:{channel:X8}:{text}"),
-            (_, _, _, _, text, _) => sent.Add($"turbine:{text}")));
+            (_, _, _, _, text, _) => sent.Add($"turbine:{text}"),
+            _ => null,
+            motion => sent.Add($"motion:{motion}"),
+            text => sent.Add($"soul:{text}")));
 
         route.Activate();
         route.Publish(new SendServerCommandCmd("@server"));
@@ -101,6 +104,43 @@ public sealed class LiveChatCommandRouteTests
         Assert.Equal("wave.", local.Text);
     }
 
+    /// <summary>
+    /// A pose in speech is not a window feature. It used to be optional here,
+    /// and the windowless host passed none of the three, so "hello *wave*"
+    /// sent plain talk and played nothing while the same line in a chat box
+    /// waved. A route built without them now refuses to be built at all.
+    /// </summary>
+    [Fact]
+    public void AChatRouteCannotBeBuiltWithoutThePosesSpeechCanCarry()
+    {
+        using var communication = new RuntimeCommunicationState();
+        using var character = new RuntimeCharacterState();
+
+        Assert.Throws<ArgumentNullException>(() =>
+            new LiveChatCommandRoute(new LiveChatCommandBindings(
+                _ => { }, communication, communication.Chat,
+                communication.TurbineChat, character, () => 1u,
+                _ => { }, (_, _) => { }, (_, _) => { }, (_, _) => { },
+                (_, _, _, _, _, _) => { },
+                ResolvePose: null!,
+                ExecuteMotion: _ => { },
+                SendSoulEmote: _ => { })));
+    }
+
+    /// <summary>
+    /// The table of poses belongs to the session, not to a window, so a front
+    /// end reads it from the communication owner the shared content pass
+    /// fills in.
+    /// </summary>
+    [Fact]
+    public void TheSessionCarriesThePoseTableAndIsEmptyUntilItIsRead()
+    {
+        using var communication = new RuntimeCommunicationState();
+
+        Assert.Same(ChatPoseCatalog.Empty, communication.ChatPoses);
+        Assert.Null(communication.ChatPoses.Resolve("wave", male: true));
+    }
+
     [Fact]
     public void Say_ContainingOnlyValidPoseDoesNotSendEmptyTalk()
     {
@@ -114,7 +154,8 @@ public sealed class LiveChatCommandRouteTests
             (_, _) => { },
             (_, _, _, _, _, _) => { },
             ResolvePose: _ => new RetailChatPose(7u, string.Empty, string.Empty),
-            ExecuteMotion: motion => sent.Add($"motion:{motion}")));
+            ExecuteMotion: motion => sent.Add($"motion:{motion}"),
+            SendSoulEmote: text => sent.Add($"soul:{text}")));
         route.Activate();
 
         route.Publish(new SendChatCmd(ChatChannelKind.Say, null, " *wave* "));

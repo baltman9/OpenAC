@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using System.Reflection;
 using AcDream.Core.Plugins;
 using AcDream.Plugin.Abstractions;
@@ -16,10 +16,37 @@ namespace AcDream.Core.Tests.Plugins;
 // Dispose rather than just compiling.
 public sealed class ScopedEventsTests
 {
+    /// <summary>
+    /// A stand-in for the world-object producer, so the walk can make each
+    /// event happen the way the host really does.
+    /// </summary>
+    private sealed class RaisableWorldEntities : IPluginWorldEntities
+    {
+        private readonly List<Action<WorldEntitySnapshot>> _handlers = [];
+
+        public IReadOnlyList<WorldEntitySnapshot> Entities => [];
+
+        public void Subscribe(Action<WorldEntitySnapshot> handler) =>
+            _handlers.Add(handler);
+
+        public void Unsubscribe(Action<WorldEntitySnapshot> handler) =>
+            _handlers.Remove(handler);
+
+        internal void Raise(WorldEntitySnapshot snapshot)
+        {
+            foreach (Action<WorldEntitySnapshot> handler in _handlers.ToArray())
+                handler(snapshot);
+        }
+    }
+
     [Fact]
     public void EveryEventIsForwardedThroughDisposeRevokesDelivery()
     {
         var inner = new WorldEvents();
+        // The spawn stream comes from the host's world-object producer, so
+        // the walk needs one bound before it can raise that event.
+        var worldEntities = new RaisableWorldEntities();
+        inner.BindWorldEntities(worldEntities);
         var host = new StubHost(inner);
         var scoped = new ScopedPluginHost(host, "example.plugin", "Example");
 
@@ -46,10 +73,10 @@ public sealed class ScopedEventsTests
         // Every event IEvents declares today. If a new event is added
         // without a matching branch in CreateHandler/Fire below, those
         // helpers throw before this assertion is ever reached.
-        Assert.Equal(12, walked);
+        Assert.Equal(13, walked);
 
         foreach (EventInfo eventInfo in events)
-            Fire(inner, eventInfo.Name);
+            Fire(inner, worldEntities, eventInfo.Name);
 
         foreach (EventInfo eventInfo in events)
         {
@@ -67,7 +94,7 @@ public sealed class ScopedEventsTests
             counter[0] = 0;
 
         foreach (EventInfo eventInfo in events)
-            Fire(inner, eventInfo.Name);
+            Fire(inner, worldEntities, eventInfo.Name);
 
         foreach (EventInfo eventInfo in events)
         {
@@ -97,6 +124,8 @@ public sealed class ScopedEventsTests
                 new Action<PluginPortalTransition>(_ => counter[0]++),
             nameof(IEvents.ItemUseCompleted) =>
                 new Action<PluginItemUseCompletion>(_ => counter[0]++),
+            nameof(IEvents.ActivationCompleted) =>
+                new Action<PluginActivationCompletion>(_ => counter[0]++),
             nameof(IEvents.NavigationChanged) =>
                 new Action<PluginGoToReport>(_ => counter[0]++),
             nameof(IEvents.ContainerOpened) =>
@@ -110,7 +139,10 @@ public sealed class ScopedEventsTests
                     + " - add one here and to Fire() below."),
         };
 
-    private static void Fire(WorldEvents inner, string eventName)
+    private static void Fire(
+        WorldEvents inner,
+        RaisableWorldEntities worldEntities,
+        string eventName)
     {
         switch (eventName)
         {
@@ -118,7 +150,7 @@ public sealed class ScopedEventsTests
                 inner.FireTick(1.0);
                 break;
             case nameof(IEvents.EntitySpawned):
-                inner.FireEntitySpawned(
+                worldEntities.Raise(
                     new WorldEntitySnapshot(1u, 1u, Vector3.Zero, Quaternion.Identity));
                 break;
             case nameof(IEvents.LoginComplete):
@@ -141,6 +173,10 @@ public sealed class ScopedEventsTests
             case nameof(IEvents.ItemUseCompleted):
                 inner.FireItemUseCompleted(new PluginItemUseCompletion(
                     1, 2u, 3u, 0u));
+                break;
+            case nameof(IEvents.ActivationCompleted):
+                inner.FireActivationCompleted(new PluginActivationCompletion(
+                    1, 2u, PluginActivationOutcome.Completed, 0u));
                 break;
             case nameof(IEvents.NavigationChanged):
                 inner.FireNavigationChanged(new PluginGoToReport(

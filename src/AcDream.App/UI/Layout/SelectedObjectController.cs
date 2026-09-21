@@ -41,7 +41,7 @@ public sealed class SelectedObjectController : IRetainedPanelController
     private readonly Func<uint, float>   _healthPercent;
     private readonly Func<uint, bool>    _hasHealth;
     private readonly Func<uint, uint>    _stackSize;
-    private readonly Action<uint>        _sendQueryHealth;
+
     private readonly Func<uint, float>   _manaPercent;
     private readonly Action<uint>        _sendQueryItemMana;
     private readonly StackSplitQuantityState _splitQuantity;
@@ -74,7 +74,6 @@ public sealed class SelectedObjectController : IRetainedPanelController
         Func<uint, float>   healthPercent,
         Func<uint, bool>    hasHealth,
         Func<uint, uint>    stackSize,
-        Action<uint>        sendQueryHealth,
         Func<uint, float>   manaPercent,
         Action<uint>        sendQueryItemMana,
         UiDatFont?          datFont,
@@ -91,7 +90,7 @@ public sealed class SelectedObjectController : IRetainedPanelController
         _healthPercent   = healthPercent;
         _hasHealth       = hasHealth;
         _stackSize       = stackSize;
-        _sendQueryHealth = sendQueryHealth;
+
         _manaPercent = manaPercent;
         _sendQueryItemMana = sendQueryItemMana;
         _splitQuantity = splitQuantity ?? throw new ArgumentNullException(nameof(splitQuantity));
@@ -211,7 +210,6 @@ public sealed class SelectedObjectController : IRetainedPanelController
         Func<uint, float>   healthPercent,
         Func<uint, bool>    hasHealth,
         Func<uint, uint>    stackSize,
-        Action<uint>        sendQueryHealth,
         Func<uint, float>   manaPercent,
         Action<uint>        sendQueryItemMana,
         UiDatFont?          datFont,
@@ -226,7 +224,7 @@ public sealed class SelectedObjectController : IRetainedPanelController
             subscribeHealthChanged, unsubscribeHealthChanged,
             subscribeItemManaChanged, unsubscribeItemManaChanged,
             isHealthTarget, isOwnedByPlayer, name, healthPercent, hasHealth, stackSize,
-            sendQueryHealth, manaPercent, sendQueryItemMana, datFont,
+            manaPercent, sendQueryItemMana, datFont,
             splitQuantity, subscribeObjectUpdated, unsubscribeObjectUpdated,
             isVendorSplitExempt, isCoinstack, coinTotal);
 
@@ -236,8 +234,9 @@ public sealed class SelectedObjectController : IRetainedPanelController
 
         if (selectionChanged)
         {
-            if (_healthMeter?.Visible == true)
-                _sendQueryHealth(0);
+            // The health stream is asked for and closed by the owner that
+            // answers the selection itself; this panel only shows what comes
+            // back.
             if (_manaMeter?.Visible == true)
                 _sendQueryItemMana(0);
         }
@@ -281,8 +280,6 @@ public sealed class SelectedObjectController : IRetainedPanelController
 
         if (stackSize <= 1u && _isHealthTarget(g))
         {
-            if (selectionChanged)
-                _sendQueryHealth(g);
             if (_hasHealth(g) && _healthMeter is not null)
                 _healthMeter.Visible = true;
         }

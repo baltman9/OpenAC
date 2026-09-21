@@ -18,6 +18,7 @@ public sealed class RuntimeCombatTargetState : IDisposable
     private bool _targetWillinglyLost;
     private bool _disposed;
     public bool IsDisposed => _disposed;
+    internal bool AutomationControlled { get; set; }
 
     public RuntimeCombatTargetState(
         CombatState combat,
@@ -73,7 +74,7 @@ public sealed class RuntimeCombatTargetState : IDisposable
             return;
         }
 
-        if (!_operations.AutoTarget
+        if (AutomationControlled || !_operations.AutoTarget
             || !CombatInputPlanner.SupportsTargetedAttack(_combat.CurrentMode))
             return;
 
