@@ -44,17 +44,42 @@ public sealed class RetailAnimationLoader : IAnimationLoader
     {
     }
 
+    /// <param name="readLock">
+    /// The lock the host's other readers of the same files hold; every raw
+    /// read this loader makes is taken under it. Null when the host reads
+    /// the files from one thread only.
+    /// </param>
+    public RetailAnimationLoader(IDatReaderWriter dats, object? readLock)
+        : this(
+            dats,
+            DefaultMaximumEstimatedBytes,
+            DefaultMaximumEntries,
+            readLock)
+    {
+    }
+
     public RetailAnimationLoader(
         IDatReaderWriter dats,
         long maximumEstimatedBytes,
-        int maximumEntries)
+        int maximumEntries,
+        object? readLock = null)
     {
         ArgumentNullException.ThrowIfNull(dats);
         ValidateBudgets(maximumEstimatedBytes, maximumEntries);
         _database = dats.Portal.Db;
-        _readRaw = id => dats.Portal.TryGetFileBytes(id, out byte[]? bytes)
-            ? bytes
-            : null;
+        _readRaw = readLock is null
+            ? id => dats.Portal.TryGetFileBytes(id, out byte[]? bytes)
+                ? bytes
+                : null
+            : id =>
+            {
+                lock (readLock)
+                {
+                    return dats.Portal.TryGetFileBytes(id, out byte[]? bytes)
+                        ? bytes
+                        : null;
+                }
+            };
         _maximumEstimatedBytes = maximumEstimatedBytes;
         _maximumEntries = maximumEntries;
     }

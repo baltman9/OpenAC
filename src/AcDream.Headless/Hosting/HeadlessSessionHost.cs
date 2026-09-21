@@ -256,8 +256,11 @@ internal sealed class HeadlessSessionHost : IDisposable
             {
                 runtime.CharacterOwner.InstallSpellMetadata(
                     content.MagicCatalog.SpellTable);
+                AcDream.Core.CharGen.ChargenOptions chargenOptions;
+                lock (content.DatLock)
+                    chargenOptions = ChargenTableReader.Load(content.Dats);
                 runtime.Session.CharacterCreationState.InstallOptions(
-                    ChargenTableReader.Load(content.Dats));
+                    chargenOptions);
             }
             gameplay.Bind(
                 runtime,
@@ -934,9 +937,16 @@ internal sealed class HeadlessSessionHost : IDisposable
     {
         if (_contentLease is not { } content)
             return null;
-        if (!content.Dats.TryGet<DatReaderWriter.DBObjs.SkillTable>(
-                SkillTableFileId,
-                out var skillTable))
+        DatReaderWriter.DBObjs.SkillTable? skillTable;
+        bool haveSkillTable;
+        lock (content.DatLock)
+        {
+            haveSkillTable = content.Dats
+                .TryGet<DatReaderWriter.DBObjs.SkillTable>(
+                    SkillTableFileId,
+                    out skillTable);
+        }
+        if (!haveSkillTable)
         {
             // Said out loud: without the table the resolver answers nothing
             // for every skill, and a silent nothing looks exactly like a
@@ -1009,10 +1019,13 @@ internal sealed class HeadlessSessionHost : IDisposable
             // the table that names its cycles and the frames those cycles
             // play. A session with no lease has no content and no bodies, and
             // binds nothing.
+            // Both readers take the process's lock on the files: a plugin may
+            // be reading the same files from its own thread at the same time.
             Runtime.EntityObjects.Physics.BindMotionContentSource(
                 new RuntimeDatMotionContentSource(
                     content.Dats,
-                    new RetailAnimationLoader(content.Dats)));
+                    new RetailAnimationLoader(content.Dats, content.DatLock),
+                    content.DatLock));
             _firstEntryDrive ??= new RuntimeFirstEntryDriveController(
                 Runtime.EntityObjects,
                 Runtime.Clock,
