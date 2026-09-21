@@ -466,8 +466,11 @@ internal static class RuntimeAutomationBindings
                 return AcDream.Content.ContractTableReader.Load(dats);
         });
 
+        // Palette colours are read the moment a plugin asks for an object's
+        // palettes, from whatever thread it asks on, so the catalogue takes
+        // the host's lock on every read.
         surface.BindPaletteColorResolver(
-            new AcDream.Content.CharGen.ChargenAppearanceCatalog(dats));
+            new AcDream.Content.CharGen.ChargenAppearanceCatalog(dats, datLock));
         bound.Add(nameof(surface.BindPaletteColorResolver));
 
         // What kind of creature a plugin is looking at. The table is read the

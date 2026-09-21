@@ -1,9 +1,13 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics.CodeAnalysis;
 using AcDream.Content;
+using AcDream.Core.Net;
+using AcDream.Core.Net.Messages;
 using AcDream.Plugin.Abstractions;
+using AcDream.Runtime.Entities;
 using AcDream.Runtime.Plugins;
 using AcDream.Runtime.Tests.Maps;
+using AcDream.Runtime.Tests.Support;
 using DatReaderWriter;
 using DatIDBObj = DatReaderWriter.Lib.IO.IDBObj;
 
@@ -40,6 +44,75 @@ public sealed class RuntimeAutomationContentLockTests
         Assert.False(plan.IsEmpty);
         Assert.True(content.Reads > readsAtBinding, "the plan was not read from the files");
         Assert.Equal(0, content.ReadsOutsideTheHostLock);
+    }
+
+    /// <summary>
+    /// An object's palette colours are read the moment a plugin asks for the
+    /// object, from whatever thread it asks on; that read is under the
+    /// host's lock like every other.
+    /// </summary>
+    [Fact]
+    public void AnObjectsPalettesAreReadUnderTheLockTheHostHandedOver()
+    {
+        var hostLock = new object();
+        using var content = new WatchedContent(hostLock);
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        for (int tick = 0; tick < 4; tick++)
+            host.Session.Tick();
+        GameRuntime runtime = host.Runtime;
+        Assert.True(runtime.Session.IsInWorld);
+        using var surface = new RuntimeAutomationSurface();
+
+        RuntimeAutomationBindings.Apply(surface, runtime, new RuntimeAutomationHostCapabilities
+        {
+            HostName = "a host under test",
+            Declared = RuntimeAutomationHostCapabilities.AllCapabilityNames,
+            Content = new RuntimeAutomationContent(content, hostLock),
+        });
+        RegisterPaintedObject(runtime, 0x70001234u);
+        int readsAtBinding = content.Reads;
+
+        IReadOnlyList<PluginInventoryItem> items = surface.CaptureOwnedItems();
+
+        PluginInventoryItem painted = Assert.Single(items, i => i.ObjectId == 0x70001234u);
+        Assert.Single(painted.Palettes);
+        Assert.True(content.Reads > readsAtBinding, "no palette was read from the files");
+        Assert.Equal(0, content.ReadsOutsideTheHostLock);
+    }
+
+    private static void RegisterPaintedObject(GameRuntime runtime, uint guid)
+    {
+        var position = new CreateObject.ServerPosition(
+            0x01010001u, 10f, 10f, 5f, 1f, 0f, 0f, 0f);
+        RuntimeEntityRecord record = runtime.EntityObjects
+            .RegisterEntity(new WorldSession.EntitySpawn(
+                guid,
+                position,
+                0x02000001u,
+                [],
+                [],
+                [new CreateObject.SubPaletteSwap(0x04000123u, 3, 4)],
+                null,
+                null,
+                "Painted",
+                null,
+                null,
+                null))
+            .Canonical!;
+        runtime.EntityObjects.ApplyAcceptedSpawn(
+            record,
+            record.CreateIntegrationVersion,
+            record.Snapshot,
+            replaceGeneration: false);
+        // The items a plugin captures come off the object table, owned by
+        // the player; the palettes on them come off the entity's creation
+        // description.
+        runtime.InventoryOwner.Objects.AddOrUpdate(new AcDream.Core.Items.ClientObject
+        {
+            ObjectId = guid,
+            ContainerId = runtime.PlayerIdentity.ServerGuid,
+        });
     }
 
     private static GameRuntime NewRuntime() => GameRuntimeTestFactory.Create();
