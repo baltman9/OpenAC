@@ -82,7 +82,7 @@ public sealed class SharedBindingPassTests
     {
         HostName = "a host under test",
         Declared = RuntimeAutomationHostCapabilities.AllCapabilityNames,
-        Content = content,
+        Content = new RuntimeAutomationContent(content, new object()),
         MagicCatalog = MagicCatalog.Empty,
         SubmitChatText = static _ => true,
         SessionCommands = new DirectGameRuntimeCommandAdapter(

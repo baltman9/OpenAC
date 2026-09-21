@@ -1169,6 +1169,7 @@ public sealed class GameWindow :
                     Runtime = _runtime,
                     Warn = Console.Error.WriteLine,
                     Content = _dats,
+                    DatLock = _datLock,
                     MagicCatalog = _magicCatalog,
                     SessionCommands = _pluginSessionCommands,
                     NavigationWalk = _navigationWalk,

@@ -24,6 +24,14 @@ internal sealed record HeadlessAutomationParts
     public Action<string>? Warn { get; init; }
 
     public IDatReaderWriter? Content { get; init; }
+
+    /// <summary>
+    /// The lock on <see cref="Content"/> that every session in this process
+    /// reads the shared files under, owned beside them. Required whenever
+    /// <see cref="Content"/> is named.
+    /// </summary>
+    public object? ContentLock { get; init; }
+
     public MagicCatalog? MagicCatalog { get; init; }
     public Func<string, bool>? SubmitChatText { get; init; }
     public IGameRuntimeCommands? SessionCommands { get; init; }
@@ -98,7 +106,16 @@ internal static partial class HeadlessAutomationCapabilities
             PluginEvents = parts.Events,
             // Nothing here is drawn, so the two navigation verbs that draw
             // are left out and answer that in plain words.
-            Content = parts.Content,
+            // The files go with the lock the process reads them under; a
+            // session that names the files without it is a defect, not a
+            // configuration.
+            Content = parts.Content is null
+                ? null
+                : new RuntimeAutomationContent(
+                    parts.Content,
+                    parts.ContentLock ?? throw new InvalidOperationException(
+                        "The windowless host named the installed data files "
+                        + "for plugins without the lock it reads them under.")),
             MagicCatalog = parts.MagicCatalog,
             SubmitChatText = parts.SubmitChatText,
             SessionCommands = parts.SessionCommands,

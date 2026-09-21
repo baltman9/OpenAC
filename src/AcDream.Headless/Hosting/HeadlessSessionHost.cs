@@ -320,7 +320,6 @@ internal sealed class HeadlessSessionHost : IDisposable
             if (contentLease is { } navigationContent)
             {
                 PhysicsEngine physics = runtime.EntityObjects.Physics.Engine;
-                object navigationDatLock = new();
                 navigationWalk = new NavigationWalkController(
                     physics,
                     new RuntimeNavigationWalkBody(runtime.MovementOwner, runtime.Portal),
@@ -333,7 +332,7 @@ internal sealed class HeadlessSessionHost : IDisposable
                         commands.TryAppraiseQuietly),
                     cellId => SealedDungeonCells.IsSealedDungeon(
                         navigationContent.Dats,
-                        navigationDatLock,
+                        navigationContent.DatLock,
                         cellId));
                 // A dead grid is tens to hundreds of megabytes the runtime
                 // will not collect on its own while the bot idles; a headless
@@ -359,6 +358,7 @@ internal sealed class HeadlessSessionHost : IDisposable
                 AnswerConfirmation,
                 RequestOwnGracefulStop,
                 content: contentLease?.Dats,
+                contentLock: contentLease?.DatLock,
                 sessionCommands: commands,
                 navigationWalk: navigationWalk,
                 dataDirectory: dataDirectory,
