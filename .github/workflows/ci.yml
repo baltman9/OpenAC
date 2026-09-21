@@ -339,8 +339,66 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: write
+    outputs:
+      version: ${{ steps.train.outputs.version }}
+      prerelease: ${{ steps.train.outputs.prerelease }}
     steps:
+      # Full history: the branch guard below has to see whether the tagged
+      # commit is on dev or on main.
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # The one place a release's train is decided, so the publish steps below
+      # only read the answer. A tag whose version carries a SemVer pre-release
+      # part (v0.1.13-dev.1) is a test build: it publishes as a pre-release and
+      # is never marked latest, which is what keeps it away from players, since
+      # the launcher polls /releases/latest/download/ and that route skips
+      # pre-releases. A plain vX.Y.Z tag is the release everyone receives.
+      # Each train has one source branch, and a tag from the other one fails
+      # here instead of publishing to the wrong audience.
+      - name: Decide the release train
+        id: train
+        shell: pwsh
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:TAG_NAME
+          $shape = '^v(?<version>(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)' +
+            '(?<pre>-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?)$'
+          $parsed = [regex]::Match($tag, $shape)
+          if (-not $parsed.Success) {
+            throw "Tag '$tag' is not 'vMAJOR.MINOR.PATCH' with an optional SemVer pre-release part."
+          }
+          $version = $parsed.Groups['version'].Value
+          $isPreRelease = $parsed.Groups['pre'].Success
+          $branch = if ($isPreRelease) { 'dev' } else { 'main' }
+
+          & git fetch --no-tags --quiet origin "+refs/heads/${branch}:refs/remotes/origin/$branch"
+          if ($LASTEXITCODE) {
+            throw "Could not read branch '$branch' to check where tag '$tag' came from."
+          }
+          $commit = (& git rev-parse 'HEAD^{commit}').Trim()
+          if ($LASTEXITCODE) { throw "Could not resolve the commit tag '$tag' points at." }
+          & git merge-base --is-ancestor $commit "refs/remotes/origin/$branch"
+          if ($LASTEXITCODE) {
+            $trains = 'A pre-release is cut from dev and a stable release from main.'
+            throw "Tag '$tag' points at $commit, which is not on '$branch'. $trains"
+          }
+
+          $notice = if ($isPreRelease) {
+            'This is a test build from the development branch. No launcher is offered it: only a launcher pointed at this release by hand will install it.'
+          } else {
+            ''
+          }
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value @(
+            "version=$version",
+            "prerelease=$(if ($isPreRelease) { 'true' } else { 'false' })",
+            "make_latest=$(if ($isPreRelease) { 'false' } else { 'true' })",
+            "notice=$notice")
+          $train = if ($isPreRelease) { 'pre-release from dev' } else { 'stable from main' }
+          Write-Host "train: $train, version $version, commit $commit"
 
       - name: Download macOS release assets
         uses: actions/download-artifact@v4
@@ -360,8 +418,38 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $version = '${{ github.ref_name }}'.TrimStart('v')
+          $version = '${{ steps.train.outputs.version }}'
           ./tools/publish-bin.ps1 -Version $version -IncludeLinux -MacArtifactsDirectory artifacts/macos-release-assets -BaseUrl "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
+
+      # The plugin contract as a package, attached to every release on both
+      # trains: a plugin kept in its own repository can then build against a
+      # released contract instead of against a checkout of the client. Symbols
+      # are left out so the asset is one file plus its checksum.
+      - name: Pack the plugin API package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ steps.train.outputs.version }}'
+          $output = Join-Path (Get-Location) 'bin/package'
+          if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Recurse -Force }
+          dotnet pack src/AcDream.Plugin.Abstractions/AcDream.Plugin.Abstractions.csproj `
+            -c Release -o $output --nologo `
+            "-p:Version=$version" -p:IncludeSymbols=false `
+            -p:IncludeSourceRevisionInInformationalVersion=false
+          if ($LASTEXITCODE) { throw 'Packing the plugin API package failed.' }
+          $packages = @(Get-ChildItem -LiteralPath $output -Filter '*.nupkg' -File)
+          if ($packages.Count -ne 1) {
+            throw "Expected exactly one package in '$output', found $($packages.Count)."
+          }
+          $package = $packages[0]
+          $hash = (Get-FileHash -LiteralPath $package.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          # The digest, two spaces, the file name: what 'shasum -a 256' writes,
+          # and the format every other .sha256 in this project uses.
+          [IO.File]::WriteAllText(
+            "$($package.FullName).sha256",
+            "$hash  $($package.Name)`n",
+            [Text.UTF8Encoding]::new($false))
+          Write-Host "packed $($package.Name) ($hash)"
 
       - name: Publish the GitHub Release
         uses: softprops/action-gh-release@v2
@@ -374,6 +462,10 @@ jobs:
             The launcher installs the client, prepares your data files, and keeps itself and the client up to date.
 
             The `client-*.zip` files are the bare client and headless host for people who do not want the launcher.
+
+            `AcDream.Plugin.Abstractions.*.nupkg` is the plugin API package for plugin authors.
+
+            ${{ steps.train.outputs.notice }}
           files: |
             bin/client-win-x64.zip
             bin/launcher-win-x64.zip
@@ -382,12 +474,17 @@ jobs:
             bin/client-osx-arm64.zip
             bin/launcher-osx-arm64.zip
             bin/manifest.json
+            bin/package/*.nupkg
+            bin/package/*.nupkg.sha256
           fail_on_unmatched_files: true
           generate_release_notes: true
-          # Never pre-release: the launcher reads /releases/latest/download/,
-          # which skips pre-releases. The beta state lives in the version.
-          prerelease: false
-          make_latest: true
+          # Both flags come from "Decide the release train" and nowhere else. A
+          # stable release is the latest release, which is the one the launcher
+          # polls; a pre-release is neither, so an ordinary launcher never sees
+          # it. Every step that touches a release has to pass the same pair, or
+          # it would quietly promote a test build.
+          prerelease: ${{ steps.train.outputs.prerelease }}
+          make_latest: ${{ steps.train.outputs.make_latest }}
 
       # osx-x64: attached only when macos-intel succeeds.
       - name: Attach the Intel macOS assets
@@ -402,3 +499,29 @@ jobs:
             bin/client-osx-x64.zip
             bin/launcher-osx-x64.zip
           fail_on_unmatched_files: true
+          prerelease: ${{ steps.train.outputs.prerelease }}
+          make_latest: ${{ steps.train.outputs.make_latest }}
+
+  prune-pre-releases:
+    # Retention for the pre-release train only. Every -dev pre-release past the
+    # newest five is deleted together with its tag, so the development train
+    # does not accumulate builds nobody installs any more. Stable releases are
+    # never candidates: the script matches the -dev tag shape and also reads
+    # only releases GitHub reports as pre-releases.
+    # Hosted, not self-hosted: this makes repository API calls and builds
+    # nothing, so it has no reason to occupy the maintainer's machine.
+    if: needs.release.result == 'success' && needs.release.outputs.prerelease == 'true'
+    needs: [release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Prune superseded pre-releases
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: ./tools/prune-dev-prereleases.ps1 -Keep 5

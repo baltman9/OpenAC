@@ -67,8 +67,16 @@ does for a project reference: compile against the contract, ship no copy of
 it. The package carries the XML documentation, so your IDE shows the same text
 the [API reference](plugin-api.md) does.
 
-The package is not on a public feed. Produce one from a checkout and restore
-against the folder:
+The package is not on a public feed. Every release attaches it as an asset,
+`AcDream.Plugin.Abstractions.<version>.nupkg`, with its SHA-256 beside it; put
+the file in a folder and restore against that folder:
+
+```
+dotnet restore --source <folder>
+```
+
+Or produce one from a checkout, which is how you build against an unreleased
+contract:
 
 ```
 dotnet pack <OpenAcRoot>/src/AcDream.Plugin.Abstractions -c Release -o <feed>
