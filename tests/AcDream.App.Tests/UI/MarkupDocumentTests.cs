@@ -225,12 +225,12 @@ public class MarkupDocumentTests
     {
         const string xml =
             "<panel x=\"0\" y=\"0\" w=\"100\" h=\"60\">" +
-            "  <label x=\"0\" y=\"0\" text=\"MossTank\"/>" +
+            "  <label x=\"0\" y=\"0\" text=\"Sample Panel\"/>" +
             "</panel>";
 
         var panel = MarkupDocument.Build(xml, new ButtonBinding(), _ => ((uint)1, 32, 32));
         var label = Assert.IsType<UiLabel>(panel.Children[0]);
-        Assert.Equal("MossTank", label.TextSource!());
+        Assert.Equal("Sample Panel", label.TextSource!());
     }
 
     [Fact]

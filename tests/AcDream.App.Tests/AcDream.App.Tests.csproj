@@ -32,7 +32,6 @@
     <!-- The vendor panel test drives the client-command dispatcher, whose
          tests and their recording bindings live with the dispatcher. -->
     <ProjectReference Include="..\AcDream.Runtime.Tests\AcDream.Runtime.Tests.csproj" />
-    <ProjectReference Include="..\..\src\AcDream.Plugins.MossTank\AcDream.Plugins.MossTank.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -60,8 +59,10 @@
     <None Include="UI\Layout\fixtures\*.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="..\..\src\AcDream.Plugins.MossTank\mosstank*.xml"
-          Link="MossTank\%(Filename)%(Extension)"
+    <!-- The sample plugin panel set this project owns: a large, realistic
+         panel the markup engine is built against, with no plugin behind it. -->
+    <None Include="UI\fixtures\plugin-panel\*.xml"
+          Link="PluginPanel\%(Filename)%(Extension)"
           CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

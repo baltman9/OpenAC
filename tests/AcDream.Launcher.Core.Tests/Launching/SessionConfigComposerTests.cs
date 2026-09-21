@@ -238,7 +238,7 @@ public sealed class SessionConfigComposerTests
     public void ConfiguredPluginIdsArePassedThroughUnchanged()
     {
         CharacterProfile character = Character(LaunchMode.Gui);
-        character.Plugins = ["acdream.mosstank"];
+        character.Plugins = ["edwards.tank"];
 
         ComposedSessionConfig composed = SessionConfigComposer.Compose(
             Server(),
@@ -250,7 +250,7 @@ public sealed class SessionConfigComposerTests
 
         JsonObject session = SingleSession(composed);
         Assert.Equal(
-            ["acdream.mosstank"],
+            ["edwards.tank"],
             session["plugins"]!.AsArray().Select(node => (string?)node));
     }
 
@@ -258,7 +258,7 @@ public sealed class SessionConfigComposerTests
     public void ABlockedConfiguredPluginIsFilteredWithOneStatusLine()
     {
         CharacterProfile character = Character(LaunchMode.Gui);
-        character.Plugins = ["edwards.hello", "acdream.mosstank"];
+        character.Plugins = ["edwards.hello", "edwards.tank"];
         PluginCatalog catalog = PluginCatalog.Parse("""
             {
               "schemaVersion": 1,
@@ -283,7 +283,7 @@ public sealed class SessionConfigComposerTests
 
         JsonObject session = SingleSession(composed);
         Assert.Equal(
-            ["acdream.mosstank"],
+            ["edwards.tank"],
             session["plugins"]!.AsArray().Select(node => (string?)node));
         Assert.Equal(
             ["Plugin 'edwards.hello' is blocked and was not loaded."],

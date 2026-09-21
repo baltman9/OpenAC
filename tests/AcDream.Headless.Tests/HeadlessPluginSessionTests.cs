@@ -261,16 +261,16 @@ public sealed class HeadlessPluginSessionTests
         IPluginStorage storage = session.Plugins.Host.Storage;
 
         Assert.True(storage.IsAvailable);
-        storage.WriteText("acdream.mosstank/profiles/macro/thing.json", "{}");
+        storage.WriteText("edwards.tank/profiles/macro/thing.json", "{}");
         Assert.Equal(
             "{}",
-            storage.ReadText("acdream.mosstank/profiles/macro/thing.json"));
+            storage.ReadText("edwards.tank/profiles/macro/thing.json"));
         Assert.Contains(
-            "acdream.mosstank/profiles/macro/thing.json",
-            storage.List("acdream.mosstank"));
+            "edwards.tank/profiles/macro/thing.json",
+            storage.List("edwards.tank"));
         Assert.True(File.Exists(Path.Combine(
-            storageRoot, "acdream.mosstank", "profiles", "macro", "thing.json")));
-        Assert.True(storage.Delete("acdream.mosstank/profiles/macro/thing.json"));
+            storageRoot, "edwards.tank", "profiles", "macro", "thing.json")));
+        Assert.True(storage.Delete("edwards.tank/profiles/macro/thing.json"));
     }
 
     /// <summary>

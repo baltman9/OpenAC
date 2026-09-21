@@ -18,7 +18,7 @@ public sealed class UiMarkupListScrollSelectionPersistenceTests
     private const int RowCount = 40;
 
     // Non-zero nesting offsets at every level (panel > group > list), mirroring
-    // MossTank's own panel(28,42) > group(8,42) > list(4,24) structure.
+    // A large plugin panel's panel(28,42) > group(8,42) > list(4,24) structure.
     private const float PanelLeft = 50f, PanelTop = 60f;
     private const float GroupLeft = 10f, GroupTop = 20f;
     private const float ListLeft = 5f, ListTop = 15f;

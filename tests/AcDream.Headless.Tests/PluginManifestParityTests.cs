@@ -8,7 +8,7 @@ using LauncherHostKind = AcDream.Launcher.Core.Plugins.LauncherPluginHostKind;
 namespace AcDream.Headless.Tests;
 
 /// <summary>Pins <see cref="LauncherPluginManifest"/>, the launcher's own <c>plugin.json</c> reader, to
-/// <see cref="PluginManifest"/>, the client's, on every manifest in <c>samples/</c>, a MossTank-shaped
+/// <see cref="PluginManifest"/>, the client's, on every manifest in <c>samples/</c>, a fully populated
 /// fixture, and a corpus covering the earlier host fields. Also pins
 /// <see cref="LauncherPluginApiRange"/> to <see cref="AcDream.Plugin.Abstractions.PluginApi"/>.</summary>
 public sealed class PluginManifestParityTests
@@ -32,13 +32,13 @@ public sealed class PluginManifestParityTests
     }
 
     [Fact]
-    public void LauncherReaderAgreesWithCoreOnAMossTankShapedManifest() =>
+    public void LauncherReaderAgreesWithCoreOnAFullyPopulatedManifest() =>
         AssertFieldsAgree("""
             {
-              "id": "acdream.mosstank",
-              "displayName": "MossTank",
+              "id": "edwards.tank",
+              "displayName": "Tank",
               "version": "0.1.0",
-              "entryDll": "AcDream.Plugins.MossTank.dll",
+              "entryDll": "Edwards.Tank.dll",
               "apiVersion": 1,
               "minHostVersion": "0.1.0",
               "hosts": ["graphical", "headless"]
