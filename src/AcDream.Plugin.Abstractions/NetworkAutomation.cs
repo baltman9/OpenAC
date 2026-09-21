@@ -111,4 +111,83 @@ public interface INetworkAutomation
     /// </returns>
     IReadOnlyList<PluginNetworkClient> CaptureClients() =>
         Array.Empty<PluginNetworkClient>();
+
+    /// <summary>
+    /// Tells the other clients on this computer that this character has
+    /// begun casting a spell at something, before it is known whether it
+    /// lands. Use it so a second character can decide not to start the same
+    /// spell at the same target; it says nothing about an effect being in
+    /// place, which is what <see cref="AnnounceCastSuccess"/> is for.
+    /// </summary>
+    /// <param name="targetObjectId">The object being cast at.</param>
+    /// <param name="spellId">
+    /// The spell, which must be one this client's own spell table knows.
+    /// </param>
+    /// <param name="effectiveSkill">
+    /// The magic skill the character is casting with, or zero to say
+    /// nothing about it. A negative number is refused.
+    /// </param>
+    /// <returns>
+    /// False for a zero target, a spell this client's spell table does not
+    /// know, a negative skill, a character that is not in the world, or a
+    /// host that does not tell other clients anything -- which is what the
+    /// default implementation does.
+    /// </returns>
+    bool AnnounceCastAttempt(
+        uint targetObjectId,
+        uint spellId,
+        int effectiveSkill) => false;
+
+    /// <summary>
+    /// Tells the other clients on this computer that a spell this character
+    /// cast has landed and how long its effect lasts, so another character
+    /// can stand down rather than re-landing it.
+    /// </summary>
+    /// <param name="targetObjectId">The object it landed on.</param>
+    /// <param name="spellId">
+    /// The spell, which must be one this client's own spell table knows.
+    /// </param>
+    /// <param name="effectiveSkill">
+    /// The magic skill it was cast with, or zero to say nothing about it.
+    /// </param>
+    /// <param name="durationSeconds">
+    /// How long the effect lasts in total, from now. A reader is handed
+    /// what is left of it rather than this number.
+    /// </param>
+    /// <returns>
+    /// False for a zero target, a spell this client's spell table does not
+    /// know, a negative skill, a duration that is not a finite positive
+    /// number of seconds or is longer than a day, a character that is not in
+    /// the world, or a host that does not tell other clients anything --
+    /// which is what the default implementation does.
+    /// </returns>
+    bool AnnounceCastSuccess(
+        uint targetObjectId,
+        uint spellId,
+        int effectiveSkill,
+        double durationSeconds) => false;
+
+    /// <summary>
+    /// What the other clients on this computer have said they cast. Nothing
+    /// is applied to this client's own bookkeeping by reading it: what to do
+    /// with a peer's cast is the plugin's decision, and a plugin that wants
+    /// a landed one counted as an effect in place passes it to
+    /// <see cref="IEnchantmentAutomation.ReportCast"/> with
+    /// <see cref="PluginPeerCast.SecondsRemaining"/> as the duration.
+    /// </summary>
+    /// <param name="afterSequence">
+    /// The highest <see cref="PluginPeerCast.Sequence"/> already dealt with,
+    /// or zero for everything still recent. Hand back the highest sequence
+    /// from one call to the next and each cast arrives once.
+    /// </param>
+    /// <returns>
+    /// The casts above that sequence, oldest first, never including this
+    /// character's own and never including a spell this client's own spell
+    /// table cannot identify. Empty when there is nothing new, when no other
+    /// client on this computer is playing in the same world, or on a host
+    /// that does not read other clients -- which is what the default
+    /// implementation returns.
+    /// </returns>
+    IReadOnlyList<PluginPeerCast> CaptureCasts(long afterSequence) =>
+        Array.Empty<PluginPeerCast>();
 }
