@@ -3,9 +3,70 @@ using AcDream.Plugin.Abstractions;
 
 namespace AcDream.Runtime.Plugins;
 
+/// <summary>
+/// One cast this client wants the other clients on this computer to know
+/// about, before the registry stamps it with a sequence and a time.
+/// </summary>
+/// <param name="CasterObjectId">The character that cast it.</param>
+/// <param name="TargetObjectId">The object it was cast at.</param>
+/// <param name="SpellId">The spell, from this client's own spell table.</param>
+/// <param name="EffectiveSkill">The skill it was cast with.</param>
+/// <param name="DurationSeconds">
+/// How long the effect lasts in total, or zero for an attempt that has not
+/// landed yet.
+/// </param>
+/// <param name="Landed">True when the cast is known to have landed.</param>
+internal readonly record struct LocalPluginCast(
+    uint CasterObjectId,
+    uint TargetObjectId,
+    uint SpellId,
+    int EffectiveSkill,
+    double DurationSeconds,
+    bool Landed);
+
 internal sealed class LocalPluginPeerRegistry : IDisposable
 {
     internal static readonly TimeSpan StaleAfter = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// How many casts one client's note carries. The note is a snapshot --
+    /// the whole document is replaced on every write, last writer wins -- so
+    /// a cast kept in a single field would be lost by the next heartbeat. A
+    /// ring survives that: a reader polling slower than the writer still sees
+    /// every cast, as long as no more than this many happen between two of
+    /// its reads. Thirty-two is far more than one caster can produce inside
+    /// the staleness window, and thirty-two of these entries is a couple of
+    /// kilobytes against the document cap below.
+    /// </summary>
+    internal const int CastRingCapacity = 32;
+
+    /// <summary>
+    /// How many casts read from other clients this one keeps to hand back.
+    /// Several plugins share one client, each reading with a cursor of its
+    /// own, so a read cannot consume: one plugin polling would starve the
+    /// next. Entries leave by age as well, so this is only a ceiling for a
+    /// burst nobody has read yet.
+    /// </summary>
+    internal const int ObservedCastCapacity = 128;
+
+    /// <summary>
+    /// The shortest gap between two notes written because of a cast. The
+    /// first cast after a quiet moment is written at once; the ones behind it
+    /// in a burst ride along on the next write. Without it a six-target
+    /// debuff chain would rewrite the whole document six times inside a few
+    /// hundred milliseconds.
+    /// </summary>
+    internal static readonly TimeSpan CastWriteDebounce =
+        TimeSpan.FromMilliseconds(250);
+
+    /// <summary>
+    /// The longest effect a cast may claim, in seconds. A day is far beyond
+    /// anything a spell lasts, so a longer one is a broken or hostile note
+    /// rather than a long buff, and a reader that believed it would hold a
+    /// target as enchanted for ever.
+    /// </summary>
+    internal const double MaximumCastDurationSeconds = 24d * 60d * 60d;
+
     private const long MaximumDocumentBytes = 64 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -16,6 +77,21 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     private readonly string _path;
     private readonly TimeProvider _time;
     private readonly Guid _instanceId;
+    private readonly object _gate = new();
+
+    /// <summary>What this client is telling the others, oldest first.</summary>
+    private readonly List<PeerCastEntry> _ring = [];
+
+    /// <summary>The highest sequence taken in from each peer, by instance.</summary>
+    private readonly Dictionary<Guid, ObservedPeer> _observedPeers = [];
+
+    /// <summary>What this client has read from the others, oldest first.</summary>
+    private readonly List<ObservedCast> _observedCasts = [];
+
+    private long _castSequence;
+    private long _observedSequence;
+    private bool _castWritePending;
+    private DateTimeOffset? _lastWriteAt;
     private bool _disposed;
 
     public LocalPluginPeerRegistry(
@@ -39,10 +115,16 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         Directory.CreateDirectory(_directory);
-        var document = PeerDocument.From(
-            client with { ClientId = ClientId },
-            _instanceId,
-            _time.GetUtcNow().ToUnixTimeMilliseconds());
+        DateTimeOffset now = _time.GetUtcNow();
+        PeerDocument document;
+        lock (_gate)
+        {
+            document = PeerDocument.From(
+                client with { ClientId = ClientId },
+                _instanceId,
+                now.ToUnixTimeMilliseconds(),
+                [.. _ring]);
+        }
         string temporary = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
@@ -54,73 +136,137 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
             if (File.Exists(temporary))
                 File.Delete(temporary);
         }
+        // The note carries the whole ring, so any write -- a heartbeat as
+        // much as a cast -- is what the debounce is counting from.
+        lock (_gate)
+        {
+            _castWritePending = false;
+            _lastWriteAt = now;
+        }
+    }
+
+    /// <summary>
+    /// Adds a cast to the ring this client publishes. The note itself is not
+    /// written here: the caller asks <see cref="IsCastWriteDue"/> and writes
+    /// when the debounce allows, so a burst of casts costs one or two writes
+    /// instead of one each.
+    /// </summary>
+    /// <returns>
+    /// False for a cast that makes no sense, which is left out of the ring
+    /// entirely. This is not only tidiness: a duration that is not a finite
+    /// number cannot be written as JSON at all, so one such entry would make
+    /// every later write of the whole note throw and this client would go
+    /// silent for the rest of the session.
+    /// </returns>
+    public bool RecordCast(in LocalPluginCast cast)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        long atUnixMs = _time.GetUtcNow().ToUnixTimeMilliseconds();
+        lock (_gate)
+        {
+            var entry = new PeerCastEntry
+            {
+                Sequence = _castSequence + 1L,
+                AtUnixMs = atUnixMs,
+                CasterObjectId = cast.CasterObjectId,
+                TargetObjectId = cast.TargetObjectId,
+                SpellId = cast.SpellId,
+                EffectiveSkill = cast.EffectiveSkill,
+                DurationSeconds = cast.DurationSeconds,
+                Landed = cast.Landed,
+            };
+            if (!IsWellFormed(entry))
+                return false;
+            _castSequence = entry.Sequence;
+            _ring.Add(entry);
+            if (_ring.Count > CastRingCapacity)
+                _ring.RemoveRange(0, _ring.Count - CastRingCapacity);
+            _castWritePending = true;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Whether a recorded cast is waiting to be published and enough time has
+    /// passed since the last write to publish it.
+    /// </summary>
+    public bool IsCastWriteDue()
+    {
+        if (_disposed)
+            return false;
+        DateTimeOffset now = _time.GetUtcNow();
+        lock (_gate)
+        {
+            return _castWritePending
+                && (_lastWriteAt is not { } last
+                    || now - last >= CastWriteDebounce);
+        }
     }
 
     public IReadOnlyList<PluginNetworkClient> CaptureRemoteClients()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!Directory.Exists(_directory))
-            return Array.Empty<PluginNetworkClient>();
-        long newestAllowed = _time.GetUtcNow().Subtract(StaleAfter)
-            .ToUnixTimeMilliseconds();
-        var result = new List<PluginNetworkClient>();
-        foreach (string file in Directory.EnumerateFiles(
-            _directory,
-            "peer-*.json",
-            SearchOption.TopDirectoryOnly))
+        lock (_gate)
         {
-            if (file.Equals(_path, StringComparison.OrdinalIgnoreCase))
-                continue;
-            try
-            {
-                var info = new FileInfo(file);
-                if (info.Length is <= 0 or > MaximumDocumentBytes)
-                    continue;
-                PeerDocument? document = JsonSerializer.Deserialize<PeerDocument>(
-                    File.ReadAllText(file),
-                    JsonOptions);
-                if (document is null
-                    || document.InstanceId == _instanceId
-                    || document.UpdatedUnixMs < newestAllowed
-                    || document.ClientId == 0u
-                    || document.PlayerId == 0u
-                    || string.IsNullOrWhiteSpace(document.Name)
-                    || document.Name.Length > 128
-                    || document.WorldName is null
-                    || document.WorldName.Length > 128
-                    || document.Tags is null
-                    || document.Tags.Length > 128
-                    || !double.IsFinite(document.EastWest)
-                    || !double.IsFinite(document.NorthSouth)
-                    || !double.IsFinite(document.Elevation)
-                    || !float.IsFinite(document.Heading))
-                {
-                    continue;
-                }
-                result.Add(document.ToClient());
-            }
-            catch (IOException)
-            {
-                // A peer can atomically replace or remove its own heartbeat
-                // between enumeration and read. It will reappear next scan.
-            }
-            catch (UnauthorizedAccessException)
-            {
-            }
-            catch (JsonException)
-            {
-            }
+            return ReadRemoteDocuments(_time.GetUtcNow())
+                .Select(static document => document.ToClient())
+                .OrderBy(static client => client.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(static client => client.ClientId)
+                .ToArray();
         }
-        return result
-            .OrderBy(static client => client.Name, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(static client => client.ClientId)
-            .ToArray();
+    }
+
+    /// <summary>
+    /// The casts other clients on this computer have reported that this one
+    /// has not handed back yet under a sequence above
+    /// <paramref name="afterSequence"/>.
+    /// </summary>
+    /// <param name="afterSequence">
+    /// The highest sequence the caller has already dealt with; zero for
+    /// everything still inside the staleness window.
+    /// </param>
+    /// <param name="worldName">
+    /// The world this client is logged in to. A peer that names a different
+    /// one is playing somewhere else, where none of its object ids mean
+    /// anything here, so its casts are skipped entirely.
+    /// </param>
+    /// <param name="ownPlayerObjectId">
+    /// This client's own character, so a cast attributed to it is never read
+    /// back as somebody else's.
+    /// </param>
+    public IReadOnlyList<PluginPeerCast> CaptureRemoteCasts(
+        long afterSequence,
+        string worldName,
+        uint ownPlayerObjectId)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        DateTimeOffset now = _time.GetUtcNow();
+        lock (_gate)
+        {
+            TakeInRemoteCasts(now, worldName ?? string.Empty, ownPlayerObjectId);
+            ForgetStaleObservations(now);
+            var result = new List<PluginPeerCast>();
+            foreach (ObservedCast observed in _observedCasts)
+            {
+                if (observed.Sequence > afterSequence)
+                    result.Add(observed.Project(now));
+            }
+            return result.Count == 0
+                ? Array.Empty<PluginPeerCast>()
+                : result.ToArray();
+        }
     }
 
     public void Withdraw()
     {
         if (_disposed)
             return;
+        lock (_gate)
+        {
+            // Nothing to write the ring into any more; a later publish will
+            // carry whatever is still young enough to matter.
+            _castWritePending = false;
+        }
         try
         {
             if (File.Exists(_path))
@@ -140,6 +286,228 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
             return;
         Withdraw();
         _disposed = true;
+    }
+
+    /// <summary>
+    /// Every other client's note that is present, recent and well shaped.
+    /// One reader for both what a peer is and what it cast, so a note cannot
+    /// be trusted for one and unchecked for the other.
+    /// </summary>
+    private List<PeerDocument> ReadRemoteDocuments(DateTimeOffset now)
+    {
+        var documents = new List<PeerDocument>();
+        if (!Directory.Exists(_directory))
+            return documents;
+        long newestAllowed = now.Subtract(StaleAfter).ToUnixTimeMilliseconds();
+        foreach (string file in Directory.EnumerateFiles(
+            _directory,
+            "peer-*.json",
+            SearchOption.TopDirectoryOnly))
+        {
+            if (file.Equals(_path, StringComparison.OrdinalIgnoreCase))
+                continue;
+            try
+            {
+                var info = new FileInfo(file);
+                if (info.Length is <= 0 or > MaximumDocumentBytes)
+                    continue;
+                PeerDocument? document = JsonSerializer.Deserialize<PeerDocument>(
+                    File.ReadAllText(file),
+                    JsonOptions);
+                if (document is null
+                    || document.InstanceId == _instanceId
+                    || document.InstanceId == Guid.Empty
+                    || document.UpdatedUnixMs < newestAllowed
+                    || document.ClientId == 0u
+                    || document.PlayerId == 0u
+                    || string.IsNullOrWhiteSpace(document.Name)
+                    || document.Name.Length > 128
+                    || document.WorldName is null
+                    || document.WorldName.Length > 128
+                    || document.Tags is null
+                    || document.Tags.Length > 128
+                    || !double.IsFinite(document.EastWest)
+                    || !double.IsFinite(document.NorthSouth)
+                    || !double.IsFinite(document.Elevation)
+                    || !float.IsFinite(document.Heading)
+                    || document.Casts is null
+                    || document.Casts.Length > CastRingCapacity)
+                {
+                    continue;
+                }
+                documents.Add(document);
+            }
+            catch (IOException)
+            {
+                // A peer can atomically replace or remove its own heartbeat
+                // between enumeration and read. It will reappear next scan.
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+            catch (JsonException)
+            {
+            }
+        }
+        return documents;
+    }
+
+    /// <summary>
+    /// Takes every cast this client has not seen before out of the peers'
+    /// notes and into its own list, numbering them in the order it first read
+    /// them. A cast is counted against the peer's high-water mark even when
+    /// it is then dropped, so a note nobody can use is not re-examined on
+    /// every read.
+    /// </summary>
+    private void TakeInRemoteCasts(
+        DateTimeOffset now,
+        string worldName,
+        uint ownPlayerObjectId)
+    {
+        foreach (PeerDocument document in ReadRemoteDocuments(now)
+            .OrderBy(static document => document.ClientId)
+            .ThenBy(static document => document.InstanceId))
+        {
+            // A peer logged in somewhere else shares nothing but a hard disk:
+            // its object ids name other creatures entirely.
+            if (!string.Equals(
+                document.WorldName,
+                worldName,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            long highest =
+                _observedPeers.TryGetValue(document.InstanceId, out ObservedPeer peer)
+                    ? peer.HighestSequence
+                    : 0L;
+            foreach (PeerCastEntry entry in document.Casts
+                .OrderBy(static entry => entry.Sequence))
+            {
+                if (entry.Sequence <= highest)
+                    continue;
+                highest = entry.Sequence;
+                if (!IsUsable(entry, now, ownPlayerObjectId))
+                    continue;
+                _observedCasts.Add(new ObservedCast(
+                    ++_observedSequence,
+                    document.ClientId,
+                    entry));
+            }
+            _observedPeers[document.InstanceId] = new ObservedPeer(highest, now);
+        }
+        if (_observedCasts.Count > ObservedCastCapacity)
+        {
+            _observedCasts.RemoveRange(
+                0,
+                _observedCasts.Count - ObservedCastCapacity);
+        }
+    }
+
+    /// <summary>
+    /// Whether a cast makes sense at all. The one rule, applied on the way
+    /// into this client's own ring and again on the way out of a peer's
+    /// note, so a note this client would refuse to read is a note it never
+    /// writes either.
+    /// </summary>
+    private static bool IsWellFormed(PeerCastEntry entry) =>
+        entry.Sequence > 0L
+        && entry.CasterObjectId != 0u
+        && entry.TargetObjectId != 0u
+        && entry.SpellId != 0u
+        && entry.EffectiveSkill >= 0
+        && double.IsFinite(entry.DurationSeconds)
+        && entry.DurationSeconds >= 0d
+        && entry.DurationSeconds <= MaximumCastDurationSeconds
+        // An attempt carries no duration; something that landed must.
+        && (!entry.Landed || entry.DurationSeconds > 0d);
+
+    /// <summary>
+    /// Whether one entry in a peer's note is a cast this client can act on:
+    /// well formed, recent, and not this client's own doing. Whether the
+    /// spell itself means anything is settled against this client's own
+    /// spell table, by the caller that has one.
+    /// </summary>
+    private static bool IsUsable(
+        PeerCastEntry entry,
+        DateTimeOffset now,
+        uint ownPlayerObjectId)
+    {
+        TimeSpan age = Age(entry, now);
+        return IsWellFormed(entry)
+            && entry.CasterObjectId != ownPlayerObjectId
+            // Too old to act on, or stamped in the future by a note whose
+            // clock cannot be trusted.
+            && age <= StaleAfter
+            && age >= -StaleAfter;
+    }
+
+    private static TimeSpan Age(PeerCastEntry entry, DateTimeOffset now) =>
+        now - DateTimeOffset.FromUnixTimeMilliseconds(entry.AtUnixMs);
+
+    /// <summary>
+    /// Drops casts that have aged out of the staleness window and peers that
+    /// have not been heard from for several windows, so neither list grows
+    /// with the length of the session.
+    /// </summary>
+    private void ForgetStaleObservations(DateTimeOffset now)
+    {
+        _observedCasts.RemoveAll(observed => Age(observed.Entry, now) > StaleAfter);
+        TimeSpan forgetPeerAfter = StaleAfter * 4;
+        foreach (Guid instanceId in _observedPeers
+            .Where(pair => now - pair.Value.LastSeen > forgetPeerAfter)
+            .Select(static pair => pair.Key)
+            .ToArray())
+        {
+            _observedPeers.Remove(instanceId);
+        }
+    }
+
+    /// <summary>How far one peer's casts have been read.</summary>
+    private readonly record struct ObservedPeer(
+        long HighestSequence,
+        DateTimeOffset LastSeen);
+
+    /// <summary>One cast read from a peer, under this client's numbering.</summary>
+    private readonly record struct ObservedCast(
+        long Sequence,
+        uint ClientId,
+        PeerCastEntry Entry)
+    {
+        /// <summary>
+        /// What the plugin is handed: the time left rather than the total, so
+        /// a success read five seconds after it happened is not applied as if
+        /// it were fresh.
+        /// </summary>
+        internal PluginPeerCast Project(DateTimeOffset now)
+        {
+            double elapsed = Math.Max(0d, Age(Entry, now).TotalSeconds);
+            return new PluginPeerCast(
+                Sequence,
+                ClientId,
+                Entry.CasterObjectId,
+                Entry.TargetObjectId,
+                Entry.SpellId,
+                Entry.EffectiveSkill,
+                Math.Clamp(
+                    Entry.DurationSeconds - elapsed,
+                    0d,
+                    Entry.DurationSeconds),
+                Entry.Landed);
+        }
+    }
+
+    /// <summary>One cast as it travels in the document.</summary>
+    private sealed class PeerCastEntry
+    {
+        public long Sequence { get; set; }
+        public long AtUnixMs { get; set; }
+        public uint CasterObjectId { get; set; }
+        public uint TargetObjectId { get; set; }
+        public uint SpellId { get; set; }
+        public int EffectiveSkill { get; set; }
+        public double DurationSeconds { get; set; }
+        public bool Landed { get; set; }
     }
 
     private sealed class PeerDocument
@@ -164,10 +532,18 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         public uint MaxMana { get; set; }
         public uint MaxStamina { get; set; }
 
+        /// <summary>
+        /// The recent casts this client has announced, oldest first. A
+        /// heartbeat carries them again unchanged; a reader tells old from
+        /// new by the sequence.
+        /// </summary>
+        public PeerCastEntry[] Casts { get; set; } = [];
+
         public static PeerDocument From(
             in PluginNetworkClient client,
             Guid instanceId,
-            long updatedUnixMs) => new()
+            long updatedUnixMs,
+            PeerCastEntry[] casts) => new()
         {
             InstanceId = instanceId,
             UpdatedUnixMs = updatedUnixMs,
@@ -193,6 +569,7 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
             MaxHealth = client.MaxHealth,
             MaxMana = client.MaxMana,
             MaxStamina = client.MaxStamina,
+            Casts = casts,
         };
 
         public PluginNetworkClient ToClient() => new(

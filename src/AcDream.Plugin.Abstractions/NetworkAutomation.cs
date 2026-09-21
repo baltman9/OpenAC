@@ -41,6 +41,54 @@ public readonly record struct PluginNetworkClient(
     float Heading);
 
 /// <summary>
+/// One spell another client on this computer said it cast, as this client
+/// reads it back. Nothing here is authoritative: it is what that client
+/// believed about its own cast, so treat it as a hint about what is already
+/// on a target rather than as a fact from the server.
+/// </summary>
+/// <param name="Sequence">
+/// A number that only grows, in the order this client first read these casts.
+/// Hand the highest one back to the next capture to pick up where you left
+/// off. Numbers can skip: a cast this client cannot make sense of is counted
+/// and then dropped.
+/// </param>
+/// <param name="ClientId">
+/// The publishing client instance, matching
+/// <see cref="PluginNetworkClient.ClientId"/>.
+/// </param>
+/// <param name="CasterObjectId">
+/// The character that cast it. Never this client's own character: a client
+/// does not read back its own casts.
+/// </param>
+/// <param name="TargetObjectId">The object it was cast at.</param>
+/// <param name="SpellId">
+/// The spell, as this client's own spell table knows it. A spell this client
+/// cannot find in its own table is never reported.
+/// </param>
+/// <param name="EffectiveSkill">
+/// The magic skill the caster was casting with, as that client reckoned it.
+/// Zero when the caster did not say.
+/// </param>
+/// <param name="SecondsRemaining">
+/// Seconds left of the effect, counted down from the duration the caster
+/// published by however long ago it said the cast happened, and never below
+/// zero. Zero for an attempt, which carries no duration at all.
+/// </param>
+/// <param name="Landed">
+/// True when the caster said the spell landed, false when this is only an
+/// attempt that may still fizzle or be resisted.
+/// </param>
+public readonly record struct PluginPeerCast(
+    long Sequence,
+    uint ClientId,
+    uint CasterObjectId,
+    uint TargetObjectId,
+    uint SpellId,
+    int EffectiveSkill,
+    double SecondsRemaining,
+    bool Landed);
+
+/// <summary>
 /// Seeing the other clients this computer is running. Each client publishes its
 /// own character periodically and reads what the others published; nothing is
 /// sent to the game server and nothing leaves the machine.
