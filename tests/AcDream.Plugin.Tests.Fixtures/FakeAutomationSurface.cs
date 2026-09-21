@@ -72,6 +72,9 @@ public sealed class FakeAutomationSurface : IAutomationSurface
     /// <summary>Projectile automation area. Defaults to no-op.</summary>
     public IProjectileAutomation Projectiles { get; set; } = NoOpAutomationSurface.Instance;
 
+    /// <summary>World label area. Defaults to no-op.</summary>
+    public IWorldLabelAutomation Labels { get; set; } = NoOpAutomationSurface.Instance;
+
     /// <summary>Selection automation area. Defaults to no-op.</summary>
     public ISelectionAutomation Selection { get; set; } = NoOpAutomationSurface.Instance;
 

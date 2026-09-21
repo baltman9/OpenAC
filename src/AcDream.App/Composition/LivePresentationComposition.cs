@@ -769,6 +769,7 @@ internal sealed class LivePresentationCompositionPhase
                             ?? (d.ChaseCameraInput.Legacy?.IsInHead == true ? 1f : 0f)
                         : 0f),
             static value => value.Dispose());
+        var modelHeights = new SetupModelHeightResolver(content.Dats, d.DatLock);
         var selectionQuery = new WorldSelectionQuery(
             liveEntities,
             d.EntityObjects.Objects,
@@ -815,7 +816,8 @@ internal sealed class LivePresentationCompositionPhase
                         _ => AcDream.Runtime.Gameplay
                             .RuntimeSelectionCycleDirection.Closest,
                     },
-                    anchor));
+                    anchor),
+            modelHeight: modelHeights.Resolve);
         var radarSnapshotProvider = new RadarSnapshotProvider(
             d.EntityObjects.Objects,
             liveEntities,

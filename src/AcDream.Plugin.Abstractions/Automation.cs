@@ -932,6 +932,9 @@ public interface IAutomationSurface
     /// <summary>Whether a missile or spell would reach a target.</summary>
     IProjectileAutomation Projectiles => NoOpAutomationSurface.Instance;
 
+    /// <summary>Text labels hung over objects in the world.</summary>
+    IWorldLabelAutomation Labels => NoOpAutomationSurface.Instance;
+
     /// <summary>What the player has selected, and acting on it.</summary>
     ISelectionAutomation Selection => NoOpAutomationSurface.Instance;
 
@@ -955,6 +958,7 @@ public sealed class NoOpAutomationSurface
       IFellowshipAutomation, IAllegianceAutomation, IEnchantmentAutomation, INavigationAutomation
       , IWorldObjectAutomation, IRecallAutomation, IWorldTimeAutomation, ILoginAutomation,
       INetworkAutomation, IRecoveryAutomation, IProjectileAutomation
+      , IWorldLabelAutomation
       , ISelectionAutomation, IDialogAutomation, ITradeAutomation,
       IVendorAutomation
 {
@@ -1027,6 +1031,9 @@ public sealed class NoOpAutomationSurface
 
     /// <inheritdoc/>
     public IProjectileAutomation Projectiles => this;
+
+    /// <inheritdoc/>
+    public IWorldLabelAutomation Labels => this;
 
     /// <inheritdoc/>
     public ISelectionAutomation Selection => this;

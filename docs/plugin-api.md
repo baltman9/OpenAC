@@ -845,6 +845,46 @@ at once. Without `--console` there is no `/quit` to type, so
 `Window.RequestClose()` is the one graceful way a plugin has to end its own
 headless session from the inside.
 
+## World labels
+
+```csharp
+host.Automation.Labels.ShowLabels(
+[
+    new PluginWorldLabel(creatureId, "Drudge Slinker", new Vector4(1f, 0.9f, 0.3f, 1f)),
+    new PluginWorldLabel(creatureId, "14 m", new Vector4(1f, 1f, 1f, 1f), Line: 1),
+]);
+```
+
+`Labels.ShowLabels` hangs one line of text over each named object, at a
+constant screen size, and follows the object as it moves. A call replaces
+the plugin's whole set: push what should be showing now, push an empty list
+to clear. The set is copied, so the list can be reused.
+
+The client works out how tall each object is; `HeightOffset` is metres added
+on top of that, and `Line` counts lines upward from the object's head so two
+labels on one object stack without either knowing the font. `MaxRange` is
+the distance from the camera, in metres, past which the label is not drawn;
+it fades over the last fifth. When labels overlap, the nearer object's label
+is drawn on top.
+
+Each plugin may have at most `IWorldLabelAutomation.MaximumLabels` (256)
+labels showing. A larger set is refused as a whole -- `ShowLabels` returns
+false and the labels already showing stay -- rather than trimmed, so the
+plugin finds out. Inside an accepted set, a label with a zero object id, no
+text, or a range that is not a positive finite number is dropped and the
+rest are shown. A label over an object the client does not hold is simply
+not drawn until the object appears.
+
+Labels are not occluded: a label shows through a wall, a hill or another
+object. The interface is drawn after the world with no depth to test
+against, and there is no cheap way to ask whether an object is behind cover.
+A plugin that wants a label to disappear with its object has to decide that
+itself, from the object's position and its own knowledge of the place.
+
+The set belongs to the session: when the character leaves the world, every
+plugin's labels are dropped, and a plugin that is unloaded takes its labels
+with it.
+
 ## Headless
 
 A windowless client binds this same surface through the same binding pass the
@@ -868,6 +908,10 @@ collision world. It answers `Unavailable` only outside the world, or while the
 collision data around the character is not loaded -- a client with no lease on
 the installed data files never has it. `Unavailable` means the flight was not
 tested; it does not mean the flight is blocked.
+
+`Labels.ShowLabels` is taken on both clients, with the same validation and
+the same cap. A windowless client keeps the set and has nothing to draw it
+with; a plugin cannot tell the two apart through this surface.
 
 ### Walking to something and then using it
 

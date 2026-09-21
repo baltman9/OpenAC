@@ -571,6 +571,17 @@ internal sealed class DeferredSelectionUiAuthority
         return query?.ResolveVividTargetInfo(guid);
     }
 
+    public bool TryResolveWorldLabelAnchor(uint guid, out WorldLabelAnchor anchor)
+    {
+        IRetainedUiSelectionQuery? query;
+        lock (_gate)
+            query = !_deactivated ? _query : null;
+        if (query is not null)
+            return query.TryResolveWorldLabelAnchor(guid, out anchor);
+        anchor = default;
+        return false;
+    }
+
     private void Release(
         IRetainedUiSelectionQuery expectedQuery,
         SelectionInteractionController expectedInteractions)

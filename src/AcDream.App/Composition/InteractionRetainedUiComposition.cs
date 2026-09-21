@@ -1012,6 +1012,14 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                 ProjectileDebugSamples: d.Automation is null
                     ? null
                     : d.Automation.CaptureProjectileDebugSamples,
+                WorldLabels: d.Automation is null
+                    ? null
+                    : d.Automation.CaptureWorldLabels,
+                WorldLabelAnchor: guid =>
+                    late.Selection.TryResolveWorldLabelAnchor(
+                        guid, out AcDream.App.Interaction.WorldLabelAnchor anchor)
+                        ? anchor
+                        : null,
                 Connection: new ConnectionRuntimeBindings(
                     () => late.GameRuntime.Connection, d.Window.Close,
                     ShowProgress: d.Options.LiveCharacterSelector is null),

@@ -333,7 +333,9 @@ public sealed record RetailUiRuntimeBindings(
     ConnectionRuntimeBindings? Connection = null,
     Func<bool>? IsGameplayDisplay = null,
     Action? SynchronizeDisplayPhase = null,
-    BookRuntimeBindings? Book = null);
+    BookRuntimeBindings? Book = null,
+    Func<IReadOnlyList<PluginWorldLabel>>? WorldLabels = null,
+    Func<uint, AcDream.App.Interaction.WorldLabelAnchor?>? WorldLabelAnchor = null);
 
 public sealed class RetailUiRuntime : IDisposable
 {
@@ -381,6 +383,7 @@ public sealed class RetailUiRuntime : IDisposable
     private VividTargetIndicatorController? _vividTargetIndicator;
     private Layout.UiOverlayHost? _overlayHost;
     private ProjectileDebugOverlayController? _projectileDebugOverlay;
+    private WorldLabelOverlayController? _worldLabelOverlay;
 
     /// <summary>
     /// The one click-through overlay band, shared by everything that paints
@@ -449,6 +452,7 @@ public sealed class RetailUiRuntime : IDisposable
         MountFpsDisplay();
         MountVividTargetIndicator();
         MountProjectileDebugOverlay();
+        MountWorldLabelOverlay();
         MountVitals();
         MountRadar();
         MountChat();
@@ -709,6 +713,7 @@ public sealed class RetailUiRuntime : IDisposable
         FpsController?.Tick();
         _vividTargetIndicator?.Tick();
         _projectileDebugOverlay?.Tick();
+        _worldLabelOverlay?.Tick();
         _vitalsSideBySide?.Tick();
         SpellbookWindowController?.Tick();
         AppraisalController?.Tick(deltaSeconds);
@@ -1391,6 +1396,28 @@ public sealed class RetailUiRuntime : IDisposable
             _bindings.VividTarget.Camera);
         Console.WriteLine(
             "[PluginUI] projectile collision debug overlay mounted.");
+    }
+
+    private void MountWorldLabelOverlay()
+    {
+        if (_bindings.WorldLabels is not { } labels
+            || _bindings.WorldLabelAnchor is not { } anchor)
+        {
+            return;
+        }
+        if (_bindings.Assets.DefaultFont is not { } font)
+        {
+            Console.WriteLine(
+                "[PluginUI] world labels not mounted: the default interface font is unavailable.");
+            return;
+        }
+        _worldLabelOverlay = WorldLabelOverlayController.Mount(
+            OverlayHost,
+            font,
+            labels,
+            anchor,
+            _bindings.VividTarget.Camera);
+        Console.WriteLine("[PluginUI] world label overlay mounted.");
     }
 
     private void MountVitals()
