@@ -36,6 +36,14 @@ public sealed class TextureCache
 
     private readonly List<GpuUiTextureEntry> _adhocGpuTextures = new();
 
+    // Interface textures that can be given back one at a time, unlike the
+    // ad-hoc list above, which only ever grows. Keyed by the handle the
+    // interface draws with. Release goes through the retirement queue: a
+    // frame still in flight may be sampling the texture.
+    private readonly Dictionary<uint, GpuUiTextureEntry> _releasableUiTextures = new();
+
+    private readonly IGpuResourceRetirementQueue _retirementQueue;
+
     private readonly Dictionary<uint, IGpuTexture> _nearestUiTextureSources = new();
 
     private readonly Dictionary<uint, uint> _linearUiTwinHandles = new();
@@ -97,6 +105,7 @@ public sealed class TextureCache
         ArgumentException.ThrowIfNullOrWhiteSpace(diagnosticsDirectory);
         _diagnosticsDirectory = diagnosticsDirectory;
         ArgumentNullException.ThrowIfNull(retirementQueue);
+        _retirementQueue = retirementQueue;
 
         var resources = new ResourceCleanupGroup();
         CompositeTextureArrayCache? composite = null;
@@ -760,6 +769,46 @@ public sealed class TextureCache
         return UiTextureTableHandle.FromSlot(entry.Slot);
     }
 
+    /// <summary>
+    /// Uploads an interface texture that the caller will give back through
+    /// <see cref="ReleaseUiTexture"/>. The ad-hoc path keeps every upload for
+    /// the life of the cache; this one is for art whose owner comes and goes,
+    /// such as a plugin's own images.
+    /// </summary>
+    internal uint UploadReleasableRgba8(byte[] rgba, int width, int height, string debugName)
+    {
+        ArgumentNullException.ThrowIfNull(rgba);
+        ArgumentException.ThrowIfNullOrWhiteSpace(debugName);
+        GpuUiTextureEntry entry = UploadUiTexture(
+            new DecodedTexture(rgba, width, height), nearest: false, debugName);
+        uint handle = UiTextureTableHandle.FromSlot(entry.Slot);
+        _releasableUiTextures.Add(handle, entry);
+        return handle;
+    }
+
+    /// <summary>How many releasable interface textures are still held.</summary>
+    internal int ReleasableUiTextureCount => _releasableUiTextures.Count;
+
+    /// <summary>
+    /// Gives back a texture from <see cref="UploadReleasableRgba8"/>. The
+    /// handle is forgotten at once, so nothing new can be drawn with it; the
+    /// texture itself and its table slot go when the retirement queue says
+    /// no in-flight frame can still be reading them. False for a handle this
+    /// path never issued, or one already released.
+    /// </summary>
+    internal bool ReleaseUiTexture(uint handle)
+    {
+        if (!_releasableUiTextures.Remove(handle, out GpuUiTextureEntry entry))
+            return false;
+        _retirementQueue.Retire(() =>
+        {
+            entry.Texture.Dispose();
+            _device.ReleaseTextureSlot(entry.Slot);
+            UntrackUploadedTexture(entry.GlName);
+        });
+        return true;
+    }
+
     private void TrackUploadedTexture(uint name, int width, int height)
     {
         _uploadMetadata[name] = (width, height, "RGBA8_DECODED");
@@ -813,5 +862,13 @@ public sealed class TextureCache
             UntrackUploadedTexture(entry.GlName);
         }
         _adhocGpuTextures.Clear();
+
+        foreach (GpuUiTextureEntry entry in _releasableUiTextures.Values)
+        {
+            entry.Texture.Dispose();
+            _device.ReleaseTextureSlot(entry.Slot);
+            UntrackUploadedTexture(entry.GlName);
+        }
+        _releasableUiTextures.Clear();
     }
 }
