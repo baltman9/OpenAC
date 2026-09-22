@@ -1324,7 +1324,9 @@ The rules the host applies before a line is run:
 - a line aimed at **labels** is taken only by a client wearing one of them;
   a line aimed at none is taken by every client in the same world;
 - a line **older than fifteen seconds**, or stamped that far in the future,
-  is dropped, along with the whole note if any entry in it is malformed.
+  is dropped, along with the rest of that note's command ring if any line in
+  it is malformed. A malformed ring costs that client its ring and nothing
+  else: its casts and its position are still read.
 
 `delayMilliseconds` staggers the recipients so several characters do not act
 on the same instant. Every client that takes the line orders itself against
@@ -1421,10 +1423,12 @@ The host checks every peer cast before handing it over and drops:
   believed from the note;
 - a cast **older than fifteen seconds**, or stamped more than fifteen
   seconds in the future by a note whose clock cannot be trusted;
-- a note with any entry that is malformed -- a zero caster, target or spell,
-  a negative skill, a duration that is not a finite number of seconds
+- a note whose cast ring has any malformed entry -- a zero caster, target or
+  spell, a negative skill, a duration that is not a finite number of seconds
   between zero and a day, a success with no duration. One bad entry refuses
-  the whole note, because an honest client never writes one.
+  that client's whole cast ring, because an honest client never writes one;
+  its broadcast lines and its position are still read, being written through
+  other code.
 
 The announce side is held to the same rule, so a cast this client would
 refuse to read is one it never writes. `AnnounceCastAttempt` and
