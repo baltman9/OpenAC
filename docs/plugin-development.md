@@ -57,7 +57,7 @@ targets, and it needs no client sources to build.
 
 ```xml
 <ItemGroup>
-  <PackageReference Include="AcDream.Plugin.Abstractions" Version="0.1.13"
+  <PackageReference Include="AcDream.Plugin.Abstractions" Version="0.1.14"
                     ExcludeAssets="runtime" />
 </ItemGroup>
 ```
