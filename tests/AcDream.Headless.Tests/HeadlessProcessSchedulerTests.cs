@@ -610,7 +610,7 @@ public sealed class HeadlessProcessSchedulerTests
         public WorldSession CreateSession(IPEndPoint endpoint)
         {
             CreatedSessionCount++;
-            return new WorldSession(endpoint);
+            return new WorldSession(endpoint).TakingItsSends();
         }
 
         public void Connect(
@@ -668,7 +668,7 @@ public sealed class HeadlessProcessSchedulerTests
             new(IPAddress.Loopback, port);
 
         public WorldSession CreateSession(IPEndPoint endpoint) =>
-            new(endpoint);
+            new WorldSession(endpoint).TakingItsSends();
 
         public void Connect(
             WorldSession session,

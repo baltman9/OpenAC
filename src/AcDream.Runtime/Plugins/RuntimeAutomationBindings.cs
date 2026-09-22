@@ -13,6 +13,21 @@ internal sealed record RuntimeAutomationLogoutCommands(
     Func<bool> CanRequest);
 
 /// <summary>
+/// The installed data files a host lends the plugin surface, together with
+/// the lock every read of them on that host is made under. The two travel
+/// as one so a host cannot hand over the files without the lock: the files
+/// are not safe to read from two threads at once, and the host's other
+/// readers already take this lock.
+/// </summary>
+/// <param name="Dats">The installed data files.</param>
+/// <param name="Lock">The host's lock on <paramref name="Dats"/>, the same object its other readers hold.</param>
+internal sealed record RuntimeAutomationContent(IDatReaderWriter Dats, object Lock)
+{
+    public IDatReaderWriter Dats { get; } = Dats ?? throw new ArgumentNullException(nameof(Dats));
+    public object Lock { get; } = Lock ?? throw new ArgumentNullException(nameof(Lock));
+}
+
+/// <summary>
 /// What a particular host lends the plugin surface. Everything a runtime
 /// owner can answer on its own is bound inside
 /// <see cref="RuntimeAutomationBindings.Apply"/> and does not appear here;
@@ -77,7 +92,7 @@ internal sealed record RuntimeAutomationHostCapabilities
     /// </summary>
     public Func<uint, bool>? NavigationRoutePreview { get; init; }
 
-    public IDatReaderWriter? Content { get; init; }
+    public RuntimeAutomationContent? Content { get; init; }
     public MagicCatalog? MagicCatalog { get; init; }
     public Func<string, bool>? SubmitChatText { get; init; }
     public IGameRuntimeCommands? SessionCommands { get; init; }
@@ -128,12 +143,6 @@ internal static class RuntimeAutomationBindings
 {
     /// <summary>The installed skill table every host reads skill names and icons from.</summary>
     private const uint SkillTableId = 0x0E000004u;
-
-    /// <summary>
-    /// Held while this pass reads the installed data files: a reader is not
-    /// safe to use from two threads at once.
-    /// </summary>
-    private static readonly object ContentReadLock = new();
 
     /// <summary>
     /// Builds the plugin surface. Both hosts come through here, so the
@@ -201,7 +210,8 @@ internal static class RuntimeAutomationBindings
             ["BindChatComposer"] = null,
             ["BindSpeciesNameResolver"] =
                 nameof(RuntimeAutomationHostCapabilities.Content),
-
+            ["BindDungeonMap"] =
+                nameof(RuntimeAutomationHostCapabilities.Content),
         };
 
     /// <summary>
@@ -424,21 +434,27 @@ internal static class RuntimeAutomationBindings
     /// What the installed data files lend the surface: palette colours for
     /// appearance, and the skill table, without which a plugin sees the
     /// character's skills unnamed and cannot judge what it can cast. One
-    /// reader, one load, the same result on either host.
+    /// reader, one load, the same result on either host. Every read is made
+    /// under the lock the host handed over with the files, the same lock its
+    /// own readers hold, so a plugin asking for a whole dungeon's cells
+    /// cannot read beside the host's streaming.
     /// </summary>
     private static void BindContent(
         RuntimeAutomationSurface surface,
         GameRuntime runtime,
-        IDatReaderWriter content,
+        RuntimeAutomationContent content,
         Action<string>? warn,
         HashSet<string> bound)
     {
+        IDatReaderWriter dats = content.Dats;
+        object datLock = content.Lock;
+
         // The poses a line of speech can carry come out of the same files, and
         // both hosts read them here so "hello *wave*" does the same thing on
         // either. Nothing on the plugin surface needs them; the chat command
         // route does.
         runtime.CommunicationOwner.ChatPoses =
-            AcDream.Runtime.Chat.ChatPoseCatalog.Load(content, ContentReadLock);
+            AcDream.Runtime.Chat.ChatPoseCatalog.Load(dats, datLock);
 
         // What a contract is called and what it asks for is authored in
         // the same files. Read the first time a plugin opens the
@@ -446,12 +462,15 @@ internal static class RuntimeAutomationBindings
         // asks never pays for it.
         runtime.ContractsOwner.BindCatalog(() =>
         {
-            lock (ContentReadLock)
-                return AcDream.Content.ContractTableReader.Load(content);
+            lock (datLock)
+                return AcDream.Content.ContractTableReader.Load(dats);
         });
 
+        // Palette colours are read the moment a plugin asks for an object's
+        // palettes, from whatever thread it asks on, so the catalogue takes
+        // the host's lock on every read.
         surface.BindPaletteColorResolver(
-            new AcDream.Content.CharGen.ChargenAppearanceCatalog(content));
+            new AcDream.Content.CharGen.ChargenAppearanceCatalog(dats, datLock));
         bound.Add(nameof(surface.BindPaletteColorResolver));
 
         // What kind of creature a plugin is looking at. The table is read the
@@ -460,16 +479,23 @@ internal static class RuntimeAutomationBindings
         var creatureNames = new Lazy<CreatureDisplayNameResolver>(
             () =>
             {
-                lock (ContentReadLock)
-                    return CreatureDisplayNameResolver.Load(content);
+                lock (datLock)
+                    return CreatureDisplayNameResolver.Load(dats);
             });
         surface.BindSpeciesNameResolver(
             species => creatureNames.Value.Resolve(species));
         bound.Add(nameof(surface.BindSpeciesNameResolver));
 
-        if (!content.TryGet<DatReaderWriter.DBObjs.SkillTable>(
-                SkillTableId, out var skillTable)
-            || skillTable is null)
+        // The shape of a dungeon is authored in the same files: a plugin
+        // drawing a map reads it from here, on either host, and the files
+        // are only opened when a plan is first asked for.
+        surface.BindDungeonMap(dats, datLock);
+        bound.Add(nameof(surface.BindDungeonMap));
+
+        DatReaderWriter.DBObjs.SkillTable? skillTable;
+        lock (datLock)
+            skillTable = dats.Get<DatReaderWriter.DBObjs.SkillTable>(SkillTableId);
+        if (skillTable is null)
         {
             warn?.Invoke(
                 "plugin automation: the installed skill table is missing, so "

@@ -115,6 +115,61 @@ writes in one of the client's own text classes, so a plugin's own output can
 use the colour the class carries. `Submit(text)` still runs the full chat
 pipeline, commands included.
 
+### Intercepting what the player types
+
+```csharp
+IDisposable alias = host.Automation.Chat.RegisterInputInterceptor(typed =>
+{
+    if (typed.Contains("[loc]"))
+        return PluginChatInputDecision.Rewrite(typed.Replace("[loc]", Here()));
+    if (typed.StartsWith("!macro "))
+    {
+        RunMacro(typed[7..]);
+        return PluginChatInputDecision.Suppress;
+    }
+    return PluginChatInputDecision.Pass;
+});
+```
+
+An interceptor sees every line the player sends from the chat entry, on
+either client, and every line a plugin sends through `Submit`. It is given
+the line trimmed and otherwise as typed, and answers one of three things:
+
+| Decision | Effect |
+|---|---|
+| `Pass` | Leave the line alone; the next interceptor, if any, sees it. |
+| `Rewrite(text)` | Send `text` instead. It goes back through the pipeline from the start, so it may be a plugin verb, a tell, a channel line, or be intercepted again. A blank rewrite counts as `Suppress`. |
+| `Suppress` | Drop the line. It is sent nowhere, no command runs for it, it is not written into the feed, and nothing is said to the player unless the plugin says it. |
+
+Where it sits in the order is the part to rely on:
+
+1. The client's own command catalogue, and its help, are consulted first. A
+   line the client claims as one of its own commands never reaches an
+   interceptor, so no plugin can shadow or rewrite a client command.
+2. Interceptors, in registration order across every plugin. The first one
+   that does not pass decides.
+3. Plugin verbs, then the channel and tell dispatch.
+
+So a rewrite can turn a plain alias into a plugin verb, or replace a marker
+inside a tell before the tell is sent, but it can never change what
+`/lifestone` does.
+
+- Rewrites are bounded at `ChatCommandRouter.MaximumRewritePasses` (8)
+  passes per line. Past that the last text is sent as it stands, so an
+  interceptor that always produces something new cannot loop.
+- An interceptor that throws is logged once and skipped for that line; the
+  next interceptor sees the line and chat carries on.
+- A plugin may have at most `IPluginChat.MaximumInputInterceptors` (16)
+  installed at once; the next registration throws `InvalidOperationException`.
+- Dispose the handle to remove one interceptor. The host removes every
+  interceptor a plugin installed when that plugin unloads, so a plugin cannot
+  leave a rewrite behind after it is gone.
+- An interceptor registered before login still applies to the next session.
+- Interceptors are client-wide: a line one plugin suppresses is gone for
+  every other plugin and for the player. Match narrowly.
+- A host with no chat pipeline returns a handle that revokes nothing and
+  never calls the interceptor.
+
 ## Lifecycle
 
 ```csharp
@@ -137,6 +192,93 @@ reported connected in its login-time world-name message, or `-1` before that
 message has arrived. The server sends this once, at login: it is a snapshot,
 not a live count, and it does not change again for the rest of the session
 even as players come and go.
+
+## Character
+
+### How a stat was bought
+
+Skills, attributes and the three pools each report how they got where they
+are, which is what a cost table is indexed by:
+
+```csharp
+ICharacterInfo character = host.Automation.Character;
+
+if (character.TryGetSkill(skillId, out PluginSkillInfo skill))
+{
+    uint boughtSoFar = skill.Ranks;          // rows already paid for
+    ulong banked     = skill.ExperienceSpent; // experience already in it
+}
+
+foreach (PluginAttributeInfo attribute in character.Attributes)
+{
+    // attribute.Ranks, attribute.ExperienceSpent
+}
+```
+
+`Vitals` is health, stamina and mana in that order, each carrying the same
+pair plus what the pool is worth:
+
+```csharp
+foreach (PluginVitalInfo vital in character.Vitals)
+{
+    // vital.Current, vital.Maximum, vital.Base (no enchantments),
+    // vital.Ranks, vital.ExperienceSpent
+}
+
+character.TryGetVital(1, out PluginVitalInfo stamina); // 0 health, 1 stamina, 2 mana
+```
+
+`TryGetVital` takes the pool's own kind, not a position in `Vitals`: `Vitals`
+leaves out any pool the server has not stated yet, so it can be shorter than
+three and the two numbers can differ. `PluginVitalInfo.Kind` is that same
+kind, which is why it is safe to hold on to.
+
+`Ranks` and `ExperienceSpent` read 0 until the server has stated the stat,
+and `Vitals` is empty until then, so check `IsInWorld` first and treat a zero
+as "not said yet" rather than "never raised".
+
+### Spending on a stat
+
+```csharp
+PluginAdvancementResult result = character.RequestAdvancement(
+    PluginAdvancementKind.Skill,
+    skill.SkillId,
+    costOfTheNextRank);
+
+if (!result.Accepted)
+    host.Log.Warn($"{result.Status}: {result.Notice}");
+```
+
+The stat id is the one the record you read it from carries:
+`PluginAttributeInfo.StatId` for an attribute, `PluginVitalInfo.StatId` for a
+pool, and `PluginSkillInfo.SkillId` for a skill. Attribute and pool ids are
+not the same numbers as their `Kind`, which says which attribute or pool it
+is rather than what a request calls it.
+
+`PluginAdvancementKind.TrainSkill` spends skill credits rather than
+experience, so its cost is a small number.
+
+An experience cost is capped at `PluginAdvancement.MaxExperienceCost`, which
+is the largest number the request's own field holds -- it is 32 bits wide.
+Anything above it is refused rather than quietly cut down to fit, because
+cutting it down would not fail: it would spend a smaller, perfectly legal
+amount you never asked for. Banked experience in the billions is ordinary at
+high level, so "spend everything I have banked" has to expect this answer and
+split the spend.
+
+The client checks the request before it sends it, and answers:
+
+| `Status` | when |
+|---|---|
+| `Sent` | the request went to the server; its answer arrives later as an updated stat |
+| `Unavailable` | the character is not in the world, or there is no session |
+| `UnknownStat` | a stat id of zero, an attribute or pool number that does not exist, or a skill the client has not been told the character has |
+| `InvalidCost` | a cost of zero, or one above `PluginAdvancement.MaxExperienceCost` (or `MaxSkillCredits` when training) |
+| `Refused` | the client declined it; `Notice` says why |
+
+`Sent` means the request left the client, not that the spend happened: the
+server decides whether it is allowed, and says so by restating the skill,
+attribute or pool. Watch the record you asked about rather than assuming.
 
 ## Spells
 
@@ -162,6 +304,14 @@ contains the text.
 written beneath, or `null` when the storage is not backed by files. It is
 for telling a user where their data went — keys still go through
 `ReadText` / `WriteText` / `List` / `Delete`.
+
+`host.Storage.EnsureDirectory("profiles/character/")` creates that folder and
+every missing parent beneath the storage root without writing a file, so a
+plugin can lay its whole folder layout out at start-up and again per server
+and character at login, and the user sees where things will go before
+anything has been saved. A trailing slash is optional, the call is safe to
+repeat, and a prefix that would escape the storage root is refused the same
+way an escaping key is. A host with nowhere to write returns false.
 
 ## Clipboard
 
@@ -422,6 +572,36 @@ Units, since none of these read as plain integers or percentages:
   damage type does 20% MORE to the wearer, `0.8` means 20% less. It is not
   the flat armor-level number; `ArmorLevel` is the separate field for that.
 
+### Crafting and tinkering values
+
+`Items.CaptureOwnedItems()` returns a `PluginInventoryItem` per owned item,
+and a crafting calculator needs a particular handful of its fields. Both
+hosts project them from the same runtime object table, so a plugin reads
+identical numbers windowed and headless.
+
+| Field | Type | Where it comes from | When it is absent |
+|---|---|---|---|
+| `Workmanship` | `float` | the workmanship the server sends with the object: fractional, 1 to 10, not the whole-number band an appraisal shows. A bag of salvage carries the average workmanship of everything melted into it | `0` |
+| `SalvageWorkmanship` | `double` | the same value as a `double`. Widening recovers nothing the server did not send; it is there for a calculator that works in doubles | `0` |
+| `NumTimesTinkered` | `int` | the item's tinker count | `0` |
+| `ImbuedEffect` | `int` | the imbue flags: the rends and the critical bonuses. Any non-zero value means the item cannot be imbued again | `0` |
+| `MaterialType` | `uint` | what the item is made of | `0` |
+| `ArmorLevel` | `int` | the item's flat armor value, from its own property table, so it is there without an appraisal | `0` |
+| `MaxDamage` | `int` | the top of the damage roll: `Damage` with the server's "unset" sentinel folded to zero, so it is always usable in a sum | `0` |
+| `WandElementalDamageType` | `int` | the damage type in the item's own property table, which is where a casting weapon's element lives | `0` |
+| `Retained` | `bool` | the mark that stops an item being dropped, sold, or salvaged by accident | `false` |
+
+Four more values a calculator asks for are already on the snapshot under
+their own names, so there is no second copy of them:
+
+- the equipable-slot mask is `ValidLocations`;
+- the uses remaining is `Structure`, with its ceiling in
+  `MaximumStructure`;
+- the damage variance is `DamageVariance`;
+- the damage rating itself is `Damage`. Unlike `MaxDamage` it keeps the
+  server's `-1` for "never set", and unlike `WandElementalDamageType` its
+  sibling `DamageType` prefers the appraised weapon profile.
+
 `Objects.TryGet`/`CaptureObjects` are real on the headless host (see
 [Headless](#headless)), but `Objects.TryCaptureProperties` and
 `Objects.Identify` are not -- they need appraisal-wire and
@@ -479,6 +659,52 @@ confirmation, and then ends. If no confirmation arrives within 45 seconds
 the session ends with a runtime error instead. Either way a headless plugin
 that calls it should expect the session to end, not to see another
 character list.
+
+## Allegiance
+
+`host.Automation.Allegiance` reads the allegiance the server has told the
+client about, and sends the two commands that change it.
+
+```csharp
+IAllegianceAutomation allegiance = host.Automation.Allegiance;
+
+PluginAllegianceSnapshot mine = allegiance.Snapshot;
+if (mine.IsKnown)
+    host.Log.Info($"{mine.Name}, rank {mine.Rank}, {mine.MemberCount} members");
+
+PluginAllegianceCommandResult sworn = allegiance.Swear(patronObjectId);
+PluginAllegianceCommandResult broken = allegiance.Break(patronObjectId);
+
+if (!sworn.Accepted)
+    host.Log.Warn($"{sworn.Status}: {sworn.Notice}");
+```
+
+The two commands are checked differently before they are sent, because they
+mean different things:
+
+- **`Swear`** pledges the character to another player as its patron, and
+  swearing is done face to face. The id has to be a player the client can
+  currently see standing in the world; anything else -- a creature, a door, a
+  player the client only knows by name, a guid it has never heard of -- is
+  refused as `InvalidTarget` and nothing leaves the client.
+- **`Break`** breaks the tie between the character and someone in its
+  allegiance: its patron, or one of its vassals. The id has to be someone the
+  server has said is in that allegiance. It does **not** have to be nearby or
+  even logged in, which is the ordinary case -- a patron a continent away is
+  still a patron.
+
+| `Status` | when |
+|---|---|
+| `Sent` | the command went to the server; its answer arrives later as a restated allegiance |
+| `Unavailable` | the character is not in the world, or there is no session |
+| `InvalidTarget` | a zero id, a patron who is not a visible player, or a break target outside the allegiance |
+| `Refused` | the target was fine and the client still did not send it, for a reason of its own; see `Notice`. Never a statement about the target, so do not pick a different one on it |
+
+`Sent` means the command left the client, not that it worked: the server
+decides whether the character may swear or break -- experience owed, a
+cooldown, a mansion held -- and says so in its own time. Watch `Snapshot`
+rather than assuming, and note that `Snapshot` only changes once the server
+sends the allegiance again.
 
 ## Loot
 
@@ -582,7 +808,16 @@ host.Automation.Vendor.TransactionCompleted += result =>
 foreach (PluginVendorItem item in host.Automation.Vendor.Items)
 {
     // item.TemplateObjectId, item.Name, item.UnitPrice (retail sell-rate math -- the vendor's SellPrice, what it charges the player), item.StackSize
+    // item.MaxStackSize  -- how many fit in one stack, so a purchase can be costed in pack slots
+    // item.ItemType      -- the listing's category, comparable with Profile.DealsInItemTypes
 }
+
+PluginVendorProfile profile = host.Automation.Vendor.Profile;
+// profile.BuyRate                         -- the share of an item's value this vendor pays you
+// profile.DealsInItemTypes                -- the categories it buys, as a bit mask
+// profile.MinimumValue / .MaximumValue    -- its per-unit value limits, or NoValueLimit
+// profile.DealsInMagicalItems             -- whether it takes items carrying spells
+// profile.UsesAlternateCurrency           -- and AlternateCurrencyWeenieClassId / Amount / Name
 
 host.Automation.Vendor.AddToBuyList(templateObjectId, count: 1);
 host.Automation.Vendor.BuyAll();
@@ -605,6 +840,31 @@ live appraisal round trip -- by its `TemplateObjectId`, including the
 `WeaponProfile`/`ArmorProfile` fields described under
 [Weapon and armor profiles](#weapon-and-armor-profiles) when the listing
 carries one.
+
+`Vendor.Profile` is the open vendor's shop terms, which is what a plugin
+needs to plan a visit before it walks in. `BuyRate` is the share of an
+item's value this vendor pays when it buys **from** you — 0.75 means three
+quarters of the item's value — so a payout is that rate times the item's
+per-unit value, rounded **down** to whole coin but never down to nothing: a
+payout that works out below one coin is paid as one. A trade note is always
+paid at face value whatever the rate says. What the vendor *charges* is
+already per listing, as `PluginVendorItem.UnitPrice`. `DealsInItemTypes` is
+a bit mask of the categories it buys, comparable directly against a
+listing's `ItemType` or an inventory item's: no shared bit means the vendor
+refuses the item. `MinimumValue` and `MaximumValue` are its per-unit value
+limits, each reading `PluginVendorProfile.NoValueLimit` when the vendor sets
+no limit in that direction; an item worth nothing at all is refused whatever
+they say, and a trade note is bought however far above `MaximumValue` it is,
+so a pack filtered by that ceiling has to let notes through or it drops the
+most valuable things the vendor would have taken. `UsesAlternateCurrency`
+tells you to count `AlternateCurrencyWeenieClassId` rather than the
+character's money; `AlternateCurrencyAmount` is how many of it the character
+held when the listing arrived — a snapshot, not a live count — and
+`AlternateCurrencyName` its plural name for a line you write. With no vendor
+open the whole record is `PluginVendorProfile.Unset`: the rate zero, the
+name null, and both value limits `NoValueLimit` rather than zero, because a
+zero limit is a real one and an all-zero record would read as a vendor that
+refuses everything. Check `IsOpen` first all the same.
 
 `IsBusy` reports whether this adapter's own buy/sell is in flight -- it is
 vendor-local, not the client-wide inventory-transaction busy state, which
@@ -724,6 +984,500 @@ at once. Without `--console` there is no `/quit` to type, so
 `Window.RequestClose()` is the one graceful way a plugin has to end its own
 headless session from the inside.
 
+## World labels
+
+```csharp
+host.Automation.Labels.ShowLabels(
+[
+    new PluginWorldLabel(creatureId, "Drudge Slinker", new Vector4(1f, 0.9f, 0.3f, 1f)),
+    new PluginWorldLabel(creatureId, "14 m", new Vector4(1f, 1f, 1f, 1f), Line: 1),
+]);
+```
+
+`Labels.ShowLabels` hangs one line of text over each named object, at a
+constant screen size, and follows the object as it moves. A call replaces
+the plugin's whole set: push what should be showing now, push an empty list
+to clear. The set is copied, so the list can be reused.
+
+The client works out how tall each object is; `HeightOffset` is metres added
+on top of that, and `Line` counts lines upward from the object's head so two
+labels on one object stack without either knowing the font. `MaxRange` is
+the distance from the camera, in metres, past which the label is not drawn;
+it fades over the last fifth. When labels overlap, the nearer object's label
+is drawn on top.
+
+Each plugin may have at most `IWorldLabelAutomation.MaximumLabels` (256)
+labels showing. A larger set is refused as a whole -- `ShowLabels` returns
+false and the labels already showing stay -- rather than trimmed, so the
+plugin finds out. Inside an accepted set, a label with a zero object id, no
+text, text longer than `IWorldLabelAutomation.MaximumTextLength` (128
+characters), a colour component or height offset that is not a finite
+number, or a range that is not a positive finite number is dropped and the
+rest are shown. A label over an object the client does not hold is simply
+not drawn until the object appears.
+
+Labels are not occluded: a label shows through a wall, a hill or another
+object. The interface is drawn after the world with no depth to test
+against, and there is no cheap way to ask whether an object is behind cover.
+A plugin that wants a label to disappear with its object has to decide that
+itself, from the object's position and its own knowledge of the place.
+
+The set belongs to the session: when the character leaves the world, every
+plugin's labels are dropped, and a plugin that is unloaded takes its labels
+with it.
+## Images
+
+A plugin that draws its own map or HUD gets its images through
+`host.Ui.Images`. There are four sources and no raw pixel uploads:
+
+```csharp
+IPluginImages images = host.Ui.Images;
+
+PluginImage art   = images.FromClientArt(0x06001234u);   // client art by surface id, or a bare index
+PluginImage spell = images.FromSpellIcon(spellId);        // the icon the spell bar draws
+PluginImage item  = images.FromObjectIcon(objectId);      // the icon the inventory draws, layers and all
+PluginImage own   = images.FromStream("art/compass.png",  // the plugin's own art, decoded by the host
+    () => File.OpenRead(Path.Combine(pluginDirectory, "art", "compass.png")));
+
+if (own.IsValid) { /* own.Width, own.Height */ }
+images.Release(own);
+```
+
+Every request is counted once per distinct thing asked for and held as
+many times as it was asked for: asking twice for the same surface returns
+the same `PluginImage`, and it takes two releases to let it go. The plugin
+may hold at most `MaximumCount` images (256), and its own decoded art at
+most `MaximumBytes` (32 MB) of texture memory, with no image wider or
+taller than `MaximumDimension` (2048). A request past any of these answers
+`PluginImage.None` and is reported once in the client's log. Client art
+and composed icons are shared with the client's own windows and every
+other plugin, so they cost nothing against the byte budget.
+
+`FromStream` accepts PNG, JPEG, BMP, TGA and GIF; the stream is opened only
+when the host does not already hold an image under that name, and disposed
+by the host. Call all of this from the tick thread, as with every other UI
+call. Without a window, or before the client's interface is up,
+`IsAvailable` is false and every request answers `PluginImage.None`;
+images are dropped when the interface is torn down (for example on a
+reconnect), after which the plugin asks again.
+
+## Canvases
+
+A canvas is a rectangle the plugin paints, shown over the world and under
+every window, taking no input unless it asks for it (see
+[Pointer input](#pointer-input) below). It is positioned by an anchor plus
+an offset, it is exactly its declared size, and everything painted is
+clipped to it; there is no way to draw anywhere else on the screen.
+
+```csharp
+IPluginCanvas hud = host.Ui.RegisterCanvas(
+    new PluginCanvasDescriptor("hud", 200, 60)
+    {
+        Anchor = PluginCanvasAnchor.BottomRight,
+        Offset = new PluginPoint(-10, -10),
+    },
+    painter =>
+    {
+        painter.Clear(PluginColor.Transparent);
+        painter.FillRect(new PluginRect(0, 0, painter.Width, painter.Height), new PluginColor(0, 0, 0, 160));
+        painter.DrawText($"{vitals.Health} / {vitals.MaximumHealth}", new PluginPoint(6, 4), PluginColor.White, outline: true);
+        painter.DrawImageTransformed(compass, new PluginRect(150, 10, 40, 40), PluginColor.White,
+            rotationRadians: heading, pivot: new PluginPoint(20, 20));
+    });
+
+// later, whenever what it shows has changed:
+hud.Invalidate();
+```
+
+Painting is **retained**: the host keeps what was last painted and calls
+the paint callback again only after `Invalidate()`, at most once per
+frame, on the tick thread. Several `Invalidate()` calls before that frame
+paint once. The painter handed to the callback is valid only for the
+duration of the call; keeping it and drawing later throws. Its primitives
+are `Clear`, `FillRect`, `StrokeRect`, `DrawLine`, `DrawText` with
+`MeasureText` (the client's own interface font, one size), `DrawImage`,
+`DrawImageTransformed` (scaled and turned about a pivot, for a compass or
+a rotating map) and `PushClip`/`PopClip`; every clip pushed must be popped
+before the callback returns.
+
+A paint callback is measured. One that stays over its 4 ms budget on three
+frames in a row, throws, or leaves a clip pushed is dropped for the rest
+of the session and the canvas hidden; the client's log says why. A plugin
+may register at most 8 canvases, each with an id unique within the plugin;
+`RegisterCanvas` throws past either. `IsVisible`, `Anchor` and `Offset`
+can be set at any time; disposing the canvas removes it, and everything a
+plugin still holds is removed when the plugin unloads.
+
+Without a window the canvas is accepted, `IsAvailable` is false, the
+state the plugin sets is kept, and the paint callback is never called.
+
+### Pointer input
+
+A canvas is click-through by default. One that wants to be dragged,
+zoomed at the cursor or clicked opts in with `AcceptsPointerInput` on the
+descriptor and sets a `PointerHandler` on the canvas; input and
+click-through are the two states of one switch, and input wins: while the
+canvas is shown and has a handler, everything the pointer does inside the
+canvas's rectangle goes to the handler and no further, and the world
+beneath gets no mouse there. Outside the rectangle nothing changes.
+Without a handler an opted-in canvas stays click-through, since nobody is
+listening.
+
+```csharp
+IPluginCanvas map = host.Ui.RegisterCanvas(
+    new PluginCanvasDescriptor("map", 300, 300) { AcceptsPointerInput = true },
+    painter => DrawMap(painter));
+
+PluginPoint? dragFrom = null;
+map.PointerHandler = e =>
+{
+    switch (e.Kind)
+    {
+        case PluginPointerEventKind.Down when e.Button == PluginPointerButton.Left:
+            dragFrom = e.Position;
+            break;
+        case PluginPointerEventKind.Move when dragFrom is { } from:
+            bool measuring = (e.Modifiers & PluginKeyModifiers.Shift) != 0;
+            Pan(e.Position.X - from.X, e.Position.Y - from.Y, measuring);
+            dragFrom = e.Position;
+            map.Invalidate();
+            break;
+        case PluginPointerEventKind.Up or PluginPointerEventKind.Cancelled:
+            dragFrom = null;
+            break;
+        case PluginPointerEventKind.Wheel:
+            ZoomAbout(e.Position, e.WheelDelta);
+            map.Invalidate();
+            break;
+    }
+};
+```
+
+Every event arrives on the tick thread as a `PluginPointerEvent`: its
+`Kind` (`Down`, `Up`, `Move`, `Wheel`, `Cancelled`), its `Position` in
+the canvas's own pixels from its top-left corner, whatever anchor, offset
+or interface scale the canvas is shown at, the `Button` it is about
+(`Left`, `Right`, `Middle`, or `None` for the wheel), the `Modifiers`
+held (`Shift`, `Control`, `Alt`, as flags) and, for the wheel, a
+`WheelDelta` in notches, positive away from the user. A press inside the
+canvas holds the pointer until the button comes up: `Move` events keep
+coming with that button, and the position may lie outside the rectangle,
+so a fast drag never loses the canvas. A move with nothing held is not
+reported. The wheel reaches the canvas only while the pointer is over it.
+`Cancelled` means a press ended without its `Up`: the canvas was hidden
+or removed, or the host took the pointer for something else; treat it as
+the end of the drag. `ReleasePointer()` ends the press the canvas holds
+on the plugin's own say-so, from inside the handler or anywhere else;
+nothing more arrives for that press, and no `Cancelled` is sent for a
+release the plugin asked for.
+
+The handler is measured like the paint callback, against the interface's
+2 ms frame budget: one that stays over it on three events in a row, or
+throws, is dropped for the rest of the session and the canvas goes back to
+click-through; painting continues and the client's log says why. The
+handler is dropped with the paint callback when the canvas is disposed.
+
+Without a window `AcceptsPointerInput` and the handler are kept, the
+handler is never called, and `ReleasePointer()` does nothing.
+
+## Dungeon map
+
+```csharp
+IDungeonMapAutomation map = host.Automation.DungeonMap;
+uint landblock = map.CurrentLandblockId;
+if (landblock != 0u && map.IsSealedDungeon(here.CellId))
+{
+    PluginDungeonFloorplan plan = map.CaptureFloorplan(landblock);
+    foreach (PluginDungeonLayer layer in plan.Layers)
+        foreach (PluginDungeonWall wall in layer.Walls)
+            DrawLine(wall.Start, wall.End);
+}
+```
+
+`DungeonMap` is the shape of the place the character is in, as data: the
+plugin draws it however it likes. `CurrentLandblockId` is the landblock the
+character's body is in, with a zero low half, or zero before there is a body.
+`IsSealedDungeon` is true for an indoor cell that sees nothing outside, as a
+dungeon's cells are, and false for the landscape, for a building interior
+that opens onto it, and for a cell the game data lacks.
+
+`CaptureFloorplan` builds a landblock's plan from the cell geometry in the
+game data the first time it is asked and hands back the same object every
+time after, so a plugin may ask every frame. Every cell's structure is placed
+by the cell's own position and turn and flattened onto the ground: a level
+face that faces up is floor, a standing face is a wall seen edge-on as a
+line, and the doorways the data lists between cells are left open. Cells are
+grouped into `Layers` by height, six metres to a band and shifted down three,
+so a storey reads as a layer; each layer has its floor polygons and its wall
+lines, collinear runs already joined. `Cells` names every cell with its
+middle and its layer, and `BoundsMin`/`BoundsMax` box the whole plan.
+
+Everything is in the landblock's own frame, in metres: x east and y north
+from the landblock's south-west corner, which is the frame the game's cell
+positions use. `PluginDungeonFloorplan.ToLandblockLocal` puts a position from
+`Navigation` into that frame; compare the position's landblock with the
+plan's before drawing it on the plan. The plan is built once and never
+changed, so it is safe to keep and to read from any thread.
+
+The plan is derived from geometry, not drawn by hand, so on a dungeon whose
+rooms are authored as sloped or stepped structures the floor and wall
+classification can be rougher than a hand-made map; a plugin should expect
+polygons to overlap where cells meet and fill them rather than stitch them.
+`PluginDungeonFloorplan.Empty` comes back for a landblock the data does not
+have, for one with no indoor cells, and on a client with no lease on the
+game data.
+
+## Clients on this computer
+
+```csharp
+INetworkAutomation peers = host.Automation.Network;
+foreach (PluginNetworkClient client in peers.CaptureClients())
+{
+    if (client.Tags.Contains("healer", StringComparer.OrdinalIgnoreCase))
+        Console.WriteLine($"{client.Name} on {client.WorldName}: {client.CurrentHealth}/{client.MaxHealth}");
+}
+```
+
+`Network` is for playing several characters side by side: each client
+running on this computer publishes a little about its own character, and
+reads what the others published, so a plugin can tell where the group's
+other characters are, how they are doing, and what they have just cast.
+Nothing here goes to the game server and nothing leaves the machine. The
+clients find each other through the file system: each one leaves a small
+note in a `plugin-peers` folder beneath its data directory, rewritten about
+every five seconds while the character is in the world and withdrawn on
+the next heartbeat after it leaves. So two clients see each other only when they share a data
+directory (`docs/plugin-development.md` says where it is); two pointed at
+different ones never meet. There is no discovery beyond that folder, and
+none is needed.
+
+`IsAvailable` is true on both clients for the whole session. `CaptureClients`
+answers the other clients on this computer, never the caller's own, sorted
+by character name. A note that has not been rewritten in the last fifteen
+seconds is treated as gone, so a client that crashed or was killed drops
+out of the list within that window rather than lingering; a note that is
+malformed or over 64 KB is skipped. Every record is a snapshot of what that
+client last wrote, up to five seconds old, and reading it costs a scan of
+the folder, so read it on a heartbeat of your own rather than every tick.
+
+A `PluginNetworkClient` carries:
+
+- `ClientId`, a stable non-zero number for that client instance for as long
+  as it runs (a client relaunched gets a new one), and `PlayerId`, its
+  character's object id;
+- `Name` and `WorldName`;
+- `Position`, a `PluginNavigationPosition` with cell, coordinates,
+  elevation and whether it is outdoors, and `Heading` in degrees clockwise
+  from north, as of that client's last note;
+- current and maximum health, mana and stamina;
+- `Tags`, the words the player started that client with -- `ACDREAM_PLUGIN_TAGS`
+  on the windowed client, `pluginTags` in the headless configuration, as
+  `docs/building-and-running.md` describes. Tags are trimmed, de-duplicated
+  ignoring case and capped at 128; a client started without any publishes an
+  empty list. They mean whatever the plugin decides they mean: a role, a
+  group name, a job for a bot. The player sets them at startup and a plugin
+  can replace them with `SetTags`, below.
+
+### Tags
+
+```csharp
+peers.SetTags(["healer", "buffbot"]);
+```
+
+`SetTags` replaces the labels this client answers to, whatever it was started
+with. The labels are trimmed, blank ones dropped, repeats ignoring case
+folded together and the list capped at 128; an empty list clears them. It
+returns false for a null list and for a label longer than 64 characters,
+which is refused outright rather than cut short. The change goes into this
+client's note on the next tick, so the other clients see it within a
+heartbeat, and it takes effect for broadcast commands straight away.
+
+Labels are the only addressing the channel has: a broadcast aimed at labels
+reaches a client wearing one of them and nobody else.
+
+### Broadcast commands
+
+```csharp
+// On the client giving the orders:
+peers.BroadcastCommand("/myplugin follow", ["healer"], delayMilliseconds: 250);
+
+// On any client, to watch what was asked rather than let a verb answer it:
+long cursor = 0L;
+foreach (PluginPeerCommand command in peers.CaptureCommands(cursor))
+{
+    cursor = command.Sequence;
+    Console.WriteLine($"{command.SenderObjectId} asked for {command.Line}");
+}
+```
+
+`BroadcastCommand` asks the other clients on this computer to run a line,
+exactly as though the player had typed it into the chat entry there. It is
+the one free-form channel between clients, and it is not limited to plugin
+verbs: the receiving client submits the line through its own chat entry, so
+
+- the client's **own commands** are consulted first (`/loc`, `/pos`, the
+  whole client catalogue), and no plugin can shadow one;
+- then the **chat input interceptors** plugins have installed, which may
+  rewrite or suppress the line;
+- then the **verbs** plugins and the client have registered;
+- and anything left is **dispatched** as typed speech is: to a channel, to a
+  tell, or to the server as a server command.
+
+So `BroadcastCommand("/loc", …)`, `BroadcastCommand("@tell Bob, hi", …)` and
+`BroadcastCommand("hello", …)` all do on the receiving client what typing
+them there would do.
+
+The delivery is the client's own, not a plugin's. Every client reads the
+notes four times a second, takes the lines aimed at labels it answers to, and
+submits each one through the same entry a typed line goes in by. So a
+broadcast is answered the same way on every client, whatever plugins happen
+to be loaded there, and a plugin that registers a verb has that verb
+reachable from another character without doing anything else.
+
+The rules the host applies before a line is run:
+
+- a line from a client logged in to a **different world** is skipped, as a
+  cast is;
+- this client's **own** broadcast is never run here. A plugin that wants the
+  line run on the sending client too runs it there itself;
+- a line aimed at **labels** is taken only by a client wearing one of them;
+  a line aimed at none is taken by every client in the same world;
+- a line **older than fifteen seconds**, or stamped that far in the future,
+  is dropped, along with the rest of that note's command ring if any line in
+  it is malformed. A malformed ring costs that client its ring and nothing
+  else: its casts and its position are still read.
+
+`delayMilliseconds` staggers the recipients so several characters do not act
+on the same instant. Every client that takes the line orders itself against
+the other recipients by client id, with the sender holding the first place,
+and waits its own place in that order times the delay: the first recipient
+waits one delay, the second two, and so on. Each recipient works its own
+place out from the notes in the folder, so nothing has to be agreed in
+advance. Zero has every recipient run it as soon as it reads it. A client
+the line is not aimed at takes no place in the order.
+
+`BroadcastCommand` returns false, and nothing is published, for an empty
+line, a line longer than 512 characters or carrying a control character,
+more than 16 labels or one longer than 64 characters, a delay below zero or
+above sixty seconds, and a character that is not in the world.
+
+`CaptureCommands` hands back the same lines for a plugin to read, oldest
+first, with a `Sequence` cursor that behaves exactly like the cast one: hand
+the highest back and each line arrives once, and reading consumes nothing, so
+several plugins can each keep a cursor and none of them stops the client
+running the lines. Each `PluginPeerCommand` carries the publishing
+`ClientId`, the `SenderObjectId`, the `Tags` the line was aimed at, the
+`Line` itself and `SentAt`, the instant the sending client said it asked.
+The caps mirror the cast ring: a note carries its last 32 lines and a reader
+keeps up to 128 unread ones, inside the same fifteen-second window.
+
+### Cast sharing
+
+```csharp
+long cursor = 0L;
+host.Events.Tick += _ =>
+{
+    foreach (PluginPeerCast cast in peers.CaptureCasts(cursor))
+    {
+        cursor = cast.Sequence;
+        if (cast.Landed)
+            host.Automation.Enchantments.ReportCast(
+                cast.TargetObjectId, cast.SpellId, cast.SecondsRemaining);
+        else
+            HoldOff(cast.TargetObjectId, cast.SpellId);
+    }
+};
+
+// When this character starts a spell, and again when it lands:
+peers.AnnounceCastAttempt(targetId, spellId, effectiveSkill);
+peers.AnnounceCastSuccess(targetId, spellId, effectiveSkill, durationSeconds);
+```
+
+Two characters buffing the same group, or debuffing the same creature, will
+happily land the same spell twice unless they tell each other. The
+announcements ride in the same note as the client record. `AnnounceCastAttempt`
+says this character has begun a spell at a target, before it is known
+whether it lands, so a second character can decide not to start the same
+one; `AnnounceCastSuccess` says it landed and how long the effect lasts.
+An announcement goes out as soon as a quarter of a second has passed since
+the last note was written -- a burst of casts shares one write rather than
+costing one each -- and both return true once the cast is accepted for
+publishing, not when a peer has read it.
+
+`CaptureCasts` hands back what the other clients said, oldest first. Each
+cast carries a `Sequence` that only grows, in the order this client first
+read it: hand the highest one back on the next call and each cast arrives
+exactly once. A read does not consume anything -- several plugins share one
+client, and each keeps its own cursor -- so `CaptureCasts(0)` always
+answers everything still recent. Sequences can skip: a peer cast this client
+could not make sense of is counted and then dropped. What comes back:
+
+- `ClientId` and `CasterObjectId` -- the publishing client and its
+  character -- `TargetObjectId`, `SpellId`, and `EffectiveSkill`, the magic
+  skill the caster said it was casting with, or zero when it said nothing;
+- `Landed`: true for a success, false for an attempt that may still fizzle
+  or be resisted;
+- `SecondsRemaining`, already age-adjusted: the duration the caster
+  published, less however long ago it said the cast happened, never below
+  zero. A success read five seconds after it landed reads five seconds
+  shorter, so it can go straight into `Enchantments.ReportCast` as the
+  duration. An attempt carries no duration and always reads zero.
+
+None of it is authoritative: it is what the other client believed about its
+own cast, not a fact from the server, so treat it as a hint about what is
+already on a target. Nothing is applied to this client's own bookkeeping by
+reading it; a plugin that wants a landed cast counted as an effect in place
+passes it to `Enchantments.ReportCast` itself, as above.
+
+The host checks every peer cast before handing it over and drops:
+
+- casts from a client logged in to a **different world**, compared by world
+  name ignoring case -- its object ids name other creatures entirely, so
+  `CaptureCasts` is empty when no other client on this computer is in the
+  same world;
+- the client's **own** casts, so a character never reads its own
+  announcements back as somebody else's;
+- a **spell this client's own spell table cannot identify**. The id is the
+  only thing carried; everything about the spell is looked up here, never
+  believed from the note;
+- a cast **older than fifteen seconds**, or stamped more than fifteen
+  seconds in the future by a note whose clock cannot be trusted;
+- a note whose cast ring has any malformed entry -- a zero caster, target or
+  spell, a negative skill, a duration that is not a finite number of seconds
+  between zero and a day, a success with no duration. One bad entry refuses
+  that client's whole cast ring, because an honest client never writes one;
+  its broadcast lines and its position are still read, being written through
+  other code.
+
+The announce side is held to the same rule, so a cast this client would
+refuse to read is one it never writes. `AnnounceCastAttempt` and
+`AnnounceCastSuccess` return false, and nothing is published, for a zero
+target, a spell this client's spell table does not know, a negative skill,
+a character that is not in the world, and -- for a success -- a duration
+that is not a finite positive number of seconds or is longer than a day.
+The day is a sanity limit rather than a game rule: nothing lasts that long,
+and a reader that believed a longer one would hold a target as enchanted
+for ever.
+
+The caps: a client's note carries its last 32 casts, and a reader keeps up
+to 128 unread ones from all peers together, so a plugin that polls slower
+than the group casts can miss some. Fifteen seconds is the window for
+everything: a cast older than that is gone whether or not it was read, and
+so is a client not heard from. A plugin polling on every tick, or every
+second, sees every cast; one polling every twenty seconds does not.
+
+What the surface does **not** carry yet: what a peer is holding or how many
+of something it has, its enchantments, or its target. A plugin that needs to
+tell another client something the record does not say can send it as a
+broadcast command line and answer it with a verb of its own.
+
+Both clients publish and read the same way, from the same data-directory
+rule and on the same heartbeat, so a windowed client and a headless bot on
+one machine see each other. Cast sharing needs the spell table on both
+sides: on a session without the installed data files -- see the "Headless"
+section -- `AnnounceCastAttempt` and `AnnounceCastSuccess` return false and
+`CaptureCasts` is empty, while `CaptureClients` is real either way.
+
 ## Headless
 
 A windowless client binds this same surface through the same binding pass the
@@ -747,6 +1501,10 @@ collision world. It answers `Unavailable` only outside the world, or while the
 collision data around the character is not loaded -- a client with no lease on
 the installed data files never has it. `Unavailable` means the flight was not
 tested; it does not mean the flight is blocked.
+
+`Labels.ShowLabels` is taken on both clients, with the same validation and
+the same cap. A windowless client keeps the set and has nothing to draw it
+with; a plugin cannot tell the two apart through this surface.
 
 ### Walking to something and then using it
 
@@ -835,6 +1593,14 @@ with a window does the work:
   formulas in those files. Without them a content-less session reads its own
   skills below what the server allows it -- which also means it runs at the
   speed those lower numbers give.
+- `DungeonMap` reads a cell's kind and a landblock's floorplan out of the
+  same files. Without them `IsSealedDungeon` is false and `CaptureFloorplan`
+  is empty; `CurrentLandblockId` comes from the character's body and is real
+  either way.
+- `Network`'s cast sharing classifies every spell in the same catalogue, so
+  without it `AnnounceCastAttempt` and `AnnounceCastSuccess` return false
+  and `CaptureCasts` is empty. `CaptureClients` and this client's own note
+  to the other clients on the machine are real either way.
 
 Other creatures' bodies come off the same lease. The server says where a
 creature is a few times a second and every client fills the gaps itself from
@@ -908,8 +1674,9 @@ not, so it is empty here.
 ### Chat, and the console
 
 `Chat` is real on both: `PostMessage`, `Submit`, `Compose`, `CaptureMessages`,
-`Received`, `IsInputActive` and the suppression filters all sit on the shared
-surface. `Compose` stages a line in the one chat entry both front ends type
+`Received`, `IsInputActive`, the suppression filters and the input
+interceptors all sit on the shared surface, and a line typed at the console
+passes the interceptors the same way a line typed in a chat box does. `Compose` stages a line in the one chat entry both front ends type
 into, so on a windowless client it appears at the console and the next Enter
 sends it.
 

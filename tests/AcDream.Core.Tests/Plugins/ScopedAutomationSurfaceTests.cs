@@ -13,10 +13,11 @@ namespace AcDream.Core.Tests.Plugins;
 // of the host's real one. This test walks the interface by reflection so a
 // future member cannot go unforwarded without a build-time-visible test
 // failure.
-// Navigation is forwarded as the host's own object only when that host's
-// navigation cannot tell plugins apart (as this stub's cannot); a host whose
-// navigation implements IScopedNavigationSource hands each plugin a view of
-// its own, covered by ScopedNavigationTests.
+// Navigation and labels are forwarded as the host's own object only when
+// that host cannot tell plugins apart (as this stub cannot); a host whose
+// navigation implements IScopedNavigationSource, or whose labels implement
+// IScopedWorldLabelSource, hands each plugin a view of its own, covered by
+// ScopedNavigationTests.
 public sealed class ScopedAutomationSurfaceTests
 {
     [Fact]
@@ -30,11 +31,17 @@ public sealed class ScopedAutomationSurfaceTests
 
         PropertyInfo[] properties = typeof(IAutomationSurface).GetProperties();
 
-        // Sanity check: if this drops below the known count, the interface
-        // shrank and the loop below silently checks less than intended.
+        // Sanity check: the loop below walks whatever the interface has, so
+        // it cannot say how much that was. This says it. Adding a member
+        // means adding a forwarder and raising this number in the same
+        // change; a number that no longer matches means one of the two was
+        // forgotten.
         Assert.True(
-            properties.Length >= 22,
-            "IAutomationSurface should still have every member this test knows about.");
+            properties.Length == 26,
+            "IAutomationSurface has "
+                + $"{properties.Length} members rather than the 26 this "
+                + "census was written for. Forward the new one in "
+                + "ScopedPluginHost and say so here.");
 
         var checkedMembers = new List<string>();
         foreach (PropertyInfo property in properties)
@@ -51,6 +58,23 @@ public sealed class ScopedAutomationSurfaceTests
 
             object? innerValue = property.GetValue(innerAutomation);
             object? scopedValue = property.GetValue(scopedAutomation);
+            // Read the stub's own object first. Comparing the two sides alone
+            // is not enough: if the stub left an area at the shared no-op,
+            // the scoped surface's own no-op fallback would match it and the
+            // census would pass whether or not a forwarder existed. That is
+            // how Recalls stayed unforwarded. Both sides are therefore
+            // required to be something other than the shared no-op.
+            Assert.False(
+                ReferenceEquals(innerValue, NoOpAutomationSurface.Instance),
+                "The stub host leaves IAutomationSurface." + property.Name
+                    + " at the shared no-op, so this census cannot tell a "
+                    + "written forwarder from a missing one. Give the stub a "
+                    + "fake of its own for that member.");
+            Assert.False(
+                ReferenceEquals(scopedValue, NoOpAutomationSurface.Instance),
+                "IAutomationSurface." + property.Name + " is not forwarded: "
+                    + "the scoped surface fell through to the interface's "
+                    + "no-op default.");
             Assert.True(
                 ReferenceEquals(innerValue, scopedValue),
                 "IAutomationSurface." + property.Name + " is not forwarded: "
@@ -63,7 +87,7 @@ public sealed class ScopedAutomationSurfaceTests
         // Every property this loop actually walked should be one of the
         // known forwarders, guarding against the loop silently checking zero
         // properties if reflection ever returned nothing.
-        Assert.Equal(22, checkedMembers.Count);
+        Assert.Equal(24, checkedMembers.Count);
 
         scoped.Dispose();
     }
@@ -113,9 +137,9 @@ public sealed class ScopedAutomationSurfaceTests
         EventInfo[] events = typeof(IPluginChat)
             .GetEvents(BindingFlags.Public | BindingFlags.Instance);
         Assert.True(
-            methods.Length == 11 && events.Length == 2,
+            methods.Length == 12 && events.Length == 2,
             "IPluginChat should still have exactly the members this test "
-                + "knows about (11 methods incl. event accessors, 2 events) -- "
+                + "knows about (12 methods incl. event accessors, 2 events) -- "
                 + "a member was added or removed without updating this test.");
 
         chat.CaptureMessages(0);
@@ -138,6 +162,9 @@ public sealed class ScopedAutomationSurfaceTests
 
         chat.RegisterFilter(static _ => true);
         Assert.Equal(1, recording.FilterCount);
+
+        chat.RegisterInputInterceptor(static _ => PluginChatInputDecision.Pass);
+        Assert.Equal(1, recording.InterceptorCount);
 
         chat.LinkClicked += static _ => { };
         Assert.Equal(1, recording.LinkClickedSubscriberCount);
@@ -209,6 +236,15 @@ public sealed class ScopedAutomationSurfaceTests
         {
             _filters.Add(suppress);
             return new Removal(this, suppress);
+        }
+
+        internal int InterceptorCount { get; private set; }
+
+        public IDisposable RegisterInputInterceptor(
+            Func<string, PluginChatInputDecision> intercept)
+        {
+            InterceptorCount++;
+            return NoOpPluginRegistration.Instance;
         }
 
         public event Action<PluginChatLinkClicked> LinkClicked
@@ -310,7 +346,9 @@ public sealed class ScopedAutomationSurfaceTests
     // Every member returns its own distinct instance, never
     // NoOpAutomationSurface.Instance, so a scoped property that silently
     // falls through to the interface's no-op default is caught by reference
-    // inequality instead of accidentally matching.
+    // inequality instead of accidentally matching. The census asserts that
+    // too, so a member added here later without a fake of its own fails
+    // rather than quietly weakening the check.
     private sealed class FakeAutomationSurface : IAutomationSurface
     {
         public bool IsAvailable => true;
@@ -324,14 +362,22 @@ public sealed class ScopedAutomationSurfaceTests
         public IItemAutomation Items { get; } = new FakeItemAutomation();
         public ILootAutomation Loot { get; } = new FakeLootAutomation();
         public IFellowshipAutomation Fellowship { get; } = new FakeFellowshipAutomation();
+        // An area left at the shared no-op would be compared against the
+        // scoped surface's own no-op fallback, so the census would hold
+        // whether or not a forwarder was written. Allegiance was found
+        // unforwarded because it had no object of its own here.
+        public IAllegianceAutomation Allegiance { get; } = new FakeAllegianceAutomation();
         public IEnchantmentAutomation Enchantments { get; } = new FakeEnchantmentAutomation();
         public INavigationAutomation Navigation { get; } = new FakeNavigationAutomation();
         public IWorldObjectAutomation Objects { get; } = new FakeWorldObjectAutomation();
+        public IRecallAutomation Recalls { get; } = new FakeRecallAutomation();
         public IWorldTimeAutomation WorldTime { get; } = new FakeWorldTimeAutomation();
         public ILoginAutomation Login { get; } = new FakeLoginAutomation();
         public INetworkAutomation Network { get; } = new FakeNetworkAutomation();
         public IRecoveryAutomation Recovery { get; } = new FakeRecoveryAutomation();
         public IProjectileAutomation Projectiles { get; } = new FakeProjectileAutomation();
+        public IWorldLabelAutomation Labels { get; } = new FakeWorldLabelAutomation();
+        public IDungeonMapAutomation DungeonMap { get; } = new FakeDungeonMapAutomation();
         public ISelectionAutomation Selection { get; } = new FakeSelectionAutomation();
         public ITradeAutomation Trade { get; } = new FakeTradeAutomation();
         public IVendorAutomation Vendor { get; } = new FakeVendorAutomation();
@@ -406,6 +452,8 @@ public sealed class ScopedAutomationSurfaceTests
 
     private sealed class FakeFellowshipAutomation : IFellowshipAutomation;
 
+    private sealed class FakeAllegianceAutomation : IAllegianceAutomation;
+
     private sealed class FakeEnchantmentAutomation : IEnchantmentAutomation;
 
     private sealed class FakeNavigationAutomation : INavigationAutomation
@@ -434,6 +482,12 @@ public sealed class ScopedAutomationSurfaceTests
     private sealed class FakeRecoveryAutomation : IRecoveryAutomation;
 
     private sealed class FakeProjectileAutomation : IProjectileAutomation;
+
+    private sealed class FakeRecallAutomation : IRecallAutomation;
+
+    private sealed class FakeWorldLabelAutomation : IWorldLabelAutomation;
+
+    private sealed class FakeDungeonMapAutomation : IDungeonMapAutomation;
 
     private sealed class FakeSelectionAutomation : ISelectionAutomation;
 

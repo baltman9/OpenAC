@@ -128,7 +128,10 @@ public sealed class HeadlessCharacterOptionsSeederWiringTests
         int callerThread = Environment.CurrentManagedThreadId;
         Task<HeadlessExitCode> run = host.RunAsync(cancellation.Token);
         var stopwatch = Stopwatch.StartNew();
-        while (operations.SentActions.IsEmpty
+        // Arriving in the world is a send of its own -- the client asks the
+        // server about the allegiance -- so this waits for the option the
+        // seeder sends rather than for the first thing off the wire.
+        while (!OptionSends(operations).Any()
             && stopwatch.Elapsed < TimeSpan.FromSeconds(10))
         {
             Thread.Sleep(1);
@@ -137,14 +140,33 @@ public sealed class HeadlessCharacterOptionsSeederWiringTests
         HeadlessExitCode result = await run;
 
         Assert.Equal(HeadlessExitCode.Success, result);
-        (byte[] Body, int ThreadId) sent = Assert.Single(operations.SentActions);
+        // Everything the session put on the wire, and nothing else: the one
+        // option the seeder found a difference for, and the one question
+        // arriving in the world asks. A session that sent a third thing here
+        // is sending something nobody asked it to.
+        // Compared in opcode order, because which of the two goes first is
+        // a matter of when the server says what, and this is about the set.
         Assert.Equal(
-            SocialActions.SetSingleCharacterOptionOpcode,
-            ActionOpcode(sent.Body));
+            [
+                SocialActions.SetSingleCharacterOptionOpcode,
+                AllegianceRequests.AllegianceUpdateRequestOpcode,
+            ],
+            operations.SentActions
+                .Select(static entry => ActionOpcode(entry.Body))
+                .Order());
+        (byte[] Body, int ThreadId) sent =
+            Assert.Single(OptionSends(operations));
         Assert.NotEqual(0, sent.ThreadId);
         Assert.NotEqual(callerThread, sent.ThreadId);
         Assert.Equal(operations.ConnectThreadId, sent.ThreadId);
     }
+
+    /// <summary>The option changes the seeder sent, and nothing else.</summary>
+    private static IReadOnlyList<(byte[] Body, int ThreadId)> OptionSends(
+        SeedTriggeringSessionOperations operations) =>
+        [.. operations.SentActions.Where(static entry =>
+            ActionOpcode(entry.Body)
+                == SocialActions.SetSingleCharacterOptionOpcode)];
 
     private static uint ActionOpcode(byte[] body) =>
         BinaryPrimitives.ReadUInt32LittleEndian(body.AsSpan(8, sizeof(uint)));
@@ -218,7 +240,7 @@ public sealed class HeadlessCharacterOptionsSeederWiringTests
 
         public WorldSession CreateSession(IPEndPoint endpoint)
         {
-            var session = new WorldSession(endpoint);
+            var session = new WorldSession(endpoint).TakingItsSends();
             Sessions.Add(session);
             return session;
         }

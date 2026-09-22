@@ -1012,6 +1012,14 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                 ProjectileDebugSamples: d.Automation is null
                     ? null
                     : d.Automation.CaptureProjectileDebugSamples,
+                WorldLabels: d.Automation is null
+                    ? null
+                    : d.Automation.CaptureWorldLabels,
+                WorldLabelAnchor: guid =>
+                    late.Selection.TryResolveWorldLabelAnchor(
+                        guid, out AcDream.App.Interaction.WorldLabelAnchor anchor)
+                        ? anchor
+                        : null,
                 Connection: new ConnectionRuntimeBindings(
                     () => late.GameRuntime.Connection, d.Window.Close,
                     ShowProgress: d.Options.LiveCharacterSelector is null),
@@ -1040,6 +1048,11 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                         || d.Character.LocalPlayer.Properties.GetBool(
                             (uint)AcDream.Core.Properties.PropertyBool.IsPsr)),
                 IsGameplayDisplay: () => d.Settings.IsGameplayDisplay,
+                PluginCanvases: new PluginCanvasHostServices(
+                    d.GpuDevice,
+                    d.GpuFrameSource,
+                    d.ShadersDirectory,
+                    d.TextureCache.GetOrCreateLinearUiTwin),
                 SynchronizeDisplayPhase: () =>
                 {
                     if (late.GameRuntime.Connection?.Snapshot.Status is

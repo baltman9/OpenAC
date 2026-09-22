@@ -13,6 +13,9 @@ namespace AcDream.App.UI;
 
 public sealed class IconComposer
 {
+    /// <summary>The side of every composed spell and object icon, in pixels.</summary>
+    internal const int IconExtent = 32;
+
     private readonly IDatReaderWriter _dats;
     private readonly TextureCache _cache;
     private readonly Dictionary<(uint, uint, uint, uint, uint), uint> _byTuple = new();

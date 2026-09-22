@@ -225,6 +225,51 @@ public sealed class TextRenderer : IDisposable
         AppendQuad(seg.Verts, x, y, w, h, u0, v0, u1, v1, tint);
     }
 
+    /// <summary>
+    /// Append a convex outline of three to eight corners as a triangle fan.
+    /// This is the path for anything that is not an upright rectangle -- a
+    /// thick line, a rotated or scaled blit, either of those after clipping.
+    ///
+    /// <para>It lands in the same per-texture run as <see cref="DrawSprite"/>,
+    /// so a rotated blit sandwiched between two upright ones of the same
+    /// texture still costs one draw call, and an untextured line drawn next to
+    /// untextured fills joins their run.</para>
+    /// </summary>
+    internal void DrawConvexPolygon(uint texture, ReadOnlySpan<UiQuadVertex> polygon, Vector4 color)
+    {
+        if (polygon.Length < 3)
+            return;
+        if (CanvasScale != Vector2.One && LinearTwinResolver is { } resolve)
+            texture = resolve(texture);
+
+        SpriteSeg seg = OverlayMode
+            ? NextSpriteSeg(_overlaySpriteSegs, ref _overlaySegUsed, texture)
+            : NextSpriteSeg(_spriteSegs,        ref _segUsed,        texture);
+
+        // Fan from the first corner: (0,1,2), (0,2,3), ... The pipeline takes a
+        // plain triangle list, so the fan is written out as separate triangles.
+        for (int i = 1; i + 1 < polygon.Length; i++)
+        {
+            AppendVertex(seg.Verts, polygon[0], color);
+            AppendVertex(seg.Verts, polygon[i], color);
+            AppendVertex(seg.Verts, polygon[i + 1], color);
+        }
+    }
+
+    private void AppendVertex(List<float> buf, in UiQuadVertex vertex, Vector4 color)
+    {
+        float px = vertex.Position.X;
+        float py = vertex.Position.Y;
+        if (CanvasScale != Vector2.One)
+        {
+            px *= CanvasScale.X;
+            py *= CanvasScale.Y;
+        }
+        buf.Add(px); buf.Add(py);
+        buf.Add(vertex.Uv.X); buf.Add(vertex.Uv.Y);
+        buf.Add(color.X); buf.Add(color.Y); buf.Add(color.Z); buf.Add(color.W);
+    }
+
     internal static uint ResolveExternalTextureSlot(GpuTextureSlot slot) =>
         UiTextureTableHandle.FromSlot(slot);
 
@@ -273,28 +318,65 @@ public sealed class TextRenderer : IDisposable
     /// <summary>Upload + draw accumulated rects + text. font may be null if only DrawRect was used.</summary>
     public void Flush(BitmapFont? font)
     {
-        bool anyNormal  = _segUsed > 0 || _textVerts > 0 || _rectVerts > 0;
-        bool anyOverlay = _overlaySegUsed > 0 || _overlayTextVerts > 0 || _overlayRectVerts > 0;
-        if (!anyNormal && !anyOverlay) return;
+        if (!HasAnythingToDraw) return;
+        FlushInto(
+            new GpuPassDescription
+            {
+                Name = "ui-text",
+                Color = new GpuColorAttachment(
+                    Target: null,
+                    Load: GpuLoadOp.Load,
+                    Store: GpuStoreOp.Store,
+                    ClearColor: default),
+                Depth = null,
+                SampleCount = 1,
+            },
+            "ui-text",
+            font);
+    }
 
+    /// <summary>
+    /// Draws what was collected into an off-screen target instead of the
+    /// frame, clearing the target first. The projection is whatever
+    /// <see cref="Begin"/> was given, so the caller begins with the target's
+    /// size. Unlike <see cref="Flush"/> this always opens the pass, because
+    /// a target that collected nothing still has to be cleared: the caller
+    /// asked for a repaint and expects an empty surface, not the last one.
+    /// </summary>
+    internal void FlushTo(IGpuRenderTarget target, Vector4 clearColor, BitmapFont? font, string passName)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentException.ThrowIfNullOrWhiteSpace(passName);
+        FlushInto(
+            new GpuPassDescription
+            {
+                Name = passName,
+                Color = new GpuColorAttachment(
+                    Target: target,
+                    Load: GpuLoadOp.Clear,
+                    Store: GpuStoreOp.Store,
+                    ClearColor: clearColor),
+                Depth = null,
+                SampleCount = 1,
+            },
+            passName,
+            font);
+    }
+
+    private bool HasAnythingToDraw =>
+        _segUsed > 0 || _textVerts > 0 || _rectVerts > 0
+        || _overlaySegUsed > 0 || _overlayTextVerts > 0 || _overlayRectVerts > 0;
+
+    private void FlushInto(GpuPassDescription pass, string stageName, BitmapFont? font)
+    {
         IGpuFrame frame = _frameSource.CurrentFrame
             ?? throw new InvalidOperationException(
                 "TextRenderer.Flush requires an open IGpuFrame (see GpuDeviceFrameLifetime) — " +
                 "the host must drive IGpuDevice.BeginFrame() before rendering the retained UI.");
 
-        using IGpuPassEncoder encoder = frame.BeginPass(new GpuPassDescription
-        {
-            Name = "ui-text",
-            Color = new GpuColorAttachment(
-                Target: null,
-                Load: GpuLoadOp.Load,
-                Store: GpuStoreOp.Store,
-                ClearColor: default),
-            Depth = null,
-            SampleCount = 1,
-        });
+        using IGpuPassEncoder encoder = frame.BeginPass(pass);
         using IDisposable? stage = AcDream.App.Diagnostics.GpuStageProfiler.Measure(
-            encoder, "ui-text");
+            encoder, stageName);
         encoder.BindPipeline(_pipeline);
 
         DrawLayer(_spriteSegs, _segUsed, _rectBuf, _rectVerts, _textBuf, _textVerts, font, frame, encoder);

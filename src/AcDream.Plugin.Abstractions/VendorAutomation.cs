@@ -62,7 +62,114 @@ public readonly record struct PluginVendorItem(
     string Name,
     PluginObjectClass ObjectClass,
     int UnitPrice,
-    int StackSize);
+    int StackSize)
+{
+    /// <summary>
+    /// How many of this item fit in one stack, so a plugin can work out how
+    /// many pack slots a purchase takes. One means the item does not stack,
+    /// which is also how a listing that does not say is read. Zero on a host
+    /// that does not provide this surface, since it lists nothing at all.
+    /// </summary>
+    public int MaxStackSize { get; init; } = 1;
+
+    /// <summary>
+    /// The item's category, as a bit mask over the same category bits
+    /// <see cref="PluginVendorProfile.DealsInItemTypes"/> is built from, so
+    /// the two can be compared directly. Zero when the listing does not say,
+    /// and zero on a host that does not provide this surface.
+    /// </summary>
+    public uint ItemType { get; init; }
+}
+
+/// <summary>
+/// The terms an open vendor shops on: what it pays for goods, what it deals
+/// in, and what it will not touch. A plugin planning a vendor visit reads
+/// this before it decides what to carry in and what to expect to be paid.
+/// </summary>
+/// <param name="BuyRate">
+/// The share of an item's value this vendor pays when it buys from the
+/// character: 0.75 means it pays three quarters of the item's value. The
+/// client rounds the product DOWN to whole coin, and never down to nothing:
+/// a payout that works out below one coin is paid as one. A trade note is
+/// always paid at its face value whatever this rate says.
+/// </param>
+/// <param name="DealsInItemTypes">
+/// The categories of item this vendor buys, as a bit mask over the same
+/// category bits <see cref="PluginVendorItem.ItemType"/> carries. An item
+/// whose category shares no bit with this mask is one the vendor refuses.
+/// </param>
+/// <param name="MinimumValue">
+/// The least an item may be worth, per unit, for this vendor to buy it;
+/// <see cref="NoValueLimit"/> when it sets no floor. An item worth nothing
+/// at all is refused whatever this says.
+/// </param>
+/// <param name="MaximumValue">
+/// The most an item may be worth, per unit, for this vendor to buy it;
+/// <see cref="NoValueLimit"/> when it sets no ceiling. A trade note is the
+/// exception, as it is on <paramref name="BuyRate"/>: the vendor takes one
+/// however much it is worth, so a plugin that pre-filters its pack by this
+/// ceiling has to let notes through or it drops the most valuable things
+/// the vendor would have bought.
+/// </param>
+/// <param name="DealsInMagicalItems">
+/// True when this vendor deals in items that carry spells.
+/// </param>
+/// <param name="AlternateCurrencyWeenieClassId">
+/// The class id of the item this vendor is paid in instead of coin, or zero
+/// when it trades in ordinary coin.
+/// </param>
+/// <param name="AlternateCurrencyAmount">
+/// How many of that currency the character was holding when the shop listing
+/// arrived, and zero when the vendor trades in coin. It is the figure that
+/// listing carried, not a live count: it does not follow what the character
+/// spends or picks up afterwards.
+/// </param>
+/// <param name="AlternateCurrencyName">
+/// The plural name of that currency, for a line a plugin writes; null when
+/// the vendor trades in ordinary coin.
+/// </param>
+public readonly record struct PluginVendorProfile(
+    float BuyRate,
+    uint DealsInItemTypes,
+    uint MinimumValue,
+    uint MaximumValue,
+    bool DealsInMagicalItems,
+    uint AlternateCurrencyWeenieClassId,
+    uint AlternateCurrencyAmount,
+    string? AlternateCurrencyName)
+{
+    /// <summary>
+    /// The value <see cref="MinimumValue"/> or <see cref="MaximumValue"/>
+    /// takes when the vendor sets no limit in that direction.
+    /// </summary>
+    public const uint NoValueLimit = uint.MaxValue;
+
+    /// <summary>
+    /// The terms reported when no vendor is open, or on a host that does not
+    /// provide the surface. Both value limits read <see cref="NoValueLimit"/>
+    /// rather than zero, because zero is a real limit under this type's own
+    /// convention: a profile of all zeroes reads as a vendor that pays
+    /// nothing and refuses everything worth more than nothing, which is the
+    /// wrong conclusion for a plugin that forgot to check
+    /// <see cref="IVendorAutomation.IsOpen"/> first.
+    /// </summary>
+    public static PluginVendorProfile Unset { get; } = new(
+        BuyRate: 0f,
+        DealsInItemTypes: 0u,
+        MinimumValue: NoValueLimit,
+        MaximumValue: NoValueLimit,
+        DealsInMagicalItems: false,
+        AlternateCurrencyWeenieClassId: 0u,
+        AlternateCurrencyAmount: 0u,
+        AlternateCurrencyName: null);
+
+    /// <summary>
+    /// True when this vendor is paid in something other than coin, so a
+    /// plugin counts <see cref="AlternateCurrencyWeenieClassId"/> rather than
+    /// the character's money.
+    /// </summary>
+    public bool UsesAlternateCurrency => AlternateCurrencyWeenieClassId != 0u;
+}
 
 /// <summary>Which direction a completed vendor transaction went.</summary>
 public enum PluginVendorTransactionKind
@@ -113,6 +220,17 @@ public interface IVendorAutomation
     /// vendor is open.
     /// </summary>
     IReadOnlyList<PluginVendorItem> Items => Array.Empty<PluginVendorItem>();
+
+    /// <summary>
+    /// The open vendor's shop terms: the rate it pays for goods, the
+    /// categories it deals in, its value limits and the currency it takes.
+    /// When no vendor is open, or this host does not provide the surface,
+    /// this is <see cref="PluginVendorProfile.Unset"/> -- which says so in
+    /// its own fields rather than looking like a vendor that refuses
+    /// everything -- but <see cref="IsOpen"/> is still the thing to check
+    /// before planning against it.
+    /// </summary>
+    PluginVendorProfile Profile => PluginVendorProfile.Unset;
 
     /// <summary>
     /// True while a buy or sell this surface committed is still awaiting the

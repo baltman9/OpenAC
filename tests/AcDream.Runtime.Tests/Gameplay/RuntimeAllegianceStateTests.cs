@@ -176,6 +176,42 @@ public sealed class RuntimeAllegianceStateTests
         Assert.Equal(before, state.View.Snapshot.Revision);
     }
 
+    /// <summary>
+    /// The request the client sends on arriving in the world is sent once a
+    /// session. This is where "once" lives, so a second arrival within the
+    /// one session -- however the lifecycle comes to report one -- cannot
+    /// turn into a second request.
+    ///
+    /// Mutation check (2026-09-22): making NoteEnteredWorld answer true every
+    /// time turned this red on the second call; restoring it turned it green.
+    /// </summary>
+    [Fact]
+    public void NoteEnteredWorld_IsTrueOnceASessionAndAgainAfterAReset()
+    {
+        var state = new RuntimeAllegianceState();
+
+        Assert.True(state.NoteEnteredWorld());
+        Assert.False(state.NoteEnteredWorld());
+
+        // A new session is a new allegiance to ask about.
+        state.ResetSession();
+
+        Assert.True(state.NoteEnteredWorld());
+    }
+
+    /// <summary>
+    /// A disposed owner has nothing to ask for, and says so rather than
+    /// throwing at a lifecycle gate that runs on every session tick.
+    /// </summary>
+    [Fact]
+    public void NoteEnteredWorld_AfterDispose_IsFalse()
+    {
+        var state = new RuntimeAllegianceState();
+        state.Dispose();
+
+        Assert.False(state.NoteEnteredWorld());
+    }
+
     [Fact]
     public void ResetSession_AfterDispose_IsANoOpAndDoesNotThrow()
     {

@@ -1,5 +1,4 @@
-using AcDream.Content;
-using DatReaderWriter;
+using AcDream.Core.Content;
 using DatReaderWriter.DBObjs;
 using DatReaderWriter.Enums;
 
@@ -12,7 +11,7 @@ internal static class SealedDungeonCells
     /// True for an indoor cell that sees nothing outside, as a dungeon's cells do; false for
     /// outdoor cells, building interiors that see outside, and cells the data lacks.
     /// </summary>
-    public static bool IsSealedDungeon(IDatReaderWriter dats, object datLock, uint cellId)
+    public static bool IsSealedDungeon(IDatObjectSource dats, object datLock, uint cellId)
     {
         ArgumentNullException.ThrowIfNull(dats);
         ArgumentNullException.ThrowIfNull(datLock);

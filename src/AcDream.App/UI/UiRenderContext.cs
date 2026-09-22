@@ -116,6 +116,10 @@ public sealed class UiRenderContext
 
     internal int ClipStackDepth => _clipStack.Count;
 
+    internal int TransformStackDepth => _stack.Count;
+
+    internal int AlphaStackDepth => _alphaStack.Count;
+
     public bool CurrentClipIsEmpty => _clip is { } c && c.IsEmpty;
 
     public void PushClipUnbounded()
@@ -123,6 +127,16 @@ public sealed class UiRenderContext
         _clipStack.Add(_clip);
         _clip = new UiClipRect(0f, 0f, ScreenSize.X, ScreenSize.Y);
     }
+
+    /// <summary>
+    /// Deepens the clip stack by one without changing what is clipped, the way
+    /// <c>PushTransform(0, 0)</c> and <c>PushAlpha(1)</c> deepen theirs. Only
+    /// use is putting the depth back after a drawing callback popped more than
+    /// it pushed and ate a level belonging to its caller. What it deepens with
+    /// is whatever the over-popping left current -- a wider rectangle, or none
+    /// at all -- so this restores the count, not the cropping.
+    /// </summary>
+    internal void PushClipUnchanged() => _clipStack.Add(_clip);
 
     public void BeginOverlayLayer() => TextRenderer.OverlayMode = true;
     public void EndOverlayLayer() => TextRenderer.OverlayMode = false;
@@ -154,6 +168,120 @@ public sealed class UiRenderContext
         x += _current.X;
         y += _current.Y;
         DrawSpriteAbsolute(texture, x, y, w, h, u0, v0, u1, v1, tint, applyAlpha: true);
+    }
+
+    /// <summary>
+    /// A straight segment from (x0, y0) to (x1, y1), <paramref name="thickness"/>
+    /// pixels wide, centred on the segment -- half the width falls on each
+    /// side of the line through the two points. The ends are square and flush
+    /// with the endpoints; there are no caps and no joins, so a chain of
+    /// segments leaves a notch on the outside of a sharp corner.
+    /// </summary>
+    public void DrawLine(
+        float x0, float y0, float x1, float y1, Vector4 color, float thickness = 1f)
+    {
+        if (thickness <= 0f) return;
+        float dx = x1 - x0;
+        float dy = y1 - y0;
+        float length = MathF.Sqrt(dx * dx + dy * dy);
+        if (!(length > 0f)) return;
+
+        // Step sideways off the segment by half the width. Turning a direction
+        // a quarter turn gives (-dy, dx), so that is the sideways direction.
+        float half = thickness * 0.5f;
+        float nx = -dy / length * half;
+        float ny = dx / length * half;
+
+        float ax = _current.X + x0;
+        float ay = _current.Y + y0;
+        float bx = _current.X + x1;
+        float by = _current.Y + y1;
+
+        Span<UiQuadVertex> quad =
+        [
+            new(ax + nx, ay + ny, 0f, 0f),
+            new(bx + nx, by + ny, 0f, 0f),
+            new(bx - nx, by - ny, 0f, 0f),
+            new(ax - nx, ay - ny, 0f, 0f),
+        ];
+        EmitConvexQuad(UiTextureTableHandle.None, quad, ApplyAlpha(color));
+    }
+
+    /// <summary>
+    /// Blits a sub-image into the rectangle (x, y, w, h) after scaling and
+    /// rotating that rectangle about a pivot.
+    ///
+    /// <para><paramref name="pivot"/> is measured in pixels from the
+    /// rectangle's own top-left corner, so (0, 0) turns the blit about its
+    /// top-left and (w / 2, h / 2) about its middle. Each corner is first
+    /// pushed away from (or pulled towards) the pivot by
+    /// <paramref name="scale"/>, then swung around the pivot by
+    /// <paramref name="rotationRadians"/>, measured clockwise on screen
+    /// because the y axis points down.</para>
+    ///
+    /// <para>A rotation of zero and a scale of one produce exactly the
+    /// rectangle <see cref="DrawSprite"/> would have drawn.</para>
+    /// </summary>
+    public void DrawSpriteTransformed(
+        uint texture,
+        float x, float y, float w, float h,
+        float u0, float v0, float u1, float v1,
+        Vector4 tint,
+        float rotationRadians,
+        Vector2 scale,
+        Vector2 pivot)
+    {
+        if (w == 0f || h == 0f || scale.X == 0f || scale.Y == 0f) return;
+
+        float cos = MathF.Cos(rotationRadians);
+        float sin = MathF.Sin(rotationRadians);
+        float pivotX = _current.X + x + pivot.X;
+        float pivotY = _current.Y + y + pivot.Y;
+        float left = _current.X + x;
+        float top = _current.Y + y;
+
+        Span<UiQuadVertex> quad =
+        [
+            Corner(left, top, u0, v0),
+            Corner(left + w, top, u1, v0),
+            Corner(left + w, top + h, u1, v1),
+            Corner(left, top + h, u0, v1),
+        ];
+        EmitConvexQuad(texture, quad, ApplyAlpha(tint));
+
+        UiQuadVertex Corner(float cx, float cy, float u, float v)
+        {
+            float ox = (cx - pivotX) * scale.X;
+            float oy = (cy - pivotY) * scale.Y;
+            return new UiQuadVertex(
+                pivotX + ox * cos - oy * sin,
+                pivotY + ox * sin + oy * cos,
+                u,
+                v);
+        }
+    }
+
+    /// <summary>
+    /// Trims a four-cornered shape to the clip in force and hands what is left
+    /// to the batcher. The upright path has its own clipper that just moves
+    /// the rectangle's edges; once a shape is turned, cutting it can add
+    /// corners, so it goes through the polygon clipper instead.
+    /// </summary>
+    private void EmitConvexQuad(uint texture, ReadOnlySpan<UiQuadVertex> quad, Vector4 color)
+    {
+        if (_clip is not { } clip)
+        {
+            TextRenderer.DrawConvexPolygon(texture, quad, color);
+            return;
+        }
+        if (clip.IsEmpty) return;
+
+        Span<UiQuadVertex> clipped =
+            stackalloc UiQuadVertex[TransformedQuadClipper.MaxClippedVertices];
+        int count = TransformedQuadClipper.Clip(
+            clip.Left, clip.Top, clip.Right, clip.Bottom, quad, clipped);
+        if (count < 3) return;
+        TextRenderer.DrawConvexPolygon(texture, clipped[..count], color);
     }
 
     private void DrawSpriteAbsolute(

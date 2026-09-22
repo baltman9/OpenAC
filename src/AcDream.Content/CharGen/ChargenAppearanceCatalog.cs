@@ -13,13 +13,21 @@ public sealed class ChargenAppearanceCatalog :
     IChargenPalSetSource, IChargenClothingTableSource, IChargenPaletteColorSource
 {
     private readonly IDatReaderWriter _dats;
+    private readonly object? _readLock;
     private readonly ConcurrentDictionary<uint, ChargenPalSet?> _palSets = new();
     private readonly ConcurrentDictionary<uint, ChargenClothingTable?> _clothingTables = new();
     private readonly ConcurrentDictionary<uint, DatPalette?> _palettes = new();
 
-    public ChargenAppearanceCatalog(IDatReaderWriter dats)
+    /// <param name="dats">The installed data files the catalogue reads.</param>
+    /// <param name="readLock">
+    /// The lock the host's other readers of the same files hold; every read
+    /// this catalogue makes is taken under it. Null when the host reads the
+    /// files from one thread only.
+    /// </param>
+    public ChargenAppearanceCatalog(IDatReaderWriter dats, object? readLock = null)
     {
         _dats = dats ?? throw new ArgumentNullException(nameof(dats));
+        _readLock = readLock;
     }
 
     public ChargenPalSet? TryGetPalSet(uint palSetId) =>
@@ -31,7 +39,7 @@ public sealed class ChargenAppearanceCatalog :
     public bool TryGetColor(uint paletteId, int index, out ChargenSwatchRgb color)
     {
         color = default;
-        DatPalette? palette = _palettes.GetOrAdd(paletteId, id => _dats.Get<DatPalette>(id));
+        DatPalette? palette = _palettes.GetOrAdd(paletteId, Read<DatPalette>);
         if (palette is null || index < 0 || index >= palette.Colors.Count)
             return false;
 
@@ -40,9 +48,17 @@ public sealed class ChargenAppearanceCatalog :
         return true;
     }
 
+    private T? Read<T>(uint id) where T : DatReaderWriter.Lib.IO.IDBObj
+    {
+        if (_readLock is null)
+            return _dats.Get<T>(id);
+        lock (_readLock)
+            return _dats.Get<T>(id);
+    }
+
     private ChargenPalSet? LoadPalSet(uint id)
     {
-        DatPalSet? palSet = _dats.Get<DatPalSet>(id);
+        DatPalSet? palSet = Read<DatPalSet>(id);
         if (palSet is null)
             return null;
 
@@ -54,7 +70,7 @@ public sealed class ChargenAppearanceCatalog :
 
     private ChargenClothingTable? LoadClothingTable(uint id)
     {
-        DatClothingTable? table = _dats.Get<DatClothingTable>(id);
+        DatClothingTable? table = Read<DatClothingTable>(id);
         if (table is null)
             return null;
 

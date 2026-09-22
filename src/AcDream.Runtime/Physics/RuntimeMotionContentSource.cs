@@ -43,23 +43,39 @@ internal interface IRuntimeMotionContentSource
 internal sealed class RuntimeDatMotionContentSource : IRuntimeMotionContentSource
 {
     private readonly IDatReaderWriter _dats;
+    private readonly object? _readLock;
 
+    /// <param name="readLock">
+    /// The lock the host's other readers of the same files hold, when the
+    /// host shares those files across threads; null when the host reads
+    /// them from one thread only.
+    /// </param>
     public RuntimeDatMotionContentSource(
         IDatReaderWriter dats,
-        IAnimationLoader animationLoader)
+        IAnimationLoader animationLoader,
+        object? readLock = null)
     {
         _dats = dats ?? throw new ArgumentNullException(nameof(dats));
         AnimationLoader = animationLoader
             ?? throw new ArgumentNullException(nameof(animationLoader));
+        _readLock = readLock;
     }
 
     public IAnimationLoader AnimationLoader { get; }
 
     public MotionTable? TryGetMotionTable(uint motionTableId) =>
-        motionTableId == 0u ? null : _dats.Get<MotionTable>(motionTableId);
+        motionTableId == 0u ? null : Read<MotionTable>(motionTableId);
 
     public Setup? TryGetSetup(uint setupId) =>
-        setupId == 0u ? null : _dats.Get<Setup>(setupId);
+        setupId == 0u ? null : Read<Setup>(setupId);
+
+    private T? Read<T>(uint id) where T : DatReaderWriter.Lib.IO.IDBObj
+    {
+        if (_readLock is null)
+            return _dats.Get<T>(id);
+        lock (_readLock)
+            return _dats.Get<T>(id);
+    }
 }
 
 /// <summary>

@@ -290,6 +290,66 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
         Assert.Equal(0, runtime.CommunicationOwner.Chat.Count);
     }
 
+    /// <summary>
+    /// The windowed client's plugin host over the shared surface, and the
+    /// bus its session composition hangs off that surface: an interceptor a
+    /// plugin registers through the host is what the bus answers the chat
+    /// router with, so a typed line goes out rewritten.
+    /// </summary>
+    [Fact]
+    public void AnInterceptorRegisteredThroughTheWindowedHostRewritesWhatTheRouterSends()
+    {
+        using var surface = new RuntimeAutomationSurface();
+        IPluginHost host = new AppPluginHost(
+            new TestPluginLogger(), new WorldGameState(), new WorldEvents(),
+            new SelectionState(), NoOpUiRegistry.Instance, surface);
+        using IDisposable alias = host.Automation.Chat.RegisterInputInterceptor(
+            static typed => typed == "go"
+                ? PluginChatInputDecision.Rewrite("hello there")
+                : PluginChatInputDecision.Pass);
+        // The bus exactly as the session composition builds it, with the
+        // surface's decision behind it.
+        var bus = new AcDream.App.Net.LiveSessionCommandSurface(
+            interceptChatInput: surface.InterceptChatInput);
+        using var communication = new RuntimeCommunicationState();
+
+        PluginChatInputDecision decision =
+            ((AcDream.Runtime.Chat.IPluginCommandBus)bus).InterceptChatInput("go");
+        var recording = new RecordingPluginBus(bus);
+        AcDream.Runtime.Chat.SubmitOutcome outcome = AcDream.Runtime.Chat.ChatCommandRouter.Submit(
+            "go",
+            new AcDream.Runtime.Chat.RuntimeChatCommandFeedback(communication),
+            recording,
+            AcDream.Runtime.Chat.ChatChannelKind.Say);
+
+        Assert.Equal(PluginChatInputAction.Rewrite, decision.Action);
+        Assert.Equal("hello there", decision.Text);
+        Assert.Equal(AcDream.Runtime.Chat.SubmitOutcome.Sent, outcome);
+        var said = Assert.IsType<AcDream.Runtime.Chat.SendChatCmd>(
+            Assert.Single(recording.Published));
+        Assert.Equal("hello there", said.Text);
+    }
+
+    /// <summary>
+    /// The windowed bus with what was published kept, so the words that
+    /// would have gone to the world can be read back.
+    /// </summary>
+    private sealed class RecordingPluginBus(
+        AcDream.Runtime.Chat.IPluginCommandBus inner)
+        : AcDream.Runtime.Chat.IPluginCommandBus
+    {
+        internal List<object> Published { get; } = [];
+
+        public void Publish<T>(T command) where T : notnull =>
+            Published.Add(command);
+
+        public bool TryHandlePluginCommand(string commandLine) =>
+            inner.TryHandlePluginCommand(commandLine);
+
+        public PluginChatInputDecision InterceptChatInput(string typed) =>
+            inner.InterceptChatInput(typed);
+    }
+
     [Fact]
     public void UnbindingRemovesTheSurfaceFiltersFromTheSessionsLog()
     {
@@ -869,6 +929,60 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
         Assert.Equal(1.8f, projected.ElectricMod);
     }
 
+    /// <summary>
+    /// The shop terms and the per-listing stack ceiling reach a plugin
+    /// through the host it actually holds, not just through the adapter:
+    /// a plugin planning a vendor visit asks host.Automation.Vendor.
+    /// Mutation: return default from RuntimeVendorAutomation.Profile and this
+    /// goes red on BuyRate.
+    /// </summary>
+    [Fact]
+    public void GraphicalHostProjectsTheVendorShopTermsAndListingStackCeiling()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        runtime.InventoryOwner.Vendor.Apply(
+            0x40001000u,
+            new VendorShopProfile(
+                MerchandiseItemTypes: (uint)ItemType.SpellComponents,
+                MerchandiseMinValue: 25u,
+                MerchandiseMaxValue: 30_000u,
+                DealMagicalItems: true,
+                BuyPrice: 0.75f,
+                SellPrice: 1.15f,
+                AlternateCurrencyWcid: 0u,
+                AlternateCurrencyAmount: 0u,
+                AlternateCurrencyPluralName: string.Empty),
+            [
+                new VendorShopItem(
+                    ItemGuid: 0x50002000u,
+                    StackSize: 100,
+                    WeenieClassId: 1234u,
+                    Name: "Fixture Peas",
+                    ItemType: (uint)ItemType.SpellComponents,
+                    IconId: 0x06000001u,
+                    Value: 5,
+                    DescStackSize: 1,
+                    MaxStackSize: 25),
+            ]);
+        IPluginHost host = new AppPluginHost(
+            new TestPluginLogger(), new WorldGameState(), new WorldEvents(),
+            new SelectionState(), NoOpUiRegistry.Instance, surface);
+
+        PluginVendorProfile profile = host.Automation.Vendor.Profile;
+        Assert.Equal(0.75f, profile.BuyRate);
+        Assert.Equal((uint)ItemType.SpellComponents, profile.DealsInItemTypes);
+        Assert.Equal(25u, profile.MinimumValue);
+        Assert.Equal(30_000u, profile.MaximumValue);
+        Assert.True(profile.DealsInMagicalItems);
+        Assert.False(profile.UsesAlternateCurrency);
+
+        PluginVendorItem item = Assert.Single(host.Automation.Vendor.Items);
+        Assert.Equal(25, item.MaxStackSize);
+        Assert.Equal((uint)ItemType.SpellComponents, item.ItemType);
+    }
+
     [Fact]
     public void LogoutIsUnavailableWithoutAnInWorldSessionAndNeverCallsTheRoute()
     {
@@ -991,8 +1105,17 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
         public IPEndPoint ResolveEndpoint(string host, int port) =>
             new(IPAddress.Loopback, port);
 
-        public WorldSession CreateSession(IPEndPoint endpoint) =>
-            new(endpoint, new NoOpTransport());
+        public WorldSession CreateSession(IPEndPoint endpoint)
+        {
+            var session = new WorldSession(endpoint, new NoOpTransport());
+            // This connection is never negotiated, so a reliable send has no
+            // cipher to go out under. A client that has arrived in the world
+            // does send -- it asks the server about the allegiance -- so the
+            // send is taken here, the way every other test over a connection
+            // with no wire under it takes one.
+            session.GameMessageCapture = (_, _) => { };
+            return session;
+        }
 
         public void Connect(WorldSession session, string user, string password) { }
 

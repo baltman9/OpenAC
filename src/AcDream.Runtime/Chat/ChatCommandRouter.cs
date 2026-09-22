@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using AcDream.Core.Chat;
+using AcDream.Plugin.Abstractions;
 
 namespace AcDream.Runtime.Chat;
 
@@ -8,6 +9,30 @@ public enum SubmitOutcome { Empty, ClientHandled, UnknownCommand, Sent, Dropped 
 
 public static class ChatCommandRouter
 {
+    /// <summary>
+    /// How many times a line may be rewritten by plugin interceptors before
+    /// the router stops asking and sends the last text as it stands.
+    /// </summary>
+    public const int MaximumRewritePasses = 8;
+
+    /// <summary>
+    /// How deep a line may be submitted from inside the handling of another.
+    /// A plugin interceptor or verb handler that submits chat re-enters the
+    /// router on the same thread with a fresh rewrite count, so the rewrite
+    /// bound does not cover it; a handler that always submits would recurse
+    /// without end. Past this depth a submission is refused with a notice.
+    /// </summary>
+    public const int MaximumReentrancyDepth = 4;
+
+    /// <summary>
+    /// How many submissions are in progress on this thread. Chat is handled
+    /// on the thread that typed it, and a handler that submits again does so
+    /// on the same thread before the first submission returns, so the depth
+    /// is the thread's.
+    /// </summary>
+    [ThreadStatic]
+    private static int t_depth;
+
     public static SubmitOutcome Submit(
         string? raw,
         IChatCommandFeedback feedback,
@@ -22,11 +47,90 @@ public static class ChatCommandRouter
         if (trimmed.Length == 0)
             return SubmitOutcome.Empty;
 
-        if (trimmed[0] is ':' or ';')
+        if (t_depth >= MaximumReentrancyDepth)
         {
-            trimmed = "@emote " + trimmed[1..];
+            string notice =
+                $"A plugin submitted chat from inside the handling of chat "
+                + $"{t_depth} deep; the line was dropped: {trimmed}";
+            Serilog.Log.Warning("{Notice}", notice);
+            feedback.ShowSystemMessage(notice);
+            return SubmitOutcome.Dropped;
         }
 
+        t_depth++;
+        try
+        {
+            return SubmitEntered(
+                trimmed, feedback, bus, defaultChannel, defaultTellTarget, defaultTellTargetGuid);
+        }
+        finally
+        {
+            t_depth--;
+        }
+    }
+
+    private static SubmitOutcome SubmitEntered(
+        string trimmed,
+        IChatCommandFeedback feedback,
+        ICommandBus bus,
+        ChatChannelKind defaultChannel,
+        string? defaultTellTarget,
+        uint defaultTellTargetGuid)
+    {
+        // Plugin interceptors may rewrite the line, and a rewrite re-enters
+        // here so it is treated exactly as if it had been typed: the client's
+        // own commands are consulted first and a rewrite can become a plugin
+        // verb or a channel line. The passes are bounded so a rewrite that
+        // always produces something new cannot loop; past the bound the last
+        // text is sent as it stands.
+        int rewrites = 0;
+        while (true)
+        {
+            string typed = trimmed;
+            if (trimmed[0] is ':' or ';')
+            {
+                trimmed = "@emote " + trimmed[1..];
+            }
+
+            if (TryHandleClientCommand(trimmed, feedback, bus, out SubmitOutcome handled))
+                return handled;
+
+            if (bus is not IPluginCommandBus interceptors
+                || rewrites >= MaximumRewritePasses)
+            {
+                break;
+            }
+
+            PluginChatInputDecision decision = interceptors.InterceptChatInput(typed);
+            if (decision.Action == PluginChatInputAction.Pass)
+                break;
+            // A suppressed line, or one rewritten to nothing, is sent
+            // nowhere and answered with nothing: the plugin that took it is
+            // the one that says something to the player, if anyone does.
+            string? rewritten = decision.Action == PluginChatInputAction.Rewrite
+                ? decision.Text?.Trim()
+                : null;
+            if (string.IsNullOrEmpty(rewritten))
+                return SubmitOutcome.ClientHandled;
+            trimmed = rewritten;
+            rewrites++;
+        }
+
+        return DispatchBeyondClientCommands(
+            trimmed, feedback, bus, defaultChannel, defaultTellTarget, defaultTellTargetGuid);
+    }
+
+    /// <summary>
+    /// The client's own command catalogue and its help, which are consulted
+    /// before anything a plugin gets to see.
+    /// </summary>
+    private static bool TryHandleClientCommand(
+        string trimmed,
+        IChatCommandFeedback feedback,
+        ICommandBus bus,
+        out SubmitOutcome outcome)
+    {
+        outcome = SubmitOutcome.ClientHandled;
         if (RetailClientCommandCatalog.TryMatch(trimmed, out var clientCommand))
         {
             if (!clientCommand.HasValidArguments)
@@ -45,17 +149,29 @@ public static class ChatCommandRouter
                     else
                         feedback.ShowSystemMessage(fallbackText);
                 }
-                return SubmitOutcome.ClientHandled;
+                return true;
             }
 
             bus.Publish(new ExecuteClientCommandCmd(
                 clientCommand.Command, clientCommand.Arguments));
-            return SubmitOutcome.ClientHandled;
+            return true;
         }
 
-        if (TryHandleLocalPresentationCommand(trimmed, feedback))
-            return SubmitOutcome.ClientHandled;
+        return TryHandleLocalPresentationCommand(trimmed, feedback);
+    }
 
+    /// <summary>
+    /// Everything after the client's own commands and the plugin
+    /// interceptors: plugin verbs, then the channel and tell dispatch.
+    /// </summary>
+    private static SubmitOutcome DispatchBeyondClientCommands(
+        string trimmed,
+        IChatCommandFeedback feedback,
+        ICommandBus bus,
+        ChatChannelKind defaultChannel,
+        string? defaultTellTarget,
+        uint defaultTellTargetGuid)
+    {
         if (bus is IPluginCommandBus pluginCommands
             && pluginCommands.TryHandlePluginCommand(trimmed))
         {

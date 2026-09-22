@@ -97,6 +97,8 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         public void WriteText(string key, string content) =>
             inner.WriteText(ScopedKey(key), content);
         public bool Delete(string key) => inner.Delete(ScopedKey(key));
+        public bool EnsureDirectory(string prefix) =>
+            inner.EnsureDirectory(ScopedKey(prefix.TrimEnd('/')));
 
         private static string ValidateKey(string key)
         {
@@ -145,6 +147,8 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         private ScopedPluginChat? _chatWrapper;
         private INavigationAutomation? _navigationSource;
         private INavigationAutomation? _navigationScope;
+        private IWorldLabelAutomation? _labelSource;
+        private IWorldLabelAutomation? _labelScope;
         private bool _disposed;
 
         private IAutomationSurface Inner => host.Automation;
@@ -186,6 +190,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         public IItemAutomation Items => Inner.Items;
         public ILootAutomation Loot => Inner.Loot;
         public IFellowshipAutomation Fellowship => Inner.Fellowship;
+        public IAllegianceAutomation Allegiance => Inner.Allegiance;
         public IEnchantmentAutomation Enchantments => Inner.Enchantments;
         // A host whose navigation can tell plugins apart hands this plugin its own view,
         // so its walks and pauses are its own and go with it when it is disabled.
@@ -212,11 +217,37 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             }
         }
         public IWorldObjectAutomation Objects => Inner.Objects;
+        public IRecallAutomation Recalls => Inner.Recalls;
         public IWorldTimeAutomation WorldTime => Inner.WorldTime;
         public ILoginAutomation Login => Inner.Login;
         public INetworkAutomation Network => Inner.Network;
         public IRecoveryAutomation Recovery => Inner.Recovery;
         public IProjectileAutomation Projectiles => Inner.Projectiles;
+        // The same shape as navigation: a host whose labels can tell plugins
+        // apart hands this plugin its own set, so the cap is per plugin and
+        // the set goes with the plugin when it is disabled.
+        public IWorldLabelAutomation Labels
+        {
+            get
+            {
+                IWorldLabelAutomation source = Inner.Labels;
+                lock (_gate)
+                {
+                    if (_disposed)
+                        return NoOpAutomationSurface.Instance.Labels;
+                    if (!ReferenceEquals(_labelSource, source))
+                    {
+                        (_labelSource as IScopedWorldLabelSource)?.Release(pluginId);
+                        _labelSource = source;
+                        _labelScope = source is IScopedWorldLabelSource scoped
+                            ? scoped.ScopeTo(pluginId)
+                            : source;
+                    }
+                    return _labelScope!;
+                }
+            }
+        }
+        public IDungeonMapAutomation DungeonMap => Inner.DungeonMap;
         public ISelectionAutomation Selection => Inner.Selection;
         public ITradeAutomation Trade => Inner.Trade;
         public IVendorAutomation Vendor => Inner.Vendor;
@@ -224,6 +255,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         public void Dispose()
         {
             INavigationAutomation? navigation;
+            IWorldLabelAutomation? labels;
             lock (_gate)
             {
                 _disposed = true;
@@ -231,9 +263,14 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
                 navigation = _navigationSource;
                 _navigationSource = null;
                 _navigationScope = null;
+                labels = _labelSource;
+                _labelSource = null;
+                _labelScope = null;
             }
-            // The plugin is going: its walk stops and its pauses are dropped.
+            // The plugin is going: its walk stops, its pauses are dropped,
+            // and its labels come down.
             (navigation as IScopedNavigationSource)?.Release(pluginId);
+            (labels as IScopedWorldLabelSource)?.Release(pluginId);
         }
     }
 
@@ -242,6 +279,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     {
         private readonly object _gate = new();
         private readonly List<IDisposable> _filters = [];
+        private readonly List<IDisposable> _interceptors = [];
         private readonly List<Action<PluginChatLinkClicked>> _linkClickedSubscriptions = [];
         private readonly List<Action<PluginChatMessage>> _subscriptions = [];
         private bool _disposed;
@@ -274,6 +312,48 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             return inner.Submit(text);
+        }
+
+        public IDisposable RegisterInputInterceptor(
+            Func<string, PluginChatInputDecision> intercept)
+        {
+            ArgumentNullException.ThrowIfNull(intercept);
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            // The cap is checked before the host is touched, so a refused
+            // registration leaves nothing behind on the host to revoke.
+            lock (_gate)
+            {
+                if (_interceptors.Count >= IPluginChat.MaximumInputInterceptors)
+                {
+                    throw new InvalidOperationException(
+                        $"This plugin already has {IPluginChat.MaximumInputInterceptors} chat input interceptors installed.");
+                }
+            }
+            IDisposable registration = inner.RegisterInputInterceptor(intercept);
+            lock (_gate)
+            {
+                if (!_disposed
+                    && _interceptors.Count < IPluginChat.MaximumInputInterceptors)
+                {
+                    _interceptors.Add(registration);
+                    return new IndividualInterceptor(this, registration);
+                }
+            }
+            registration.Dispose();
+            if (_disposed)
+                throw new ObjectDisposedException(nameof(ScopedPluginChat));
+            throw new InvalidOperationException(
+                $"This plugin already has {IPluginChat.MaximumInputInterceptors} chat input interceptors installed.");
+        }
+
+        private void RemoveInterceptor(IDisposable registration)
+        {
+            lock (_gate)
+            {
+                if (!_interceptors.Remove(registration))
+                    return;
+            }
+            registration.Dispose();
         }
 
         public event Action<PluginChatLinkClicked> LinkClicked
@@ -408,6 +488,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         public void Dispose()
         {
             IDisposable[] filters;
+            IDisposable[] interceptors;
             Action<PluginChatLinkClicked>[] linkClickedSubscriptions;
             Action<PluginChatMessage>[] subscriptions;
             lock (_gate)
@@ -417,6 +498,8 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
                 _disposed = true;
                 filters = _filters.ToArray();
                 _filters.Clear();
+                interceptors = _interceptors.ToArray();
+                _interceptors.Clear();
                 linkClickedSubscriptions = _linkClickedSubscriptions.ToArray();
                 _linkClickedSubscriptions.Clear();
                 subscriptions = _subscriptions.ToArray();
@@ -426,6 +509,12 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             for (int index = filters.Length - 1; index >= 0; index--)
             {
                 try { filters[index].Dispose(); }
+                catch { }
+            }
+
+            for (int index = interceptors.Length - 1; index >= 0; index--)
+            {
+                try { interceptors[index].Dispose(); }
                 catch { }
             }
 
@@ -450,6 +539,16 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
 
             public void Dispose() => Interlocked.Exchange(ref _owner, null)?
                 .RemoveFilter(registration);
+        }
+
+        private sealed class IndividualInterceptor(
+            ScopedPluginChat owner,
+            IDisposable registration) : IDisposable
+        {
+            private ScopedPluginChat? _owner = owner;
+
+            public void Dispose() => Interlocked.Exchange(ref _owner, null)?
+                .RemoveInterceptor(registration);
         }
     }
 
@@ -1500,6 +1599,40 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         public bool IsClientWindowVisible(PluginClientWindow window) =>
             _inner.IsClientWindowVisible(window);
 
+        // The plugin's image surface is asked for once and kept; when the
+        // host's surface can be disposed it is tracked like any other
+        // registration, so the plugin's images go with the plugin.
+        private IPluginImages? _images;
+
+        public IPluginImages Images
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    if (_disposed)
+                        throw new ObjectDisposedException(nameof(ScopedUiRegistry));
+                    if (_images is null)
+                    {
+                        _images = _inner.ImagesFor(_owner);
+                        if (_images is IDisposable disposable)
+                            _registrations.Add(disposable);
+                    }
+                    return _images;
+                }
+            }
+        }
+
+        public IPluginCanvas RegisterCanvas(
+            PluginCanvasDescriptor descriptor,
+            Action<IPluginPainter> paint)
+        {
+            ArgumentNullException.ThrowIfNull(descriptor);
+            ArgumentNullException.ThrowIfNull(paint);
+            IPluginCanvas canvas = _inner.RegisterCanvas(_owner, descriptor, paint);
+            return new IndividualCanvas(canvas, TrackRegistration(canvas));
+        }
+
         private void AddRegistration(IDisposable registration)
         {
             lock (_gate)
@@ -1567,6 +1700,54 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
 
             public void Dispose() => Interlocked.Exchange(ref _owner, null)?
                 .RemoveRegistration(registration);
+        }
+
+        /// <summary>
+        /// The host's canvas as the plugin holds it: every call forwards, and
+        /// disposing it goes through the tracked registration so the plugin's
+        /// list and the host agree on what is still mounted.
+        /// </summary>
+        private sealed class IndividualCanvas(
+            IPluginCanvas inner,
+            IDisposable registration) : IPluginCanvas
+        {
+            public string CanvasId => inner.CanvasId;
+            public int Width => inner.Width;
+            public int Height => inner.Height;
+            public bool IsAvailable => inner.IsAvailable;
+
+            public bool IsVisible
+            {
+                get => inner.IsVisible;
+                set => inner.IsVisible = value;
+            }
+
+            public PluginCanvasAnchor Anchor
+            {
+                get => inner.Anchor;
+                set => inner.Anchor = value;
+            }
+
+            public PluginPoint Offset
+            {
+                get => inner.Offset;
+                set => inner.Offset = value;
+            }
+
+            public Action<PluginPointerEvent>? PointerHandler
+            {
+                get => inner.PointerHandler;
+                set => inner.PointerHandler = value;
+            }
+
+            public void Invalidate() => inner.Invalidate();
+
+            public void ReleasePointer() => inner.ReleasePointer();
+
+            public void Dispose()
+            {
+                registration.Dispose();
+            }
         }
     }
 }

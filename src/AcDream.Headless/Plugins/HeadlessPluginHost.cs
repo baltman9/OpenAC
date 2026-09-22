@@ -55,6 +55,7 @@ internal sealed class HeadlessPluginHost
         Func<uint, bool, bool>? answerConfirmation = null,
         Func<bool>? requestGracefulStop = null,
         AcDream.Content.IDatReaderWriter? content = null,
+        object? contentLock = null,
         IGameRuntimeCommands? sessionCommands = null,
         NavigationWalkController? navigationWalk = null,
         Action<string, Exception>? pluginCommandFailed = null,
@@ -99,6 +100,7 @@ internal sealed class HeadlessPluginHost
                 Runtime = runtime,
                 Warn = Log.Warn,
                 Content = content,
+                ContentLock = contentLock,
                 MagicCatalog = magicCatalog,
                 SubmitChatText = submitChatText,
                 SessionCommands = sessionCommands,
@@ -145,6 +147,13 @@ internal sealed class HeadlessPluginHost
     /// </summary>
     internal bool TryHandlePluginCommand(string commandLine) =>
         _automation.TryHandlePluginCommand(commandLine);
+
+    /// <summary>
+    /// What the plugins on the one surface make of a typed line, so the chat
+    /// route can ask before offering it to verbs or sending it.
+    /// </summary>
+    internal PluginChatInputDecision InterceptChatInput(string typed) =>
+        _automation.InterceptChatInput(typed);
 
     /// <summary>
     /// Whether a verb is already spoken for on that one registry. A front end

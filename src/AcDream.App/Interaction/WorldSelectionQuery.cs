@@ -86,11 +86,43 @@ internal interface IWorldSelectionQuery
     Vector3? GetCombatCameraTargetPoint(uint serverGuid);
 }
 
+/// <summary>Which rung of the height chain answered for a label anchor.</summary>
+public enum WorldLabelAnchorSource
+{
+    /// <summary>The body the physics owner walks the object as, scale applied.</summary>
+    PhysicsCylinder,
+
+    /// <summary>The top of the authored selection sphere, scale applied.</summary>
+    SelectionSphere,
+
+    /// <summary>The top of the model's own local bounds, scale applied.</summary>
+    ModelBounds,
+
+    /// <summary>Nothing was known: a fixed 1.1 metres, about a standing human.</summary>
+    Fallback,
+}
+
+/// <summary>
+/// Where a text label for a world object hangs from: the object's base in
+/// world metres and how tall the object is, so the label can sit just above
+/// its head rather than in the middle of it.
+/// </summary>
+public readonly record struct WorldLabelAnchor(
+    Vector3 BasePosition,
+    float Height,
+    WorldLabelAnchorSource Source);
+
 internal interface IRetainedUiSelectionQuery
 {
     bool ShouldShowHealth(uint serverGuid);
     VividTargetInfo? ResolveVividTargetInfo(uint serverGuid);
     bool IsWithinExternalContainerUseRange(uint serverGuid);
+
+    /// <summary>
+    /// The base and height of the object with this server id, for hanging a
+    /// label above it. False when the client holds nothing live by that id.
+    /// </summary>
+    bool TryResolveWorldLabelAnchor(uint serverGuid, out WorldLabelAnchor anchor);
 }
 
 internal interface ISelectionViewPlaneSource
@@ -121,6 +153,13 @@ internal sealed class WorldSelectionQuery
     private readonly Func<CombatMode> _combatMode;
     private readonly Func<uint, bool> _isFellow;
     private readonly Func<RetailSelectionDirection, uint?, uint?> _findPlayer;
+    private readonly Func<uint, float?> _modelHeight;
+
+    /// <summary>
+    /// What a label is hung at when neither the physics body, the selection
+    /// sphere nor the model bounds are known: about a standing human.
+    /// </summary>
+    internal const float FallbackLabelHeight = 1.1f;
 
     public WorldSelectionQuery(
         LiveEntityRuntime liveEntities,
@@ -136,7 +175,8 @@ internal sealed class WorldSelectionQuery
         Func<uint, bool>? hasOpenedCorpse = null,
         Func<CombatMode>? combatMode = null,
         Func<uint, bool>? isFellow = null,
-        Func<RetailSelectionDirection, uint?, uint?>? findPlayer = null)
+        Func<RetailSelectionDirection, uint?, uint?>? findPlayer = null,
+        Func<uint, float?>? modelHeight = null)
     {
         _liveEntities = liveEntities ?? throw new ArgumentNullException(nameof(liveEntities));
         _objects = objects ?? throw new ArgumentNullException(nameof(objects));
@@ -152,6 +192,7 @@ internal sealed class WorldSelectionQuery
         _combatMode = combatMode ?? (() => CombatMode.NonCombat);
         _isFellow = isFellow ?? (_ => false);
         _findPlayer = findPlayer ?? ((_, _) => null);
+        _modelHeight = modelHeight ?? (_ => null);
     }
 
     public uint PlayerGuid => _playerGuid();
@@ -533,6 +574,75 @@ internal sealed class WorldSelectionQuery
             ? Vector3.Transform(localCenter, childRoot)
             : entity.Position + Vector3.Transform(localCenter, entity.Rotation);
         worldRadius = sphere.Radius * scale;
+        return true;
+    }
+
+    /// <summary>
+    /// The height chain for a label: the physics body first, because it is
+    /// what the object is walked and hit as and its owner has already applied
+    /// the server's scale; then the authored selection sphere's top; then the
+    /// top of the model's own local bounds; then a fixed 1.1 metres. The
+    /// inflated world box is deliberately not a rung -- it is padded by a
+    /// fixed margin for streaming and would float every label a storey up.
+    /// </summary>
+    public bool TryResolveWorldLabelAnchor(uint serverGuid, out WorldLabelAnchor anchor)
+    {
+        anchor = default;
+        if (!_liveEntities.TryGetWorldEntity(serverGuid, out WorldEntity entity))
+            return false;
+
+        bool attached =
+            _liveEntities.TryGetAttachedProjectedRecord(serverGuid, out _);
+        Vector3 basePosition = entity.Position;
+        if (attached)
+        {
+            if (_childRootPose(entity.Id) is not { } published)
+                return false;
+            basePosition = published.Translation;
+        }
+
+        (_, float bodyHeight) = _setupCylinder(serverGuid, entity);
+        if (bodyHeight > 0f && float.IsFinite(bodyHeight))
+        {
+            anchor = new WorldLabelAnchor(
+                basePosition, bodyHeight, WorldLabelAnchorSource.PhysicsCylinder);
+            return true;
+        }
+
+        bool hasSpawn = _liveEntities.TryGetSnapshot(serverGuid, out var spawn);
+        float scale = attached
+            ? (hasSpawn && spawn.ObjScale is { } childScale && childScale > 0f ? childScale : 1f)
+            : (entity.Scale > 0f ? entity.Scale : 1f);
+        uint? setupId = hasSpawn ? spawn.SetupTableId : null;
+
+        if (setupId is { } sphereSetup
+            && _selectionSphere(sphereSetup) is { } sphere
+            && sphere.Radius > 1e-4f)
+        {
+            // The sphere's centre is authored in the model's own frame, so it
+            // turns with the object; its top does not depend on the turn.
+            Vector3 localCenter = Vector3.Transform(sphere.Origin * scale, entity.Rotation);
+            float top = localCenter.Z + sphere.Radius * scale;
+            if (top > 0f && float.IsFinite(top))
+            {
+                anchor = new WorldLabelAnchor(
+                    basePosition, top, WorldLabelAnchorSource.SelectionSphere);
+                return true;
+            }
+        }
+
+        if (setupId is { } boundsSetup
+            && _modelHeight(boundsSetup) is { } modelTop
+            && modelTop > 0f
+            && float.IsFinite(modelTop))
+        {
+            anchor = new WorldLabelAnchor(
+                basePosition, modelTop * scale, WorldLabelAnchorSource.ModelBounds);
+            return true;
+        }
+
+        anchor = new WorldLabelAnchor(
+            basePosition, FallbackLabelHeight, WorldLabelAnchorSource.Fallback);
         return true;
     }
 

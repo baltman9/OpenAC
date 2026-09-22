@@ -13,6 +13,7 @@ public sealed class MarkupResizableAnchorTests
         public IReadOnlyList<string> Items => ["A", "B", "C"];
         public int Selected { get; set; } = -1;
         public Action<int> OnSelect => value => Selected = value;
+        public bool Flag => true;
     }
 
     // ── resizable / minw / minh parse tests ─────────────────────────────────
@@ -79,6 +80,10 @@ public sealed class MarkupResizableAnchorTests
     [InlineData("label")]
     [InlineData("button")]
     [InlineData("icon")]
+    [InlineData("meter")]
+    [InlineData("tab")]
+    [InlineData("toggle")]
+    [InlineData("slider")]
     public void Build_ElementWithoutAnchorAttribute_DefaultsToLeftTop(string tag)
     {
         string xml = WrapSingle(tag, anchor: null);
@@ -96,6 +101,10 @@ public sealed class MarkupResizableAnchorTests
     [InlineData("label")]
     [InlineData("button")]
     [InlineData("icon")]
+    [InlineData("meter")]
+    [InlineData("tab")]
+    [InlineData("toggle")]
+    [InlineData("slider")]
     public void Build_ElementAnchorLeftRight_SetsBothHorizontalEdges(string tag)
     {
         string xml = WrapSingle(tag, anchor: "left right");
@@ -123,6 +132,120 @@ public sealed class MarkupResizableAnchorTests
         var panel = MarkupDocument.Build(xml, new ListBinding(), _ => (1u, 32, 32));
 
         Assert.Equal(AnchorEdges.Bottom | AnchorEdges.Right, panel.Children[0].Anchors);
+    }
+
+    [Theory]
+    [InlineData("group")]
+    [InlineData("list")]
+    [InlineData("menu")]
+    [InlineData("field")]
+    [InlineData("label")]
+    [InlineData("button")]
+    [InlineData("icon")]
+    [InlineData("meter")]
+    [InlineData("tab")]
+    [InlineData("toggle")]
+    [InlineData("slider")]
+    public void Build_ElementAnchorCommaSeparated_ReadsLikeTheSpacedForm(string tag)
+    {
+        string xml = WrapSingle(tag, anchor: "right,bottom");
+        var panel = MarkupDocument.Build(xml, new ListBinding(), _ => (1u, 32, 32));
+
+        Assert.Equal(AnchorEdges.Right | AnchorEdges.Bottom, panel.Children[0].Anchors);
+    }
+
+    [Theory]
+    [InlineData("right,bottom")]
+    [InlineData("right, bottom")]
+    [InlineData(" RIGHT ,Bottom ")]
+    [InlineData("bottom right")]
+    public void Build_AnchorSeparatorsAndCasingAreInterchangeable(string anchor)
+    {
+        string xml = WrapSingle("button", anchor);
+        var panel = MarkupDocument.Build(xml, new ListBinding(), _ => (1u, 32, 32));
+
+        Assert.Equal(AnchorEdges.Right | AnchorEdges.Bottom, panel.Children[0].Anchors);
+    }
+
+    [Fact]
+    public void Build_AnchorAllFourCommaSeparated_SetsEveryEdge()
+    {
+        string xml = WrapSingle("group", anchor: "left,top,right,bottom");
+        var panel = MarkupDocument.Build(xml, new ListBinding(), _ => (1u, 32, 32));
+
+        Assert.Equal(
+            AnchorEdges.Left | AnchorEdges.Top | AnchorEdges.Right | AnchorEdges.Bottom,
+            panel.Children[0].Anchors);
+    }
+
+    [Fact]
+    public void Build_AnchorOfSeparatorsOnly_ThrowsNamingTheElementAndTheValue()
+    {
+        const string xml =
+            "<panel x=\"0\" y=\"0\" w=\"100\" h=\"60\">" +
+            "<button name=\"Fire2\" x=\"0\" y=\"0\" w=\"40\" h=\"20\" text=\"Go\" anchor=\",,\"/>" +
+            "</panel>";
+
+        FormatException ex = Assert.Throws<FormatException>(
+            () => MarkupDocument.Build(xml, new object(), _ => (1u, 32, 32)));
+
+        Assert.Contains("Fire2", ex.Message);
+        Assert.Contains(",,", ex.Message);
+    }
+
+    /// <summary>
+    /// An anchor attribute that is there and says nothing -- empty, or
+    /// nothing but spaces -- is the same mistake as anchor=",": the author
+    /// meant to anchor the element and did not. Left as the default corner it
+    /// would look as though the attribute had worked, and the element would
+    /// sit still through every resize with nothing to explain it.
+    /// </summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("\t")]
+    public void Build_AnchorPresentButEmpty_ThrowsNamingTheElement(string anchor)
+    {
+        string xml =
+            "<panel x=\"0\" y=\"0\" w=\"100\" h=\"60\">" +
+            $"<button name=\"Fire4\" x=\"0\" y=\"0\" w=\"40\" h=\"20\" text=\"Go\" anchor=\"{anchor}\"/>" +
+            "</panel>";
+
+        FormatException ex = Assert.Throws<FormatException>(
+            () => MarkupDocument.Build(xml, new object(), _ => (1u, 32, 32)));
+
+        Assert.Contains("Fire4", ex.Message);
+        Assert.Contains("names no edge", ex.Message);
+    }
+
+    /// <summary>
+    /// No attribute at all is not a mistake: it is the default corner, which
+    /// is what nearly every element in a layout wants.
+    /// </summary>
+    [Fact]
+    public void Build_NoAnchorAttribute_IsTheDefaultCorner()
+    {
+        string xml = WrapSingle("group", anchor: null);
+        var panel = MarkupDocument.Build(xml, new ListBinding(), _ => (1u, 32, 32));
+
+        Assert.Equal(
+            AnchorEdges.Left | AnchorEdges.Top,
+            panel.Children[0].Anchors);
+    }
+
+    [Fact]
+    public void Build_UnknownCommaSeparatedAnchorToken_ThrowsNamingTheElementAndTheValue()
+    {
+        const string xml =
+            "<panel x=\"0\" y=\"0\" w=\"100\" h=\"60\">" +
+            "<button name=\"Fire3\" x=\"0\" y=\"0\" w=\"40\" h=\"20\" text=\"Go\" anchor=\"left,frotz\"/>" +
+            "</panel>";
+
+        FormatException ex = Assert.Throws<FormatException>(
+            () => MarkupDocument.Build(xml, new object(), _ => (1u, 32, 32)));
+
+        Assert.Contains("Fire3", ex.Message);
+        Assert.Contains("frotz", ex.Message);
     }
 
     [Fact]
@@ -153,6 +276,12 @@ public sealed class MarkupResizableAnchorTests
             "label" => $"<label x=\"10\" y=\"10\" text=\"Hi\"{anchorAttr}/>",
             "button" => $"<button x=\"10\" y=\"10\" w=\"40\" h=\"20\" text=\"Go\"{anchorAttr}/>",
             "icon" => $"<icon x=\"10\" y=\"10\" w=\"32\" h=\"32\" did=\"0x06000001\"{anchorAttr}/>",
+            "meter" => $"<meter x=\"10\" y=\"10\" w=\"100\" h=\"12\" fill=\"0.5\"{anchorAttr}/>",
+            "tab" => $"<tab x=\"10\" y=\"10\" w=\"60\" h=\"20\" text=\"T\" " +
+                     $"selected=\"{{Flag}}\"{anchorAttr}/>",
+            "toggle" => $"<toggle x=\"10\" y=\"10\" w=\"60\" h=\"20\" text=\"T\" " +
+                        $"checked=\"{{Flag}}\"{anchorAttr}/>",
+            "slider" => $"<slider x=\"10\" y=\"10\" w=\"100\" h=\"14\"{anchorAttr}/>",
             _ => throw new ArgumentOutOfRangeException(nameof(tag)),
         };
         return "<panel x=\"0\" y=\"0\" w=\"200\" h=\"150\">" + inner + "</panel>";
@@ -250,6 +379,126 @@ public sealed class MarkupResizableAnchorTests
         // The nested list follows the GROUP's new width (5px margin to each
         // side of the group, not the panel).
         Assert.Equal(470f, list.Width);   // 480 - 5 - 5
+    }
+
+    [Fact]
+    public void ResizingPanel_CommaAnchoredChildren_MoveStretchAndStayPut()
+    {
+        // One panel, three children, one drag: the comma form is what an
+        // author actually writes, and each child's outcome is a separate pin.
+        const string xml = """
+            <panel x="0" y="0" w="300" h="200" resizable="true" minw="200" minh="150">
+              <button anchor="right,bottom" x="250" y="170" w="40" h="20" text="OK"/>
+              <field anchor="left,right" x="10" y="40" w="280" h="20"/>
+              <label x="10" y="10" text="Title"/>
+            </panel>
+            """;
+        var panel = MarkupDocument.Build(xml, new ListBinding(), _ => (1u, 32, 32));
+        var corner = Assert.IsType<UiSimpleButton>(panel.Children[0]);
+        var field = Assert.IsType<UiField>(panel.Children[1]);
+        var title = Assert.IsType<UiLabel>(panel.Children[2]);
+
+        UiRenderContext ctx = MakeContext(600f, 400f);
+        panel.DrawSelfAndChildren(ctx);
+
+        panel.Width = 500f;
+        panel.Height = 300f;
+        panel.DrawSelfAndChildren(ctx);
+
+        // right,bottom: fixed size, follows both far edges (10px margins).
+        Assert.Equal(450f, corner.Left);
+        Assert.Equal(270f, corner.Top);
+        Assert.Equal(40f, corner.Width);
+        Assert.Equal(20f, corner.Height);
+
+        // left,right: stretches horizontally, keeps its authored top.
+        Assert.Equal(10f, field.Left);
+        Assert.Equal(480f, field.Width);
+        Assert.Equal(40f, field.Top);
+        Assert.Equal(20f, field.Height);
+
+        // No anchor attribute: the default left,top, so nothing moves.
+        Assert.Equal(10f, title.Left);
+        Assert.Equal(10f, title.Top);
+    }
+
+    // ── a hidden page lays out like a visible one ───────────────────────────
+
+    // Two page groups stacked in the same place, one shown at a time — the shape
+    // every tabbed markup panel has. Each page carries the same right/bottom
+    // anchored child, so the visible page is the reference arm for the hidden one.
+    private const string TwoPageXml = """
+        <panel x="0" y="0" w="300" h="200" resizable="true" minw="200" minh="150">
+          <group anchor="left top right bottom" x="10" y="10" w="280" h="180">
+            <button anchor="right,bottom" x="230" y="150" w="40" h="20" text="A"/>
+          </group>
+          <group anchor="left top right bottom" x="10" y="10" w="280" h="180">
+            <button anchor="right,bottom" x="230" y="150" w="40" h="20" text="B"/>
+          </group>
+        </panel>
+        """;
+
+    [Fact]
+    public void HiddenPage_ShownAfterAResize_AnchorsAsIfItHadBeenVisibleThroughout()
+    {
+        var panel = MarkupDocument.Build(TwoPageXml, new object(), _ => (1u, 32, 32));
+        var pageA = Assert.IsType<UiPanel>(panel.Children[0]);
+        var pageB = Assert.IsType<UiPanel>(panel.Children[1]);
+        var cornerA = Assert.IsType<UiSimpleButton>(pageA.Children[0]);
+        var cornerB = Assert.IsType<UiSimpleButton>(pageB.Children[0]);
+
+        UiRenderContext ctx = MakeContext(600f, 400f);
+        pageB.Visible = false;
+
+        panel.Width = 500f;
+        panel.Height = 300f;
+        panel.DrawSelfAndChildren(ctx);
+
+        // Page A followed the resize: the group is 480x280 and its corner keeps a
+        // 10px margin to the group's right and bottom edges.
+        Assert.Equal(480f, pageA.Width);
+        Assert.Equal(430f, cornerA.Left);
+        Assert.Equal(250f, cornerA.Top);
+
+        pageB.Visible = true;
+        panel.DrawSelfAndChildren(ctx);
+
+        // Page B was hidden for the resize, so it is drawn for the first time at
+        // the new size — and must land exactly where page A did.
+        Assert.Equal(480f, pageB.Width);
+        Assert.Equal(280f, pageB.Height);
+        Assert.Equal(cornerA.Left, cornerB.Left);
+        Assert.Equal(cornerA.Top, cornerB.Top);
+        Assert.Equal(430f, cornerB.Left);
+        Assert.Equal(250f, cornerB.Top);
+    }
+
+    [Fact]
+    public void PageHiddenOnTheFirstFrame_ShownAfterAResize_KeepsItsAuthoredMargins()
+    {
+        var panel = MarkupDocument.Build(TwoPageXml, new object(), _ => (1u, 32, 32));
+        var pageB = Assert.IsType<UiPanel>(panel.Children[1]);
+        var cornerB = Assert.IsType<UiSimpleButton>(pageB.Children[0]);
+
+        UiRenderContext ctx = MakeContext(600f, 400f);
+
+        // Hidden before anything is ever drawn: the session opens on page A.
+        pageB.Visible = false;
+        panel.DrawSelfAndChildren(ctx);
+
+        panel.Width = 500f;
+        panel.Height = 300f;
+        panel.DrawSelfAndChildren(ctx);
+
+        pageB.Visible = true;
+        panel.DrawSelfAndChildren(ctx);
+
+        Assert.Equal(480f, pageB.Width);
+        Assert.Equal(280f, pageB.Height);
+        Assert.Equal(430f, cornerB.Left); // 480 - 10 - 40
+        Assert.Equal(250f, cornerB.Top);  // 280 - 10 - 20
+        Assert.Equal(40f, cornerB.Width);
+        Assert.Equal(20f, cornerB.Height);
     }
 
     // ── golden: a plain panel with none of the new attributes is unaffected ──

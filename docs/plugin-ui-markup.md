@@ -50,6 +50,7 @@ back at runtime instead.
 | Attribute | Type | Missing binding |
 |---|---|---|
 | `label text`, `field text`, `menu selected`, `tooltip` | `string` (via `ToString()`) | silent: the literal text is shown |
+| `color`, `background`, `border` (every element that takes one) | `uint` or `int` holding `0xAARRGGBB`, or a `string` in the `#AARRGGBB` literal form | silent: opaque white, the same as an unparseable literal |
 | `meter cur`, `meter max` | integral, nullable | silent: no value shown |
 | `meter fill`, `slider value` | `float` | silent: 0 |
 | `list items`, `menu items` | `IEnumerable<string>` | throws |
@@ -67,6 +68,42 @@ back at runtime instead.
 Hex literals need the `0x` prefix; `did="165"` is decimal 165, `did="0x165"`
 is hex. `list colors` values are `0xRRGGBB`; every `color`, `background`, and
 `border` attribute is `#AARRGGBB`.
+
+## Bound colours
+
+Every `color`, `background`, and `border` attribute takes a binding in place
+of its literal, so a plugin that lets a player pick colours can show them.
+
+```xml
+<group x="8" y="8" w="404" h="304" background="{PanelColor}" border="{EdgeColor}">
+  <label x="4" y="4" text="Monsters" color="{HeadingColor}"/>
+  <meter x="4" y="24" w="200" h="14" fill="{HealthFraction}" color="{HealthBarColor}"/>
+</group>
+```
+
+```csharp
+public uint PanelColor { get; set; } = 0xC0101018;   // 0xAARRGGBB
+public int EdgeColor { get; set; } = unchecked((int)0xFF4A3A14);
+public string HeadingColor { get; set; } = "#FFE8D8B0";
+```
+
+- A bound colour resolves from a **`uint` or `int` holding `0xAARRGGBB`** --
+  the same byte order as the literal, alpha in the top byte -- or from a
+  **`string` in the `#AARRGGBB` literal form**. Store a colour setting as
+  whichever of the three suits the plugin; all three mean the same colour.
+- The top byte is real alpha, not padding: `0x00FF0000` is invisible, not
+  opaque red, exactly as `background="#00FF0000"` is.
+- The value is re-read every frame, so assigning the property from the thread
+  that calls `Tick` is all it takes to repaint.
+- A binding that names nothing, or a value that is neither of those forms
+  (including text the literal parser rejects), is **silent**: the attribute
+  falls back to opaque white, which is where an unparseable literal already
+  landed. Colours never throw at build the way `onclick` or `selected` do.
+- A colour attribute left out entirely still means what it always did: the
+  element's own default, which for a `group` is no fill and no border.
+
+Per-row colours are a separate thing and unchanged: `list colors` and
+`<column type="text" colors>` take a list of `0xRRGGBB` values with no alpha.
 
 ## Elements
 
@@ -108,18 +145,32 @@ Panels are fixed-size unless the root declares `resizable="true"`. `minw` and
 `minh` set the floor for a drag or a restored layout; they default to the
 authored `w` and `h`. `resize="x|y|both|none"` limits the axes.
 
-Children follow a resize through `anchor`, a space-separated subset of
-`left top right bottom` naming the edges of the **direct parent** the element
-keeps a fixed margin to. The default is `left top`.
+Children follow a resize through `anchor`, a subset of `left top right bottom`
+naming the edges of the **direct parent** the element keeps a fixed margin to.
+Separate the names with commas or spaces (`anchor="right,bottom"` and
+`anchor="right bottom"` are the same thing); the names are case-insensitive
+and their order does not matter. Leaving the attribute off gives the default,
+`left top`; writing it and naming no edge (`anchor=""`, `anchor=" "`,
+`anchor=","`) throws, because an attribute that is there was meant to say
+something.
 
 - `left top`: fixed position and size.
-- `left right`: stretches horizontally. `top bottom`: stretches vertically.
-- `left top right bottom`: stretches both ways.
+- `left,right`: stretches horizontally. `top,bottom`: stretches vertically.
+- `left,top,right,bottom`: stretches both ways.
 - `right` alone: fixed width, moves with the parent's right edge. Same for
   `bottom`.
 
-A `group` propagates a resize to its own children, so anchor the group to the
-panel and the list to the group:
+```xml
+<panel x="0" y="0" w="300" h="200" resizable="true" minw="200" minh="150">
+  <label x="10" y="10" text="Title"/>                        <!-- stays put -->
+  <field anchor="left,right" x="10" y="40" w="280" h="20"/>  <!-- widens -->
+  <button anchor="right,bottom" x="250" y="170" w="40" h="20" text="OK"/>
+</panel>
+```
+
+`anchor` applies to every element kind in the table above. A `group`
+propagates a resize to its own children, so anchor the group to the panel and
+the list to the group:
 
 ```xml
 <panel x="0" y="0" w="420" h="320" title="My Plugin" resizable="true" minw="360" minh="260">
@@ -131,7 +182,14 @@ panel and the list to the group:
 </panel>
 ```
 
-An unknown anchor token throws at build time. Changing a panel's authored
+Margins are measured once, from the layout you authored, when the panel is
+built. A group that is hidden while the window is resized — one page of a
+tabbed panel, say — therefore opens laid out exactly as it would have been had
+it been on screen the whole time; whether and when an element was ever visible
+never changes where it lands.
+
+An unknown anchor token, or a value that is present and names no edge at all,
+throws at build time naming the element and the value. Changing a panel's authored
 size or limits in a later plugin version resets each user's stored size once;
 their saved position is kept.
 
@@ -269,9 +327,16 @@ same as any other UI call.
 ## Tests
 
 Markup behavior is covered by `MarkupDocumentTests`, `MarkupIconTests`,
-`MarkupListColumnsTests`, `MarkupResizableAnchorTests`, and
-`PluginSidePanelTests` under `tests/AcDream.App.Tests/UI/`, all against fake
+`MarkupListColumnsTests`, `MarkupColorBindingTests`,
+`MarkupResizableAnchorTests`, and `PluginSidePanelTests` under
+`tests/AcDream.App.Tests/UI/`, all against fake
 resolvers rather than the game's data files. Client-window control is
 covered by `BufferedUiRegistryTests` and `PluginClientWindowNamesTests` in
 the same tree, and by `ScopedUiRegistryClientWindowTests` under
-`tests/AcDream.Core.Tests/Plugins/` for the scoped forwarder.
+`tests/AcDream.Core.Tests/Plugins/` for the scoped forwarder. Plugin images
+and canvases (see the plugin API guide) are covered by
+`PluginImageTableTests`, `BufferedUiRegistryImagesTests`,
+`BufferedUiRegistryCanvasTests` and `UI/Layout/PluginCanvasElementTests`
+under `tests/AcDream.App.Tests/`, by `ScopedUiRegistryImagesTests` and
+`ScopedUiRegistryCanvasTests` for the scoped forwarder, and by the contract
+and headless suites for the inert answers a host without a window gives.

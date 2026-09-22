@@ -190,6 +190,15 @@ internal sealed class HeadlessProcessContentOwner : IDisposable
             (IPreparedCollisionSource)prepared!);
     }
 
+    /// <summary>
+    /// The one lock on the installed data files this process opened. The
+    /// files are shared by every session in the process and are not safe to
+    /// read from two threads at once, so the lock is owned here, beside
+    /// them, and handed out with every lease; a lock made per session would
+    /// guard nothing.
+    /// </summary>
+    internal object DatLock { get; } = new();
+
     internal HeadlessProcessContentLease AcquireLease(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -206,6 +215,7 @@ internal sealed class HeadlessProcessContentOwner : IDisposable
                 this,
                 sessionId,
                 _dats!,
+                DatLock,
                 _prepared!,
                 _collision!,
                 _magic,
@@ -277,6 +287,7 @@ internal sealed class HeadlessProcessContentOwner : IDisposable
     {
         private HeadlessProcessContentOwner? _owner;
         private readonly IDatReaderWriter _dats;
+        private readonly object _datLock;
         private readonly IPreparedAssetSource _prepared;
         private readonly IPreparedCollisionSource _collision;
         private readonly MagicCatalog _magic;
@@ -286,6 +297,7 @@ internal sealed class HeadlessProcessContentOwner : IDisposable
             HeadlessProcessContentOwner owner,
             string sessionId,
             IDatReaderWriter dats,
+            object datLock,
             IPreparedAssetSource prepared,
             IPreparedCollisionSource collision,
             MagicCatalog magic,
@@ -294,6 +306,7 @@ internal sealed class HeadlessProcessContentOwner : IDisposable
             _owner = owner;
             SessionId = sessionId;
             _dats = dats;
+            _datLock = datLock;
             _prepared = prepared;
             _collision = collision;
             _magic = magic;
@@ -308,6 +321,16 @@ internal sealed class HeadlessProcessContentOwner : IDisposable
             {
                 ObjectDisposedException.ThrowIf(_owner is null, this);
                 return _dats;
+            }
+        }
+
+        /// <summary>The process's lock on <see cref="Dats"/>; every read is made under it.</summary>
+        internal object DatLock
+        {
+            get
+            {
+                ObjectDisposedException.ThrowIf(_owner is null, this);
+                return _datLock;
             }
         }
 

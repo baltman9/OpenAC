@@ -265,7 +265,8 @@ internal sealed class ParityServer(WorldSession session, Func<uint> playerGuid)
     /// </summary>
     /// <param name="skillId">Which skill; 24 is run and 22 is jump.</param>
     /// <param name="ranks">How much of it the character has trained.</param>
-    internal void SkillUpdate(uint skillId, uint ranks) =>
+    /// <param name="xp">The experience banked into it towards those ranks.</param>
+    internal void SkillUpdate(uint skillId, uint ranks, uint xp = 0u) =>
         Raise(
             nameof(WorldSession.SkillUpdated),
             new PrivateUpdateSkill.Parsed(
@@ -275,10 +276,32 @@ internal sealed class ParityServer(WorldSession session, Func<uint> playerGuid)
                 AdjustPP: 0,
                 // Trained, which is what a raised skill is.
                 AdvancementClass: 2u,
-                Xp: 0u,
+                Xp: xp,
                 Init: 0u,
                 Resistance: 0u,
                 LastUsed: 0d));
+
+    /// <summary>
+    /// The server states one of the character's primary attributes, which is
+    /// how one is raised mid-session.
+    /// </summary>
+    /// <param name="attributeId">Which attribute; 1 is strength, 2 endurance.</param>
+    /// <param name="ranks">How many times it has been raised.</param>
+    /// <param name="start">What it was before any of those raises.</param>
+    /// <param name="xp">The experience banked into it towards those ranks.</param>
+    internal void AttributeUpdate(
+        uint attributeId,
+        uint ranks,
+        uint start = 100u,
+        uint xp = 0u) =>
+        Raise(
+            nameof(WorldSession.AttributeUpdated),
+            new PrivateUpdateAttribute.Parsed(
+                Sequence: ++_characterSequence,
+                AttributeId: attributeId,
+                Ranks: ranks,
+                Start: start,
+                Xp: xp));
 
     /// <summary>
     /// The server states one of the character's vitals in full: how much of
@@ -286,15 +309,21 @@ internal sealed class ParityServer(WorldSession session, Func<uint> playerGuid)
     /// </summary>
     /// <param name="vitalId">Which vital; 4 is stamina.</param>
     /// <param name="current">How much of it is left.</param>
-    internal void VitalUpdate(uint vitalId, uint current) =>
+    /// <param name="ranks">How many times the pool has been raised.</param>
+    /// <param name="xp">The experience banked into it towards those ranks.</param>
+    internal void VitalUpdate(
+        uint vitalId,
+        uint current,
+        uint ranks = 0u,
+        uint xp = 0u) =>
         Raise(
             nameof(WorldSession.VitalUpdated),
             new PrivateUpdateVital.ParsedFull(
                 Sequence: ++_characterSequence,
                 VitalId: vitalId,
-                Ranks: 0u,
+                Ranks: ranks,
                 Start: 100u,
-                Xp: 0u,
+                Xp: xp,
                 Current: current));
 
     /// <summary>
@@ -319,6 +348,113 @@ internal sealed class ParityServer(WorldSession session, Func<uint> playerGuid)
         Raise(
             nameof(WorldSession.ServerMessageReceived),
             new ServerMessage.Parsed(text, chatType));
+
+    /// <summary>
+    /// The allegiance, as the server states it when the client asks. This is
+    /// written onto the wire and handed to the connection, so the client's
+    /// own parser and its own inbound route carry it the rest of the way --
+    /// which is what a scenario about a break wants to stand on, rather than
+    /// reaching past both and writing the profile into the owner by hand.
+    /// </summary>
+    /// <param name="update">What the server says the allegiance is.</param>
+    internal void AllegianceUpdate(ClientCommandResponses.AllegianceUpdate update)
+    {
+        var payload = new List<byte>();
+        WriteU32(payload, update.Rank);
+        WriteU32(payload, update.TotalMembers);
+        WriteU32(payload, update.TotalVassals);
+        WriteU16(payload, update.RecordCount);
+        // The profile version this is written in. Eight is the first that
+        // carries the allegiance's name, which is what the profile is read
+        // for; the gates below are the ones that version opens.
+        const ushort ProfileVersion = 8;
+        WriteU16(payload, ProfileVersion);
+        // Officers: none, and the count is followed by its own padding.
+        WriteU16(payload, 0);
+        WriteU16(payload, 0);
+        // The four broadcast counters.
+        for (int index = 0; index < 4; index++)
+            WriteU32(payload, 0u);
+        WriteString(payload, string.Empty);   // message of the day
+        WriteString(payload, string.Empty);   // and who set it
+        WriteU32(payload, 0u);                // the allegiance's chat room
+        // The eight-word block version seven added.
+        for (int index = 0; index < 8; index++)
+            WriteU32(payload, 0u);
+        WriteString(payload, update.AllegianceName);
+        WriteU32(payload, 0u);                // when the name was last set
+
+        if (update.Monarch is { } monarch)
+        {
+            WriteAllegianceMember(payload, monarch);
+            foreach (ClientCommandResponses.AllegianceMemberRecord record in
+                update.Records)
+            {
+                WriteU32(payload, record.ParentGuid);
+                WriteAllegianceMember(payload, record);
+            }
+        }
+
+        GameEvent(GameEventType.AllegianceUpdate, [.. payload]);
+    }
+
+    /// <summary>One member of the allegiance, as the profile carries it.</summary>
+    private static void WriteAllegianceMember(
+        List<byte> payload,
+        ClientCommandResponses.AllegianceMemberRecord record)
+    {
+        // Logged in, and carrying its level as its own word -- which is also
+        // what says the member's right to pass experience up is stated here
+        // rather than assumed.
+        const uint LoggedIn = 0x1u;
+        const uint HasPackedLevel = 0x8u;
+        const uint MayPassupExperience = 0x10u;
+        uint bitfield = HasPackedLevel
+            | (record.IsLoggedIn ? LoggedIn : 0u)
+            | (record.MayPassupExperience ? MayPassupExperience : 0u);
+
+        WriteU32(payload, record.CharacterId);
+        WriteU32(payload, record.CpCached);
+        WriteU32(payload, record.CpTithed);
+        WriteU32(payload, bitfield);
+        payload.Add(record.Gender);
+        payload.Add(record.HeritageGroup);
+        WriteU16(payload, record.Rank);
+        WriteU32(payload, record.Level);
+        WriteU16(payload, record.Loyalty);
+        WriteU16(payload, record.Leadership);
+        WriteU32(payload, 0u);                // how long it has been online
+        WriteU32(payload, 0u);                // and the high half of it
+        WriteString(payload, record.Name);
+    }
+
+    private static void WriteU16(List<byte> payload, ushort value)
+    {
+        Span<byte> word = stackalloc byte[2];
+        BinaryPrimitives.WriteUInt16LittleEndian(word, value);
+        payload.AddRange(word);
+    }
+
+    private static void WriteU32(List<byte> payload, uint value)
+    {
+        Span<byte> word = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32LittleEndian(word, value);
+        payload.AddRange(word);
+    }
+
+    /// <summary>
+    /// A line as the wire carries one: how long it is, the characters, then
+    /// padding up to the next four bytes.
+    /// </summary>
+    private static void WriteString(List<byte> payload, string text)
+    {
+        byte[] characters = System.Text.Encoding.Latin1.GetBytes(text);
+        WriteU16(payload, (ushort)characters.Length);
+        payload.AddRange(characters);
+        int written = 2 + characters.Length;
+        for (int pad = (4 - (written & 3)) & 3; pad > 0; pad--)
+            payload.Add(0);
+    }
 
     /// <summary>Hands a game event to the connection's own event dispatcher.</summary>
     internal void GameEvent(GameEventType type, byte[] payload) =>

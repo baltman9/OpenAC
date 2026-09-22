@@ -339,6 +339,32 @@ public sealed class DirectGameRuntimeCommandAdapterTests
     }
 
 
+    /// <summary>
+    /// Every advancement cost rides a 32-bit field on the wire. A cost too
+    /// wide for it does not fail on the way out -- it arrives as a smaller,
+    /// perfectly legal amount -- so it is refused here, the way training's
+    /// cost already was, instead of being cut down and sent.
+    /// </summary>
+    [Fact]
+    public void Advance_CostWiderThanTheRequestField_RejectsWithoutSendingAnything()
+    {
+        (GameRuntime runtime, DirectGameRuntimeCommandAdapter adapter, FixtureSessionOperations operations) =
+            CreateStartedHarness();
+        var gameActions = new List<byte[]>();
+        operations.Sessions[^1].GameActionCapture = body => gameActions.Add(body);
+
+        RuntimeCommandResult result = adapter.Character.Advance(
+            runtime.Generation,
+            new RuntimeAdvancementCommand(
+                RuntimeAdvancementKind.Skill,
+                StatId: 6u,
+                Cost: (ulong)uint.MaxValue + 1UL));
+
+        Assert.Equal(RuntimeCommandStatus.Rejected, result.Status);
+        Assert.Empty(gameActions);
+        runtime.Dispose();
+    }
+
     [Fact]
     public void Tell_WithATargetId_AimsAtTheObject_NotAtAName_Issue50()
     {
@@ -1086,6 +1112,12 @@ public sealed class DirectGameRuntimeCommandAdapterTests
             var session = new WorldSession(
                 endpoint,
                 new FixtureTransport());
+            // Never negotiated: a client that has arrived in the world sends
+            // -- it asks the server about the allegiance -- and a reliable
+            // send here has no cipher to go out under, so it is taken. A
+            // test that wants to read what it sent takes the game-action
+            // capture, which sits above this one.
+            session.GameMessageCapture = (_, _) => { };
             Sessions.Add(session);
             return session;
         }

@@ -19,6 +19,11 @@ namespace AcDream.HostParity.Tests;
 /// is the same length on both, so the agreement is exact rather than within a
 /// tolerance.
 ///
+/// Mutation check (2026-09-21), run: treating a creature the server moved
+/// outright as an ordinary update turned
+/// <see cref="ATeleportPutsTheBodyInTheSamePlaceOnBoth"/> red on both arms at
+/// once, UnroutedCatchUp against TeleportPlacement.
+///
 /// Mutation checks (2026-09-20), all run:
 /// * making the windowless drive carry nothing turned four of the five red,
 ///   and left only the beyond-the-bubble one green -- which is right, because
@@ -116,16 +121,29 @@ public sealed class RemoteBodyParityTests
                 arm.Tick(RemoteBodyArm.TickSeconds);
 
             transcript.Step("the server moves it outright");
-            RuntimeRemoteContactArm routed = arm.ServerSaysTheCreatureIsAt(
-                RemoteBodyArm.Start + new Vector3(0f, 12f, 0f),
-                teleported: true);
+            Vector3 movedTo = RemoteBodyArm.Start + new Vector3(0f, 12f, 0f);
+            RuntimeRemoteContactArm routed =
+                arm.ServerSaysTheCreatureIsAt(movedTo, teleported: true);
             transcript.Record("routed", routed.ToString());
             Record(arm, transcript);
+            // The body is PUT where the server said rather than asked to
+            // walk there: a client that interpolated instead would be twelve
+            // metres behind for the next second, and two clients that both
+            // left the body where it was would agree line for line.
+            Assert.Equal(RuntimeRemoteContactArm.TeleportPlacement, routed);
+            Assert.Equal(movedTo.X, arm.Body.Body.Position.X, 3);
+            Assert.Equal(movedTo.Y, arm.Body.Body.Position.Y, 3);
 
             transcript.Step("and a few steps later");
             for (int tick = 0; tick < 10; tick++)
                 arm.Tick(RemoteBodyArm.TickSeconds);
             Record(arm, transcript);
+            // And it carries on from there rather than sliding back to where
+            // it was: a tenth of a second of walking, not twelve metres of it.
+            Assert.True(
+                Vector3.Distance(arm.Body.Body.Position, movedTo) < 1f,
+                $"The body left the place it was put: it is at "
+                + $"{arm.Body.Body.Position} against {movedTo}.");
         });
 
     /// <summary>

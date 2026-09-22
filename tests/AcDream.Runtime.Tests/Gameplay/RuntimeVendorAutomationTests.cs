@@ -112,6 +112,221 @@ public sealed class RuntimeVendorAutomationTests
         Assert.False(vendor.TryCaptureProperties(0x99999999u, out _));
     }
 
+    /// <summary>
+    /// Mutation: project SellPrice as BuyRate, or drop any one of the
+    /// merchandise fields, and a plugin can no longer tell what the vendor
+    /// pays or what it refuses -- which is the whole of a vendor-visit plan.
+    /// </summary>
+    [Fact]
+    public void ProjectsTheShopTermsAVisitPlannerNeeds()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+
+        var profile = new VendorShopProfile(
+            MerchandiseItemTypes: (uint)ItemType.Weapon | (uint)ItemType.Armor,
+            MerchandiseMinValue: 25u,
+            MerchandiseMaxValue: 30_000u,
+            DealMagicalItems: true,
+            BuyPrice: 0.75f,
+            SellPrice: 1.15f,
+            AlternateCurrencyWcid: 0u,
+            AlternateCurrencyAmount: 0u,
+            AlternateCurrencyPluralName: string.Empty);
+        host.Runtime.InventoryOwner.Vendor.Apply(0x40001000u, profile, []);
+
+        PluginVendorProfile projected = vendor.Profile;
+        // BuyPrice is what the vendor PAYS; SellPrice is what it charges, and
+        // that already reaches plugins per listing as UnitPrice.
+        Assert.Equal(0.75f, projected.BuyRate);
+        Assert.Equal((uint)ItemType.Weapon | (uint)ItemType.Armor, projected.DealsInItemTypes);
+        Assert.Equal(25u, projected.MinimumValue);
+        Assert.Equal(30_000u, projected.MaximumValue);
+        Assert.True(projected.DealsInMagicalItems);
+        Assert.False(projected.UsesAlternateCurrency);
+        Assert.Equal(0u, projected.AlternateCurrencyWeenieClassId);
+        Assert.Equal(0u, projected.AlternateCurrencyAmount);
+        Assert.Null(projected.AlternateCurrencyName);
+    }
+
+    /// <summary>
+    /// Mutation: carry the state's currency name and amount through
+    /// unconditionally and a coin vendor reports an empty-named currency it
+    /// does not take, so a planner counts the wrong purse.
+    /// </summary>
+    [Fact]
+    public void ProjectsTheAlternateCurrencyOnlyWhenTheVendorTakesOne()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+
+        host.Runtime.InventoryOwner.Vendor.Apply(
+            0x40001000u,
+            Profile with
+            {
+                AlternateCurrencyWcid = 20630u,
+                AlternateCurrencyAmount = 17u,
+                AlternateCurrencyPluralName = "Writs of Refusal",
+            },
+            []);
+
+        PluginVendorProfile takesWrits = vendor.Profile;
+        Assert.True(takesWrits.UsesAlternateCurrency);
+        Assert.Equal(20630u, takesWrits.AlternateCurrencyWeenieClassId);
+        Assert.Equal(17u, takesWrits.AlternateCurrencyAmount);
+        Assert.Equal("Writs of Refusal", takesWrits.AlternateCurrencyName);
+
+        // A coin vendor whose state still carries a stale amount must not
+        // report a currency it does not take.
+        host.Runtime.InventoryOwner.Vendor.Apply(
+            0x40001001u,
+            Profile with
+            {
+                AlternateCurrencyWcid = 0u,
+                AlternateCurrencyAmount = 17u,
+                AlternateCurrencyPluralName = "Writs of Refusal",
+            },
+            []);
+
+        PluginVendorProfile takesCoin = vendor.Profile;
+        Assert.False(takesCoin.UsesAlternateCurrency);
+        Assert.Equal(0u, takesCoin.AlternateCurrencyAmount);
+        Assert.Null(takesCoin.AlternateCurrencyName);
+    }
+
+    /// <summary>
+    /// Mutation: return the last profile when nothing is open and a plugin
+    /// plans against a shop the character has already walked away from.
+    /// </summary>
+    [Fact]
+    public void ReportsNoShopTermsUntilAVendorOpensAndAgainOnceItCloses()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+
+        Assert.Equal(PluginVendorProfile.Unset, vendor.Profile);
+
+        host.Runtime.InventoryOwner.Vendor.Apply(0x40001000u, Profile, []);
+        Assert.Equal(Profile.BuyPrice, vendor.Profile.BuyRate);
+
+        host.Runtime.InventoryOwner.Vendor.Close();
+        Assert.Equal(PluginVendorProfile.Unset, vendor.Profile);
+    }
+
+    /// <summary>
+    /// With nothing open the two value limits read "no limit", not zero.
+    /// Zero is a real limit here -- the sentinel for "no limit" is the top of
+    /// the range -- so an all-zero record reads as a vendor that refuses
+    /// everything worth more than nothing, and a plugin that checked the
+    /// profile before checking whether a shop was open would walk away from a
+    /// vendor that in fact buys anything.
+    ///
+    /// Mutation: return the all-zero record here and this test reads a
+    /// maximum of 0 where a vendor with no ceiling reads four billion.
+    /// </summary>
+    [Fact]
+    public void WithNoVendorOpenTheValueLimitsReadNoLimitRatherThanZero()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+
+        Assert.False(vendor.IsOpen);
+        Assert.Equal(PluginVendorProfile.NoValueLimit, vendor.Profile.MinimumValue);
+        Assert.Equal(PluginVendorProfile.NoValueLimit, vendor.Profile.MaximumValue);
+
+        // And the inert host answers the same way, so a plugin reads one
+        // shape whichever client it is running on.
+        Assert.Equal(
+            PluginVendorProfile.NoValueLimit,
+            InertVendor.Instance.Profile.MinimumValue);
+        Assert.Equal(
+            PluginVendorProfile.NoValueLimit,
+            InertVendor.Instance.Profile.MaximumValue);
+    }
+
+    /// <summary>A host that provides nothing, answering out of the interface.</summary>
+    private sealed class InertVendor : IVendorAutomation
+    {
+        internal static readonly IVendorAutomation Instance = new InertVendor();
+    }
+
+    /// <summary>
+    /// The no-limit sentinel a plugin compares against has to be the one the
+    /// client itself treats as "no limit"; if the two ever part, a plugin
+    /// reads a ceiling of four billion as a real one.
+    /// </summary>
+    [Fact]
+    public void NoValueLimitIsTheSameSentinelTheClientTreatsAsUnlimited()
+    {
+        Assert.Equal(VendorSellAcceptability.NoLimit, PluginVendorProfile.NoValueLimit);
+
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+        host.Runtime.InventoryOwner.Vendor.Apply(
+            0x40001000u,
+            Profile with
+            {
+                MerchandiseMinValue = VendorSellAcceptability.NoLimit,
+                MerchandiseMaxValue = VendorSellAcceptability.NoLimit,
+            },
+            []);
+
+        Assert.Equal(PluginVendorProfile.NoValueLimit, vendor.Profile.MinimumValue);
+        Assert.Equal(PluginVendorProfile.NoValueLimit, vendor.Profile.MaximumValue);
+    }
+
+    /// <summary>
+    /// Mutation: drop MaxStackSize or ItemType from the listing projection
+    /// and a plugin can neither count the pack slots a purchase needs nor
+    /// tell whether the vendor will take the item back.
+    /// </summary>
+    [Fact]
+    public void ProjectsEachListingsStackCeilingAndCategory()
+    {
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+
+        host.Runtime.InventoryOwner.Vendor.Apply(
+            0x40001000u,
+            Profile,
+            [
+                new VendorShopItem(
+                    ItemGuid: 0x50002000u,
+                    StackSize: 100,
+                    WeenieClassId: 1234u,
+                    Name: "Fixture Peas",
+                    ItemType: (uint)ItemType.SpellComponents,
+                    IconId: 0x06000001u,
+                    Value: 5,
+                    DescStackSize: 1,
+                    MaxStackSize: 25),
+                new VendorShopItem(
+                    ItemGuid: 0x50002001u,
+                    StackSize: 1,
+                    WeenieClassId: 1235u,
+                    Name: "Fixture Sword",
+                    ItemType: (uint)ItemType.Weapon,
+                    IconId: 0x06000001u,
+                    Value: 100),
+            ]);
+
+        IReadOnlyList<PluginVendorItem> items = vendor.Items;
+        Assert.Equal(25, items[0].MaxStackSize);
+        Assert.Equal((uint)ItemType.SpellComponents, items[0].ItemType);
+        // Nothing authored a maximum for the sword, so it does not stack --
+        // the same reading the vendor window makes of the missing field.
+        Assert.Equal(1, items[1].MaxStackSize);
+        Assert.Equal((uint)ItemType.Weapon, items[1].ItemType);
+        // The category a plugin compares against the vendor's own mask.
+        Assert.NotEqual(0u, items[0].ItemType & vendor.Profile.DealsInItemTypes);
+    }
+
     [Fact]
     public void StagesAndCommitsABuyListThroughTheWireBuilder()
     {

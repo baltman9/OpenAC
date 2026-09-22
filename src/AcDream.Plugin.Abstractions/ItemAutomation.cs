@@ -252,12 +252,62 @@ public readonly record struct PluginInventoryItem(
     public int ItemMaximumMana { get; init; }
 
     /// <summary>
-    /// The item's workmanship, which an appraisal supplies; zero for an item
-    /// that has none or has not been appraised.
+    /// The item's workmanship as the server sends it with the object itself:
+    /// a fractional number from 1 to 10, not the whole-number band an
+    /// appraisal shows a player. A bag of salvage carries the average
+    /// workmanship of everything melted into it here. Zero when the server
+    /// sent none.
     /// </summary>
     public float Workmanship { get; init; }
+
+    /// <summary>
+    /// The same value as <see cref="Workmanship"/>, as a double. Nothing is
+    /// recovered by widening it -- the server sent a single -- so this is
+    /// only a convenience for a crafting calculator that works in doubles.
+    /// </summary>
+    public double SalvageWorkmanship { get; init; }
+
     /// <summary>How many times the item has been tinkered; zero when never or unknown.</summary>
     public int NumTimesTinkered { get; init; }
+
+    /// <summary>
+    /// The imbue burned into the item: the rends that change which element it
+    /// strikes with, plus the critical bonuses. Zero when the item carries no
+    /// imbue. Any non-zero value means the item can no longer be imbued
+    /// again.
+    /// </summary>
+    public int ImbuedEffect { get; init; }
+
+    /// <summary>
+    /// The item's flat armor value; zero for anything that offers no
+    /// protection. Read from the item's own property table, so it is
+    /// available without an appraisal.
+    /// </summary>
+    public int ArmorLevel { get; init; }
+
+    /// <summary>
+    /// The top end of the item's damage roll, zero when the client does not
+    /// know it. This is <see cref="Damage"/> with the server's "unset"
+    /// sentinel folded to zero, so it is always a number a calculation can
+    /// use.
+    /// </summary>
+    public int MaxDamage { get; init; }
+
+    /// <summary>
+    /// The damage type recorded in the item's own property table, which is
+    /// where a casting weapon's element lives. <see cref="DamageType"/>
+    /// prefers the appraised weapon profile and so reports what the weapon
+    /// strikes with in melee; for a wand or staff that profile says nothing
+    /// about the element it casts. Zero when the property is absent.
+    /// </summary>
+    public int WandElementalDamageType { get; init; }
+
+    /// <summary>
+    /// True when the item is marked as retained, which stops it being
+    /// dropped, sold, or salvaged by accident. False when the item carries no
+    /// such mark.
+    /// </summary>
+    public bool Retained { get; init; }
 
     /// <summary>What the item is made of; zero when the client does not know.</summary>
     public uint MaterialType { get; init; }

@@ -77,6 +77,64 @@ public sealed class HeadlessPluginApiSurfaceTests
         Assert.Equal(1, runtime.CommunicationOwner.Chat.Count);
     }
 
+    /// <summary>
+    /// The windowless client's plugin host, and the bus its session host
+    /// hangs off it: an interceptor a plugin registers through the host is
+    /// what the bus answers the chat router with, so a typed line goes out
+    /// rewritten.
+    /// </summary>
+    [Fact]
+    public void AnInterceptorRegisteredThroughTheHeadlessHostRewritesWhatTheRouterSends()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        IPluginHost pluginHost = host;
+        using IDisposable alias = pluginHost.Automation.Chat.RegisterInputInterceptor(
+            static typed => typed == "go"
+                ? PluginChatInputDecision.Rewrite("hello there")
+                : PluginChatInputDecision.Pass);
+        // The bus exactly as the session host builds it, with the plugin
+        // host's decision behind it.
+        var bus = new AcDream.Runtime.Chat.LiveChatCommandSurface(
+            interceptChatInput: host.InterceptChatInput);
+
+        PluginChatInputDecision decision =
+            ((AcDream.Runtime.Chat.IPluginCommandBus)bus).InterceptChatInput("go");
+        var recording = new RecordingPluginBus(bus);
+        AcDream.Runtime.Chat.SubmitOutcome outcome = AcDream.Runtime.Chat.ChatCommandRouter.Submit(
+            "go",
+            new AcDream.Runtime.Chat.RuntimeChatCommandFeedback(runtime.CommunicationOwner),
+            recording,
+            AcDream.Runtime.Chat.ChatChannelKind.Say);
+
+        Assert.Equal(PluginChatInputAction.Rewrite, decision.Action);
+        Assert.Equal("hello there", decision.Text);
+        Assert.Equal(AcDream.Runtime.Chat.SubmitOutcome.Sent, outcome);
+        var said = Assert.IsType<AcDream.Runtime.Chat.SendChatCmd>(
+            Assert.Single(recording.Published));
+        Assert.Equal("hello there", said.Text);
+    }
+
+    /// <summary>
+    /// The windowless bus with what was published kept, so the words that
+    /// would have gone to the world can be read back.
+    /// </summary>
+    private sealed class RecordingPluginBus(
+        AcDream.Runtime.Chat.IPluginCommandBus inner)
+        : AcDream.Runtime.Chat.IPluginCommandBus
+    {
+        internal List<object> Published { get; } = [];
+
+        public void Publish<T>(T command) where T : notnull =>
+            Published.Add(command);
+
+        public bool TryHandlePluginCommand(string commandLine) =>
+            inner.TryHandlePluginCommand(commandLine);
+
+        public PluginChatInputDecision InterceptChatInput(string typed) =>
+            inner.InterceptChatInput(typed);
+    }
+
     [Fact]
     public void LoginCompleteAndLogoffFollowTheInWorldEdge()
     {
@@ -671,7 +729,7 @@ public sealed class HeadlessPluginApiSurfaceTests
             new(IPAddress.Loopback, port);
 
         public WorldSession CreateSession(IPEndPoint endpoint) =>
-            new(endpoint, new NoOpTransport());
+            new WorldSession(endpoint, new NoOpTransport()).TakingItsSends();
 
         public void Connect(WorldSession session, string user, string password) { }
 
@@ -791,6 +849,64 @@ public sealed class HeadlessPluginApiSurfaceTests
         Assert.NotNull(locations);
     }
 
+    /// <summary>
+    /// The windowless host answers the shop terms and the per-listing stack
+    /// ceiling exactly as the windowed one does -- both bind the one shared
+    /// vendor adapter, so a vendor-planning plugin runs unchanged on either.
+    /// Mutation: return default from RuntimeVendorAutomation.Profile and this
+    /// goes red on BuyRate.
+    /// </summary>
+    [Fact]
+    public void WindowlessHostProjectsTheVendorShopTermsAndListingStackCeiling()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        runtime.InventoryOwner.Vendor.Apply(
+            0x40001000u,
+            new AcDream.Core.Items.VendorShopProfile(
+                MerchandiseItemTypes: (uint)AcDream.Core.Items.ItemType.SpellComponents,
+                MerchandiseMinValue: 25u,
+                MerchandiseMaxValue: 30_000u,
+                DealMagicalItems: true,
+                BuyPrice: 0.75f,
+                SellPrice: 1.15f,
+                AlternateCurrencyWcid: 20630u,
+                AlternateCurrencyAmount: 17u,
+                AlternateCurrencyPluralName: "Writs of Refusal"),
+            [
+                new AcDream.Core.Items.VendorShopItem(
+                    ItemGuid: 0x50002000u,
+                    StackSize: 100,
+                    WeenieClassId: 1234u,
+                    Name: "Fixture Peas",
+                    ItemType: (uint)AcDream.Core.Items.ItemType.SpellComponents,
+                    IconId: 0x06000001u,
+                    Value: 5,
+                    DescStackSize: 1,
+                    MaxStackSize: 25),
+            ]);
+        IPluginHost pluginHost = host;
+
+        PluginVendorProfile profile = pluginHost.Automation.Vendor.Profile;
+        Assert.Equal(0.75f, profile.BuyRate);
+        Assert.Equal(
+            (uint)AcDream.Core.Items.ItemType.SpellComponents,
+            profile.DealsInItemTypes);
+        Assert.Equal(25u, profile.MinimumValue);
+        Assert.Equal(30_000u, profile.MaximumValue);
+        Assert.True(profile.DealsInMagicalItems);
+        Assert.True(profile.UsesAlternateCurrency);
+        Assert.Equal(20630u, profile.AlternateCurrencyWeenieClassId);
+        Assert.Equal(17u, profile.AlternateCurrencyAmount);
+        Assert.Equal("Writs of Refusal", profile.AlternateCurrencyName);
+
+        PluginVendorItem item = Assert.Single(pluginHost.Automation.Vendor.Items);
+        Assert.Equal(25, item.MaxStackSize);
+        Assert.Equal(
+            (uint)AcDream.Core.Items.ItemType.SpellComponents,
+            item.ItemType);
+    }
+
     [Fact]
     public void ActivationCompletedEventHasDefaultStub()
     {
@@ -801,6 +917,94 @@ public sealed class HeadlessPluginApiSurfaceTests
         host.Events.ActivationCompleted += c => seen = c;
         host.Events.ActivationCompleted -= c => seen = c;
         Assert.Null(seen);
+    }
+
+    /// <summary>
+    /// A plugin that draws a map or a HUD asks the same surface on both
+    /// hosts. Without a window there is nothing to draw on, so every image
+    /// request answers "no image" and nothing is held; the plugin's own
+    /// stream factory is never even opened.
+    /// </summary>
+    [Fact]
+    public void WithoutAWindowTheImageSurfaceAnswersInertly()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        IPluginHost pluginHost = host;
+        bool opened = false;
+
+        IPluginImages images = pluginHost.Ui.Images;
+
+        Assert.False(pluginHost.HasUi);
+        Assert.False(images.IsAvailable);
+        Assert.Equal(PluginImage.None, images.FromClientArt(0x06001234u));
+        Assert.Equal(PluginImage.None, images.FromSpellIcon(1u));
+        Assert.Equal(PluginImage.None, images.FromObjectIcon(0x80000001u));
+        Assert.Equal(PluginImage.None, images.FromStream("map.png", () =>
+        {
+            opened = true;
+            return new MemoryStream();
+        }));
+        Assert.False(opened);
+        Assert.False(images.Release(new PluginImage(1, 4, 4)));
+        Assert.Equal(0, images.Count);
+    }
+
+    /// <summary>
+    /// The same canvas registration a plugin makes with a window is
+    /// accepted without one: the plugin keeps its handle, sets what it
+    /// likes, and the paint callback is never called because there is
+    /// nothing to paint on.
+    /// </summary>
+    [Fact]
+    public void WithoutAWindowACanvasIsAcceptedAndNeverPainted()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        IPluginHost pluginHost = host;
+        int paints = 0;
+
+        IPluginCanvas canvas = pluginHost.Ui.RegisterCanvas(
+            new PluginCanvasDescriptor("hud", 200, 100) { Anchor = PluginCanvasAnchor.BottomRight },
+            _ => paints++);
+        canvas.Invalidate();
+        canvas.IsVisible = false;
+        canvas.Offset = new PluginPoint(-10, -10);
+
+        Assert.False(canvas.IsAvailable);
+        Assert.Equal("hud", canvas.CanvasId);
+        Assert.Equal((200, 100), (canvas.Width, canvas.Height));
+        Assert.Equal(PluginCanvasAnchor.BottomRight, canvas.Anchor);
+        Assert.False(canvas.IsVisible);
+        Assert.Equal(0, paints);
+        canvas.Dispose();
+    }
+
+    /// <summary>
+    /// A canvas that opted in to pointer input is accepted without a
+    /// window in the same way: the handler is kept so the plugin's own
+    /// logic runs unchanged, nothing ever calls it, and releasing the
+    /// pointer does nothing.
+    /// </summary>
+    [Fact]
+    public void WithoutAWindowAPointerHandlerIsKeptAndNeverCalled()
+    {
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        IPluginHost pluginHost = host;
+        int calls = 0;
+        Action<PluginPointerEvent> handler = _ => calls++;
+
+        IPluginCanvas canvas = pluginHost.Ui.RegisterCanvas(
+            new PluginCanvasDescriptor("map", 200, 100) { AcceptsPointerInput = true },
+            _ => { });
+        canvas.PointerHandler = handler;
+        canvas.ReleasePointer();
+
+        Assert.False(canvas.IsAvailable);
+        Assert.Same(handler, canvas.PointerHandler);
+        Assert.Equal(0, calls);
+        canvas.Dispose();
     }
 
     private static GameRuntime NewRuntime()

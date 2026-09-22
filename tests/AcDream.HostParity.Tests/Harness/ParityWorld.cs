@@ -1,8 +1,9 @@
-﻿using AcDream.Core.Combat;
+using AcDream.Core.Combat;
 using AcDream.Core.Items;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
+using AcDream.Core.Properties;
 using AcDream.Runtime;
 using AcDream.Runtime.Entities;
 
@@ -20,11 +21,22 @@ namespace AcDream.HostParity.Tests;
 internal static class ParityWorld
 {
     internal const uint Player = 0x50000001u;
+    /// <summary>The combat table the staged character's stances come from.</summary>
+    internal const uint CombatTable = 0x30000000u;
     internal const uint Monster = 0x50000012u;
     internal const uint SecondMonster = 0x50000013u;
     internal const uint DeadMonster = 0x50000011u;
     internal const uint HiddenMonster = 0x50000010u;
     internal const uint Bystander = 0x50000020u;
+
+    /// <summary>Another player, standing next to the character.</summary>
+    internal const uint OtherPlayer = 0x50000021u;
+
+    /// <summary>The character's patron, who is nowhere near it.</summary>
+    internal const uint Patron = 0x50000002u;
+
+    /// <summary>The monarch of the allegiance the character belongs to.</summary>
+    internal const uint Monarch = 0x50000003u;
 
     /// <summary>Where the character stands, in metres inside its cell.</summary>
     internal const float PlayerX = 96f;
@@ -52,7 +64,34 @@ internal static class ParityWorld
         Add(runtime, SecondMonster, PlayerX + 7f, MonsterObject(SecondMonster));
         Add(runtime, Bystander, PlayerX + 4f, BystanderObject(Bystander));
         body.Drive();
+        SettleTheBody(arm);
         return body;
+    }
+
+    /// <summary>
+    /// Runs the character's first frames until the pose it took on arrival
+    /// has finished. A character that has just logged in is left standing
+    /// before any plugin gets to it, and a stance change asks the body
+    /// whether it is still busy with a motion before it goes out, so a
+    /// scenario that started on the very frame of arrival would have every
+    /// stance parked behind that first pose on both clients alike.
+    /// </summary>
+    private static void SettleTheBody(ParityArm arm)
+    {
+        // The body steps once per physics quantum, a thirtieth of a second,
+        // so a handful of ticks covers the arrival pose several times over.
+        const int MaximumTicks = 12;
+        for (int tick = 0; tick < MaximumTicks; tick++)
+        {
+            if (arm.Runtime.MovementOwner.Controller is { } controller
+                && !controller.Motion.MotionsPending())
+            {
+                return;
+            }
+            arm.StepBody();
+        }
+        throw new InvalidOperationException(
+            $"{arm.Name}'s character is still taking up its arrival pose after {MaximumTicks} ticks.");
     }
 
     internal static ClientObject PlayerObject(uint objectId) => new()
@@ -61,6 +100,9 @@ internal static class ParityWorld
         Type = ItemType.Creature,
         Name = "Parity",
         PublicWeenieBitfield = SelectedObjectHealthPolicy.BfPlayer,
+        // Every character the server sends carries the table its combat
+        // stances come from; a body without one is never ready for melee.
+        Properties = { DataIds = { [(uint)PropertyDataId.CombatTable] = CombatTable } },
     };
 
     internal static ClientObject MonsterObject(uint objectId) => new()
@@ -80,6 +122,49 @@ internal static class ParityWorld
         PublicWeenieBitfield = 0u,
     };
 
+    /// <summary>
+    /// Puts another player on the ground two metres out. The character's own
+    /// entry is already a player; this is someone else's, which is what an
+    /// allegiance command can be pointed at.
+    /// </summary>
+    internal static void StageAnotherPlayer(GameRuntime runtime)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        ClientObject player = PlayerObject(OtherPlayer);
+        player.Name = "Another";
+        Add(runtime, OtherPlayer, PlayerX + 2f, player);
+    }
+
+    /// <summary>
+    /// The allegiance the server states for this character: a monarch, the
+    /// patron above it, and itself below that patron. Neither the monarch nor
+    /// the patron is anywhere in the world, which is the ordinary case.
+    /// </summary>
+    internal static void StageAllegiance(ParityArm arm)
+    {
+        ArgumentNullException.ThrowIfNull(arm);
+        // Said by the server and read by the client's own parser and inbound
+        // route, which is how the client really learns this: it asked on
+        // arriving in the world, and this is the answer. Writing it into the
+        // owner by hand would leave the asking, the parsing and the routing
+        // out of every scenario that stands on it.
+        arm.Server.AllegianceUpdate(new ClientCommandResponses.AllegianceUpdate(
+            Rank: 3u,
+            TotalMembers: 3u,
+            TotalVassals: 1u,
+            RecordCount: 3,
+            AllegianceName: "The Order",
+            Monarch: new ClientCommandResponses.AllegianceMemberRecord(
+                Monarch, 0u, true, "Monarch"),
+            Records:
+            [
+                new ClientCommandResponses.AllegianceMemberRecord(
+                    Patron, Monarch, false, "Patron"),
+                new ClientCommandResponses.AllegianceMemberRecord(
+                    Player, Patron, true, "Parity"),
+            ]));
+    }
+
     // ── things to carry, and things to open ─────────────────────────────
 
     /// <summary>A healing kit: usable on its own, carried in the main pack.</summary>
@@ -96,6 +181,9 @@ internal static class ParityWorld
 
     /// <summary>An item that cannot be used without naming a target.</summary>
     internal const uint TargetedItem = 0x50000044u;
+
+    /// <summary>What the scrap is made of, as the server states it.</summary>
+    internal const uint SteelMaterial = 61u;
 
     /// <summary>
     /// A part-filled stack the character already carries, of the same kind as
@@ -161,11 +249,23 @@ internal static class ParityWorld
             SalvageTool, "Tinkering Tool", ItemUseability.Contained);
         tool.Type = ItemType.TinkeringTool;
         objects.AddOrUpdate(tool);
-        objects.AddOrUpdate(Carried(ScrapItem, "Scrap", ItemUseability.Contained));
-        objects.AddOrUpdate(Carried(
+        ClientObject scrap = Carried(
+            ScrapItem, "Scrap", ItemUseability.Contained);
+        // What it is made of, which is what a salvage reads before it sends:
+        // a thing with no material is not salvageable at all, so without this
+        // both clients refuse and agree about refusing.
+        scrap.MaterialType = SteelMaterial;
+        objects.AddOrUpdate(scrap);
+        ClientObject stone = Carried(
             TargetedItem,
             "Mana Stone",
-            ItemUseability.Contained | (ItemUseability.Contained << 16)));
+            ItemUseability.Contained | (ItemUseability.Contained << 16));
+        // What it may be used ON. A targeted item whose target kinds are
+        // left blank is compatible with nothing, so the apply is turned away
+        // before it is composed -- on both clients, which is agreement
+        // about doing nothing.
+        stone.TargetType = (uint)ItemType.Misc;
+        objects.AddOrUpdate(stone);
     }
 
     /// <summary>

@@ -48,21 +48,33 @@ public static class RuntimeVendorRangeQuery
             return;
         }
 
+        // A vendor whose create message carried no use radius really has none:
+        // the descriptor zeroes that field when its flag is absent, so an
+        // absent radius means zero metres rather than "unknown, be generous".
         float useRadius = vendorRecord.Snapshot.UseRadius ?? 0f;
 
-        float playerRadius =
-            runtime.EntityObjects.Physics.ResolveObjectTableHost(playerGuid)
-                ?.Radius ?? 0f;
-        float vendorRadius =
-            runtime.EntityObjects.Physics.ResolveObjectTableHost(vendorId)
-                ?.Radius ?? 0f;
+        // Both bodies are measured as cylinders, each with its own girth AND
+        // its own height, which is what the range check behind a vendor window
+        // has always done (see the research note on vendor range). Measured as
+        // flat discs on the floor instead, any step or slope between the two
+        // becomes a vertical gap that is added to the distance, so a character
+        // the server judged in range is judged out of it here and the window is
+        // closed the same frame it opened. When a shape is not to hand the
+        // answer is a zero girth and a zero height, as it was before.
+        (float Radius, float Height) playerBody =
+            runtime.EntityObjects.Physics.EntityBodyShape(playerGuid)
+                ?? (0f, 0f);
+        (float Radius, float Height) vendorBody =
+            runtime.EntityObjects.Physics.EntityBodyShape(vendorId)
+                ?? (0f, 0f);
+
         bool inRange = ObjectRangeMath.ObjectsInRange(
             playerPosition,
-            playerRadius,
-            0f,
+            playerBody.Radius,
+            playerBody.Height,
             vendorPosition,
-            vendorRadius,
-            0f,
+            vendorBody.Radius,
+            vendorBody.Height,
             useRadius,
             useRadii: true,
             ignoreZDelta: false);

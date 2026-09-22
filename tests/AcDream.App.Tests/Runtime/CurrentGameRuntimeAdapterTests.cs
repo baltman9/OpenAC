@@ -650,6 +650,32 @@ public sealed class CurrentGameRuntimeAdapterTests
         Assert.Equal(published, harness.Commands.Published.Count);
     }
 
+    /// <summary>
+    /// Every advancement cost rides a 32-bit field on the wire. A cost too
+    /// wide for it does not fail on the way out -- it arrives as a smaller,
+    /// perfectly legal amount -- so it is refused here, the way training's
+    /// cost already was, instead of being cut down and sent.
+    /// </summary>
+    [Fact]
+    public void Advance_CostWiderThanTheRequestField_RejectsWithoutPublishing()
+    {
+        using var harness = new Harness();
+        _ = harness.Runtime.Session.Start(harness.Runtime.Generation);
+        RuntimeGenerationToken generation = harness.Runtime.Generation;
+        IGameRuntimeCommands commands = harness.Runtime;
+        int published = harness.Commands.Published.Count;
+
+        RuntimeCommandResult result = commands.Character.Advance(
+            generation,
+            new RuntimeAdvancementCommand(
+                RuntimeAdvancementKind.Skill,
+                StatId: 6u,
+                Cost: (ulong)uint.MaxValue + 1UL));
+
+        Assert.Equal(RuntimeCommandStatus.Rejected, result.Status);
+        Assert.Equal(published, harness.Commands.Published.Count);
+    }
+
     [Fact]
     public void SaveOptions_PublishesSaveCharacterOptionsCommand()
     {
@@ -1156,8 +1182,16 @@ public sealed class CurrentGameRuntimeAdapterTests
         public IPEndPoint ResolveEndpoint(string host, int port) =>
             new(IPAddress.Loopback, port);
 
-        public WorldSession CreateSession(IPEndPoint endpoint) =>
-            new(endpoint, transport);
+        public WorldSession CreateSession(IPEndPoint endpoint)
+        {
+            var session = new WorldSession(endpoint, transport);
+            // Never negotiated: a reliable send has no cipher to go out
+            // under. A client that has arrived in the world does send -- it
+            // asks the server about the allegiance -- so the send is taken
+            // here rather than throwing.
+            session.GameMessageCapture = (_, _) => { };
+            return session;
+        }
 
         public void Connect(WorldSession session, string user, string password)
         {

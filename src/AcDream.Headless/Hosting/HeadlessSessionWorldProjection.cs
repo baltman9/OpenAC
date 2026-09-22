@@ -308,14 +308,23 @@ internal sealed class HeadlessCollisionNeighborhood
         uint currentCellId,
         bool required)
     {
-        if (!LandblockPhysicsContentBuilder.TryLoadCollisionLandblock(
+        // The files are read under the process's lock: a plugin may be
+        // reading the same files from its own thread while this host loads.
+        bool loaded;
+        LoadedLandblock landblock;
+        LandblockCollisionBuild collisions;
+        lock (_content.DatLock)
+        {
+            loaded = LandblockPhysicsContentBuilder.TryLoadCollisionLandblock(
                 _content.Dats,
                 _content.PreparedCollision,
                 _content.HeightTable.AsSpan(),
                 landblockId,
                 origin,
-                out LoadedLandblock landblock,
-                out LandblockCollisionBuild collisions))
+                out landblock,
+                out collisions);
+        }
+        if (!loaded)
         {
             if (required)
             {

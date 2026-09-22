@@ -50,6 +50,9 @@ public sealed class WorldSelectionQueryTests
         public readonly HashSet<uint> Fellows = [];
         public PlayerInteractionPose? PlayerPose = new(0x0101_0001u, Vector3.Zero);
         public CombatMode CurrentCombatMode = CombatMode.NonCombat;
+        public (float Radius, float Height) Cylinder = (0.5f, 2f);
+        public (Vector3 Origin, float Radius)? Sphere = (new Vector3(1f, 0f, 0f), 2f);
+        public float? ModelHeight;
 
         public readonly Dictionary<uint, Matrix4x4> ChildRoots = new();
 
@@ -70,14 +73,15 @@ public sealed class WorldSelectionQueryTests
                 Camera,
                 () => new Vector2(400f, 300f),
                 () => PlayerPose,
-                (_, _) => (0.5f, 2f),
-                _ => (new Vector3(1f, 0f, 0f), 2f),
+                (_, _) => Cylinder,
+                _ => Sphere,
                 localEntityId => ChildRoots.TryGetValue(localEntityId, out Matrix4x4 root)
                     ? root
                     : null,
                 ExternalContainers.HasCorpseBeenOpened,
                 () => CurrentCombatMode,
-                Fellows.Contains);
+                Fellows.Contains,
+                modelHeight: _ => ModelHeight);
 
             Add(Player, Vector3.Zero, ItemType.Creature, SelectedObjectHealthPolicy.BfPlayer);
         }
@@ -177,6 +181,64 @@ public sealed class WorldSelectionQueryTests
             }
             Scene.CompleteFrame();
         }
+    }
+
+    // ── World label anchor: the height chain ────────────────────────────
+    // Physics cylinder first (already scaled by its owner), then the
+    // selection sphere, then the model's own bounds, then a fixed 1.1 m.
+
+    [Fact]
+    public void LabelAnchorTakesThePhysicsCylinderHeightFirst()
+    {
+        var h = new Harness();
+        h.Add(Target, new Vector3(3f, 4f, 5f), ItemType.Creature, scale: 2f);
+
+        Assert.True(h.Query.TryResolveWorldLabelAnchor(Target, out WorldLabelAnchor anchor));
+        Assert.Equal(new Vector3(3f, 4f, 5f), anchor.BasePosition);
+        Assert.Equal(2f, anchor.Height);
+        Assert.Equal(WorldLabelAnchorSource.PhysicsCylinder, anchor.Source);
+    }
+
+    [Fact]
+    public void LabelAnchorFallsBackToTheScaledSelectionSphereTop()
+    {
+        var h = new Harness { Cylinder = (0f, 0f) };
+        h.Add(Target, Vector3.Zero, ItemType.Creature, scale: 2f);
+
+        Assert.True(h.Query.TryResolveWorldLabelAnchor(Target, out WorldLabelAnchor anchor));
+        // Sphere at local (1, 0, 0) radius 2, scaled by 2: its top is 0 + 4.
+        Assert.Equal(4f, anchor.Height, 4);
+        Assert.Equal(WorldLabelAnchorSource.SelectionSphere, anchor.Source);
+    }
+
+    [Fact]
+    public void LabelAnchorFallsBackToTheScaledModelBounds()
+    {
+        var h = new Harness { Cylinder = (0f, 0f), Sphere = null, ModelHeight = 1.7f };
+        h.Add(Target, Vector3.Zero, ItemType.Creature, scale: 2f);
+
+        Assert.True(h.Query.TryResolveWorldLabelAnchor(Target, out WorldLabelAnchor anchor));
+        Assert.Equal(3.4f, anchor.Height, 4);
+        Assert.Equal(WorldLabelAnchorSource.ModelBounds, anchor.Source);
+    }
+
+    [Fact]
+    public void LabelAnchorFallsBackToOnePointOneMetresWhenNothingIsKnown()
+    {
+        var h = new Harness { Cylinder = (0f, 0f), Sphere = null, ModelHeight = null };
+        h.Add(Target, Vector3.Zero, ItemType.Creature, scale: 2f);
+
+        Assert.True(h.Query.TryResolveWorldLabelAnchor(Target, out WorldLabelAnchor anchor));
+        Assert.Equal(1.1f, anchor.Height);
+        Assert.Equal(WorldLabelAnchorSource.Fallback, anchor.Source);
+    }
+
+    [Fact]
+    public void LabelAnchorIsRefusedForAnObjectTheClientDoesNotHold()
+    {
+        var h = new Harness();
+
+        Assert.False(h.Query.TryResolveWorldLabelAnchor(0x7000_0FFFu, out _));
     }
 
     [Fact]

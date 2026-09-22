@@ -93,6 +93,12 @@ internal sealed class NoWindowGameRuntimeHost : IDisposable
     public RuntimeTraceRecorder Trace { get; }
     public IReadOnlyList<string> LifecycleTrace => _operations.Trace;
 
+    /// <summary>
+    /// Every game message this client asked its connection to send, in
+    /// order.
+    /// </summary>
+    public IReadOnlyList<byte[]> Outbound => _operations.Outbound;
+
     // Re-arms the deferred-connect poll countdown for a fresh Start/
     // Reconnect sequence -- the fixture's PollConnect only defers the
     // FIRST connect by default; a test proving the async in-world edge
@@ -648,6 +654,13 @@ internal sealed class NoWindowGameRuntimeHost : IDisposable
         public void RearmPollTicks(int count) => _pollTicksRemaining = count;
         public List<string> Trace { get; } = [];
 
+        /// <summary>
+        /// Every game message the runtime asked the connection to send, as
+        /// raw bodies, so a test can say what left the client rather than
+        /// only what a command adapter was told.
+        /// </summary>
+        public List<byte[]> Outbound { get; } = [];
+
         public IPEndPoint ResolveEndpoint(string host, int port)
         {
             Trace.Add($"resolve:{host}:{port}");
@@ -657,7 +670,14 @@ internal sealed class NoWindowGameRuntimeHost : IDisposable
         public WorldSession CreateSession(IPEndPoint endpoint)
         {
             Trace.Add("session+");
-            return new WorldSession(endpoint, new FixtureTransport());
+            var session = new WorldSession(endpoint, new FixtureTransport());
+            // This connection is never negotiated -- Connect here is a note in
+            // a trace -- so a reliable send would throw for want of a seeded
+            // cipher. The client really does send on arriving in the world, so
+            // the fixture takes the send the way every other test over a
+            // wireless session does, and keeps it where a test can read it.
+            session.GameMessageCapture = (body, _) => Outbound.Add(body);
+            return session;
         }
 
         public void Connect(

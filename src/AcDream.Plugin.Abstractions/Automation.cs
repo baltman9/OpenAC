@@ -224,6 +224,20 @@ public readonly record struct PluginSkillInfo(
 
     /// <summary>The skill's icon, as a full icon id; 0 when it has none.</summary>
     public uint IconId { get; init; }
+
+    /// <summary>
+    /// How many times experience has been spent to raise this skill, which is
+    /// the row a cost table is read at to price the next raise. 0 on a host
+    /// that cannot tell, and before the server has stated the skill.
+    /// </summary>
+    public uint Ranks { get; init; }
+
+    /// <summary>
+    /// The experience already put into this skill towards the ranks it has.
+    /// 0 on a host that cannot tell, and before the server has stated the
+    /// skill.
+    /// </summary>
+    public ulong ExperienceSpent { get; init; }
 }
 
 /// <summary>One primary attribute. <paramref name="Kind"/> is 0..5.</summary>
@@ -234,6 +248,79 @@ public readonly record struct PluginAttributeInfo(
 {
     /// <summary>Unenchanted primary-attribute value.</summary>
     public uint Base { get; init; } = Current;
+
+    /// <summary>
+    /// The number this attribute is named by when experience is spent on it,
+    /// which is what <see cref="ICharacterInfo.RequestAdvancement"/> takes.
+    /// It is not <see cref="Kind"/>: kinds count from zero and this does not,
+    /// so a zero here means the record was never filled in.
+    /// </summary>
+    public uint StatId { get; init; } = (uint)(Kind + 1);
+
+    /// <summary>
+    /// How many times experience has been spent to raise this attribute,
+    /// which is the row a cost table is read at to price the next raise. 0 on
+    /// a host that cannot tell, and before the server has stated it.
+    /// </summary>
+    public uint Ranks { get; init; }
+
+    /// <summary>
+    /// The experience already put into this attribute towards the ranks it
+    /// has. 0 on a host that cannot tell, and before the server has stated it.
+    /// </summary>
+    public ulong ExperienceSpent { get; init; }
+}
+
+/// <summary>
+/// One of the character's three pools -- health, stamina and mana -- as both
+/// a reading and something experience can be spent on.
+/// </summary>
+/// <param name="Kind">
+/// Which pool: 0 health, 1 stamina, 2 mana. This is the pool's own kind, the
+/// number <see cref="ICharacterInfo.TryGetVital"/> takes; it is neither a
+/// position in <see cref="ICharacterInfo.Vitals"/>, which leaves out any
+/// pool the server has not stated, nor the number the pool is named by on a
+/// request -- see <see cref="StatId"/> for that.
+/// </param>
+/// <param name="Name">The pool's name as shown to the player.</param>
+/// <param name="Current">How much of the pool is left right now.</param>
+/// <param name="Maximum">
+/// The pool at full, enchantments included -- the same number
+/// <see cref="ICharacterInfo.MaxHealth"/> and its two siblings report.
+/// </param>
+public readonly record struct PluginVitalInfo(
+    int Kind,
+    string Name,
+    uint Current,
+    uint Maximum)
+{
+    /// <summary>
+    /// The number this pool is named by when experience is spent on it, which
+    /// is what <see cref="ICharacterInfo.RequestAdvancement"/> takes. It is
+    /// not <see cref="Kind"/>, and a zero here means the record was never
+    /// filled in.
+    /// </summary>
+    public uint StatId { get; init; } = (uint)((Kind * 2) + 1);
+
+    /// <summary>
+    /// The pool at full with every enchantment layer off. A host that does
+    /// not track the split reports <see cref="Maximum"/> instead, in which
+    /// case the two are the same number.
+    /// </summary>
+    public uint Base { get; init; } = Maximum;
+
+    /// <summary>
+    /// How many times experience has been spent to raise this pool, which is
+    /// the row a cost table is read at to price the next raise. 0 on a host
+    /// that cannot tell, and before the server has stated it.
+    /// </summary>
+    public uint Ranks { get; init; }
+
+    /// <summary>
+    /// The experience already put into this pool towards the ranks it has. 0
+    /// on a host that cannot tell, and before the server has stated it.
+    /// </summary>
+    public ulong ExperienceSpent { get; init; }
 }
 
 /// <summary>Why a cast would or would not be accepted right now.</summary>
@@ -372,6 +459,57 @@ public interface ICharacterInfo
 
     /// <summary>The six primary attributes.</summary>
     IReadOnlyList<PluginAttributeInfo> Attributes { get; }
+
+    /// <summary>
+    /// Health, stamina and mana in that order, each with what the server has
+    /// said about how it was raised. Empty before the server has stated them,
+    /// and on a host that does not project them.
+    /// </summary>
+    IReadOnlyList<PluginVitalInfo> Vitals => Array.Empty<PluginVitalInfo>();
+
+    /// <summary>
+    /// Looks up one pool by its kind: 0 health, 1 stamina, 2 mana. This is
+    /// the pool's own number, not an index into <see cref="Vitals"/>, which
+    /// leaves out any pool the server has not stated yet and so can be
+    /// shorter than three. False when the number names no pool, when the
+    /// server has not stated it yet, or on a host that does not project them.
+    /// </summary>
+    /// <param name="kind">Which pool: 0 health, 1 stamina, 2 mana.</param>
+    /// <param name="vital">The pool, or a default record when false.</param>
+    bool TryGetVital(int kind, out PluginVitalInfo vital)
+    {
+        vital = default;
+        return false;
+    }
+
+    /// <summary>
+    /// Asks the client to spend on one stat: raising an attribute, a pool or a
+    /// skill with experience, or training a skill with skill credits. The
+    /// client checks the request and sends it; whether the spend is allowed is
+    /// the server's own decision and arrives later as an updated stat.
+    /// </summary>
+    /// <param name="kind">Which kind of stat the spend is against.</param>
+    /// <param name="statId">
+    /// Which stat: <see cref="PluginAttributeInfo.StatId"/> for an attribute,
+    /// <see cref="PluginVitalInfo.StatId"/> for a pool, and
+    /// <see cref="PluginSkillInfo.SkillId"/> for a skill, trained or raised.
+    /// Zero names nothing and is refused.
+    /// </param>
+    /// <param name="cost">
+    /// What to spend: experience for the first three kinds, skill credits for
+    /// <see cref="PluginAdvancementKind.TrainSkill"/>. Zero is refused, as is
+    /// anything above the bound in <see cref="PluginAdvancement"/>.
+    /// </param>
+    /// <returns>
+    /// What the client did with it, and why not when it refused. A host that
+    /// cannot send -- no session, or no such surface -- answers
+    /// <see cref="PluginAdvancementStatus.Unavailable"/> rather than throwing.
+    /// </returns>
+    PluginAdvancementResult RequestAdvancement(
+        PluginAdvancementKind kind,
+        uint statId,
+        ulong cost) =>
+        new(PluginAdvancementStatus.Unavailable);
 
     /// <summary>
     /// Enchantments in force on the local player. Snapshot semantics: the list
@@ -551,12 +689,79 @@ public readonly record struct PluginChatMessage(
     public DateTimeOffset Received { get; init; }
 }
 
+/// <summary>What an input interceptor decided about a line the player typed.</summary>
+public enum PluginChatInputAction
+{
+    /// <summary>Leave the line alone; the next interceptor, if any, sees it.</summary>
+    Pass,
+
+    /// <summary>
+    /// Replace the line with <see cref="PluginChatInputDecision.Text"/> and
+    /// run the replacement through the chat pipeline from the start.
+    /// </summary>
+    Rewrite,
+
+    /// <summary>
+    /// Drop the line. It is sent nowhere, no command runs for it, and the
+    /// player is told nothing unless the plugin says something itself.
+    /// </summary>
+    Suppress,
+}
+
 /// <summary>
-/// Reading the client's text, printing into it, and dropping lines before
-/// they are shown.
+/// The answer an input interceptor gives for one typed line. Build it from
+/// <see cref="Pass"/>, <see cref="Suppress"/> or <see cref="Rewrite(string)"/>;
+/// the default value is <see cref="Pass"/>.
+/// </summary>
+public readonly record struct PluginChatInputDecision
+{
+    private PluginChatInputDecision(PluginChatInputAction action, string? text)
+    {
+        Action = action;
+        Text = text;
+    }
+
+    /// <summary>What to do with the line.</summary>
+    public PluginChatInputAction Action { get; }
+
+    /// <summary>
+    /// The replacement line when <see cref="Action"/> is
+    /// <see cref="PluginChatInputAction.Rewrite"/>; null otherwise.
+    /// </summary>
+    public string? Text { get; }
+
+    /// <summary>Leave the line alone.</summary>
+    public static PluginChatInputDecision Pass { get; } = default;
+
+    /// <summary>Drop the line without sending it anywhere.</summary>
+    public static PluginChatInputDecision Suppress { get; } =
+        new(PluginChatInputAction.Suppress, null);
+
+    /// <summary>
+    /// Replace the line with <paramref name="text"/>. A blank replacement is
+    /// treated as <see cref="Suppress"/> by the host.
+    /// </summary>
+    /// <param name="text">The line to send instead of what was typed.</param>
+    public static PluginChatInputDecision Rewrite(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        return new(PluginChatInputAction.Rewrite, text);
+    }
+}
+
+/// <summary>
+/// Reading the client's text, printing into it, dropping lines before they
+/// are shown, and intercepting lines before they are sent.
 /// </summary>
 public interface IPluginChat
 {
+    /// <summary>
+    /// The most input interceptors one plugin may have installed at once. A
+    /// registration past this is refused with an exception rather than
+    /// silently ignored, so a plugin finds out.
+    /// </summary>
+    const int MaximumInputInterceptors = 16;
+
     /// <summary>
     /// Every retained line whose <see cref="PluginChatMessage.Sequence"/> is
     /// above the one given. The host keeps only the most recent few hundred
@@ -594,6 +799,46 @@ public interface IPluginChat
     /// filter a plugin installed when that plugin unloads.
     /// </summary>
     IDisposable RegisterFilter(Func<PluginChatMessage, bool> suppress) =>
+        NoOpPluginRegistration.Instance;
+
+    /// <summary>
+    /// Installs an interceptor consulted for every line the player sends from
+    /// the chat entry, on either front end, and for every line a plugin sends
+    /// through <see cref="Submit"/>. The interceptor sees the line trimmed,
+    /// otherwise exactly as typed, and answers with a
+    /// <see cref="PluginChatInputDecision"/>.
+    /// <para>
+    /// Ordering: interceptors run AFTER the client's own command catalogue, so
+    /// a line the client claims as one of its own commands never reaches an
+    /// interceptor and no plugin can shadow or rewrite a client command. They
+    /// run BEFORE plugin verbs and before the line is dispatched to a channel
+    /// or a tell, so a rewritten line can itself become a plugin verb or a
+    /// channel message. Interceptors run in registration order across every
+    /// plugin, and the first one that does not pass decides.
+    /// </para>
+    /// <para>
+    /// A rewrite is fed back through the pipeline from the start, so it may be
+    /// intercepted again. The host bounds the rewrite passes; once the bound
+    /// is reached the last text is sent as it stands. A suppressed line is
+    /// sent nowhere and runs no command; the player is told nothing unless
+    /// the plugin posts something. An interceptor that throws is logged once
+    /// and skipped for that line, and chat carries on without it.
+    /// </para>
+    /// Dispose the result to remove the interceptor; the host also removes
+    /// every interceptor a plugin installed when that plugin unloads. A host
+    /// that has no chat pipeline to intercept returns a handle that revokes
+    /// nothing and never calls the interceptor, which is what the default
+    /// implementation does.
+    /// </summary>
+    /// <param name="intercept">
+    /// Given the typed line, answers what to do with it.
+    /// </param>
+    /// <returns>A handle that removes the interceptor when disposed.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The plugin already has <see cref="MaximumInputInterceptors"/> installed.
+    /// </exception>
+    IDisposable RegisterInputInterceptor(
+        Func<string, PluginChatInputDecision> intercept) =>
         NoOpPluginRegistration.Instance;
 
     /// <summary>
@@ -785,7 +1030,7 @@ public interface IAutomationSurface
     /// <summary>The account's character list, and logging out.</summary>
     ILoginAutomation Login => NoOpAutomationSurface.Instance;
 
-    /// <summary>The state of the connection to the server.</summary>
+    /// <summary>The other clients on this computer: the local client list, and the casts they report.</summary>
     INetworkAutomation Network => NoOpAutomationSurface.Instance;
 
     /// <summary>Recovering after death.</summary>
@@ -793,6 +1038,12 @@ public interface IAutomationSurface
 
     /// <summary>Whether a missile or spell would reach a target.</summary>
     IProjectileAutomation Projectiles => NoOpAutomationSurface.Instance;
+
+    /// <summary>Text labels hung over objects in the world.</summary>
+    IWorldLabelAutomation Labels => NoOpAutomationSurface.Instance;
+
+    /// <summary>The shape of the dungeon the character is in, for drawing a map of it.</summary>
+    IDungeonMapAutomation DungeonMap => NoOpAutomationSurface.Instance;
 
     /// <summary>What the player has selected, and acting on it.</summary>
     ISelectionAutomation Selection => NoOpAutomationSurface.Instance;
@@ -817,6 +1068,7 @@ public sealed class NoOpAutomationSurface
       IFellowshipAutomation, IAllegianceAutomation, IEnchantmentAutomation, INavigationAutomation
       , IWorldObjectAutomation, IRecallAutomation, IWorldTimeAutomation, ILoginAutomation,
       INetworkAutomation, IRecoveryAutomation, IProjectileAutomation
+      , IWorldLabelAutomation, IDungeonMapAutomation
       , ISelectionAutomation, IDialogAutomation, ITradeAutomation,
       IVendorAutomation
 {
@@ -889,6 +1141,12 @@ public sealed class NoOpAutomationSurface
 
     /// <inheritdoc/>
     public IProjectileAutomation Projectiles => this;
+
+    /// <inheritdoc/>
+    public IWorldLabelAutomation Labels => this;
+
+    /// <inheritdoc/>
+    public IDungeonMapAutomation DungeonMap => this;
 
     /// <inheritdoc/>
     public ISelectionAutomation Selection => this;

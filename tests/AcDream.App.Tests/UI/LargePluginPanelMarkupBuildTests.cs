@@ -82,9 +82,10 @@ public sealed class LargePluginPanelMarkupBuildTests
         Assert.Equal(392f, built.MinWidth);
         Assert.Equal(300f, built.MinHeight);
 
-        // The popup's own visibility is bound; force it visible, because
-        // DrawSelfAndChildren's anchor pass never runs for an invisible
-        // element.
+        // The popup's own visibility is bound; force it visible, because an
+        // invisible element draws nothing at all, and this test reads the
+        // layout a draw produces. (Anchor margins themselves no longer depend
+        // on visibility: the build pins them from the authored layout.)
         built.Visible = true;
 
         UiMarkupList optionList = Assert.Single(

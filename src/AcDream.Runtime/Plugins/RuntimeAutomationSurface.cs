@@ -25,7 +25,8 @@ internal sealed class RuntimeAutomationSurface
       IRuntimeCommunicationObserver, IRuntimeEventObserver,
       IWorldObjectAutomation, IRecallAutomation, IAllegianceAutomation,
       IWorldTimeAutomation, ILoginAutomation, INetworkAutomation, IRecoveryAutomation,
-      IProjectileAutomation, ISelectionAutomation, IDialogAutomation, IDisposable
+      IProjectileAutomation, ISelectionAutomation, IDialogAutomation,
+      IWorldLabelAutomation, IScopedWorldLabelSource, IDisposable
 {
     private readonly PluginCommandRegistry _pluginCommands;
     private Action<string, Exception>? _pluginCommandFailed;
@@ -33,12 +34,41 @@ internal sealed class RuntimeAutomationSurface
         _navigationCommands;
     private IDisposable? _statusCommand;
     private const int MaximumPluginChatMessages = 512;
-    private const double PeerHeartbeatSeconds = 5d;
+    // One period for both: the registry holds a write that failed or was
+    // refused back for exactly as long as the next heartbeat would have been,
+    // so a note this client cannot write costs one attempt per heartbeat.
+    private static readonly double PeerHeartbeatSeconds =
+        LocalPluginPeerRegistry.HeartbeatPeriod.TotalSeconds;
     private readonly object _gate = new();
     private readonly AcDream.Runtime.Navigation.RuntimeNavigationAutomation _navigation;
+    private readonly AcDream.Runtime.Maps.RuntimeDungeonMapAutomation _dungeonMap = new();
     private readonly AcDream.Core.Plugins.IPluginEventSink? _events;
+    private static readonly double PeerCommandPollSeconds =
+        LocalPluginPeerRegistry.CommandPollPeriod.TotalSeconds;
     private readonly LocalPluginPeerRegistry _peers;
-    private readonly string[] _peerTags;
+
+    /// <summary>
+    /// The labels this client answers to. The host starts it with whatever
+    /// the player configured; a plugin may replace them, which is why this
+    /// is not fixed at birth.
+    /// </summary>
+    private string[] _peerTags;
+
+    /// <summary>
+    /// Broadcast lines this client has taken but not run yet, each with the
+    /// instant it is due. The wait is this client's place in the recipients'
+    /// order, so several clients taking one line do not all act at once.
+    /// </summary>
+    private readonly List<PendingPeerCommand> _pendingPeerCommands = [];
+
+    /// <summary>
+    /// How far this client's own delivery has read the peers' command rings.
+    /// Its own cursor, separate from every plugin's, so a plugin reading
+    /// <c>CaptureCommands</c> cannot make the client skip a line or run one
+    /// twice.
+    /// </summary>
+    private long _deliveredCommandSequence;
+    private double _peerCommandPollRemaining;
     private double _peerHeartbeatRemaining;
     private long _lastNavigationSequence;
     private PluginGoToState _lastNavigationState;
@@ -96,6 +126,13 @@ internal sealed class RuntimeAutomationSurface
     private IReadOnlyList<PluginProjectileDebugSample> _projectileDebugSamples =
         Array.Empty<PluginProjectileDebugSample>();
     private long _projectileDebugSamplesExpireAt;
+    // One label set per owner, so a plugin replacing its own set never
+    // touches another's. The merged view the drawing side reads is rebuilt
+    // only when a set changes, since it is asked for every frame.
+    private readonly Dictionary<string, PluginWorldLabel[]> _worldLabels =
+        new(StringComparer.Ordinal);
+    private PluginWorldLabel[]? _worldLabelsMerged = Array.Empty<PluginWorldLabel>();
+    private const string UnscopedWorldLabelOwner = "";
     private IGameRuntimeCommands? _sessionCommands;
     private Func<string, bool>? _submitChatText;
     private IDisposable? _communicationSubscription;
@@ -106,6 +143,11 @@ internal sealed class RuntimeAutomationSurface
     /// the log so they survive a session being replaced.
     /// </summary>
     private readonly ChatSuppressionFilters _chatFilters = new();
+    /// <summary>
+    /// Interceptors installed by plugins over the lines the player types. On
+    /// the surface for the same reason as the filters: they outlive a session.
+    /// </summary>
+    private readonly ChatInputInterceptors _chatInterceptors = new();
     private IDisposable? _chatFilterInstallation;
     private IDisposable? _runtimeEventSubscription;
     private bool _wasInWorld;
@@ -140,6 +182,10 @@ internal sealed class RuntimeAutomationSurface
     private static readonly string[] AttributeNames =
         ["Strength", "Endurance", "Quickness", "Coordination", "Focus", "Self"];
 
+    /// <summary>The three pools, in the order a plugin reads them.</summary>
+    private static readonly string[] VitalNames =
+        ["Health", "Stamina", "Mana"];
+
     private readonly Func<uint, IReadOnlyList<uint>> _activeSpellIdsForPlayer;
 
     public RuntimeAutomationSurface()
@@ -155,16 +201,13 @@ internal sealed class RuntimeAutomationSurface
         _navigation = new AcDream.Runtime.Navigation.RuntimeNavigationAutomation(() => IsAvailable);
         _activeSpellIdsForPlayer = _ => _enchantments.Select(static enchantment => enchantment.SpellId).ToArray();
         _pluginCommands = new PluginCommandRegistry(ReportPluginCommandFailure);
+        _chatInterceptors.InterceptorFaulted = error =>
+            ReportPluginCommandFailure("chat-input-interceptor", error);
         _events = events;
         _peers = peers ?? new LocalPluginPeerRegistry(Path.Combine(
             AcDream.Platform.ApplicationPathSet.Resolve().DataDirectory,
             "plugin-peers"));
-        _peerTags = (peerTags ?? Array.Empty<string>())
-            .Where(static tag => !string.IsNullOrWhiteSpace(tag))
-            .Select(static tag => tag.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(128)
-            .ToArray();
+        _peerTags = NormalizePeerTags(peerTags);
         if (_events is not null)
             _events.Tick += OnPeerTick;
     }
@@ -270,6 +313,13 @@ internal sealed class RuntimeAutomationSurface
         _pluginCommands.TryHandle(commandLine);
 
     /// <summary>
+    /// What the plugins on this surface make of a line the player typed. The
+    /// chat route asks before offering the line to plugin verbs or sending it.
+    /// </summary>
+    internal PluginChatInputDecision InterceptChatInput(string typed) =>
+        _chatInterceptors.Decide(typed);
+
+    /// <summary>
     /// Whether a verb is already spoken for on this registry. A front end
     /// with a verb of its own asks before it answers one, so nothing it does
     /// on its own ever shadows a plugin's.
@@ -312,6 +362,8 @@ internal sealed class RuntimeAutomationSurface
     public INetworkAutomation Network => this;
     public IRecoveryAutomation Recovery => this;
     public IProjectileAutomation Projectiles => this;
+    public IWorldLabelAutomation Labels => this;
+    public IDungeonMapAutomation DungeonMap => _dungeonMap;
     public ISelectionAutomation Selection => this;
     public ITradeAutomation Trade
     {
@@ -397,6 +449,229 @@ internal sealed class RuntimeAutomationSurface
             PublishPeerSnapshot();
         return _peers.CaptureRemoteClients();
     }
+
+    bool INetworkAutomation.AnnounceCastAttempt(
+        uint targetObjectId,
+        uint spellId,
+        int effectiveSkill) =>
+        AnnounceCast(
+            targetObjectId,
+            spellId,
+            effectiveSkill,
+            durationSeconds: 0d,
+            landed: false);
+
+    bool INetworkAutomation.AnnounceCastSuccess(
+        uint targetObjectId,
+        uint spellId,
+        int effectiveSkill,
+        double durationSeconds) =>
+        AnnounceCast(
+            targetObjectId,
+            spellId,
+            effectiveSkill,
+            durationSeconds,
+            landed: true);
+
+    /// <summary>
+    /// Puts one cast in the note the other clients on this machine read.
+    /// What only this client knows is settled here -- who is casting, and
+    /// whether the spell is one its own table can name. The rest is the
+    /// ring's one rule, which is the same rule a peer's note is read by.
+    /// </summary>
+    private bool AnnounceCast(
+        uint targetObjectId,
+        uint spellId,
+        int effectiveSkill,
+        double durationSeconds,
+        bool landed)
+    {
+        ICharacterInfo character = this;
+        uint casterObjectId = character.ObjectId;
+        if (casterObjectId == 0u)
+            return false;
+        lock (_gate)
+        {
+            // A spell nobody here can name is a spell nobody here can act
+            // on, so it never leaves this client either.
+            if (_disposed
+                || _spellbook is null
+                || !_spellbook.TryGetMetadata(spellId, out _))
+            {
+                return false;
+            }
+        }
+
+        // Everything else about the cast -- no target, a skill below zero, a
+        // duration that is not a finite number of seconds or is longer than a
+        // day -- is the ring's one rule, applied in the same place for a cast
+        // this client writes and a cast it reads, so the two cannot drift.
+        if (!_peers.RecordCast(new LocalPluginCast(
+            casterObjectId,
+            targetObjectId,
+            spellId,
+            effectiveSkill,
+            durationSeconds,
+            landed)))
+        {
+            return false;
+        }
+        // A cast is an event on a transport that otherwise only carries
+        // state, so the note is rewritten for it as soon as the debounce
+        // allows rather than waiting for the next heartbeat.
+        if (_peers.IsCastWriteDue())
+            PublishPeerSnapshot();
+        return true;
+    }
+
+    IReadOnlyList<PluginPeerCast> INetworkAutomation.CaptureCasts(
+        long afterSequence)
+    {
+        if (_events is null)
+            PublishPeerSnapshot();
+        ICharacterInfo character = this;
+        IReadOnlyList<PluginPeerCast> casts = _peers.CaptureRemoteCasts(
+            afterSequence,
+            character.WorldName,
+            character.ObjectId);
+        if (casts.Count == 0)
+            return casts;
+
+        Spellbook? spellbook;
+        lock (_gate)
+            spellbook = _disposed ? null : _spellbook;
+        if (spellbook is null)
+            return Array.Empty<PluginPeerCast>();
+        // A remote cast is classified in THIS client's spell table, never
+        // believed from the note: the id is the only thing worth carrying
+        // and everything about the spell is looked up here.
+        PluginPeerCast[] known = casts
+            .Where(cast => spellbook.TryGetMetadata(cast.SpellId, out _))
+            .ToArray();
+        return known.Length == 0
+            ? Array.Empty<PluginPeerCast>()
+            : known;
+    }
+
+    bool INetworkAutomation.SetTags(IReadOnlyList<string> tags)
+    {
+        if (tags is null)
+            return false;
+        foreach (string tag in tags)
+        {
+            // A label too long to travel is refused outright rather than cut
+            // short: a client answering to half a label is worse than one
+            // that says it would not take them.
+            if (tag is not null
+                && tag.Trim().Length > LocalPluginPeerRegistry.MaximumTagLength)
+            {
+                return false;
+            }
+        }
+        string[] normalized = NormalizePeerTags(tags);
+        lock (_gate)
+        {
+            if (_disposed)
+                return false;
+            _peerTags = normalized;
+        }
+        // The labels live in the note, and the note is what another client
+        // reads to decide whether a broadcast is for this one, so the change
+        // goes out on the next tick rather than at the next heartbeat.
+        PublishPeerSnapshot();
+        return true;
+    }
+
+    bool INetworkAutomation.BroadcastCommand(
+        string line,
+        IReadOnlyList<string> tags,
+        int delayMilliseconds)
+    {
+        ICharacterInfo character = this;
+        uint senderObjectId = character.ObjectId;
+        if (senderObjectId == 0u)
+            return false;
+        lock (_gate)
+        {
+            if (_disposed)
+                return false;
+        }
+
+        // Everything else about the line -- an empty one, one too long or
+        // carrying a control character, too many labels or one too long, a
+        // delay outside what a stagger may ask for -- is the ring's one
+        // rule, applied in the same place for a line this client writes and
+        // a line it reads, so the two cannot drift.
+        if (!_peers.RecordCommand(new LocalPluginCommand(
+            senderObjectId,
+            tags ?? Array.Empty<string>(),
+            line ?? string.Empty,
+            delayMilliseconds)))
+        {
+            return false;
+        }
+        // A broadcast is an event on a transport that otherwise only carries
+        // state, so the note is rewritten for it as soon as the debounce
+        // allows rather than waiting for the next heartbeat.
+        if (_peers.IsCommandWriteDue())
+            PublishPeerSnapshot();
+        return true;
+    }
+
+    IReadOnlyList<PluginPeerCommand> INetworkAutomation.CaptureCommands(
+        long afterSequence)
+    {
+        if (_events is null)
+            PublishPeerSnapshot();
+        IReadOnlyList<LocalPluginPeerCommand> commands = ReadPeerCommands(
+            afterSequence);
+        if (commands.Count == 0)
+            return Array.Empty<PluginPeerCommand>();
+        return commands
+            .Select(static command => command.Command)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// The broadcast lines the other clients on this computer have asked for
+    /// above <paramref name="afterSequence"/>, aimed at labels this client
+    /// answers to. One reader for the client's own delivery and for a
+    /// plugin's capture, so what a plugin sees and what the client runs are
+    /// never two different lists.
+    /// </summary>
+    private IReadOnlyList<LocalPluginPeerCommand> ReadPeerCommands(
+        long afterSequence)
+    {
+        ICharacterInfo character = this;
+        string[] tags;
+        lock (_gate)
+        {
+            if (_disposed)
+                return Array.Empty<LocalPluginPeerCommand>();
+            tags = _peerTags;
+        }
+        return _peers.CaptureRemoteCommands(
+            afterSequence,
+            character.WorldName,
+            character.ObjectId,
+            tags);
+    }
+
+    /// <summary>
+    /// The labels as they travel: trimmed, empties dropped, anything longer
+    /// than a label may be dropped, repeats ignoring case folded together,
+    /// and capped. The same shape the note is written with, so what a plugin
+    /// sets and what a peer reads back are the same words.
+    /// </summary>
+    private static string[] NormalizePeerTags(IReadOnlyList<string>? tags) =>
+        (tags ?? Array.Empty<string>())
+            .Where(static tag => !string.IsNullOrWhiteSpace(tag))
+            .Select(static tag => tag.Trim())
+            .Where(static tag =>
+                tag.Length <= LocalPluginPeerRegistry.MaximumTagLength)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(128)
+            .ToArray();
 
     bool ILoginAutomation.IsAvailable
     {
@@ -565,6 +840,7 @@ internal sealed class RuntimeAutomationSurface
             DetachLocked();
             _runtime = runtime;
             _navigation.Bind(runtime);
+            _dungeonMap.Bind(runtime);
             _tradeAutomation = new AcDream.Runtime.Gameplay.RuntimeTradeAutomation(runtime);
             _vendorAutomation = new AcDream.Runtime.Gameplay.RuntimeVendorAutomation(runtime);
             _communication = runtime.CommunicationOwner;
@@ -639,6 +915,13 @@ internal sealed class RuntimeAutomationSurface
     /// <summary>The walks plugins ask for through the navigation API.</summary>
     public void BindNavigationWalk(AcDream.Runtime.Navigation.NavigationWalkController walk) =>
         _navigation.BindWalk(walk);
+
+    /// <summary>
+    /// Lends the dungeon map the game files, read under <paramref name="contentLock"/>,
+    /// so it can tell a sealed cell and flatten a landblock's cells into a plan.
+    /// </summary>
+    public void BindDungeonMap(AcDream.Core.Content.IDatObjectSource content, object contentLock) =>
+        _dungeonMap.BindContent(content, contentLock);
 
     /// <summary>The runtime navigation this surface hands to plugins; a host binds its walk controller and commands to it.</summary>
     internal AcDream.Runtime.Navigation.RuntimeNavigationAutomation NavigationAutomation => _navigation;
@@ -860,8 +1143,16 @@ internal sealed class RuntimeAutomationSurface
         _composeChat = null;
         _trackedEnchantments.Clear();
         _trackedCastCompletionRevision = 0;
+        // A line waiting out its stagger was asked of the character that has
+        // just left the world; running it against whatever session comes
+        // next is not what the sender asked for. The cursor stays where it
+        // is, so a line already taken is not taken again on the way back in.
+        _pendingPeerCommands.Clear();
         _projectileDebugSamples = Array.Empty<PluginProjectileDebugSample>();
         _projectileDebugSamplesExpireAt = 0;
+        // The objects the labels hung from are gone with the session.
+        _worldLabels.Clear();
+        _worldLabelsMerged = Array.Empty<PluginWorldLabel>();
     }
 
     // Trade/vendor event polling only. The headless host calls this once per
@@ -887,12 +1178,144 @@ internal sealed class RuntimeAutomationSurface
         _navigation.PublishSnapshotChanged();
         PublishNavigationChange();
 
+        PumpPeerCommands(elapsedSeconds);
+
         _peerHeartbeatRemaining -= Math.Max(0d, elapsedSeconds);
-        if (_peerHeartbeatRemaining > 0d)
+        // The heartbeat is for state; a cast or a broadcast line is an event
+        // and cannot wait for it. The debounce is what keeps a burst from
+        // rewriting the whole note once each, and the note carries
+        // everything either way, so one write counts as this period's
+        // heartbeat too.
+        if (_peerHeartbeatRemaining > 0d
+            && !_peers.IsCastWriteDue()
+            && !_peers.IsCommandWriteDue())
+        {
             return;
+        }
         _peerHeartbeatRemaining = PeerHeartbeatSeconds;
         PublishPeerSnapshot();
     }
+
+    /// <summary>
+    /// Takes in the broadcast lines the other clients have asked this one to
+    /// run, and runs the ones whose wait is up. The client does this itself
+    /// rather than leaving it to a plugin: a line sent to this client is a
+    /// line this client was asked to run, and a machine where it depended on
+    /// which plugins happened to be installed would answer a broadcast
+    /// differently from one client to the next.
+    /// </summary>
+    /// <param name="elapsedSeconds">However long this frame or turn took.</param>
+    private void PumpPeerCommands(double elapsedSeconds)
+    {
+        _peerCommandPollRemaining -= Math.Max(0d, elapsedSeconds);
+        if (_peerCommandPollRemaining <= 0d)
+        {
+            _peerCommandPollRemaining = PeerCommandPollSeconds;
+            // A character with no object id is not in the world: it has no
+            // name to tell its own broadcasts from anybody else's, and a
+            // client that is not playing has nothing to run a line with.
+            // The same gate an announcement is held to.
+            ICharacterInfo character = this;
+            if (character.ObjectId != 0u)
+                TakeInPeerCommands();
+        }
+        RunDuePeerCommands();
+    }
+
+    /// <summary>
+    /// Reads what is new in the peers' command rings and puts each line in
+    /// the queue at the instant this client owes it.
+    /// </summary>
+    private void TakeInPeerCommands()
+    {
+        IReadOnlyList<LocalPluginPeerCommand> taken;
+        try
+        {
+            taken = ReadPeerCommands(_deliveredCommandSequence);
+        }
+        catch (IOException)
+        {
+            // A peer can replace or remove its own note between the folder
+            // scan and the read. It will be read again on the next poll.
+            return;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return;
+        }
+        if (taken.Count == 0)
+            return;
+        DateTimeOffset now = _peers.UtcNow;
+        lock (_gate)
+        {
+            if (_disposed)
+                return;
+            foreach (LocalPluginPeerCommand command in taken)
+            {
+                _deliveredCommandSequence = Math.Max(
+                    _deliveredCommandSequence, command.Command.Sequence);
+                _pendingPeerCommands.Add(new PendingPeerCommand(
+                    now + TimeSpan.FromMilliseconds(
+                        command.StaggerMilliseconds),
+                    command.Command.Line));
+            }
+            // The same ceiling the reader keeps for unread lines: a burst
+            // nobody could have run is bounded rather than growing with the
+            // session.
+            if (_pendingPeerCommands.Count
+                > LocalPluginPeerRegistry.ObservedCommandCapacity)
+            {
+                _pendingPeerCommands.RemoveRange(
+                    0,
+                    _pendingPeerCommands.Count
+                        - LocalPluginPeerRegistry.ObservedCommandCapacity);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Submits every line whose wait is up through this client's own chat
+    /// entry, which is the one door a line the player typed comes in by: the
+    /// client's own commands are consulted first, then the plugins' chat
+    /// interceptors, then the verbs plugins and the client registered, and
+    /// what is left goes to a channel, a tell or the server.
+    ///
+    /// <para>Offering the line to the verb registry alone -- which is what
+    /// this did -- meant a broadcast could only ever run a plugin verb. A
+    /// broadcast of a client command, of a server command, or of something
+    /// to say was taken from the sender, staggered, and then dropped.</para>
+    /// </summary>
+    private void RunDuePeerCommands()
+    {
+        List<string>? due = null;
+        lock (_gate)
+        {
+            // Runs on every tick, and on almost all of them there is nothing
+            // waiting, so the queue is asked before the clock is.
+            if (_disposed || _pendingPeerCommands.Count == 0)
+                return;
+            DateTimeOffset now = _peers.UtcNow;
+            for (int index = _pendingPeerCommands.Count - 1; index >= 0; index--)
+            {
+                if (_pendingPeerCommands[index].DueAt > now)
+                    continue;
+                (due ??= []).Add(_pendingPeerCommands[index].Line);
+                _pendingPeerCommands.RemoveAt(index);
+            }
+        }
+        if (due is null)
+            return;
+        // Oldest first: the loop above walked the queue backwards so a line
+        // could be taken out of it as it went.
+        due.Reverse();
+        foreach (string line in due)
+            _ = Submit(line);
+    }
+
+    /// <summary>A broadcast line this client has taken, and when it is due.</summary>
+    private readonly record struct PendingPeerCommand(
+        DateTimeOffset DueAt,
+        string Line);
 
     private void PublishNavigationChange()
     {
@@ -1427,6 +1850,8 @@ internal sealed class RuntimeAutomationSurface
         {
             Base = baseLevel,
             IconId = iconId,
+            Ranks = snapshot.Ranks,
+            ExperienceSpent = snapshot.Experience,
         };
         return true;
     }
@@ -1463,11 +1888,174 @@ internal sealed class RuntimeAutomationSurface
                         kind, AttributeNames[kind], effective)
                     {
                         Base = attribute.Current,
+                        Ranks = attribute.Ranks,
+                        ExperienceSpent = attribute.Experience,
                     });
                 }
             }
             return built;
         }
+    }
+
+    public IReadOnlyList<PluginVitalInfo> Vitals
+    {
+        get
+        {
+            var built = new List<PluginVitalInfo>(VitalNames.Length);
+            for (int kind = 0; kind < VitalNames.Length; kind++)
+            {
+                if (TryGetVital(kind, out PluginVitalInfo vital))
+                    built.Add(vital);
+            }
+            return built.Count == 0
+                ? Array.Empty<PluginVitalInfo>()
+                : built;
+        }
+    }
+
+    public bool TryGetVital(int kind, out PluginVitalInfo vital)
+    {
+        RuntimeCharacterState? character;
+        lock (_gate)
+            character = _character;
+        if (character is null
+            || (uint)kind >= (uint)VitalNames.Length
+            || !character.View.TryGetVital(kind, out RuntimeVitalSnapshot snapshot))
+        {
+            vital = default;
+            return false;
+        }
+
+        var pool = (LocalPlayerState.VitalKind)kind;
+        vital = new PluginVitalInfo(
+            kind,
+            VitalNames[kind],
+            snapshot.Current,
+            snapshot.Maximum)
+        {
+            // The one number a reader cannot work out from the snapshot: the
+            // pool at full with the enchantment layers taken off.
+            Base = character.LocalPlayer.GetBaseMaxApprox(pool)
+                ?? snapshot.Maximum,
+            Ranks = snapshot.Ranks,
+            ExperienceSpent = snapshot.Experience,
+        };
+        return true;
+    }
+
+    /// <summary>
+    /// Spending on one stat, checked here so both clients refuse the same
+    /// requests for the same reasons rather than each finding out on the wire.
+    /// </summary>
+    public PluginAdvancementResult RequestAdvancement(
+        PluginAdvancementKind kind,
+        uint statId,
+        ulong cost)
+    {
+        GameRuntime? runtime;
+        IGameRuntimeCommands? commands;
+        RuntimeCharacterState? character;
+        lock (_gate)
+        {
+            runtime = _runtime;
+            commands = _sessionCommands;
+            character = _character;
+        }
+        if (runtime is null || commands is null || character is null
+            || !IsAvailable)
+        {
+            return new(
+                PluginAdvancementStatus.Unavailable,
+                "the character is not in the world");
+        }
+
+        if (!TryMapAdvancementKind(kind, out RuntimeAdvancementKind mapped))
+        {
+            return new(
+                PluginAdvancementStatus.Refused,
+                $"{kind} is not a kind this client can spend on");
+        }
+
+        // The cost is checked before the stat so a caller that got both wrong
+        // is told about the one that is cheapest to fix.
+        ulong ceiling = mapped == RuntimeAdvancementKind.TrainSkill
+            ? PluginAdvancement.MaxSkillCredits
+            : PluginAdvancement.MaxExperienceCost;
+        if (cost == 0UL || cost > ceiling)
+        {
+            return new(
+                PluginAdvancementStatus.InvalidCost,
+                $"a cost of {cost} is outside 1..{ceiling}");
+        }
+
+        if (!IsKnownStat(character, mapped, statId))
+        {
+            return new(
+                PluginAdvancementStatus.UnknownStat,
+                $"{statId} names no {kind.ToString().ToLowerInvariant()} "
+                + "this character has");
+        }
+
+        RuntimeCommandResult result = commands.Character.Advance(
+            runtime.Generation,
+            new RuntimeAdvancementCommand(mapped, statId, cost));
+        return result.Status switch
+        {
+            RuntimeCommandStatus.Accepted =>
+                new(PluginAdvancementStatus.Sent),
+            RuntimeCommandStatus.Rejected =>
+                new(PluginAdvancementStatus.Refused, "the client declined it"),
+            _ => new(
+                PluginAdvancementStatus.Unavailable,
+                result.Status.ToString()),
+        };
+    }
+
+    private static bool TryMapAdvancementKind(
+        PluginAdvancementKind kind,
+        out RuntimeAdvancementKind mapped)
+    {
+        switch (kind)
+        {
+            case PluginAdvancementKind.Attribute:
+                mapped = RuntimeAdvancementKind.Attribute;
+                return true;
+            case PluginAdvancementKind.Vital:
+                mapped = RuntimeAdvancementKind.Vital;
+                return true;
+            case PluginAdvancementKind.Skill:
+                mapped = RuntimeAdvancementKind.Skill;
+                return true;
+            case PluginAdvancementKind.TrainSkill:
+                mapped = RuntimeAdvancementKind.TrainSkill;
+                return true;
+            default:
+                mapped = default;
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether this number names a stat the character really has. A skill is
+    /// checked against what the server has said the character carries; an
+    /// attribute and a pool are checked against the ones that exist.
+    /// </summary>
+    private static bool IsKnownStat(
+        RuntimeCharacterState character,
+        RuntimeAdvancementKind kind,
+        uint statId)
+    {
+        if (statId == 0u)
+            return false;
+        return kind switch
+        {
+            RuntimeAdvancementKind.Attribute =>
+                LocalPlayerState.AttributeIdToKind(statId) is not null,
+            // Only the three "at full" numbers may be spent on; the ids for
+            // how much is left name the same pools and are not raisable.
+            RuntimeAdvancementKind.Vital => statId is 1u or 3u or 5u,
+            _ => character.View.TryGetSkill(statId, out _),
+        };
     }
 
     // ── ISpellCatalog ─────────────────────────────────────────────────────
@@ -1936,6 +2524,13 @@ internal sealed class RuntimeAutomationSurface
         return _chatFilters.Register(suppress);
     }
 
+    public IDisposable RegisterInputInterceptor(
+        Func<string, PluginChatInputDecision> intercept)
+    {
+        ArgumentNullException.ThrowIfNull(intercept);
+        return _chatInterceptors.Register(intercept);
+    }
+
     public void OnChat(in RuntimeCommunicationEvent delta)
     {
         PluginChatMessage message;
@@ -2122,6 +2717,113 @@ internal sealed class RuntimeAutomationSurface
             }
             return _projectileDebugSamples;
         }
+    }
+
+    // ── IWorldLabelAutomation ───────────────────────────────────────────
+    // The same shape as the projectile markers: a plugin pushes a whole
+    // set, the surface keeps a detached copy, and whichever host has
+    // something to draw with reads it back once a frame. A host with no
+    // window keeps the set too and simply never asks for it.
+
+    bool IWorldLabelAutomation.ShowLabels(IReadOnlyList<PluginWorldLabel> labels) =>
+        ShowWorldLabels(UnscopedWorldLabelOwner, labels);
+
+    IWorldLabelAutomation IScopedWorldLabelSource.ScopeTo(string ownerId)
+    {
+        ArgumentNullException.ThrowIfNull(ownerId);
+        return new OwnedWorldLabels(this, ownerId);
+    }
+
+    void IScopedWorldLabelSource.Release(string ownerId)
+    {
+        ArgumentNullException.ThrowIfNull(ownerId);
+        lock (_gate)
+        {
+            if (_worldLabels.Remove(ownerId))
+                _worldLabelsMerged = null;
+        }
+    }
+
+    /// <summary>
+    /// Takes one owner's whole label set. A set over the cap is refused
+    /// unchanged rather than trimmed, so the plugin learns it asked for too
+    /// much; an unusable label inside an acceptable set is dropped quietly,
+    /// since one bad entry should not cost the other two hundred.
+    /// </summary>
+    internal bool ShowWorldLabels(string ownerId, IReadOnlyList<PluginWorldLabel> labels)
+    {
+        ArgumentNullException.ThrowIfNull(ownerId);
+        ArgumentNullException.ThrowIfNull(labels);
+        if (labels.Count > IWorldLabelAutomation.MaximumLabels)
+            return false;
+
+        var detached = new List<PluginWorldLabel>(labels.Count);
+        for (int index = 0; index < labels.Count; index++)
+        {
+            PluginWorldLabel label = labels[index];
+            if (label.ObjectId == 0u
+                || string.IsNullOrEmpty(label.Text)
+                || label.Text.Length > IWorldLabelAutomation.MaximumTextLength
+                || !float.IsFinite(label.Color.X)
+                || !float.IsFinite(label.Color.Y)
+                || !float.IsFinite(label.Color.Z)
+                || !float.IsFinite(label.Color.W)
+                || !float.IsFinite(label.MaxRange)
+                || label.MaxRange <= 0f
+                || !float.IsFinite(label.HeightOffset))
+            {
+                continue;
+            }
+            detached.Add(label);
+        }
+
+        lock (_gate)
+        {
+            if (_disposed)
+                return false;
+            if (detached.Count == 0)
+                _worldLabels.Remove(ownerId);
+            else
+                _worldLabels[ownerId] = detached.ToArray();
+            _worldLabelsMerged = null;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Every label every plugin has showing, in the order the owners pushed
+    /// them. The array is shared between calls until a set changes, so a
+    /// reader iterates it and never holds on to it.
+    /// </summary>
+    internal IReadOnlyList<PluginWorldLabel> CaptureWorldLabels()
+    {
+        lock (_gate)
+        {
+            if (_disposed)
+                return Array.Empty<PluginWorldLabel>();
+            if (_worldLabelsMerged is { } merged)
+                return merged;
+            int total = 0;
+            foreach (PluginWorldLabel[] set in _worldLabels.Values)
+                total += set.Length;
+            if (total == 0)
+                return _worldLabelsMerged = Array.Empty<PluginWorldLabel>();
+            var all = new PluginWorldLabel[total];
+            int cursor = 0;
+            foreach (PluginWorldLabel[] set in _worldLabels.Values)
+            {
+                set.CopyTo(all, cursor);
+                cursor += set.Length;
+            }
+            return _worldLabelsMerged = all;
+        }
+    }
+
+    private sealed class OwnedWorldLabels(RuntimeAutomationSurface surface, string ownerId)
+        : IWorldLabelAutomation
+    {
+        public bool ShowLabels(IReadOnlyList<PluginWorldLabel> labels) =>
+            surface.ShowWorldLabels(ownerId, labels);
     }
 
     private PluginProjectilePathResult EvaluateProjectilePathRequest(
@@ -2405,6 +3107,78 @@ internal sealed class RuntimeAutomationSurface
                 snapshot.MonarchGuid);
         }
     }
+
+    // Swearing is done face to face: the patron has to be a player the
+    // client can see standing there, which is the same thing the client's
+    // own panel requires before it offers the command at all.
+    PluginAllegianceCommandResult IAllegianceAutomation.Swear(uint patronObjectId)
+    {
+        GameRuntime? runtime;
+        IGameRuntimeCommands? commands;
+        lock (_gate)
+        {
+            runtime = _runtime;
+            commands = _sessionCommands;
+        }
+        if (runtime is null || commands is null || !IsAvailable)
+            return new(PluginAllegianceCommandStatus.Unavailable);
+        if (patronObjectId == 0u
+            || !runtime.EntityObjects.Entities.TryGetActive(patronObjectId, out _)
+            || ClassifyObject(runtime.InventoryOwner.Objects.Get(patronObjectId))
+                != PluginObjectClass.Player)
+        {
+            return new(
+                PluginAllegianceCommandStatus.InvalidTarget,
+                "Swearing needs another player the client can see.");
+        }
+        return ProjectAllegiance(
+            commands.Allegiance.Swear(runtime.Generation, patronObjectId));
+    }
+
+    // Breaking does not: a patron may be a continent away or logged out, and
+    // the tie is still there to break. What it does need is that the target
+    // really is in this character's allegiance, which is the list the server
+    // sent.
+    PluginAllegianceCommandResult IAllegianceAutomation.Break(uint targetObjectId)
+    {
+        GameRuntime? runtime;
+        IGameRuntimeCommands? commands;
+        lock (_gate)
+        {
+            runtime = _runtime;
+            commands = _sessionCommands;
+        }
+        if (runtime is null || commands is null || !IsAvailable)
+            return new(PluginAllegianceCommandStatus.Unavailable);
+        if (targetObjectId == 0u
+            || !runtime.Allegiance.TryGetMember(targetObjectId, out _))
+        {
+            return new(
+                PluginAllegianceCommandStatus.InvalidTarget,
+                "Only someone in the character's allegiance can be broken from.");
+        }
+        return ProjectAllegiance(
+            commands.Allegiance.Break(runtime.Generation, targetObjectId));
+    }
+
+    // A command the adapter turned down is a statement about the session, not
+    // about the target: the target was already checked above, and by the time
+    // the adapter sees the command it is only deciding whether this client can
+    // send anything at all. Reporting that as a wrong target would send a
+    // plugin off looking for a different patron over something that has
+    // nothing to do with who was named.
+    private static PluginAllegianceCommandResult ProjectAllegiance(
+        RuntimeCommandResult result) =>
+        result.Status switch
+        {
+            RuntimeCommandStatus.Accepted =>
+                new(PluginAllegianceCommandStatus.Sent),
+            RuntimeCommandStatus.Rejected =>
+                new(
+                    PluginAllegianceCommandStatus.Refused,
+                    "The client did not send the command."),
+            _ => new(PluginAllegianceCommandStatus.Unavailable),
+        };
 
     PluginRecallRequest IRecallAutomation.LastRequest
     {
@@ -3982,6 +4756,9 @@ internal sealed class RuntimeAutomationSurface
         ClientObject item)
     {
         ClientWeaponProfile? weapon = item.WeaponProfile;
+        int damage = weapon is { } weaponDamage
+            ? ClientAppraisalProfileMapper.NormalizeDamage(weaponDamage.Damage)
+            : item.Properties.GetInt((uint)PropertyInt.Damage);
         return new(
             item.ObjectId,
             item.WeenieClassId,
@@ -4014,9 +4791,7 @@ internal sealed class RuntimeAutomationSurface
             weapon is { } wt
                 ? (int)wt.DamageType
                 : item.Properties.GetInt((uint)PropertyInt.DamageType),
-            weapon is { } wd
-                ? ClientAppraisalProfileMapper.NormalizeDamage(wd.Damage)
-                : item.Properties.GetInt((uint)PropertyInt.Damage),
+            damage,
             weapon is { } wv
                 ? wv.DamageVariance
                 : item.Properties.GetFloat((uint)PropertyFloat.DamageVariance),
@@ -4064,7 +4839,14 @@ internal sealed class RuntimeAutomationSurface
             ItemCurrentMana = item.Properties.GetInt((uint)PropertyInt.ItemCurMana),
             ItemMaximumMana = item.Properties.GetInt((uint)PropertyInt.ItemMaxMana),
             Workmanship = item.Workmanship,
+            SalvageWorkmanship = item.Workmanship,
             NumTimesTinkered = item.Properties.GetInt((uint)PropertyInt.NumTimesTinkered),
+            ImbuedEffect = item.Properties.GetInt((uint)PropertyInt.ImbuedEffect),
+            ArmorLevel = item.Properties.GetInt((uint)PropertyInt.ArmorLevel),
+            MaxDamage = Math.Max(0, damage),
+            WandElementalDamageType = item.Properties.GetInt(
+                (uint)PropertyInt.DamageType),
+            Retained = item.Properties.GetBool((uint)PropertyBool.Retained),
             MaterialType = item.MaterialType ?? 0u,
             ObjectClass = ClassifyObject(item),
             Palettes = ProjectPalettes(runtime, item.ObjectId),

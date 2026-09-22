@@ -87,6 +87,20 @@ internal sealed class ParitySessionOperations : ILiveSessionOperations
 
     public bool PollConnect(WorldSession session) => true;
 
+    /// <summary>
+    /// The world the login said this character is in, and how many people
+    /// were on it. A real client is told this once, at login, and never
+    /// again; without it both clients answer an empty world name and a
+    /// population of -1, and a scenario comparing two blanks proves nothing.
+    /// </summary>
+    internal const string WorldName = "Parity Realm";
+
+    /// <summary>How many were on that world when the login asked.</summary>
+    internal const int ServerPopulation = 317;
+
+    public ServerName.Parsed? GetServerInfo(WorldSession session) =>
+        new(ServerPopulation, 800, WorldName);
+
     public CharacterList.Parsed GetCharacters(WorldSession session) =>
         new(
             0u,

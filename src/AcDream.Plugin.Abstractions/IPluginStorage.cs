@@ -57,6 +57,19 @@ public interface IPluginStorage
         throw new NotSupportedException("Plugin storage is unavailable.");
 
     /// <summary>
+    /// Creates the directory named by <paramref name="prefix"/> beneath the
+    /// storage root, together with every missing parent, so a plugin can lay
+    /// its folder tree out before it has anything to write into it. The
+    /// prefix is a slash-separated relative key prefix; a trailing slash is
+    /// allowed. Returns true when the directory exists afterwards, and false
+    /// when the storage is unavailable. Throws
+    /// <see cref="ArgumentException"/> for a prefix that is absolute or
+    /// escapes the storage root, exactly as <see cref="WriteText"/> does for
+    /// such a key.
+    /// </summary>
+    bool EnsureDirectory(string prefix) => false;
+
+    /// <summary>
     /// Removes what is stored under <paramref name="key"/>. Returns false
     /// when there was nothing to remove or the storage is unavailable.
     /// </summary>

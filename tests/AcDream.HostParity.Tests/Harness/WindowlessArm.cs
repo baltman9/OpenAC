@@ -42,7 +42,7 @@ internal sealed class WindowlessArm : ParityArm
     /// hangs it: the shared chat command route behind the surface the host
     /// hands its console and its plugins.
     /// </summary>
-    private readonly LiveChatCommandSurface _chatCommands = new();
+    private readonly LiveChatCommandSurface _chatCommands;
     private DirectGameRuntimeCommandAdapter _commands = null!;
 
     internal WindowlessArm()
@@ -61,6 +61,13 @@ internal sealed class WindowlessArm : ParityArm
                 sessionOperations: operations))
     {
         _gameplay = gameplay;
+        // The bus asks this client's plugin host what its plugins make of a
+        // typed line and which verbs it answers, exactly as the session host
+        // hangs it. The verb lookup is resolved when a line arrives rather
+        // than captured now, because the host below does not exist yet.
+        _chatCommands = new LiveChatCommandSurface(
+            line => _host?.TryHandlePluginCommand(line) == true,
+            line => _host!.InterceptChatInput(line));
         _gameplay.Bind(Runtime, catalog: null, accountName: () => "parity");
         // The windowless client's own command adapter, the one its session
         // host really builds, over this arm's session.
@@ -76,6 +83,10 @@ internal sealed class WindowlessArm : ParityArm
                 Path.Combine(DataDirectory, "plugin-storage")),
             vtankProfiles: new AcDream.Core.Plugins.FilePluginStorage(
                 Path.Combine(DataDirectory, "plugin-profiles")),
+            // Where a line a plugin submits, or one another client on this
+            // machine broadcast, goes in: this client's own chat entry, over
+            // its own route, exactly as its session host hands it.
+            submitChatText: SubmitChatText,
             sessionCommands: _commands,
             dataDirectory: DataDirectory,
             pluginTags: ConfiguredPluginTags,
@@ -84,6 +95,21 @@ internal sealed class WindowlessArm : ParityArm
             _host.FireTick,
             () => Runtime.Generation.Value);
     }
+
+    /// <summary>
+    /// Submitting a line the way this client's session host does: through
+    /// the shared router, over this client's own chat command surface, with
+    /// its own feedback.
+    /// </summary>
+    private bool SubmitChatText(string text) =>
+        ChatCommandRouter.Submit(
+            text,
+            new RuntimeChatCommandFeedback(Runtime.CommunicationOwner),
+            _chatCommands,
+            ChatChannelKind.Say)
+        is not (SubmitOutcome.Empty
+            or SubmitOutcome.UnknownCommand
+            or SubmitOutcome.Dropped);
 
     internal override IPluginHost Host => _host;
 

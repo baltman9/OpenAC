@@ -44,7 +44,14 @@ namespace AcDream.HostParity.Tests;
 internal sealed class WindowedArm : ParityArm
 {
     private readonly CombatFeedbackSlot _feedback = new();
-    private readonly LiveSessionCommandSurface _commands = new();
+    /// <summary>
+    /// Where a typed line goes on this client, hung the way its session
+    /// composition hangs it: the bus asks the shared plugin surface what the
+    /// plugins make of the line and which verbs it answers before offering
+    /// the line on. Both are resolved when a line arrives rather than
+    /// captured here, because the surface below does not exist yet.
+    /// </summary>
+    private readonly LiveSessionCommandSurface _commands;
     private readonly LiveSessionAppSource _sessionSource;
     private readonly WorldGameState _state = new();
     private readonly WorldEvents _events = new();
@@ -102,6 +109,9 @@ internal sealed class WindowedArm : ParityArm
         _pluginTick = new AcDream.Runtime.Plugins.RuntimePluginTickClock(
             _events.FireTick,
             () => Runtime.Generation.Value);
+        _commands = new LiveSessionCommandSurface(
+            line => _automation?.TryHandlePluginCommand(line) == true,
+            line => _automation!.InterceptChatInput(line));
         _sessionSource = new LiveSessionAppSource(Runtime.Session, _commands);
         _bindings.Add(_feedback.BindOwned(text =>
             Runtime.CommunicationOwner.AddText(

@@ -107,13 +107,14 @@ public sealed class HeadlessSessionHostTests
                 ChatRequests.ChatChannelOpcode,
                 ChatRequests.TalkOpcode,
             ],
-            captured.Select(ActionOpcode));
+            LoginCommandSends(captured).Select(ActionOpcode));
+        IReadOnlyList<byte[]> loginSends = LoginCommandSends(captured);
         Assert.Equal(
             0x00000800u,
-            BinaryPrimitives.ReadUInt32LittleEndian(captured[2].AsSpan(12)));
+            BinaryPrimitives.ReadUInt32LittleEndian(loginSends[2].AsSpan(12)));
         Assert.Equal(
             0x00000002u,
-            BinaryPrimitives.ReadUInt32LittleEndian(captured[3].AsSpan(12)));
+            BinaryPrimitives.ReadUInt32LittleEndian(loginSends[3].AsSpan(12)));
     }
 
     /// <summary>
@@ -141,7 +142,7 @@ public sealed class HeadlessSessionHostTests
         Assert.Equal(RuntimeSessionStartStatus.Connected, host.Start().Status);
         host.Tick(0.015d);
 
-        Assert.DoesNotContain(ChatRequests.TalkOpcode, captured.Select(ActionOpcode));
+        Assert.DoesNotContain(ChatRequests.TalkOpcode, LoginCommandSends(captured).Select(ActionOpcode));
     }
 
     [Fact]
@@ -423,9 +424,10 @@ public sealed class HeadlessSessionHostTests
                 ClientCommandRequests.ModifyGlobalSquelchOpcode,
                 ClientCommandRequests.ModifyGlobalSquelchOpcode,
             ],
-            captured.Select(ActionOpcode));
-        Assert.Equal("Aunt Agatha", StringActionArgument(captured[0]));
-        Assert.Equal("Lord Gnarly Beard", StringActionArgument(captured[1]));
+            LoginCommandSends(captured).Select(ActionOpcode));
+        IReadOnlyList<byte[]> loginSends = LoginCommandSends(captured);
+        Assert.Equal("Aunt Agatha", StringActionArgument(loginSends[0]));
+        Assert.Equal("Lord Gnarly Beard", StringActionArgument(loginSends[1]));
         Assert.Equal(
             [
                 (Add: 0u, MessageType: 2u),
@@ -433,7 +435,7 @@ public sealed class HeadlessSessionHostTests
                 (Add: 1u, MessageType: 3u),
                 (Add: 0u, MessageType: 3u),
             ],
-            captured.Skip(2).Select(static body => (
+            LoginCommandSends(captured).Skip(2).Select(static body => (
                 Add: BinaryPrimitives.ReadUInt32LittleEndian(
                     body.AsSpan(12, sizeof(uint))),
                 MessageType: BinaryPrimitives.ReadUInt32LittleEndian(
@@ -477,8 +479,9 @@ public sealed class HeadlessSessionHostTests
             Assert.Equal(
                 RuntimeSessionStartStatus.Connected,
                 host.Start().Status);
-            Assert.Single(captured);
-            Assert.Equal("after", TalkText(captured[0]));
+            Assert.Equal(
+                "after",
+                TalkText(Assert.Single(LoginCommandSends(captured))));
 
             host.Runtime.CommunicationOwner.SpewBox.Tick(0d);
             Assert.Equal(
@@ -533,8 +536,9 @@ public sealed class HeadlessSessionHostTests
 
             Assert.Equal(RuntimeSessionStartStatus.Connected, result.Status);
             Assert.True(host.Runtime.Session.IsInWorld);
-            Assert.Single(captured);
-            Assert.Equal(ChatRequests.TalkOpcode, ActionOpcode(captured[0]));
+            Assert.Equal(
+                ChatRequests.TalkOpcode,
+                ActionOpcode(Assert.Single(LoginCommandSends(captured))));
 
             JsonElement[] events = LiveStatusFile.ReadAllLines(statusPath)
                 .Select(static line =>
@@ -594,21 +598,21 @@ public sealed class HeadlessSessionHostTests
             timeProvider: time);
 
         Assert.Equal(RuntimeSessionStartStatus.Connected, host.Start().Status);
-        Assert.Equal(["first"], captured.Select(TalkText));
+        Assert.Equal(["first"], LoginCommandSends(captured).Select(TalkText));
 
         host.Tick(0.1d);
-        Assert.Equal(["first"], captured.Select(TalkText));
+        Assert.Equal(["first"], LoginCommandSends(captured).Select(TalkText));
 
         Assert.Equal(RuntimeSessionStartStatus.Connected, host.Reconnect().Status);
-        Assert.Equal(["first", "first"], captured.Select(TalkText));
+        Assert.Equal(["first", "first"], LoginCommandSends(captured).Select(TalkText));
 
         time.Advance(TimeSpan.FromMilliseconds(499));
         host.Tick(0.1d);
-        Assert.Equal(["first", "first"], captured.Select(TalkText));
+        Assert.Equal(["first", "first"], LoginCommandSends(captured).Select(TalkText));
 
         time.Advance(TimeSpan.FromMilliseconds(1));
         host.Tick(0.1d);
-        Assert.Equal(["first", "first", "second"], captured.Select(TalkText));
+        Assert.Equal(["first", "first", "second"], LoginCommandSends(captured).Select(TalkText));
     }
 
     [Fact]
@@ -4372,6 +4376,18 @@ public sealed class HeadlessSessionHostTests
         BinaryPrimitives.ReadUInt32LittleEndian(
             body.AsSpan(8, sizeof(uint)));
 
+    /// <summary>
+    /// What the session's login commands put on the wire. Arriving in the
+    /// world is itself something the client says -- it asks the server to
+    /// state the allegiance, which nothing else will make it say -- and that
+    /// belongs to the arrival rather than to the configured commands.
+    /// </summary>
+    private static IReadOnlyList<byte[]> LoginCommandSends(
+        IEnumerable<byte[]> captured) =>
+        [.. captured.Where(static body =>
+            ActionOpcode(body)
+                != AllegianceRequests.AllegianceUpdateRequestOpcode)];
+
     private static string TalkText(byte[] body)
     {
         Assert.Equal(ChatRequests.TalkOpcode, ActionOpcode(body));
@@ -4504,7 +4520,7 @@ public sealed class HeadlessSessionHostTests
         public WorldSession CreateSession(IPEndPoint endpoint)
         {
             CreatedSessionCount++;
-            var session = new WorldSession(endpoint);
+            var session = new WorldSession(endpoint).TakingItsSends();
             session.GameActionCapture = GameActionCapture;
             // This scripted server never sends the character's own object, so
             // the client is never prompted to complete its login. A test that
