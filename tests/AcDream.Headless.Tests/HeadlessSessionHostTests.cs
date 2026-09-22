@@ -108,12 +108,13 @@ public sealed class HeadlessSessionHostTests
                 ChatRequests.TalkOpcode,
             ],
             LoginCommandSends(captured).Select(ActionOpcode));
+        IReadOnlyList<byte[]> loginSends = LoginCommandSends(captured);
         Assert.Equal(
             0x00000800u,
-            BinaryPrimitives.ReadUInt32LittleEndian(captured[2].AsSpan(12)));
+            BinaryPrimitives.ReadUInt32LittleEndian(loginSends[2].AsSpan(12)));
         Assert.Equal(
             0x00000002u,
-            BinaryPrimitives.ReadUInt32LittleEndian(captured[3].AsSpan(12)));
+            BinaryPrimitives.ReadUInt32LittleEndian(loginSends[3].AsSpan(12)));
     }
 
     /// <summary>
@@ -424,8 +425,9 @@ public sealed class HeadlessSessionHostTests
                 ClientCommandRequests.ModifyGlobalSquelchOpcode,
             ],
             LoginCommandSends(captured).Select(ActionOpcode));
-        Assert.Equal("Aunt Agatha", StringActionArgument(captured[0]));
-        Assert.Equal("Lord Gnarly Beard", StringActionArgument(captured[1]));
+        IReadOnlyList<byte[]> loginSends = LoginCommandSends(captured);
+        Assert.Equal("Aunt Agatha", StringActionArgument(loginSends[0]));
+        Assert.Equal("Lord Gnarly Beard", StringActionArgument(loginSends[1]));
         Assert.Equal(
             [
                 (Add: 0u, MessageType: 2u),
@@ -477,8 +479,9 @@ public sealed class HeadlessSessionHostTests
             Assert.Equal(
                 RuntimeSessionStartStatus.Connected,
                 host.Start().Status);
-            Assert.Single(LoginCommandSends(captured));
-            Assert.Equal("after", TalkText(captured[0]));
+            Assert.Equal(
+                "after",
+                TalkText(Assert.Single(LoginCommandSends(captured))));
 
             host.Runtime.CommunicationOwner.SpewBox.Tick(0d);
             Assert.Equal(
@@ -533,8 +536,9 @@ public sealed class HeadlessSessionHostTests
 
             Assert.Equal(RuntimeSessionStartStatus.Connected, result.Status);
             Assert.True(host.Runtime.Session.IsInWorld);
-            Assert.Single(LoginCommandSends(captured));
-            Assert.Equal(ChatRequests.TalkOpcode, ActionOpcode(captured[0]));
+            Assert.Equal(
+                ChatRequests.TalkOpcode,
+                ActionOpcode(Assert.Single(LoginCommandSends(captured))));
 
             JsonElement[] events = LiveStatusFile.ReadAllLines(statusPath)
                 .Select(static line =>

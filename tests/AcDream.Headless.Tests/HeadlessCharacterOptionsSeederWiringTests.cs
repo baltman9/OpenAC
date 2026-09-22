@@ -140,6 +140,20 @@ public sealed class HeadlessCharacterOptionsSeederWiringTests
         HeadlessExitCode result = await run;
 
         Assert.Equal(HeadlessExitCode.Success, result);
+        // Everything the session put on the wire, and nothing else: the one
+        // option the seeder found a difference for, and the one question
+        // arriving in the world asks. A session that sent a third thing here
+        // is sending something nobody asked it to.
+        // Compared in opcode order, because which of the two goes first is
+        // a matter of when the server says what, and this is about the set.
+        Assert.Equal(
+            [
+                SocialActions.SetSingleCharacterOptionOpcode,
+                AllegianceRequests.AllegianceUpdateRequestOpcode,
+            ],
+            operations.SentActions
+                .Select(static entry => ActionOpcode(entry.Body))
+                .Order());
         (byte[] Body, int ThreadId) sent =
             Assert.Single(OptionSends(operations));
         Assert.NotEqual(0, sent.ThreadId);

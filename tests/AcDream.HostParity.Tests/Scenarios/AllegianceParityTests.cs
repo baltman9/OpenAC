@@ -74,6 +74,29 @@ public sealed class AllegianceParityTests
             transcript.RecordOutbound(arm);
         });
 
+    /// <summary>
+    /// And nothing else. Arriving in the world is a moment when a client
+    /// could start saying all sorts of things to the server unasked; what it
+    /// says is this one question. The scenario that pins the question reads
+    /// only the messages of that kind, so it would not notice a second
+    /// client learning to announce itself on arrival -- this one counts
+    /// everything that left.
+    /// </summary>
+    [Fact]
+    public void ArrivingInTheWorldSendsNothingButThatOneQuestion() =>
+        ParityScenario.RunFromLogin(static (arm, transcript) =>
+        {
+            transcript.Step("arrive in the world");
+            Assert.Empty(arm.Operations.Outbound);
+
+            arm.EnterWorld();
+
+            ParityOutbound only = Assert.Single(arm.Operations.Outbound);
+            transcript.Record("action", only.GameAction);
+            Assert.Equal(UpdateRequestAction, only.GameAction);
+            transcript.RecordOutbound(arm);
+        });
+
     [Fact]
     public void SwearingToAPlayerLeavesBothClientsWithThatPlayersId() =>
         ParityScenario.Run(static (arm, transcript) =>
