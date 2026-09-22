@@ -491,6 +491,11 @@ public interface INavigationAutomation
     /// <param name="headingDegrees">
     /// The direction to face, in degrees clockwise from north.
     /// </param>
+    /// <remarks>
+    /// The turn is made at run speed whatever the player's keys say: a plugin
+    /// facing a heading is steering, and a route must never turn as slowly
+    /// as a walk. Holding the walk key does not slow it.
+    /// </remarks>
     /// <returns>
     /// <see cref="PluginNavigationCommandStatus.Unavailable"/> when no session
     /// is in the world or the host does not implement turning, which is what
