@@ -564,6 +564,36 @@ Units, since none of these read as plain integers or percentages:
   damage type does 20% MORE to the wearer, `0.8` means 20% less. It is not
   the flat armor-level number; `ArmorLevel` is the separate field for that.
 
+### Crafting and tinkering values
+
+`Items.CaptureOwnedItems()` returns a `PluginInventoryItem` per owned item,
+and a crafting calculator needs a particular handful of its fields. Both
+hosts project them from the same runtime object table, so a plugin reads
+identical numbers windowed and headless.
+
+| Field | Type | Where it comes from | When it is absent |
+|---|---|---|---|
+| `Workmanship` | `float` | the object's own workmanship | `0` |
+| `SalvageWorkmanship` | `double` | the same number, widened — a bag of salvage carries the average workmanship of everything melted into it | `0` |
+| `NumTimesTinkered` | `int` | the item's tinker count | `0` |
+| `ImbuedEffect` | `int` | the imbue flags: the rends and the critical bonuses. Any non-zero value means the item cannot be imbued again | `0` |
+| `MaterialType` | `uint` | what the item is made of | `0` |
+| `ArmorLevel` | `int` | the item's flat armor value, from its own property table, so it is there without an appraisal | `0` |
+| `MaxDamage` | `int` | the top of the damage roll: `Damage` with the server's "unset" sentinel folded to zero, so it is always usable in a sum | `0` |
+| `WandElementalDamageType` | `int` | the damage type in the item's own property table, which is where a casting weapon's element lives | `0` |
+| `Retained` | `bool` | the mark that stops an item being dropped, sold, or salvaged by accident | `false` |
+
+Four more values a calculator asks for are already on the snapshot under
+their own names, so there is no second copy of them:
+
+- the equipable-slot mask is `ValidLocations`;
+- the uses remaining is `Structure`, with its ceiling in
+  `MaximumStructure`;
+- the damage variance is `DamageVariance`;
+- the damage rating itself is `Damage`. Unlike `MaxDamage` it keeps the
+  server's `-1` for "never set", and unlike `WandElementalDamageType` its
+  sibling `DamageType` prefers the appraised weapon profile.
+
 `Objects.TryGet`/`CaptureObjects` are real on the headless host (see
 [Headless](#headless)), but `Objects.TryCaptureProperties` and
 `Objects.Identify` are not -- they need appraisal-wire and

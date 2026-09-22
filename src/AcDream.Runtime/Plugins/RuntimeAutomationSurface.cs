@@ -4412,6 +4412,9 @@ internal sealed class RuntimeAutomationSurface
         ClientObject item)
     {
         ClientWeaponProfile? weapon = item.WeaponProfile;
+        int damage = weapon is { } weaponDamage
+            ? ClientAppraisalProfileMapper.NormalizeDamage(weaponDamage.Damage)
+            : item.Properties.GetInt((uint)PropertyInt.Damage);
         return new(
             item.ObjectId,
             item.WeenieClassId,
@@ -4444,9 +4447,7 @@ internal sealed class RuntimeAutomationSurface
             weapon is { } wt
                 ? (int)wt.DamageType
                 : item.Properties.GetInt((uint)PropertyInt.DamageType),
-            weapon is { } wd
-                ? ClientAppraisalProfileMapper.NormalizeDamage(wd.Damage)
-                : item.Properties.GetInt((uint)PropertyInt.Damage),
+            damage,
             weapon is { } wv
                 ? wv.DamageVariance
                 : item.Properties.GetFloat((uint)PropertyFloat.DamageVariance),
@@ -4494,7 +4495,14 @@ internal sealed class RuntimeAutomationSurface
             ItemCurrentMana = item.Properties.GetInt((uint)PropertyInt.ItemCurMana),
             ItemMaximumMana = item.Properties.GetInt((uint)PropertyInt.ItemMaxMana),
             Workmanship = item.Workmanship,
+            SalvageWorkmanship = item.Workmanship,
             NumTimesTinkered = item.Properties.GetInt((uint)PropertyInt.NumTimesTinkered),
+            ImbuedEffect = item.Properties.GetInt((uint)PropertyInt.ImbuedEffect),
+            ArmorLevel = item.Properties.GetInt((uint)PropertyInt.ArmorLevel),
+            MaxDamage = Math.Max(0, damage),
+            WandElementalDamageType = item.Properties.GetInt(
+                (uint)PropertyInt.DamageType),
+            Retained = item.Properties.GetBool((uint)PropertyBool.Retained),
             MaterialType = item.MaterialType ?? 0u,
             ObjectClass = ClassifyObject(item),
             Palettes = ProjectPalettes(runtime, item.ObjectId),
