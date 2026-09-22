@@ -31,11 +31,17 @@ public sealed class ScopedAutomationSurfaceTests
 
         PropertyInfo[] properties = typeof(IAutomationSurface).GetProperties();
 
-        // Sanity check: if this drops below the known count, the interface
-        // shrank and the loop below silently checks less than intended.
+        // Sanity check: the loop below walks whatever the interface has, so
+        // it cannot say how much that was. This says it. Adding a member
+        // means adding a forwarder and raising this number in the same
+        // change; a number that no longer matches means one of the two was
+        // forgotten.
         Assert.True(
-            properties.Length >= 23,
-            "IAutomationSurface should still have every member this test knows about.");
+            properties.Length == 26,
+            "IAutomationSurface has "
+                + $"{properties.Length} members rather than the 26 this "
+                + "census was written for. Forward the new one in "
+                + "ScopedPluginHost and say so here.");
 
         var checkedMembers = new List<string>();
         foreach (PropertyInfo property in properties)
