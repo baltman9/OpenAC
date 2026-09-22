@@ -29,6 +29,15 @@ internal static class ParityWorld
     internal const uint HiddenMonster = 0x50000010u;
     internal const uint Bystander = 0x50000020u;
 
+    /// <summary>Another player, standing next to the character.</summary>
+    internal const uint OtherPlayer = 0x50000021u;
+
+    /// <summary>The character's patron, who is nowhere near it.</summary>
+    internal const uint Patron = 0x50000002u;
+
+    /// <summary>The monarch of the allegiance the character belongs to.</summary>
+    internal const uint Monarch = 0x50000003u;
+
     /// <summary>Where the character stands, in metres inside its cell.</summary>
     internal const float PlayerX = 96f;
     internal const float PlayerY = 97f;
@@ -112,6 +121,44 @@ internal static class ParityWorld
         Name = $"Bystander {objectId:X8}",
         PublicWeenieBitfield = 0u,
     };
+
+    /// <summary>
+    /// Puts another player on the ground two metres out. The character's own
+    /// entry is already a player; this is someone else's, which is what an
+    /// allegiance command can be pointed at.
+    /// </summary>
+    internal static void StageAnotherPlayer(GameRuntime runtime)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        ClientObject player = PlayerObject(OtherPlayer);
+        player.Name = "Another";
+        Add(runtime, OtherPlayer, PlayerX + 2f, player);
+    }
+
+    /// <summary>
+    /// The allegiance the server states for this character: a monarch, the
+    /// patron above it, and itself below that patron. Neither the monarch nor
+    /// the patron is anywhere in the world, which is the ordinary case.
+    /// </summary>
+    internal static void StageAllegiance(GameRuntime runtime)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        runtime.AllegianceOwner!.ApplyUpdate(new ClientCommandResponses.AllegianceUpdate(
+            Rank: 3u,
+            TotalMembers: 3u,
+            TotalVassals: 1u,
+            RecordCount: 3,
+            AllegianceName: "The Order",
+            Monarch: new ClientCommandResponses.AllegianceMemberRecord(
+                Monarch, 0u, true, "Monarch"),
+            Records:
+            [
+                new ClientCommandResponses.AllegianceMemberRecord(
+                    Patron, Monarch, false, "Patron"),
+                new ClientCommandResponses.AllegianceMemberRecord(
+                    Player, Patron, true, "Parity"),
+            ]));
+    }
 
     // ── things to carry, and things to open ─────────────────────────────
 

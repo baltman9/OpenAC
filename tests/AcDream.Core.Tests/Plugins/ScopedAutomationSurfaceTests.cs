@@ -336,6 +336,11 @@ public sealed class ScopedAutomationSurfaceTests
         public IItemAutomation Items { get; } = new FakeItemAutomation();
         public ILootAutomation Loot { get; } = new FakeLootAutomation();
         public IFellowshipAutomation Fellowship { get; } = new FakeFellowshipAutomation();
+        // An area left at the shared no-op would be compared against the
+        // scoped surface's own no-op fallback, so the census would hold
+        // whether or not a forwarder was written. Allegiance was found
+        // unforwarded because it had no object of its own here.
+        public IAllegianceAutomation Allegiance { get; } = new FakeAllegianceAutomation();
         public IEnchantmentAutomation Enchantments { get; } = new FakeEnchantmentAutomation();
         public INavigationAutomation Navigation { get; } = new FakeNavigationAutomation();
         public IWorldObjectAutomation Objects { get; } = new FakeWorldObjectAutomation();
@@ -418,6 +423,8 @@ public sealed class ScopedAutomationSurfaceTests
     private sealed class FakeLootAutomation : ILootAutomation;
 
     private sealed class FakeFellowshipAutomation : IFellowshipAutomation;
+
+    private sealed class FakeAllegianceAutomation : IAllegianceAutomation;
 
     private sealed class FakeEnchantmentAutomation : IEnchantmentAutomation;
 

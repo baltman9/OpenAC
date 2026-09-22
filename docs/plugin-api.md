@@ -652,6 +652,51 @@ the session ends with a runtime error instead. Either way a headless plugin
 that calls it should expect the session to end, not to see another
 character list.
 
+## Allegiance
+
+`host.Automation.Allegiance` reads the allegiance the server has told the
+client about, and sends the two commands that change it.
+
+```csharp
+IAllegianceAutomation allegiance = host.Automation.Allegiance;
+
+PluginAllegianceSnapshot mine = allegiance.Snapshot;
+if (mine.IsKnown)
+    host.Log.Info($"{mine.Name}, rank {mine.Rank}, {mine.MemberCount} members");
+
+PluginAllegianceCommandResult sworn = allegiance.Swear(patronObjectId);
+PluginAllegianceCommandResult broken = allegiance.Break(patronObjectId);
+
+if (!sworn.Accepted)
+    host.Log.Warn($"{sworn.Status}: {sworn.Notice}");
+```
+
+The two commands are checked differently before they are sent, because they
+mean different things:
+
+- **`Swear`** pledges the character to another player as its patron, and
+  swearing is done face to face. The id has to be a player the client can
+  currently see standing in the world; anything else -- a creature, a door, a
+  player the client only knows by name, a guid it has never heard of -- is
+  refused as `InvalidTarget` and nothing leaves the client.
+- **`Break`** breaks the tie between the character and someone in its
+  allegiance: its patron, or one of its vassals. The id has to be someone the
+  server has said is in that allegiance. It does **not** have to be nearby or
+  even logged in, which is the ordinary case -- a patron a continent away is
+  still a patron.
+
+| `Status` | when |
+|---|---|
+| `Sent` | the command went to the server; its answer arrives later as a restated allegiance |
+| `Unavailable` | the character is not in the world, or there is no session |
+| `InvalidTarget` | a zero id, a patron who is not a visible player, or a break target outside the allegiance |
+
+`Sent` means the command left the client, not that it worked: the server
+decides whether the character may swear or break -- experience owed, a
+cooldown, a mansion held -- and says so in its own time. Watch `Snapshot`
+rather than assuming, and note that `Snapshot` only changes once the server
+sends the allegiance again.
+
 ## Loot
 
 A classifier is registered under `<pluginId>/<classifierId>` — the id a

@@ -188,6 +188,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         public IItemAutomation Items => Inner.Items;
         public ILootAutomation Loot => Inner.Loot;
         public IFellowshipAutomation Fellowship => Inner.Fellowship;
+        public IAllegianceAutomation Allegiance => Inner.Allegiance;
         public IEnchantmentAutomation Enchantments => Inner.Enchantments;
         // A host whose navigation can tell plugins apart hands this plugin its own view,
         // so its walks and pauses are its own and go with it when it is disabled.

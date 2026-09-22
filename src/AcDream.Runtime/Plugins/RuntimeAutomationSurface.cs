@@ -2836,6 +2836,69 @@ internal sealed class RuntimeAutomationSurface
         }
     }
 
+    // Swearing is done face to face: the patron has to be a player the
+    // client can see standing there, which is the same thing the client's
+    // own panel requires before it offers the command at all.
+    PluginAllegianceCommandResult IAllegianceAutomation.Swear(uint patronObjectId)
+    {
+        GameRuntime? runtime;
+        IGameRuntimeCommands? commands;
+        lock (_gate)
+        {
+            runtime = _runtime;
+            commands = _sessionCommands;
+        }
+        if (runtime is null || commands is null || !IsAvailable)
+            return new(PluginAllegianceCommandStatus.Unavailable);
+        if (patronObjectId == 0u
+            || !runtime.EntityObjects.Entities.TryGetActive(patronObjectId, out _)
+            || ClassifyObject(runtime.InventoryOwner.Objects.Get(patronObjectId))
+                != PluginObjectClass.Player)
+        {
+            return new(
+                PluginAllegianceCommandStatus.InvalidTarget,
+                "Swearing needs another player the client can see.");
+        }
+        return ProjectAllegiance(
+            commands.Allegiance.Swear(runtime.Generation, patronObjectId));
+    }
+
+    // Breaking does not: a patron may be a continent away or logged out, and
+    // the tie is still there to break. What it does need is that the target
+    // really is in this character's allegiance, which is the list the server
+    // sent.
+    PluginAllegianceCommandResult IAllegianceAutomation.Break(uint targetObjectId)
+    {
+        GameRuntime? runtime;
+        IGameRuntimeCommands? commands;
+        lock (_gate)
+        {
+            runtime = _runtime;
+            commands = _sessionCommands;
+        }
+        if (runtime is null || commands is null || !IsAvailable)
+            return new(PluginAllegianceCommandStatus.Unavailable);
+        if (targetObjectId == 0u
+            || !runtime.Allegiance.TryGetMember(targetObjectId, out _))
+        {
+            return new(
+                PluginAllegianceCommandStatus.InvalidTarget,
+                "Only someone in the character's allegiance can be broken from.");
+        }
+        return ProjectAllegiance(
+            commands.Allegiance.Break(runtime.Generation, targetObjectId));
+    }
+
+    private static PluginAllegianceCommandResult ProjectAllegiance(
+        RuntimeCommandResult result) =>
+        new(result.Status switch
+        {
+            RuntimeCommandStatus.Accepted => PluginAllegianceCommandStatus.Sent,
+            RuntimeCommandStatus.Rejected =>
+                PluginAllegianceCommandStatus.InvalidTarget,
+            _ => PluginAllegianceCommandStatus.Unavailable,
+        });
+
     PluginRecallRequest IRecallAutomation.LastRequest
     {
         get { lock (_gate) return _lastRecallRequest; }
