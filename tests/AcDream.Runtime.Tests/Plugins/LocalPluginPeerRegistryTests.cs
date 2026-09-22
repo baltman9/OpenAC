@@ -935,6 +935,54 @@ public sealed class LocalPluginPeerRegistryTests
     }
 
     /// <summary>
+    /// A client that crashed leaves its note in the folder for good, and the
+    /// scan hands that note over like any other. It is no longer playing, so
+    /// it is no longer a recipient: the clients behind it close up rather
+    /// than each waiting an extra place for the rest of the session.
+    ///
+    /// Mutation check (2026-09-22): counting a note the folder still holds
+    /// without asking whether it is recent made this client wait 300ms
+    /// rather than 200ms.
+    /// </summary>
+    [Fact]
+    public void AClientThatStoppedSayingSoTakesNoPlaceInTheOrder()
+    {
+        string root = TemporaryRoot();
+        var time = new ManualTimeProvider(
+            new DateTimeOffset(2026, 9, 22, 12, 0, 0, TimeSpan.Zero));
+        try
+        {
+            using var sender = Registry(root, time, 1);
+            using var live = Registry(root, time, 2);
+            using var crashed = Registry(root, time, 3);
+            using var reader = Registry(root, time, 4);
+            // The one that stops: it says so once and never again, which is
+            // what a client that crashed leaves behind.
+            crashed.Publish(Client(crashed.ClientId, 30u, "Gamma", []));
+
+            time.Advance(TimeSpan.FromSeconds(30));
+            sender.Publish(Client(sender.ClientId, 10u, "Alpha", []));
+            live.Publish(Client(live.ClientId, 20u, "Beta", []));
+            reader.Publish(Client(reader.ClientId, 40u, "Delta", []));
+
+            Assert.True(sender.RecordCommand(
+                new LocalPluginCommand(10u, [], "/example go", 100)));
+            sender.Publish(Client(sender.ClientId, 10u, "Alpha", []));
+
+            // One live client is ahead of this one, so this one is second in
+            // the order behind the sender and waits two delays.
+            Assert.Equal(
+                200,
+                Assert.Single(reader.CaptureRemoteCommands(
+                    0L, "Coldeve", 40u, [])).StaggerMilliseconds);
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    /// <summary>
     /// What never enters the ring. Each row is a line that would be wrong to
     /// pass on -- and the note is written as JSON and read by another
     /// process, so a line carrying a control character or running to

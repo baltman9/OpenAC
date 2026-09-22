@@ -882,6 +882,7 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                     aimedAt,
                     StaggerFor(
                         notes,
+                        now,
                         worldName,
                         document.ClientId,
                         aimedAt,
@@ -913,12 +914,14 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     /// and so on.</para>
     /// </summary>
     /// <param name="notes">Every other client's note, as read this pass.</param>
+    /// <param name="now">This read's instant.</param>
     /// <param name="worldName">The world this client is playing in.</param>
     /// <param name="senderClientId">The client that asked for the line.</param>
     /// <param name="aimedAt">The labels the line is aimed at.</param>
     /// <param name="delayMilliseconds">The delay the sender asked for.</param>
     private int StaggerFor(
         List<PeerNote> notes,
+        DateTimeOffset now,
         string worldName,
         uint senderClientId,
         string[] aimedAt,
@@ -930,8 +933,16 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         foreach (PeerNote note in notes)
         {
             PeerDocument document = note.Document;
+            // Lying in the folder is not the same as playing: a client that
+            // crashed leaves its note behind and the scan hands it over like
+            // any other. A place in the order belongs to a client that is
+            // still saying so, by the same rule that decides whether a note
+            // speaks for anybody at all -- otherwise every client behind a
+            // dead one waits one place too many, for as long as the file
+            // lies there.
             if (document.ClientId == senderClientId
                 || document.ClientId >= ClientId
+                || !IsRecent(document, now)
                 || !IsSameWorld(document, worldName)
                 || !IsAimedAt(aimedAt, NormalizeTags(document.Tags)))
             {
