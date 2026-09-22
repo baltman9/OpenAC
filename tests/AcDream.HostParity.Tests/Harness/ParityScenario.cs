@@ -64,7 +64,15 @@ internal static class ParityScenario
         {
             var transcript = new ParityTranscript();
             if (enterWorld)
+            {
                 arm.EnterWorld();
+                // Arriving is itself something a client does out loud: it
+                // asks the server about the allegiance. That belongs to the
+                // arrival, not to the scenario, so what a scenario reads off
+                // the wire afterwards is its own. A scenario about the
+                // arrival itself takes RunFromLogin and keeps the record.
+                _ = arm.Operations.TakeOutbound();
+            }
             script(arm, transcript);
             return transcript;
         }

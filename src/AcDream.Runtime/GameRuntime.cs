@@ -684,7 +684,26 @@ public sealed class GameRuntime
         if (previous == current)
             return;
         _lastEmittedLifecycleState = current;
+        if (current == RuntimeLifecycleState.InWorld)
+            AskTheServerAboutTheAllegiance();
         _events.EmitLifecycle(previous, current);
+    }
+
+    /// <summary>
+    /// The one request the runtime itself makes on arriving in the world.
+    /// The server says nothing about a character's allegiance unless it is
+    /// asked, and until it does, every allegiance question -- who the patron
+    /// is, who the vassals are, whether a break has anyone to break with --
+    /// answers "nobody". Asking here rather than from a panel is what the
+    /// original client does, and it is the only way a client with no panels
+    /// open, or no panels at all, knows any of it.
+    /// </summary>
+    private void AskTheServerAboutTheAllegiance()
+    {
+        if (Session.CurrentSession is not { } session)
+            return;
+        if (AllegianceOwner.NoteEnteredWorld())
+            session.SendAllegianceUpdateRequest(true);
     }
 
     IGameRuntimeClock IGameRuntimeView.Clock => Clock;

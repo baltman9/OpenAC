@@ -25,6 +25,7 @@ public sealed class RuntimeAllegianceState : IDisposable
     private uint _rank;
     private bool _hasProfile;
     private bool _hasServerSeed;
+    private bool _askedOnEntry;
     private long _revision;
     private bool _disposed;
 
@@ -40,6 +41,32 @@ public sealed class RuntimeAllegianceState : IDisposable
     public bool HasServerSeed
     {
         get { lock (_gate) return _hasServerSeed; }
+    }
+
+    /// <summary>
+    /// The character has just arrived in the world, which is when the client
+    /// asks the server to state the allegiance: nothing here is known until
+    /// the server does, and the server only speaks about an allegiance when
+    /// it is asked. The original client asks at exactly this moment -- as
+    /// soon as the character's own description has arrived -- rather than
+    /// waiting for anyone to open a panel, which is why an allegiance is
+    /// there to read the instant a player logs in.
+    /// </summary>
+    /// <returns>
+    /// True the first time in a session, so the caller sends the request
+    /// once. A new generation clears it, so a reconnect asks again.
+    /// </returns>
+    public bool NoteEnteredWorld()
+    {
+        lock (_gate)
+        {
+            if (_disposed)
+                return false;
+            if (_askedOnEntry)
+                return false;
+            _askedOnEntry = true;
+            return true;
+        }
     }
 
     public void ApplyUpdate(ClientCommandResponses.AllegianceUpdate update)
@@ -128,6 +155,9 @@ public sealed class RuntimeAllegianceState : IDisposable
         _rank = 0u;
         _hasProfile = false;
         _hasServerSeed = false;
+        // A new session asks again: nothing carried over is worth keeping,
+        // and the ask is the only way anything comes back.
+        _askedOnEntry = false;
         if (changed) Bump();
     }
 

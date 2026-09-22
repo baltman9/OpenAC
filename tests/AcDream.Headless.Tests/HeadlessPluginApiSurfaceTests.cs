@@ -729,7 +729,7 @@ public sealed class HeadlessPluginApiSurfaceTests
             new(IPAddress.Loopback, port);
 
         public WorldSession CreateSession(IPEndPoint endpoint) =>
-            new(endpoint, new NoOpTransport());
+            new WorldSession(endpoint, new NoOpTransport()).TakingItsSends();
 
         public void Connect(WorldSession session, string user, string password) { }
 

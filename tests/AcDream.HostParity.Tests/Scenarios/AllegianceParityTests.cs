@@ -22,7 +22,14 @@ namespace AcDream.HostParity.Tests;
 /// swear that should never have been composed; and dropping the membership
 /// check turned
 /// <see cref="BreakingWithAStrangerIsRefusedTheSameOnBothClients"/> red the
-/// same way. Restoring each turned them green.
+/// same way; and deleting the runtime's in-world ask turned
+/// <see cref="ArrivingInTheWorldAsksTheServerAboutTheAllegianceOnBothClients"/>
+/// red on an empty outbound record. Restoring each turned them green.
+///
+/// The allegiance these scenarios stand on is said by the harness server and
+/// read by each client's own parser and inbound route, so the asking, the
+/// parsing and the routing are all inside the comparison rather than written
+/// into the runtime owner by hand.
 /// </summary>
 public sealed class AllegianceParityTests
 {
@@ -31,6 +38,41 @@ public sealed class AllegianceParityTests
 
     /// <summary>The client action that says "break with that one".</summary>
     private const uint BreakAction = 0x001Eu;
+
+    /// <summary>
+    /// The client action that asks the server to state the allegiance, and
+    /// to keep the client told about it.
+    /// </summary>
+    private const uint UpdateRequestAction = 0x001Fu;
+
+    /// <summary>
+    /// Both clients ask the server about the allegiance as they arrive in
+    /// the world, without anyone opening a panel. Nothing about an
+    /// allegiance is known until the server is asked, so a client that did
+    /// not ask would refuse every break for the whole session -- which is
+    /// what the client with no window did, because the ask used to live in
+    /// the other client's social panel.
+    /// </summary>
+    [Fact]
+    public void ArrivingInTheWorldAsksTheServerAboutTheAllegianceOnBothClients() =>
+        ParityScenario.RunFromLogin(static (arm, transcript) =>
+        {
+            transcript.Step("arrive in the world");
+            // Nothing has been asked before the character is in: a request
+            // into a session the server has not let the character into has
+            // nothing to answer it.
+            Assert.Empty(Sent(arm, UpdateRequestAction));
+
+            arm.EnterWorld();
+
+            // Asked once, in the subscribe form, by THIS client -- read off
+            // the wire rather than counted, so a client that composed
+            // nothing cannot agree with the other about doing nothing.
+            ParityOutbound request =
+                Assert.Single(Sent(arm, UpdateRequestAction));
+            Assert.Equal(1u, WordAfterTheAction(request));
+            transcript.RecordOutbound(arm);
+        });
 
     [Fact]
     public void SwearingToAPlayerLeavesBothClientsWithThatPlayersId() =>
@@ -123,7 +165,7 @@ public sealed class AllegianceParityTests
     {
         _ = ParityWorld.Stage(arm);
         ParityWorld.StageAnotherPlayer(arm.Runtime);
-        ParityWorld.StageAllegiance(arm.Runtime);
+        ParityWorld.StageAllegiance(arm);
         _ = arm.Operations.TakeOutbound();
         return arm.Host.Automation.Allegiance;
     }
@@ -134,9 +176,15 @@ public sealed class AllegianceParityTests
             message => message.GameAction == action)];
 
     /// <summary>Who the one command of this kind this arm sent named.</summary>
-    private static uint WhoWasNamed(ParityArm arm, uint action)
+    private static uint WhoWasNamed(ParityArm arm, uint action) =>
+        WordAfterTheAction(Assert.Single(Sent(arm, action)));
+
+    /// <summary>
+    /// The one word a client action carries after naming itself: an object
+    /// id for a swear or a break, and on or off for an update request.
+    /// </summary>
+    private static uint WordAfterTheAction(ParityOutbound message)
     {
-        ParityOutbound message = Assert.Single(Sent(arm, action));
         byte[] body = Convert.FromHexString(message.Body);
         return System.Buffers.Binary.BinaryPrimitives
             .ReadUInt32LittleEndian(body.AsSpan(12));

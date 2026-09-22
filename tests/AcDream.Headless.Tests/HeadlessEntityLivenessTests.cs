@@ -135,7 +135,8 @@ public sealed class HeadlessEntityLivenessTests
         public IPEndPoint ResolveEndpoint(string host, int port) =>
             new(IPAddress.Loopback, port);
 
-        public WorldSession CreateSession(IPEndPoint endpoint) => new(endpoint);
+        public WorldSession CreateSession(IPEndPoint endpoint) =>
+            new WorldSession(endpoint).TakingItsSends();
 
         public void Connect(WorldSession session, string user, string password)
         {

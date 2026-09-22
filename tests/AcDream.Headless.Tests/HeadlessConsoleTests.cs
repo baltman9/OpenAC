@@ -574,7 +574,7 @@ public sealed class HeadlessConsoleTests
         SubmitOutcome outcome = host.SubmitConsoleLine("/say hello");
 
         Assert.Equal(SubmitOutcome.Sent, outcome);
-        byte[] body = Assert.Single(captured);
+        byte[] body = Assert.Single(ConsoleSends(captured));
         Assert.Equal(ChatRequests.TalkOpcode, ActionOpcode(body));
         Assert.Equal("hello", TalkText(body));
     }
@@ -600,7 +600,7 @@ public sealed class HeadlessConsoleTests
         SubmitOutcome outcome = host.SubmitConsoleLine("hello");
 
         Assert.Equal(SubmitOutcome.Sent, outcome);
-        byte[] body = Assert.Single(captured);
+        byte[] body = Assert.Single(ConsoleSends(captured));
         Assert.Equal(ChatRequests.TalkOpcode, ActionOpcode(body));
         Assert.Equal("hello", TalkText(body));
     }
@@ -633,7 +633,7 @@ public sealed class HeadlessConsoleTests
         PluginCommand command = Assert.Single(received);
         Assert.Equal("vt", command.Verb);
         Assert.Equal("start", command.Arguments);
-        Assert.Empty(captured);
+        Assert.Empty(ConsoleSends(captured));
     }
 
     [Fact]
@@ -713,7 +713,7 @@ public sealed class HeadlessConsoleTests
         SubmitOutcome outcome = host.SubmitConsoleLine("meet me");
 
         Assert.Equal(SubmitOutcome.Sent, outcome);
-        byte[] body = Assert.Single(captured);
+        byte[] body = Assert.Single(ConsoleSends(captured));
         Assert.Equal(ChatRequests.TellOpcode, ActionOpcode(body));
     }
 
@@ -765,7 +765,7 @@ public sealed class HeadlessConsoleTests
         SubmitOutcome outcome = host.SubmitConsoleLine(null);
 
         Assert.Equal(SubmitOutcome.Sent, outcome);
-        byte[] body = Assert.Single(captured);
+        byte[] body = Assert.Single(ConsoleSends(captured));
         Assert.Equal(ChatRequests.TalkOpcode, ActionOpcode(body));
         Assert.Equal("hello", TalkText(body));
         Assert.Equal(string.Empty, host.ChatEntry.Draft);
@@ -825,7 +825,7 @@ public sealed class HeadlessConsoleTests
             .WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Equal(HeadlessExitCode.Success, exitCode);
-        byte[] body = Assert.Single(captured);
+        byte[] body = Assert.Single(ConsoleSends(captured));
         Assert.Equal(ChatRequests.TalkOpcode, ActionOpcode(body));
         Assert.Equal("hello", TalkText(body));
     }
@@ -1037,6 +1037,18 @@ public sealed class HeadlessConsoleTests
     private static bool WaitForEndOfInput(HeadlessConsoleController controller) =>
         controller.Reader.EndOfInput.Wait(TimeSpan.FromSeconds(5));
 
+    /// <summary>
+    /// What a console line put on the wire. Arriving in the world is itself
+    /// something the client says -- it asks the server to state the
+    /// allegiance -- and that belongs to the arrival rather than to the line
+    /// being typed, so it is left out of what these tests count.
+    /// </summary>
+    private static IReadOnlyList<byte[]> ConsoleSends(
+        IEnumerable<byte[]> captured) =>
+        [.. captured.Where(static body =>
+            ActionOpcode(body)
+                != AllegianceRequests.AllegianceUpdateRequestOpcode)];
+
     private static uint ActionOpcode(byte[] body) =>
         BinaryPrimitives.ReadUInt32LittleEndian(body.AsSpan(8, sizeof(uint)));
 
@@ -1092,7 +1104,7 @@ public sealed class HeadlessConsoleTests
 
         public WorldSession CreateSession(IPEndPoint endpoint)
         {
-            var session = new WorldSession(endpoint);
+            var session = new WorldSession(endpoint).TakingItsSends();
             session.GameActionCapture = GameActionCapture;
             return session;
         }

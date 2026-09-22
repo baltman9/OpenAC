@@ -1112,6 +1112,12 @@ public sealed class DirectGameRuntimeCommandAdapterTests
             var session = new WorldSession(
                 endpoint,
                 new FixtureTransport());
+            // Never negotiated: a client that has arrived in the world sends
+            // -- it asks the server about the allegiance -- and a reliable
+            // send here has no cipher to go out under, so it is taken. A
+            // test that wants to read what it sent takes the game-action
+            // capture, which sits above this one.
+            session.GameMessageCapture = (_, _) => { };
             Sessions.Add(session);
             return session;
         }

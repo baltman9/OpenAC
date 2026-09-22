@@ -1165,7 +1165,7 @@ public sealed class HeadlessPluginSessionTests
         {
             // This scripted server never prompts the client to complete its
             // login, so the session is taken as already past it.
-            var session = new WorldSession(endpoint);
+            var session = new WorldSession(endpoint).TakingItsSends();
             session.AssumeLoginCompleteForTesting();
             return session;
         }

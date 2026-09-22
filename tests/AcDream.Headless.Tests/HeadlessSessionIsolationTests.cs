@@ -585,7 +585,7 @@ public sealed class HeadlessSessionIsolationTests
         public WorldSession CreateSession(IPEndPoint endpoint)
         {
             CreatedSessionCount++;
-            return new WorldSession(endpoint, new FixtureTransport());
+            return new WorldSession(endpoint, new FixtureTransport()).TakingItsSends();
         }
 
         public void Connect(

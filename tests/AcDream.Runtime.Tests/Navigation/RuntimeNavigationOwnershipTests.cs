@@ -322,7 +322,15 @@ public sealed class RuntimeNavigationOwnershipTests
     private sealed class RealSessionOperations : ILiveSessionOperations
     {
         public IPEndPoint ResolveEndpoint(string host, int port) => new(IPAddress.Loopback, port);
-        public WorldSession CreateSession(IPEndPoint endpoint) => new(endpoint, new NoOpTransport());
+        public WorldSession CreateSession(IPEndPoint endpoint)
+        {
+            var session = new WorldSession(endpoint, new NoOpTransport());
+            // Never negotiated: a client that has arrived in the world sends
+            // -- it asks the server about the allegiance -- and a reliable
+            // send here has no cipher to go out under, so it is taken.
+            session.GameMessageCapture = (_, _) => { };
+            return session;
+        }
         public void Connect(WorldSession session, string user, string password) { }
         public CharacterList.Parsed GetCharacters(WorldSession session) =>
             new(0u, [new CharacterList.Character(0x50000001u, "Fixture", 0u)], [], 11, "account", true, true);

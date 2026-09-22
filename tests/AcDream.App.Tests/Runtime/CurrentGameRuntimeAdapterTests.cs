@@ -1182,8 +1182,16 @@ public sealed class CurrentGameRuntimeAdapterTests
         public IPEndPoint ResolveEndpoint(string host, int port) =>
             new(IPAddress.Loopback, port);
 
-        public WorldSession CreateSession(IPEndPoint endpoint) =>
-            new(endpoint, transport);
+        public WorldSession CreateSession(IPEndPoint endpoint)
+        {
+            var session = new WorldSession(endpoint, transport);
+            // Never negotiated: a reliable send has no cipher to go out
+            // under. A client that has arrived in the world does send -- it
+            // asks the server about the allegiance -- so the send is taken
+            // here rather than throwing.
+            session.GameMessageCapture = (_, _) => { };
+            return session;
+        }
 
         public void Connect(WorldSession session, string user, string password)
         {

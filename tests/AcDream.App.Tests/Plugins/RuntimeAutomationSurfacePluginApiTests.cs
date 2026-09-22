@@ -1105,8 +1105,17 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
         public IPEndPoint ResolveEndpoint(string host, int port) =>
             new(IPAddress.Loopback, port);
 
-        public WorldSession CreateSession(IPEndPoint endpoint) =>
-            new(endpoint, new NoOpTransport());
+        public WorldSession CreateSession(IPEndPoint endpoint)
+        {
+            var session = new WorldSession(endpoint, new NoOpTransport());
+            // This connection is never negotiated, so a reliable send has no
+            // cipher to go out under. A client that has arrived in the world
+            // does send -- it asks the server about the allegiance -- so the
+            // send is taken here, the way every other test over a connection
+            // with no wire under it takes one.
+            session.GameMessageCapture = (_, _) => { };
+            return session;
+        }
 
         public void Connect(WorldSession session, string user, string password) { }
 

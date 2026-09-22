@@ -140,10 +140,15 @@ internal static class ParityWorld
     /// patron above it, and itself below that patron. Neither the monarch nor
     /// the patron is anywhere in the world, which is the ordinary case.
     /// </summary>
-    internal static void StageAllegiance(GameRuntime runtime)
+    internal static void StageAllegiance(ParityArm arm)
     {
-        ArgumentNullException.ThrowIfNull(runtime);
-        runtime.AllegianceOwner!.ApplyUpdate(new ClientCommandResponses.AllegianceUpdate(
+        ArgumentNullException.ThrowIfNull(arm);
+        // Said by the server and read by the client's own parser and inbound
+        // route, which is how the client really learns this: it asked on
+        // arriving in the world, and this is the answer. Writing it into the
+        // owner by hand would leave the asking, the parsing and the routing
+        // out of every scenario that stands on it.
+        arm.Server.AllegianceUpdate(new ClientCommandResponses.AllegianceUpdate(
             Rank: 3u,
             TotalMembers: 3u,
             TotalVassals: 1u,
