@@ -382,6 +382,85 @@ public sealed class MarkupResizableAnchorTests
         Assert.Equal(10f, title.Top);
     }
 
+    // ── a hidden page lays out like a visible one ───────────────────────────
+
+    // Two page groups stacked in the same place, one shown at a time — the shape
+    // every tabbed markup panel has. Each page carries the same right/bottom
+    // anchored child, so the visible page is the reference arm for the hidden one.
+    private const string TwoPageXml = """
+        <panel x="0" y="0" w="300" h="200" resizable="true" minw="200" minh="150">
+          <group anchor="left top right bottom" x="10" y="10" w="280" h="180">
+            <button anchor="right,bottom" x="230" y="150" w="40" h="20" text="A"/>
+          </group>
+          <group anchor="left top right bottom" x="10" y="10" w="280" h="180">
+            <button anchor="right,bottom" x="230" y="150" w="40" h="20" text="B"/>
+          </group>
+        </panel>
+        """;
+
+    [Fact]
+    public void HiddenPage_ShownAfterAResize_AnchorsAsIfItHadBeenVisibleThroughout()
+    {
+        var panel = MarkupDocument.Build(TwoPageXml, new object(), _ => (1u, 32, 32));
+        var pageA = Assert.IsType<UiPanel>(panel.Children[0]);
+        var pageB = Assert.IsType<UiPanel>(panel.Children[1]);
+        var cornerA = Assert.IsType<UiSimpleButton>(pageA.Children[0]);
+        var cornerB = Assert.IsType<UiSimpleButton>(pageB.Children[0]);
+
+        UiRenderContext ctx = MakeContext(600f, 400f);
+        pageB.Visible = false;
+
+        panel.Width = 500f;
+        panel.Height = 300f;
+        panel.DrawSelfAndChildren(ctx);
+
+        // Page A followed the resize: the group is 480x280 and its corner keeps a
+        // 10px margin to the group's right and bottom edges.
+        Assert.Equal(480f, pageA.Width);
+        Assert.Equal(430f, cornerA.Left);
+        Assert.Equal(250f, cornerA.Top);
+
+        pageB.Visible = true;
+        panel.DrawSelfAndChildren(ctx);
+
+        // Page B was hidden for the resize, so it is drawn for the first time at
+        // the new size — and must land exactly where page A did.
+        Assert.Equal(480f, pageB.Width);
+        Assert.Equal(280f, pageB.Height);
+        Assert.Equal(cornerA.Left, cornerB.Left);
+        Assert.Equal(cornerA.Top, cornerB.Top);
+        Assert.Equal(430f, cornerB.Left);
+        Assert.Equal(250f, cornerB.Top);
+    }
+
+    [Fact]
+    public void PageHiddenOnTheFirstFrame_ShownAfterAResize_KeepsItsAuthoredMargins()
+    {
+        var panel = MarkupDocument.Build(TwoPageXml, new object(), _ => (1u, 32, 32));
+        var pageB = Assert.IsType<UiPanel>(panel.Children[1]);
+        var cornerB = Assert.IsType<UiSimpleButton>(pageB.Children[0]);
+
+        UiRenderContext ctx = MakeContext(600f, 400f);
+
+        // Hidden before anything is ever drawn: the session opens on page A.
+        pageB.Visible = false;
+        panel.DrawSelfAndChildren(ctx);
+
+        panel.Width = 500f;
+        panel.Height = 300f;
+        panel.DrawSelfAndChildren(ctx);
+
+        pageB.Visible = true;
+        panel.DrawSelfAndChildren(ctx);
+
+        Assert.Equal(480f, pageB.Width);
+        Assert.Equal(280f, pageB.Height);
+        Assert.Equal(430f, cornerB.Left); // 480 - 10 - 40
+        Assert.Equal(250f, cornerB.Top);  // 280 - 10 - 20
+        Assert.Equal(40f, cornerB.Width);
+        Assert.Equal(20f, cornerB.Height);
+    }
+
     // ── golden: a plain panel with none of the new attributes is unaffected ──
 
     [Fact]
