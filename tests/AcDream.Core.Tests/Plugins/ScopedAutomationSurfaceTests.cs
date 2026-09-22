@@ -13,10 +13,11 @@ namespace AcDream.Core.Tests.Plugins;
 // of the host's real one. This test walks the interface by reflection so a
 // future member cannot go unforwarded without a build-time-visible test
 // failure.
-// Navigation is forwarded as the host's own object only when that host's
-// navigation cannot tell plugins apart (as this stub's cannot); a host whose
-// navigation implements IScopedNavigationSource hands each plugin a view of
-// its own, covered by ScopedNavigationTests.
+// Navigation and labels are forwarded as the host's own object only when
+// that host cannot tell plugins apart (as this stub cannot); a host whose
+// navigation implements IScopedNavigationSource, or whose labels implement
+// IScopedWorldLabelSource, hands each plugin a view of its own, covered by
+// ScopedNavigationTests.
 public sealed class ScopedAutomationSurfaceTests
 {
     [Fact]
@@ -51,6 +52,23 @@ public sealed class ScopedAutomationSurfaceTests
 
             object? innerValue = property.GetValue(innerAutomation);
             object? scopedValue = property.GetValue(scopedAutomation);
+            // Read the stub's own object first. Comparing the two sides alone
+            // is not enough: if the stub left an area at the shared no-op,
+            // the scoped surface's own no-op fallback would match it and the
+            // census would pass whether or not a forwarder existed. That is
+            // how Recalls stayed unforwarded. Both sides are therefore
+            // required to be something other than the shared no-op.
+            Assert.False(
+                ReferenceEquals(innerValue, NoOpAutomationSurface.Instance),
+                "The stub host leaves IAutomationSurface." + property.Name
+                    + " at the shared no-op, so this census cannot tell a "
+                    + "written forwarder from a missing one. Give the stub a "
+                    + "fake of its own for that member.");
+            Assert.False(
+                ReferenceEquals(scopedValue, NoOpAutomationSurface.Instance),
+                "IAutomationSurface." + property.Name + " is not forwarded: "
+                    + "the scoped surface fell through to the interface's "
+                    + "no-op default.");
             Assert.True(
                 ReferenceEquals(innerValue, scopedValue),
                 "IAutomationSurface." + property.Name + " is not forwarded: "
@@ -322,7 +340,9 @@ public sealed class ScopedAutomationSurfaceTests
     // Every member returns its own distinct instance, never
     // NoOpAutomationSurface.Instance, so a scoped property that silently
     // falls through to the interface's no-op default is caught by reference
-    // inequality instead of accidentally matching.
+    // inequality instead of accidentally matching. The census asserts that
+    // too, so a member added here later without a fake of its own fails
+    // rather than quietly weakening the check.
     private sealed class FakeAutomationSurface : IAutomationSurface
     {
         public bool IsAvailable => true;
@@ -344,11 +364,13 @@ public sealed class ScopedAutomationSurfaceTests
         public IEnchantmentAutomation Enchantments { get; } = new FakeEnchantmentAutomation();
         public INavigationAutomation Navigation { get; } = new FakeNavigationAutomation();
         public IWorldObjectAutomation Objects { get; } = new FakeWorldObjectAutomation();
+        public IRecallAutomation Recalls { get; } = new FakeRecallAutomation();
         public IWorldTimeAutomation WorldTime { get; } = new FakeWorldTimeAutomation();
         public ILoginAutomation Login { get; } = new FakeLoginAutomation();
         public INetworkAutomation Network { get; } = new FakeNetworkAutomation();
         public IRecoveryAutomation Recovery { get; } = new FakeRecoveryAutomation();
         public IProjectileAutomation Projectiles { get; } = new FakeProjectileAutomation();
+        public IWorldLabelAutomation Labels { get; } = new FakeWorldLabelAutomation();
         public IDungeonMapAutomation DungeonMap { get; } = new FakeDungeonMapAutomation();
         public ISelectionAutomation Selection { get; } = new FakeSelectionAutomation();
         public ITradeAutomation Trade { get; } = new FakeTradeAutomation();
@@ -454,6 +476,10 @@ public sealed class ScopedAutomationSurfaceTests
     private sealed class FakeRecoveryAutomation : IRecoveryAutomation;
 
     private sealed class FakeProjectileAutomation : IProjectileAutomation;
+
+    private sealed class FakeRecallAutomation : IRecallAutomation;
+
+    private sealed class FakeWorldLabelAutomation : IWorldLabelAutomation;
 
     private sealed class FakeDungeonMapAutomation : IDungeonMapAutomation;
 

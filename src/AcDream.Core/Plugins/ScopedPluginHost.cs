@@ -215,6 +215,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             }
         }
         public IWorldObjectAutomation Objects => Inner.Objects;
+        public IRecallAutomation Recalls => Inner.Recalls;
         public IWorldTimeAutomation WorldTime => Inner.WorldTime;
         public ILoginAutomation Login => Inner.Login;
         public INetworkAutomation Network => Inner.Network;
