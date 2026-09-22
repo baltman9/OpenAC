@@ -59,6 +59,17 @@ public sealed class FilePluginStorage : IPluginStorage
         }
     }
 
+    public bool EnsureDirectory(string prefix)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
+        // A trailing separator is how a caller spells "this is a folder";
+        // Resolve works on keys, so take it off first.
+        string trimmed = prefix.TrimEnd('/', Path.DirectorySeparatorChar);
+        string path = Resolve(trimmed.Length == 0 ? prefix : trimmed);
+        Directory.CreateDirectory(path);
+        return Directory.Exists(path);
+    }
+
     public bool Delete(string key)
     {
         string path = Resolve(key);

@@ -97,6 +97,8 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         public void WriteText(string key, string content) =>
             inner.WriteText(ScopedKey(key), content);
         public bool Delete(string key) => inner.Delete(ScopedKey(key));
+        public bool EnsureDirectory(string prefix) =>
+            inner.EnsureDirectory(ScopedKey(prefix.TrimEnd('/')));
 
         private static string ValidateKey(string key)
         {

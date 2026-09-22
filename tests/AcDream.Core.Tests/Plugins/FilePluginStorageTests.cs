@@ -75,4 +75,76 @@ public sealed class FilePluginStorageTests
                 Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    public void EnsureDirectoryCreatesTheWholeTreeAndIsIdempotent()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-plugin-storage-{Guid.NewGuid():N}");
+        try
+        {
+            var storage = new FilePluginStorage(root);
+
+            // Lay the folders out before anything is written into them, so
+            // the layout is visible on a first run.
+            Assert.True(storage.EnsureDirectory("plugin/profiles/character"));
+            Assert.True(Directory.Exists(
+                Path.Combine(root, "plugin", "profiles", "character")));
+            // Every missing parent came with it.
+            Assert.True(Directory.Exists(
+                Path.Combine(root, "plugin", "profiles")));
+
+            // Saying it twice changes nothing and still reports true.
+            Assert.True(storage.EnsureDirectory("plugin/profiles/character"));
+
+            // A trailing slash is the other way to spell the same folder.
+            Assert.True(storage.EnsureDirectory("plugin/imports/"));
+            Assert.True(Directory.Exists(
+                Path.Combine(root, "plugin", "imports")));
+
+            // A created but empty folder holds no keys.
+            Assert.Empty(storage.List("plugin/imports"));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void EnsureDirectoryRejectsAPrefixThatEscapesTheRoot()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-plugin-storage-{Guid.NewGuid():N}");
+        try
+        {
+            var storage = new FilePluginStorage(root);
+            // A name no other run could have left behind, so the "nothing
+            // was created outside the root" check means what it says.
+            string sibling = $"acdream-plugin-escape-{Guid.NewGuid():N}";
+
+            // The same refusal WriteText gives an escaping key.
+            Assert.Throws<ArgumentException>(() =>
+                storage.EnsureDirectory("../" + sibling));
+            Assert.Throws<ArgumentException>(() =>
+                storage.EnsureDirectory("plugin/../../" + sibling));
+            Assert.False(Directory.Exists(Path.Combine(
+                Path.GetDirectoryName(Path.GetFullPath(root))!, sibling)));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TheInertStorageCreatesNothing()
+    {
+        Assert.False(((IPluginStorage)NoOpPluginStorage.Instance)
+            .EnsureDirectory("plugin/profiles"));
+    }
 }

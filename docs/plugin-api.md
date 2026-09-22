@@ -305,6 +305,14 @@ written beneath, or `null` when the storage is not backed by files. It is
 for telling a user where their data went — keys still go through
 `ReadText` / `WriteText` / `List` / `Delete`.
 
+`host.Storage.EnsureDirectory("profiles/character/")` creates that folder and
+every missing parent beneath the storage root without writing a file, so a
+plugin can lay its whole folder layout out at start-up and again per server
+and character at login, and the user sees where things will go before
+anything has been saved. A trailing slash is optional, the call is safe to
+repeat, and a prefix that would escape the storage root is refused the same
+way an escaping key is. A host with nowhere to write returns false.
+
 ## Clipboard
 
 ```csharp
