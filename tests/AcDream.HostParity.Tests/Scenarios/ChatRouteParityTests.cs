@@ -295,23 +295,48 @@ public sealed class ChatRouteParityTests
         });
 
     /// <summary>
-    /// A plugin's verb, typed at the box with no plugin loaded to claim it.
-    /// Both clients do the same thing with it, and what they do is send it:
-    /// an unclaimed verb falls through to speech, with the leading slash
-    /// written as the at-sign the server expects. Neither client swallows
-    /// it, and neither answers the player in words.
+    /// A verb the client registers for itself on the one registry it shares
+    /// with plugins, typed at the box. Both clients claim it and answer it
+    /// here: nothing goes to the server, and the answer is put to the player
+    /// in the client's own text.
     /// </summary>
     /// <remarks>
-    /// The fall-through is what is pinned here, not the verb: with a plugin
-    /// loaded the verb is claimed before it reaches this point, which is a
-    /// scenario for a host with plugins rather than for the bare routes.
+    /// These four are registered by the one binding pass both clients run,
+    /// so a client that sent them to the server would be shouting its own
+    /// commands at the world.
     /// </remarks>
     [Theory]
-    [InlineData("/status", "@status")]
-    [InlineData("/nav status", "@nav status")]
-    [InlineData("/nav grid", "@nav grid")]
-    [InlineData("/motor turn left 90", "@motor turn left 90")]
-    public void APluginVerbTypedAtTheBoxAnswersTheSameOnBothClients(
+    [InlineData("/status")]
+    [InlineData("/nav status")]
+    [InlineData("/nav grid")]
+    [InlineData("/motor turn left 90")]
+    public void AVerbTheClientRegistersIsClaimedOnBothClients(string line) =>
+        ParityScenario.Run((arm, transcript) =>
+        {
+            int saidBefore = Shown(arm).Count;
+            transcript.Step($"type {line}");
+            IReadOnlyList<ParityOutbound> sent = Type(arm, transcript, line);
+            RecordInterfaceText(arm, transcript);
+            // Claimed outright per arm: nothing left the client, and the
+            // verb really answered -- two clients that both did nothing
+            // would agree and prove nothing.
+            Assert.Empty(sent);
+            Assert.True(
+                Shown(arm).Count > saidBefore,
+                $"{arm.Name} claimed {line} and said nothing about it.");
+        });
+
+    /// <summary>
+    /// A verb nothing has registered, typed at the box. Both clients do the
+    /// same thing with it, and what they do is send it: an unclaimed verb
+    /// falls through to speech, with the leading slash written as the
+    /// at-sign the server expects. Neither client swallows it, and neither
+    /// answers the player in words.
+    /// </summary>
+    [Theory]
+    [InlineData("/noplugintookthis", "@noplugintookthis")]
+    [InlineData("/noplugintookthis with words", "@noplugintookthis with words")]
+    public void AVerbNothingClaimsFallsThroughToSpeechOnBothClients(
         string line, string spoken) =>
         ParityScenario.Run((arm, transcript) =>
         {

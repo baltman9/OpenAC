@@ -1302,18 +1302,29 @@ foreach (PluginPeerCommand command in peers.CaptureCommands(cursor))
 }
 ```
 
-`BroadcastCommand` asks the other clients on this computer to run a command
-line, exactly as though the player had typed it there. It is the one
-free-form channel between clients: what a line means is whatever the
-receiving client's own command verbs make of it, and a line no verb answers
-is simply not run.
+`BroadcastCommand` asks the other clients on this computer to run a line,
+exactly as though the player had typed it into the chat entry there. It is
+the one free-form channel between clients, and it is not limited to plugin
+verbs: the receiving client submits the line through its own chat entry, so
+
+- the client's **own commands** are consulted first (`/loc`, `/pos`, the
+  whole client catalogue), and no plugin can shadow one;
+- then the **chat input interceptors** plugins have installed, which may
+  rewrite or suppress the line;
+- then the **verbs** plugins and the client have registered;
+- and anything left is **dispatched** as typed speech is: to a channel, to a
+  tell, or to the server as a server command.
+
+So `BroadcastCommand("/loc", …)`, `BroadcastCommand("@tell Bob, hi", …)` and
+`BroadcastCommand("hello", …)` all do on the receiving client what typing
+them there would do.
 
 The delivery is the client's own, not a plugin's. Every client reads the
 notes four times a second, takes the lines aimed at labels it answers to, and
-hands each one to the same command bus a typed line goes to. So a broadcast
-is answered the same way on every client, whatever plugins happen to be
-loaded there, and a plugin that registers a verb has that verb reachable from
-another character without doing anything else.
+submits each one through the same entry a typed line goes in by. So a
+broadcast is answered the same way on every client, whatever plugins happen
+to be loaded there, and a plugin that registers a verb has that verb
+reachable from another character without doing anything else.
 
 The rules the host applies before a line is run:
 

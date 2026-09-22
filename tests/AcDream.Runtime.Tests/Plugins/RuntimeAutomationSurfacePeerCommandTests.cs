@@ -421,9 +421,27 @@ public sealed class RuntimeAutomationSurfacePeerCommandTests
         runtime.PlayerIdentity.ServerGuid = playerObjectId;
         peers = new LocalPluginPeerRegistry(root, time, instanceId);
         events = new WorldEvents();
-        surface = new RuntimeAutomationSurface(events, peers);
+        RuntimeAutomationSurface built = new(events, peers);
+        surface = built;
         surface.Bind(
             runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        // Where a typed line goes in on either client: the shared router
+        // over a chat command surface that asks this surface's own registry
+        // for its verbs. A delivered broadcast comes in by the same door, so
+        // a test of the delivery has to have that door.
+        var bus = new AcDream.Runtime.Chat.LiveChatCommandSurface(
+            line => built.TryHandlePluginCommand(line),
+            line => built.InterceptChatInput(line));
+        surface.BindSubmit(line =>
+            AcDream.Runtime.Chat.ChatCommandRouter.Submit(
+                line,
+                new AcDream.Runtime.Chat.RuntimeChatCommandFeedback(
+                    runtime.CommunicationOwner),
+                bus,
+                AcDream.Runtime.Chat.ChatChannelKind.Say)
+            is not (AcDream.Runtime.Chat.SubmitOutcome.Empty
+                or AcDream.Runtime.Chat.SubmitOutcome.UnknownCommand
+                or AcDream.Runtime.Chat.SubmitOutcome.Dropped));
         return runtime;
     }
 

@@ -47,9 +47,9 @@ internal sealed class WindowedArm : ParityArm
     /// <summary>
     /// Where a typed line goes on this client, hung the way its session
     /// composition hangs it: the bus asks the shared plugin surface what the
-    /// plugins make of the line before offering it on. The verb lookup is
-    /// left out on purpose, so the bare route the chat scenarios pin stays
-    /// bare; the client's own registered verbs would otherwise claim them.
+    /// plugins make of the line and which verbs it answers before offering
+    /// the line on. Both are resolved when a line arrives rather than
+    /// captured here, because the surface below does not exist yet.
     /// </summary>
     private readonly LiveSessionCommandSurface _commands;
     private readonly LiveSessionAppSource _sessionSource;
@@ -110,7 +110,8 @@ internal sealed class WindowedArm : ParityArm
             _events.FireTick,
             () => Runtime.Generation.Value);
         _commands = new LiveSessionCommandSurface(
-            interceptChatInput: line => _automation!.InterceptChatInput(line));
+            line => _automation?.TryHandlePluginCommand(line) == true,
+            line => _automation!.InterceptChatInput(line));
         _sessionSource = new LiveSessionAppSource(Runtime.Session, _commands);
         _bindings.Add(_feedback.BindOwned(text =>
             Runtime.CommunicationOwner.AddText(

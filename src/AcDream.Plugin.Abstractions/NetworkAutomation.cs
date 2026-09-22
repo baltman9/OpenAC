@@ -250,14 +250,19 @@ public interface INetworkAutomation
     bool SetTags(IReadOnlyList<string> tags) => false;
 
     /// <summary>
-    /// Asks the other clients on this computer to run a command line, as
-    /// though the player had typed it there. It is the one free-form channel
-    /// between clients: what a line means is whatever the receiving client's
-    /// own command verbs make of it.
+    /// Asks the other clients on this computer to run a line, as though the
+    /// player had typed it into the chat entry there. It is the one
+    /// free-form channel between clients: the receiving client submits the
+    /// line through its own chat entry, so its own commands are consulted
+    /// first, then the plugins' chat interceptors, then the verbs plugins
+    /// and the client have registered, and anything left goes to a channel,
+    /// a tell or the server exactly as typed speech does.
     /// </summary>
     /// <param name="line">
-    /// The command line, written exactly as it would be typed. A line no
-    /// verb on the receiving client answers is simply not run there.
+    /// The line, written exactly as it would be typed. It may be a plugin
+    /// verb, one of the client's own commands, a server command or something
+    /// to say; a line nothing claims is answered on the receiving client the
+    /// way an unknown command typed there is answered.
     /// </param>
     /// <param name="tags">
     /// The labels to aim it at. Only a client whose own labels include one

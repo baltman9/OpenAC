@@ -151,6 +151,74 @@ public sealed class PeerCommandParityTests
         });
 
     /// <summary>
+    /// A broadcast is not limited to plugin verbs. The line goes in where a
+    /// line the player typed goes in, so one of the client's OWN commands
+    /// and a plain line of speech both do what typing them here would do.
+    /// Handing the line to the verb registry alone -- which is what the
+    /// delivery used to do -- took both of these from the sender, staggered
+    /// them and dropped them.
+    /// </summary>
+    [Fact]
+    public void EitherClientRunsABroadcastThatNoPluginVerbClaims() =>
+        ParityScenario.Run(static (arm, transcript) =>
+        {
+            _ = ParityWorld.Stage(arm);
+
+            using (var other = new LocalPluginPeerRegistry(
+                arm.PeerDirectory, timeProvider: null, OtherClient))
+            {
+                // One of the client's own commands, which reaches the server
+                // as a client action of its own, and one plain line, which
+                // reaches it as speech.
+                Assert.True(other.RecordCommand(new LocalPluginCommand(
+                    SenderObjectId: OtherCharacter,
+                    Tags: [],
+                    Line: "@permit add Bob",
+                    DelayMilliseconds: 0)));
+                Assert.True(other.RecordCommand(new LocalPluginCommand(
+                    OtherCharacter, [], "hello", 0)));
+                other.Publish(OtherClientNote(arm));
+                // What staging the world put on the wire is not this
+                // scenario's; what follows is.
+                _ = arm.Operations.TakeOutbound();
+
+                transcript.Step("run");
+                arm.Advance();
+                ParityOutbound[] sent = [.. arm.Operations.Outbound];
+                transcript.RecordOutbound(arm);
+
+                ParityOutbound permit = Assert.Single(
+                    sent, message => message.GameAction == PermitAction);
+                Assert.Equal("Bob", TextAt(permit, 12));
+                ParityOutbound spoke = Assert.Single(
+                    sent, message => message.GameAction == TalkAction);
+                Assert.Equal("hello", TextAt(spoke, 12));
+            }
+        });
+
+    /// <summary>
+    /// The client action that asks the server to let another player at this
+    /// character's corpse, which is what <c>@permit add</c> becomes.
+    /// </summary>
+    private const uint PermitAction = 0x0219u;
+
+    /// <summary>The client action a line of speech becomes.</summary>
+    private const uint TalkAction = 0x0015u;
+
+    /// <summary>
+    /// One length-prefixed line of text out of a client action's body: two
+    /// bytes of length, then the characters.
+    /// </summary>
+    private static string TextAt(ParityOutbound message, int offset)
+    {
+        byte[] body = Convert.FromHexString(message.Body);
+        int length = System.Buffers.Binary.BinaryPrimitives
+            .ReadUInt16LittleEndian(body.AsSpan(offset));
+        return System.Text.Encoding.Latin1.GetString(
+            body, offset + 2, length);
+    }
+
+    /// <summary>
     /// The labels: a plugin can change the words this client answers to, the
     /// change reaches the note the other clients read, and a line aimed at
     /// the old word is no longer run here.

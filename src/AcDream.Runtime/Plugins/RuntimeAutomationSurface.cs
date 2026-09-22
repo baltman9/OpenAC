@@ -1274,8 +1274,16 @@ internal sealed class RuntimeAutomationSurface
     }
 
     /// <summary>
-    /// Hands every line whose wait is up to this client's own command bus,
-    /// which is exactly where a line the player typed goes.
+    /// Submits every line whose wait is up through this client's own chat
+    /// entry, which is the one door a line the player typed comes in by: the
+    /// client's own commands are consulted first, then the plugins' chat
+    /// interceptors, then the verbs plugins and the client registered, and
+    /// what is left goes to a channel, a tell or the server.
+    ///
+    /// <para>Offering the line to the verb registry alone -- which is what
+    /// this did -- meant a broadcast could only ever run a plugin verb. A
+    /// broadcast of a client command, of a server command, or of something
+    /// to say was taken from the sender, staggered, and then dropped.</para>
     /// </summary>
     private void RunDuePeerCommands()
     {
@@ -1301,7 +1309,7 @@ internal sealed class RuntimeAutomationSurface
         // could be taken out of it as it went.
         due.Reverse();
         foreach (string line in due)
-            _ = TryHandlePluginCommand(line);
+            _ = Submit(line);
     }
 
     /// <summary>A broadcast line this client has taken, and when it is due.</summary>
