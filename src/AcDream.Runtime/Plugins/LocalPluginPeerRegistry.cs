@@ -720,7 +720,7 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                     cached = new CachedNote(
                         info.Length,
                         writtenAt,
-                        IsAcceptable(parsed) ? parsed : null);
+                        Accept(parsed));
                     if (_parsedNotes.Count >= ParsedNoteCapacity)
                         _parsedNotes.Clear();
                     _parsedNotes[file] = cached;
@@ -987,11 +987,36 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                 .ToArray();
 
     /// <summary>
-    /// Whether a note is one this client will read at all: written by
-    /// somebody else, naming a character, and carrying rings it could have
-    /// written itself. Everything here is settled by what the file says, so
-    /// it is settled once per version of the file; whether the note is still
-    /// recent is not here, because that answer changes with the clock.
+    /// What this client will read out of a note, or <see langword="null"/>
+    /// when the note does not describe a client at all. Everything here is
+    /// settled by what the file says, so it is settled once per version of
+    /// the file; whether the note is still recent is not here, because that
+    /// answer changes with the clock.
+    ///
+    /// <para>A ring is refused on its own. One bad entry means the ring it
+    /// is in was not written by an honest client and none of that ring is
+    /// worth more than the bad row -- but the other ring and the client's
+    /// own row were written by the same client through different code, and a
+    /// broken cast is no reason to stop seeing where a character is standing
+    /// or to stop taking the lines it asks for.</para>
+    /// </summary>
+    private PeerDocument? Accept(PeerDocument? parsed)
+    {
+        if (!IsAcceptable(parsed))
+            return null;
+        PeerDocument document = parsed!;
+        if (!AreCastsWellFormed(document.Casts))
+            document.Casts = [];
+        if (!AreCommandsWellFormed(document.Commands))
+            document.Commands = [];
+        return document;
+    }
+
+    /// <summary>
+    /// Whether a note describes a client at all: written by somebody else,
+    /// naming a character, standing somewhere that is a place, and carrying
+    /// rings of a size this client could have written. What is IN the rings
+    /// is each ring's own business; see <see cref="Accept"/>.
     /// </summary>
     private bool IsAcceptable(PeerDocument? document) =>
         document is not null
@@ -1012,10 +1037,8 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         && float.IsFinite(document.Heading)
         && document.Casts is not null
         && document.Casts.Length <= CastRingCapacity
-        && AreCastsWellFormed(document.Casts)
         && document.Commands is not null
-        && document.Commands.Length <= CommandRingCapacity
-        && AreCommandsWellFormed(document.Commands);
+        && document.Commands.Length <= CommandRingCapacity;
 
     /// <summary>
     /// Whether every cast in a note is one this client could have written
@@ -1023,10 +1046,10 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     /// a JSON null element and a stamp that is not a time both throw in that
     /// walk, and the throw would leave through the plugin's capture call.
     ///
-    /// <para>One bad entry refuses the whole note. The same rule runs before
-    /// an entry reaches this client's own ring, so a note carrying one was
-    /// not written by an honest client and the rest of it is worth no more
-    /// than the bad row.</para>
+    /// <para>One bad entry refuses this ring of this note. The same rule
+    /// runs before an entry reaches this client's own ring, so a ring
+    /// carrying one was not written by an honest client and none of it is
+    /// worth more than the bad row.</para>
     /// </summary>
     private static bool AreCastsWellFormed(PeerCastEntry?[] casts)
     {
@@ -1041,7 +1064,7 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     /// <summary>
     /// Whether every command line in a note is one this client could have
     /// written itself, by the same rule and for the same reason as the
-    /// casts: one bad entry refuses the whole note.
+    /// casts: one bad entry refuses this ring of this note.
     /// </summary>
     private static bool AreCommandsWellFormed(PeerCommandEntry?[] commands)
     {

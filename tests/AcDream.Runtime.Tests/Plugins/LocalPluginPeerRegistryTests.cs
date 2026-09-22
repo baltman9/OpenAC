@@ -374,11 +374,13 @@ public sealed class LocalPluginPeerRegistryTests
             PluginPeerCast only = Assert.Single(read);
             Assert.Equal(honest.ClientId, only.ClientId);
             Assert.Equal(42u, only.SpellId);
-            // The hostile note names a client too, and its note is refused
-            // for the client list on the same rule.
-            PluginNetworkClient client = Assert.Single(
-                reader.CaptureRemoteClients());
-            Assert.Equal(honest.ClientId, client.ClientId);
+            // The hostile note names a client too, and it is read as one:
+            // what its cast ring says is that ring's business, and the two
+            // are written through different code. It has lost the ring and
+            // nothing else.
+            Assert.Equal(
+                2,
+                reader.CaptureRemoteClients().Count);
         }
         finally
         {
@@ -387,13 +389,13 @@ public sealed class LocalPluginPeerRegistryTests
     }
 
     /// <summary>
-    /// One bad entry refuses the whole note rather than being skipped. The
-    /// writer applies the same rule before an entry ever reaches the ring, so
-    /// a note carrying one was not written by an honest client and nothing
-    /// else in it is worth believing either.
+    /// One bad entry refuses the ring it is in rather than being skipped.
+    /// The writer applies the same rule before an entry ever reaches the
+    /// ring, so a ring carrying one was not written by an honest client and
+    /// none of that ring is worth believing either.
     /// </summary>
     [Fact]
-    public void ANoteWithOneImpossibleCastIsRefusedWhole()
+    public void ANoteWithOneImpossibleCastLosesItsCastRing()
     {
         string root = TemporaryRoot();
         var now = new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);
@@ -409,6 +411,68 @@ public sealed class LocalPluginPeerRegistryTests
             WriteRawNote(root, HostileInstance, note);
 
             Assert.Empty(reader.CaptureRemoteCasts(0L, "Coldeve", 20u));
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    /// <summary>
+    /// A ring is refused on its own. The two rings and the client's own row
+    /// are written by one client through different code, so a cast this
+    /// client would never have written is no reason to stop seeing where
+    /// that character is standing, or to stop running the lines it asks for.
+    /// Refusing the whole note over one bad row hands a client that writes
+    /// one broken cast the power to make itself invisible and its broadcasts
+    /// unheard.
+    ///
+    /// Mutation checks (2026-09-22): refusing a whole note whose cast ring
+    /// has a bad row left this reader with no peer and no line at all;
+    /// refusing a whole note whose command ring has a bad row left it with
+    /// no peer and no cast.
+    /// </summary>
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void ABadRowInOneRingLeavesTheOtherRingAndTheClientAlone(
+        bool breakTheCasts,
+        bool breakTheCommands)
+    {
+        string root = TemporaryRoot();
+        var now = new DateTimeOffset(2026, 9, 22, 12, 0, 0, TimeSpan.Zero);
+        long at = now.ToUnixTimeMilliseconds();
+        var time = new ManualTimeProvider(now);
+        try
+        {
+            using var reader = Registry(root, time, 2);
+            JsonObject note = RawNote(now, HostileInstance);
+            note["Casts"] = breakTheCasts
+                ? new JsonArray(RawCast(1L, at), RawCast(2L, at, spellId: 0u))
+                : new JsonArray(RawCast(1L, at));
+            note["Commands"] = breakTheCommands
+                ? new JsonArray(RawCommand(1L, at), RawCommand(2L, at, line: ""))
+                : new JsonArray(RawCommand(1L, at));
+            WriteRawNote(root, HostileInstance, note);
+
+            // The client itself is read whichever ring is broken: a note
+            // that describes a character still describes it.
+            Assert.Equal("Alpha", Assert.Single(
+                reader.CaptureRemoteClients()).Name);
+            IReadOnlyList<PluginPeerCast> casts =
+                reader.CaptureRemoteCasts(0L, "Coldeve", 20u);
+            IReadOnlyList<LocalPluginPeerCommand> lines =
+                reader.CaptureRemoteCommands(0L, "Coldeve", 20u, []);
+            if (breakTheCasts)
+            {
+                Assert.Empty(casts);
+                Assert.Equal("/example go", Assert.Single(lines).Command.Line);
+            }
+            else
+            {
+                Assert.Equal(42u, Assert.Single(casts).SpellId);
+                Assert.Empty(lines);
+            }
         }
         finally
         {
@@ -746,6 +810,25 @@ public sealed class LocalPluginPeerRegistryTests
             ["EffectiveSkill"] = 357,
             ["DurationSeconds"] = 60d,
             ["Landed"] = true,
+        };
+
+    /// <summary>
+    /// One broadcast line as another process on this computer would write
+    /// it, carrying what an honest note carries so a test changes only the
+    /// one thing it is about.
+    /// </summary>
+    private static JsonObject RawCommand(
+        long sequence,
+        long atUnixMs,
+        uint senderObjectId = 10u,
+        string line = "/example go") => new()
+        {
+            ["Sequence"] = sequence,
+            ["AtUnixMs"] = atUnixMs,
+            ["SenderObjectId"] = senderObjectId,
+            ["Tags"] = new JsonArray(),
+            ["Line"] = line,
+            ["DelayMilliseconds"] = 0,
         };
 
     /// <summary>
