@@ -96,9 +96,13 @@ public sealed class LauncherExecutableSet
         return mode == LaunchMode.Headless
             ? new LauncherProcessSpec(
                 paths.HeadlessHostPath,
-                ["run", "--config", configFilePath],
+                // A session with no window is talked to through its console:
+                // what it says goes to the session log, and the launcher's
+                // console window sends it what the player types.
+                ["run", "--config", configFilePath, "--console"],
                 paths.WorkingDirectory,
-                StderrLogPath: stderrLogPath)
+                StderrLogPath: stderrLogPath,
+                KeepStandardInputOpen: true)
             : new LauncherProcessSpec(
                 paths.GraphicalHostPath,
                 ["--session-config", configFilePath],

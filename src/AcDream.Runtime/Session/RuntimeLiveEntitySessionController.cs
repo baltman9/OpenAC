@@ -180,13 +180,50 @@ public sealed class RuntimeLiveEntitySessionController
             _runtime.ActionOwner.CombatMode.RecordQualifiedSelfMotion(
                 _runtime.Clock.SimulationTimeSeconds);
         }
-        // A movement the server drives at this character is an order to walk
-        // or turn, and it is the only answer a use out of arm's reach ever
-        // gets. A host with a window has always obeyed it.
         if (known && isLocal)
-            _ = RuntimeServerControlledLocalMovement.TryApply(_runtime, update);
+            ApplyServerMotionToLocalBody(update);
         else if (known)
             ArmRemoteInboundMotion(update);
+    }
+
+    /// <summary>
+    /// A movement the server sends about this character's own body. The
+    /// original unpacks it into the body unless it is the echo of a movement
+    /// this character made itself, and then hands the body to the server. A
+    /// walk or turn the server orders is one such movement, and it is the
+    /// only answer a use out of arm's reach ever gets. So is the stance the
+    /// server puts the body in after a combat-mode change: the body takes
+    /// that stance up over the length of its animation, and until it has, it
+    /// is not in position for the next mode change. A host that skipped this
+    /// asked for the next mode while the server still had the last one
+    /// playing, and the cast that followed arrived in the wrong mode.
+    /// A host with a window has always done both.
+    /// </summary>
+    private void ApplyServerMotionToLocalBody(
+        in WorldSession.EntityMotionUpdate update)
+    {
+        if (RuntimeServerControlledLocalMovement.TryApply(_runtime, update))
+            return;
+        if (update.IsAutonomous
+            || update.MotionState.MovementType != 0
+            || _remoteArming is not { } arming
+            || _runtime.MovementOwner.Controller is not { } controller)
+        {
+            return;
+        }
+
+        controller.SetLastMoveWasAutonomous(update.IsAutonomous);
+        uint commandClass =
+            controller.Motion.InterpretedState.ForwardCommand & 0xFF000000u;
+        if (commandClass == 0u)
+            commandClass = 0x41000000u;
+        _ = arming.InboundMotion.Apply(
+            update,
+            controller.Movement,
+            controller.Motion.DefaultSink,
+            _runtime.EntityObjects.Physics.ResolveObjectTableHost(update.Guid),
+            controller.CellId,
+            commandClass);
     }
 
     private void OnPositionUpdated(

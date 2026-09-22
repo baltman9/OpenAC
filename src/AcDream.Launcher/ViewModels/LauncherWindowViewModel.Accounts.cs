@@ -43,6 +43,7 @@ public sealed partial class LauncherWindowViewModel
                     GetRowDisabledReason, NotifyAccountCommands, item => LaunchRowsAsync([item]),
                     StopSessionAsync, OpenRowOptions, () => CanInteract);
                 row.UseSelectionStore(SaveRowSelection);
+                row.UseConsole(OpenSessionConsole);
                 group.Servers.Add(row);
             }
             retained.Add(row);
@@ -138,6 +139,16 @@ public sealed partial class LauncherWindowViewModel
     }
 
     private void OpenRowOptions(LauncherAccountServerRowViewModel row) => OpenAccountRowOptions(row);
+
+    /// <summary>
+    /// Raised when a session's console should be shown. Showing a window is
+    /// the view's business; the view model only says which console.
+    /// </summary>
+    public event Action<SessionConsoleViewModel>? ConsoleRequested;
+
+    private void OpenSessionConsole(string sessionId, string title) =>
+        ConsoleRequested?.Invoke(
+            new SessionConsoleViewModel(_orchestrator, sessionId, "Console · " + title));
 
     private void NotifyAccountCommands()
     {

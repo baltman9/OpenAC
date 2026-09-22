@@ -483,6 +483,37 @@ public sealed class HeadlessConsoleTests
         Assert.Contains("Unknown command: /x", text);
     }
 
+    /// <summary>
+    /// With colour on, a chat line is written in the colour the chat window
+    /// shows that kind of line in, from the same table; with colour off it
+    /// carries no escape at all.
+    /// </summary>
+    [Fact]
+    public void AChatLineIsWrittenInTheColourTheChatWindowShowsItIn()
+    {
+        var log = new ChatLog();
+        using var feed = new RuntimeChatFeed(log, new ChatWindowState());
+        var coloured = new StringWriter();
+        using var renderer = new HeadlessConsoleRenderer(
+            coloured, useColor: true, chat: feed);
+        var plain = new StringWriter();
+        using var plainRenderer = new HeadlessConsoleRenderer(
+            plain, useColor: false, chat: feed);
+
+        log.OnLocalSpeech(
+            "Bob", "hi", 0x50000010u, isRanged: false,
+            logTextType: (uint)RetailLogTextType.Tell);
+
+        Assert.True(RuntimeChatColors.TryGetColor(
+            (uint)RetailLogTextType.Tell, out System.Numerics.Vector4 tell));
+        string expected = string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"\u001b[38;2;{(int)MathF.Round(tell.X * 255f)};{(int)MathF.Round(tell.Y * 255f)};{(int)MathF.Round(tell.Z * 255f)}m");
+        Assert.StartsWith(expected, coloured.ToString(), StringComparison.Ordinal);
+        Assert.Contains("\u001b[0m", coloured.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain('\u001b', plain.ToString());
+    }
+
     [Fact]
     public void LifecycleCommandAndPortalLinesAreDimmedWhenColorIsEnabled()
     {

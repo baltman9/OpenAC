@@ -106,6 +106,18 @@ public interface ILauncherOrchestrator : IDisposable
         string accountName,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Sends one console line to a running windowless session. False when the
+    /// session is not running or takes no console input.
+    /// </summary>
+    bool TrySendConsoleLine(string sessionId, string line) => false;
+
+    /// <summary>
+    /// The file a session's console output is written to, or null when the
+    /// session is unknown or writes none.
+    /// </summary>
+    string? GetSessionLogPath(string sessionId) => null;
+
     Task StopSessionAsync(
         string sessionId,
         TimeSpan timeout,

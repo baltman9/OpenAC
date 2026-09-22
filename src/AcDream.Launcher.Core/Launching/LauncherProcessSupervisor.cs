@@ -13,6 +13,12 @@ public interface ILauncherProcessSupervisor : IDisposable
     void Start(LauncherProcessSpec spec, string? password);
 
     void Stop(TimeSpan timeout);
+
+    /// <summary>
+    /// Sends one line to the running process's input. False when there is no
+    /// running process, or its input was closed when it started.
+    /// </summary>
+    bool TrySendLine(string line) => false;
 }
 
 public interface ILauncherProcessSupervisorFactory
@@ -42,6 +48,7 @@ public sealed class LauncherProcessSupervisor : ILauncherProcessSupervisor
     private int? _exitCode;
     private bool _publishingStateChanges;
     private bool _disposed;
+    private bool _inputOpen;
 
     public LauncherProcessSupervisor(ILauncherChildProcessFactory? factory = null)
     {
@@ -107,7 +114,15 @@ public sealed class LauncherProcessSupervisor : ILauncherProcessSupervisor
                 process.StandardInput.Flush();
             }
 
-            process.StandardInput.Close();
+            if (spec.KeepStandardInputOpen)
+            {
+                lock (_gate)
+                    _inputOpen = true;
+            }
+            else
+            {
+                process.StandardInput.Close();
+            }
         }
         catch
         {
@@ -134,6 +149,34 @@ public sealed class LauncherProcessSupervisor : ILauncherProcessSupervisor
         }
 
         SetState(LauncherSessionState.Running);
+    }
+
+    public bool TrySendLine(string line)
+    {
+        ArgumentNullException.ThrowIfNull(line);
+        lock (_gate)
+        {
+            if (_disposed || !_inputOpen || _process is not { HasExited: false } process)
+                return false;
+            try
+            {
+                process.StandardInput.Write(line);
+                process.StandardInput.Write('\n');
+                process.StandardInput.Flush();
+                return true;
+            }
+            catch (IOException)
+            {
+                // The process went away between the check and the write.
+                _inputOpen = false;
+                return false;
+            }
+            catch (ObjectDisposedException)
+            {
+                _inputOpen = false;
+                return false;
+            }
+        }
     }
 
     public void Stop(TimeSpan timeout)

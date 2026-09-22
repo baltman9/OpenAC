@@ -77,7 +77,23 @@ internal sealed class HeadlessConsoleRenderer : IRuntimeEventObserver, IDisposab
         if (_chat is not null && !_chat.BelongsTo(_windowId, line.LogTextType))
             return;
         WriteLine(
-            RuntimeChatLineTags.For(line) + line.Text, dim: false);
+            RuntimeChatLineTags.For(line) + line.Text,
+            dim: false,
+            color: ColorFor(line.LogTextType));
+    }
+
+    /// <summary>
+    /// The escape that sets the colour the chat window shows this kind of
+    /// line in, or null for a kind with no colour of its own.
+    /// </summary>
+    private static string? ColorFor(uint logTextType)
+    {
+        if (!RuntimeChatColors.TryGetColor(logTextType, out System.Numerics.Vector4 color))
+            return null;
+        static int Channel(float value) => (int)MathF.Round(Math.Clamp(value, 0f, 1f) * 255f);
+        return string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"\u001b[38;2;{Channel(color.X)};{Channel(color.Y)};{Channel(color.Z)}m");
     }
 
     /// <summary>
@@ -144,12 +160,13 @@ internal sealed class HeadlessConsoleRenderer : IRuntimeEventObserver, IDisposab
     {
     }
 
-    private void WriteLine(string text, bool dim)
+    private void WriteLine(string text, bool dim, string? color = null)
     {
         string line = dim
             ? NoticePrefix + _sessionPrefix + text
             : _sessionPrefix + text;
-        _output.WriteLine(_useColor && dim ? Dim + line + Reset : line);
+        string? escape = !_useColor ? null : dim ? Dim : color;
+        _output.WriteLine(escape is null ? line : escape + line + Reset);
         _output.Flush();
     }
 }
