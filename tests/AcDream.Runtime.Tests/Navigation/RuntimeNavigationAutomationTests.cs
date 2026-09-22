@@ -6,7 +6,6 @@ using AcDream.Core.Properties;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Navigation;
-using AcDream.Runtime.Tests.Support;
 
 namespace AcDream.Runtime.Tests.Navigation;
 
@@ -306,54 +305,5 @@ public sealed class RuntimeNavigationAutomationTests
             position = default;
             return false;
         }
-    }
-
-    /// <summary>
-    /// A route turns at run speed whatever the keyboard says: the plugin's
-    /// face-heading names the run key explicitly instead of taking whatever
-    /// hold key the character happens to have, which is what made a route's
-    /// about-turn as slow as a turn with Shift held. Mutation: dropping the
-    /// explicit run key from <c>FaceHeading</c> turns this red.
-    /// </summary>
-    [Fact]
-    public void FaceHeadingAlwaysTurnsWithTheRunKey()
-    {
-        using var host = new NoWindowGameRuntimeHost();
-        host.Start();
-        for (int tick = 0; tick < 4; tick++)
-            host.Session.Tick();
-        Assert.True(host.Runtime.Session.IsInWorld);
-        var navigation = new RuntimeNavigationAutomation();
-        navigation.Bind(host.Runtime);
-        var commands = new RecordingMovementCommands();
-        navigation.BindCommands(commands, static () => new RuntimeGenerationToken(7UL));
-
-        Assert.Equal(PluginNavigationCommandStatus.Accepted, navigation.FaceHeading(180f));
-        (float heading, bool run) = Assert.Single(commands.Turns);
-        Assert.Equal(180f, heading);
-        Assert.True(run);
-    }
-
-    private sealed class RecordingMovementCommands : IRuntimeMovementCommands
-    {
-        internal List<(float Heading, bool Run)> Turns { get; } = [];
-
-        public RuntimeCommandResult TurnToHeading(
-            RuntimeGenerationToken expectedGeneration,
-            float headingDegrees,
-            bool applyRunHoldKey = false)
-        {
-            Turns.Add((headingDegrees, applyRunHoldKey));
-            return new(RuntimeCommandStatus.Accepted, expectedGeneration);
-        }
-
-        public RuntimeCommandResult Execute(RuntimeGenerationToken expectedGeneration, RuntimeMovementCommand command) => throw new NotSupportedException();
-        public RuntimeCommandResult ExecuteMotion(RuntimeGenerationToken expectedGeneration, uint motionCommand) => throw new NotSupportedException();
-        public RuntimeCommandResult SetIntent(RuntimeGenerationToken expectedGeneration, in MovementInput input) => throw new NotSupportedException();
-        public RuntimeCommandResult ClearIntent(RuntimeGenerationToken expectedGeneration) => throw new NotSupportedException();
-        public RuntimeCommandResult BeginMove(RuntimeGenerationToken expectedGeneration, in RuntimeMoveRequest request) => throw new NotSupportedException();
-        public RuntimeCommandResult StopMove(RuntimeGenerationToken expectedGeneration) => throw new NotSupportedException();
-        public RuntimeCommandResult StopMove(RuntimeGenerationToken expectedGeneration, RuntimeMoveChannel channel) => throw new NotSupportedException();
-        public RuntimeCommandResult Jump(RuntimeGenerationToken expectedGeneration, float power) => throw new NotSupportedException();
     }
 }

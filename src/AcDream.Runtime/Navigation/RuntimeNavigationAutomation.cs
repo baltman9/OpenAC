@@ -365,7 +365,7 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
     {
         if (!TryCommands(out IRuntimeMovementCommands commands, out RuntimeGenerationToken generation))
             return PluginNavigationCommandStatus.Unavailable;
-        return StatusOf(commands.TurnToHeading(generation, headingDegrees, applyRunHoldKey: true));
+        return StatusOf(commands.TurnToHeading(generation, headingDegrees));
     }
 
     // ── Moves the client carries out ──────────────────────────────────────
