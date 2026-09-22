@@ -199,6 +199,14 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     /// </summary>
     private static readonly List<PeerNote> NoNotes = [];
 
+    /// <summary>
+    /// How many files' contents are remembered between scans. One entry per
+    /// client whose note is in the folder; the folder keeps one for every
+    /// client that ever ran here, so past this many the lot is dropped and
+    /// rebuilt rather than grown without limit.
+    /// </summary>
+    private const int ParsedNoteCapacity = 64;
+
     private const long MaximumDocumentBytes = 64 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -231,6 +239,22 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
 
     /// <summary>The command lines read from the others, oldest first.</summary>
     private readonly List<ObservedCommand> _observedCommands = [];
+
+    /// <summary>
+    /// What each note file said, against the version of the file that said
+    /// it, so a scan re-reads only what has changed since the last one.
+    /// </summary>
+    private readonly Dictionary<string, CachedNote> _parsedNotes =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// What the last scan of the folder found, the folder's stamp when it
+    /// was made, and when. A scan is repeated only when the folder has
+    /// changed or the heartbeat has come round again.
+    /// </summary>
+    private List<PeerNote>? _scannedNotes;
+    private DateTime _scannedFolderStamp;
+    private DateTimeOffset _scannedAt;
 
     private long _castSequence;
     private long _commandSequence;
@@ -547,7 +571,9 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         lock (_gate)
         {
-            return ReadRemoteNotes(_time.GetUtcNow())
+            DateTimeOffset now = _time.GetUtcNow();
+            return ReadRemoteNotes(now)
+                .Where(note => IsRecent(note.Document, now))
                 .Select(static note => note.Document.ToClient())
                 .OrderBy(static client => client.Name, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(static client => client.ClientId)
@@ -635,13 +661,29 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     /// </summary>
     private List<PeerNote> ReadRemoteNotes(DateTimeOffset now)
     {
-        // No folder means no other client has ever announced itself here.
-        // Answered before anything is allocated, because a client reads this
-        // on a timer whether or not it has company.
-        if (!Directory.Exists(_directory))
+        // The folder's own stamp, which moves whenever a note is put there,
+        // removed or replaced -- every client writes its note by renaming a
+        // new file over the old one, which is a change to the folder. Asked
+        // for first because a client reads this on a timer whether or not
+        // anything has happened, and a folder that has not changed holds
+        // exactly what the last scan found.
+        //
+        // A folder that is not there answers with the zero of file time
+        // rather than throwing, which is the same answer as "nothing has
+        // ever announced itself here".
+        DateTime folderStamp = Directory.GetLastWriteTimeUtc(_directory);
+        if (folderStamp.Year < 1700)
             return NoNotes;
+        // Scanned again on the heartbeat regardless, so a note that somehow
+        // changed without the folder saying so is picked up within one
+        // period rather than never.
+        if (_scannedNotes is { } lastScan
+            && folderStamp == _scannedFolderStamp
+            && now - _scannedAt < HeartbeatPeriod)
+        {
+            return lastScan;
+        }
         var notes = new List<PeerNote>();
-        long newestAllowed = now.Subtract(StaleAfter).ToUnixTimeMilliseconds();
         foreach (string file in Directory.EnumerateFiles(
             _directory,
             "peer-*.json",
@@ -654,36 +696,45 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                 var info = new FileInfo(file);
                 if (info.Length is <= 0 or > MaximumDocumentBytes)
                     continue;
-                PeerDocument? document = JsonSerializer.Deserialize<PeerDocument>(
-                    File.ReadAllText(file),
-                    JsonOptions);
-                if (document is null
-                    || document.InstanceId == _instanceId
-                    || document.InstanceId == Guid.Empty
-                    || document.UpdatedUnixMs < newestAllowed
-                    || document.ClientId == 0u
-                    || document.PlayerId == 0u
-                    || string.IsNullOrWhiteSpace(document.Name)
-                    || document.Name.Length > 128
-                    || document.WorldName is null
-                    || document.WorldName.Length > 128
-                    || document.Tags is null
-                    || document.Tags.Length > 128
-                    || !AreTagsWellFormed(document.Tags)
-                    || !double.IsFinite(document.EastWest)
-                    || !double.IsFinite(document.NorthSouth)
-                    || !double.IsFinite(document.Elevation)
-                    || !float.IsFinite(document.Heading)
-                    || document.Casts is null
-                    || document.Casts.Length > CastRingCapacity
-                    || !AreCastsWellFormed(document.Casts)
-                    || document.Commands is null
-                    || document.Commands.Length > CommandRingCapacity
-                    || !AreCommandsWellFormed(document.Commands))
-                {
+                DateTime writtenAt = info.LastWriteTimeUtc;
+                // The folder keeps a note for every client that ever ran on
+                // this machine, and a client that crashed leaves its own
+                // behind for good. The file system already knows when each
+                // was last written, so a note that cannot possibly be fresh
+                // is skipped before it is read at all. The margin is
+                // generous because this stamp is the file system's clock and
+                // the one inside the note is the writing client's; the
+                // authority is still the note's own, checked below.
+                //
+                // Measured against the wall clock rather than this
+                // registry's own, because it is the file system's stamp
+                // being judged and only the file system's clock is
+                // comparable with it. Nothing this rule skips could have
+                // passed the note's own stamp anyway.
+                if (DateTime.UtcNow - writtenAt > StaleAfter * 4)
                     continue;
+                if (!_parsedNotes.TryGetValue(file, out CachedNote cached)
+                    || cached.Length != info.Length
+                    || cached.LastWriteUtc != writtenAt)
+                {
+                    // A note is read on a timer and rewritten every few
+                    // seconds, so most reads find exactly what the last one
+                    // did. What a file says is settled once per version of
+                    // that file; only whether it is still recent is asked
+                    // every time.
+                    PeerDocument? parsed = JsonSerializer.Deserialize<PeerDocument>(
+                        File.ReadAllText(file),
+                        JsonOptions);
+                    cached = new CachedNote(
+                        info.Length,
+                        writtenAt,
+                        IsAcceptable(parsed) ? parsed : null);
+                    if (_parsedNotes.Count >= ParsedNoteCapacity)
+                        _parsedNotes.Clear();
+                    _parsedNotes[file] = cached;
                 }
-                notes.Add(new PeerNote(file, document));
+                if (cached.Document is { } document)
+                    notes.Add(new PeerNote(file, document));
             }
             catch (IOException)
             {
@@ -697,8 +748,23 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
             {
             }
         }
+        _scannedNotes = notes;
+        _scannedFolderStamp = folderStamp;
+        _scannedAt = now;
         return notes;
     }
+
+    /// <summary>
+    /// Whether a note is recent enough to say anything about the client that
+    /// wrote it. The scan itself no longer asks, because what the folder
+    /// holds is remembered between reads while nothing in it changes, and
+    /// the answer to this changes with the clock rather than with the
+    /// folder. What a note's rings say is held to the same window entry by
+    /// entry, so this is the rule for the client record alone.
+    /// </summary>
+    private static bool IsRecent(PeerDocument document, DateTimeOffset now) =>
+        document.UpdatedUnixMs
+            >= now.Subtract(StaleAfter).ToUnixTimeMilliseconds();
 
     /// <summary>
     /// Takes every cast this client has not seen before out of the peers'
@@ -909,6 +975,37 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                 .ToArray();
 
     /// <summary>
+    /// Whether a note is one this client will read at all: written by
+    /// somebody else, naming a character, and carrying rings it could have
+    /// written itself. Everything here is settled by what the file says, so
+    /// it is settled once per version of the file; whether the note is still
+    /// recent is not here, because that answer changes with the clock.
+    /// </summary>
+    private bool IsAcceptable(PeerDocument? document) =>
+        document is not null
+        && document.InstanceId != _instanceId
+        && document.InstanceId != Guid.Empty
+        && document.ClientId != 0u
+        && document.PlayerId != 0u
+        && !string.IsNullOrWhiteSpace(document.Name)
+        && document.Name.Length <= 128
+        && document.WorldName is not null
+        && document.WorldName.Length <= 128
+        && document.Tags is not null
+        && document.Tags.Length <= 128
+        && AreTagsWellFormed(document.Tags)
+        && double.IsFinite(document.EastWest)
+        && double.IsFinite(document.NorthSouth)
+        && double.IsFinite(document.Elevation)
+        && float.IsFinite(document.Heading)
+        && document.Casts is not null
+        && document.Casts.Length <= CastRingCapacity
+        && AreCastsWellFormed(document.Casts)
+        && document.Commands is not null
+        && document.Commands.Length <= CommandRingCapacity
+        && AreCommandsWellFormed(document.Commands);
+
+    /// <summary>
     /// Whether every cast in a note is one this client could have written
     /// itself. Applied where the note is accepted, before anything walks it:
     /// a JSON null element and a stamp that is not a time both throw in that
@@ -1093,6 +1190,16 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
 
     /// <summary>A peer's note: the file it was read from, and what it says.</summary>
     private readonly record struct PeerNote(string Path, PeerDocument Document);
+
+    /// <summary>
+    /// One file's contents as they were last read, with what the file looked
+    /// like then. A document of <see langword="null"/> is a file this client
+    /// refused, remembered so it is not read again while it is unchanged.
+    /// </summary>
+    private readonly record struct CachedNote(
+        long Length,
+        DateTime LastWriteUtc,
+        PeerDocument? Document);
 
     /// <summary>
     /// What a high-water mark belongs to. The identity in a note is a field
