@@ -26,13 +26,6 @@ public sealed class PluginCanvasPointerTests
         public IGpuFrame? CurrentFrame { get; set; }
     }
 
-    private sealed class HeldRetirementQueue : IGpuResourceRetirementQueue
-    {
-        public void Retire(Action release)
-        {
-        }
-    }
-
     /// <summary>A clock the test advances by hand: each guarded call costs what the test says.</summary>
     private sealed class ManualClock
     {
@@ -73,7 +66,7 @@ public sealed class PluginCanvasPointerTests
             UiOverlayHost host = UiOverlayHost.Mount(Root);
             Layer = host.AddLayer("PluginCanvases");
             Layer.Visible = true;
-            var services = new PluginCanvasHostServices(Device, new FrameSource(), "unused", null, new HeldRetirementQueue());
+            var services = new PluginCanvasHostServices(Device, new FrameSource(), "unused", null);
             Surface = new PluginCanvasSurface(services, font: null);
             Root.WorldMouseFallThrough += (button, x, y, _) => WorldPresses.Add((button, x, y));
             Root.WorldScrollFallThrough += _ => WorldScrolls++;

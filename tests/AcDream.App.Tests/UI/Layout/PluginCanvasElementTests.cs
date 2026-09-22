@@ -24,17 +24,6 @@ public sealed class PluginCanvasElementTests
         public IGpuFrame? CurrentFrame { get; set; }
     }
 
-    private sealed class HeldRetirementQueue : IGpuResourceRetirementQueue
-    {
-        public List<Action> Pending { get; } = [];
-        public void Retire(Action release) => Pending.Add(release);
-        public void RunAll()
-        {
-            foreach (Action release in Pending) release();
-            Pending.Clear();
-        }
-    }
-
     private sealed class FakeImageBackend : IPluginImageBackend
     {
         public const uint ArtTexture = 77u;
@@ -88,9 +77,10 @@ public sealed class PluginCanvasElementTests
     /// </summary>
     private sealed class Harness
     {
-        public RecordingGpuDevice Device { get; } = new();
+        /// <summary>The device's frame flight, as the retirement ledger a slot release waits on.</summary>
+        public HeldGpuRetirementQueue Retirement { get; } = new();
+        public RecordingGpuDevice Device { get; }
         public FrameSource Frames { get; } = new();
-        public HeldRetirementQueue Retirement { get; } = new();
         public BufferedUiRegistry Registry { get; } = new();
         public UiRoot Root { get; } = new() { Width = 800f, Height = 600f };
         public UiOverlayHost Host { get; }
@@ -105,10 +95,11 @@ public sealed class PluginCanvasElementTests
 
         public Harness()
         {
+            Device = new RecordingGpuDevice(retirement: Retirement);
             Host = UiOverlayHost.Mount(Root);
             Layer = Host.AddLayer("PluginCanvases");
             Layer.Visible = true;
-            var services = new PluginCanvasHostServices(Device, Frames, "unused", null, Retirement);
+            var services = new PluginCanvasHostServices(Device, Frames, "unused", null);
             Surface = new PluginCanvasSurface(services, font: null);
             MainRenderer = new TextRenderer(Device, Frames, "unused");
             MainContext = new UiRenderContext(MainRenderer, new Vector2(800f, 600f));
@@ -418,7 +409,8 @@ public sealed class PluginCanvasElementTests
         Assert.Null(registration.Paint);
         Assert.False(registration.IsAvailable);
         Assert.Equal(0, harness.Registry.CanvasCount);
-        // The textures go through the queue, not now: a frame may still be reading the shown one.
+        // The slots are given back to the device at once, and the device
+        // waits for the frames in flight: a frame may still be reading the shown one.
         Assert.Equal(2, harness.Retirement.Pending.Count);
         Assert.Equal(slotsBefore, harness.Device.LiveTextureSlotCount);
         harness.Retirement.RunAll();

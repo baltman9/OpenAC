@@ -18,17 +18,20 @@ public sealed class PluginCanvasHostServices
         IGpuDevice device,
         ICurrentGpuFrameSource frames,
         string shaderDirectory,
-        Func<uint, uint>? linearTwinResolver,
-        IGpuResourceRetirementQueue? retirement = null)
+        Func<uint, uint>? linearTwinResolver)
     {
         Device = device ?? throw new ArgumentNullException(nameof(device));
         Frames = frames ?? throw new ArgumentNullException(nameof(frames));
         ArgumentException.ThrowIfNullOrWhiteSpace(shaderDirectory);
         ShaderDirectory = shaderDirectory;
         LinearTwinResolver = linearTwinResolver;
-        Retirement = retirement ?? device.Retirement;
     }
 
+    /// <summary>
+    /// The device the targets come from and go back to. It waits for the
+    /// frames in flight itself when a target is given back; nothing here
+    /// keeps a retirement ledger of its own.
+    /// </summary>
     internal IGpuDevice Device { get; }
 
     internal ICurrentGpuFrameSource Frames { get; }
@@ -36,9 +39,6 @@ public sealed class PluginCanvasHostServices
     internal string ShaderDirectory { get; }
 
     internal Func<uint, uint>? LinearTwinResolver { get; }
-
-    /// <summary>Where a canvas's textures go when it comes down: after every frame that could be reading them.</summary>
-    internal IGpuResourceRetirementQueue Retirement { get; }
 }
 
 /// <summary>

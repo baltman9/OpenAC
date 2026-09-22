@@ -70,6 +70,49 @@ internal sealed record GpuRecordedTextureRegistration(string TextureName, GpuSam
 
 internal sealed record GpuRecordedTextureRelease(uint Slot) : GpuRecordedCall;
 
+internal sealed record GpuRecordedDeviceDispose : GpuRecordedCall;
+
+/// <summary>
+/// A retirement ledger shaped like the live frame flight's: releases are
+/// held until <see cref="RunAll"/>, which also runs whatever a release
+/// enqueues while it runs; once disposed, a late release runs at once.
+/// </summary>
+internal sealed class HeldGpuRetirementQueue : IGpuResourceRetirementQueue, IDisposable
+{
+    public List<Action> Pending { get; } = [];
+
+    public bool IsDisposed { get; private set; }
+
+    public void Retire(Action release)
+    {
+        ArgumentNullException.ThrowIfNull(release);
+        if (IsDisposed)
+        {
+            release();
+            return;
+        }
+        Pending.Add(release);
+    }
+
+    public void RunAll()
+    {
+        while (Pending.Count > 0)
+        {
+            Action release = Pending[0];
+            Pending.RemoveAt(0);
+            release();
+        }
+    }
+
+    public void Dispose()
+    {
+        if (IsDisposed)
+            return;
+        RunAll();
+        IsDisposed = true;
+    }
+}
+
 internal sealed record GpuRecordedRenderTargetCreate(GpuRenderTargetDescription Description)
     : GpuRecordedCall;
 
@@ -104,9 +147,20 @@ internal sealed class RecordingGpuDevice : IGpuDevice, IGpuPipelineFormatVariant
     private RecordingGpuFrame? _openFrame;
     private bool _disposed;
 
-    public RecordingGpuDevice(int ringCapacityBytes = DefaultRingCapacityBytes)
+    private readonly IGpuResourceRetirementQueue _retirement;
+
+    /// <summary>
+    /// <paramref name="retirement"/> stands in for the frame flight: a slot
+    /// release is deferred through it the way the live device defers one,
+    /// and it is drained when the device is disposed, after the device has
+    /// stopped taking requests, which is the live order.
+    /// </summary>
+    public RecordingGpuDevice(
+        int ringCapacityBytes = DefaultRingCapacityBytes,
+        IGpuResourceRetirementQueue? retirement = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(ringCapacityBytes, 1);
+        _retirement = retirement ?? ImmediateGpuResourceRetirementQueue.Instance;
         _ring = new byte[ringCapacityBytes];
         RingBuffer = new RecordingGpuBuffer(
             new GpuBufferDescription(
@@ -163,7 +217,7 @@ internal sealed class RecordingGpuDevice : IGpuDevice, IGpuPipelineFormatVariant
         SupportsMultiview = true,
     };
 
-    public IGpuResourceRetirementQueue Retirement => ImmediateGpuResourceRetirementQueue.Instance;
+    public IGpuResourceRetirementQueue Retirement => _retirement;
 
     public RecordingGpuTimerPool RecordingTimers { get; } = new();
 
@@ -324,11 +378,18 @@ internal sealed class RecordingGpuDevice : IGpuDevice, IGpuPipelineFormatVariant
 
     public void ReleaseTextureSlot(GpuTextureSlot slot)
     {
+        // The live device refuses a release once it is disposed: one that
+        // arrives then came from a deferred action that outlived its owner,
+        // and there is nothing left to give the slot back to.
+        ObjectDisposedException.ThrowIf(_disposed, this);
         if (!slot.IsAssigned)
             throw new ArgumentException("Cannot release an unassigned texture slot.", nameof(slot));
 
-        _freeTextureSlots.Push(slot.Index);
-        _calls.Add(new GpuRecordedTextureRelease(slot.Index));
+        _retirement.Retire(() =>
+        {
+            _freeTextureSlots.Push(slot.Index);
+            _calls.Add(new GpuRecordedTextureRelease(slot.Index));
+        });
     }
 
     public IGpuFrame BeginFrame()
@@ -369,7 +430,16 @@ internal sealed class RecordingGpuDevice : IGpuDevice, IGpuPipelineFormatVariant
 
     public void WaitIdle() => ProcessDeviceActions();
 
-    public void Dispose() => _disposed = true;
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+        _disposed = true;
+        _calls.Add(new GpuRecordedDeviceDispose());
+        // What was deferred runs now, with the device idle and no longer
+        // taking requests, as the live device drains its flight ledger.
+        (_retirement as IDisposable)?.Dispose();
+    }
 
     internal void Record(GpuRecordedCall call) => _calls.Add(call);
 

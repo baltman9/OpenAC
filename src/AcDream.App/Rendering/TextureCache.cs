@@ -792,20 +792,21 @@ public sealed class TextureCache
     /// <summary>
     /// Gives back a texture from <see cref="UploadReleasableRgba8"/>. The
     /// handle is forgotten at once, so nothing new can be drawn with it; the
-    /// texture itself and its table slot go when the retirement queue says
-    /// no in-flight frame can still be reading them. False for a handle this
-    /// path never issued, or one already released.
+    /// texture itself and its table slot go when the device says no
+    /// in-flight frame can still be reading them, which the device waits
+    /// for on its own for both. The ask is not deferred a second time here:
+    /// a deferred call into the device lands on the ledger the device
+    /// drains while it is being torn down, after it has stopped taking
+    /// requests. False for a handle this path never issued, or one already
+    /// released.
     /// </summary>
     internal bool ReleaseUiTexture(uint handle)
     {
         if (!_releasableUiTextures.Remove(handle, out GpuUiTextureEntry entry))
             return false;
-        _retirementQueue.Retire(() =>
-        {
-            entry.Texture.Dispose();
-            _device.ReleaseTextureSlot(entry.Slot);
-            UntrackUploadedTexture(entry.GlName);
-        });
+        entry.Texture.Dispose();
+        _device.ReleaseTextureSlot(entry.Slot);
+        UntrackUploadedTexture(entry.GlName);
         return true;
     }
 

@@ -386,10 +386,17 @@ internal sealed class PluginCanvasElement : UiElement
     }
 
     /// <summary>
-    /// Gives every target back through the retirement queue, because the
-    /// frame in flight may still be sampling the shown one, and stops
-    /// drawing. Idempotent. The element is removed from the tree by whoever
-    /// mounted it, through the parent, so the root sees the subtree go.
+    /// Gives every target back to the device and stops drawing. Idempotent.
+    /// The element is removed from the tree by whoever mounted it, through
+    /// the parent, so the root sees the subtree go.
+    ///
+    /// <para>The device owns the wait for the frames in flight: a slot
+    /// release and a texture disposal are both deferred behind them inside
+    /// the device, so they are asked for at once here. Deferring the ask
+    /// itself would put a call into the device on a ledger the device
+    /// drains while it is being torn down, after it has stopped taking
+    /// requests; that is how a canvas open at shutdown reached a disposed
+    /// device.</para>
     /// </summary>
     internal void ReleaseTargets()
     {
@@ -401,11 +408,8 @@ internal sealed class PluginCanvasElement : UiElement
         IGpuDevice device = _surface.Services.Device;
         foreach (CanvasTarget target in _targets)
         {
-            _surface.Services.Retirement.Retire(() =>
-            {
-                device.ReleaseTextureSlot(target.Slot);
-                target.Target.Dispose();
-            });
+            device.ReleaseTextureSlot(target.Slot);
+            target.Target.Dispose();
         }
         _targets.Clear();
     }

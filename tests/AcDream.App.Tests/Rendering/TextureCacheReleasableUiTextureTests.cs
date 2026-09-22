@@ -9,32 +9,21 @@ namespace AcDream.App.Tests.Rendering;
 /// <summary>
 /// The interface's ad-hoc uploads are kept for the life of the cache. The
 /// releasable path is the one exception: an upload that is given back one
-/// handle at a time, with the GPU work deferred through the retirement
-/// queue because a frame still in flight can be sampling the texture.
+/// handle at a time. The handle is forgotten at once; the GPU work waits
+/// for the frames in flight inside the device, which is the one owner of
+/// that wait, so the cache asks the device at once and defers nothing of
+/// its own.
 /// </summary>
 public sealed class TextureCacheReleasableUiTextureTests
 {
-    private sealed class HeldRetirementQueue : IGpuResourceRetirementQueue
+    private static (RecordingGpuDevice Device, TextureCache Cache, HeldGpuRetirementQueue Queue) Build()
     {
-        public List<Action> Pending { get; } = [];
-
-        public void Retire(Action release) => Pending.Add(release);
-
-        public void RunAll()
-        {
-            foreach (Action release in Pending) release();
-            Pending.Clear();
-        }
-    }
-
-    private static (RecordingGpuDevice Device, TextureCache Cache, HeldRetirementQueue Queue) Build()
-    {
-        var device = new RecordingGpuDevice();
-        var queue = new HeldRetirementQueue();
+        var queue = new HeldGpuRetirementQueue();
+        var device = new RecordingGpuDevice(retirement: queue);
         var cache = new TextureCache(
             device,
             dats: null!,
-            queue,
+            device.Retirement,
             Path.Combine(Path.GetTempPath(), "acdream-tests", "releasable"));
         device.Clear();
         return (device, cache, queue);
@@ -43,7 +32,7 @@ public sealed class TextureCacheReleasableUiTextureTests
     [Fact]
     public void ReleaseForgetsTheHandleNowAndFreesTheTextureOnlyWhenTheQueueSays()
     {
-        (RecordingGpuDevice device, TextureCache cache, HeldRetirementQueue queue) = Build();
+        (RecordingGpuDevice device, TextureCache cache, HeldGpuRetirementQueue queue) = Build();
         uint handle = cache.UploadReleasableRgba8(new byte[4 * 4 * 4], 4, 4, "test-image");
         Assert.NotEqual(0u, handle);
         Assert.Equal(1, cache.ReleasableUiTextureCount);
@@ -66,7 +55,7 @@ public sealed class TextureCacheReleasableUiTextureTests
     [Fact]
     public void ASecondReleaseOfTheSameHandleIsRefused()
     {
-        (_, TextureCache cache, HeldRetirementQueue queue) = Build();
+        (_, TextureCache cache, HeldGpuRetirementQueue queue) = Build();
         uint handle = cache.UploadReleasableRgba8(new byte[4 * 4 * 4], 4, 4, "test-image");
 
         Assert.True(cache.ReleaseUiTexture(handle));
@@ -77,7 +66,7 @@ public sealed class TextureCacheReleasableUiTextureTests
     [Fact]
     public void AHandleFromTheAdHocPathCannotBeReleasedThroughIt()
     {
-        (_, TextureCache cache, HeldRetirementQueue queue) = Build();
+        (_, TextureCache cache, HeldGpuRetirementQueue queue) = Build();
         uint adhoc = cache.UploadRgba8(new byte[4 * 4 * 4], 4, 4);
 
         Assert.False(cache.ReleaseUiTexture(adhoc));
@@ -91,7 +80,10 @@ public sealed class TextureCacheReleasableUiTextureTests
         (RecordingGpuDevice device, TextureCache cache, _) = Build();
         uint handle = cache.UploadReleasableRgba8(new byte[4 * 4 * 4], 4, 4, "test-image");
 
+        // The client's order: the cache goes, then the device drains what
+        // the cache gave back to it.
         cache.Dispose();
+        device.Dispose();
 
         Assert.Contains(
             device.OfKind<GpuRecordedTextureRelease>(),
