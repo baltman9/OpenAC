@@ -68,6 +68,14 @@ public static class MarkupDocument
 
         foreach (var el in root.Elements())
             AddElement(panel, el, binding, resolve, datFont, icons);
+
+        // The whole document now sits at its authored sizes, so this is the one
+        // moment every anchor margin can be read off the layout its author wrote.
+        // Pin them here rather than on first draw: a group that is hidden when the
+        // window is resized is never reached by the draw-time anchor pass, and
+        // would otherwise measure its children against the resized parent the first
+        // time it is opened.
+        panel.CaptureAuthoredAnchorBaselines();
         return panel;
     }
 

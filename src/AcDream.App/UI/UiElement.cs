@@ -577,6 +577,28 @@ public abstract class UiElement
         ApplyAnchor(Parent.Width, Parent.Height);
     }
 
+    /// <summary>Fix the anchor baseline of every descendant to the rectangle it was
+    /// authored with, measured against the size its parent was authored with. Call it
+    /// once on a freshly built tree, while every element still sits where its author
+    /// put it.
+    ///
+    /// Without it a child captures its baseline on the first frame it is drawn, and the
+    /// anchor pass only descends into visible subtrees — so a subtree that stays hidden
+    /// while its window is resized would measure its margins against the NEW size and
+    /// keep its authored rectangle inside a larger parent the first time it is shown.
+    /// Capturing up front makes where an anchored child ends up independent of when, or
+    /// whether, it was ever visible. Applying an anchor at the size it was captured at
+    /// is the identity, so this changes no geometry.</summary>
+    internal void CaptureAuthoredAnchorBaselines()
+    {
+        for (int i = 0; i < _children.Count; i++)
+        {
+            UiElement child = _children[i];
+            child.ApplyAnchor(Width, Height);
+            child.CaptureAuthoredAnchorBaselines();
+        }
+    }
+
     internal void RebaseChildLayoutBaselines()
     {
         foreach (var child in _children)

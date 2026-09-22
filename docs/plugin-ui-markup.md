@@ -179,6 +179,12 @@ the list to the group:
 </panel>
 ```
 
+Margins are measured once, from the layout you authored, when the panel is
+built. A group that is hidden while the window is resized — one page of a
+tabbed panel, say — therefore opens laid out exactly as it would have been had
+it been on screen the whole time; whether and when an element was ever visible
+never changes where it lands.
+
 An unknown anchor token, or a value that names no edge at all, throws at
 build time naming the element and the value. Changing a panel's authored
 size or limits in a later plugin version resets each user's stored size once;
