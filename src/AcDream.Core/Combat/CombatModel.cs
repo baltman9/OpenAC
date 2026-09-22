@@ -44,22 +44,72 @@ public static class CombatInputPlanner
     public const double AttackPowerUpSeconds = 1.0;
     public const double DualWieldPowerUpSeconds = 0.8;
 
+    /// <summary>
+    /// Whether the character is in position to act in its combat mode: the
+    /// rule the original client asks before it builds an attack, before it
+    /// changes combat mode, and each frame while a mode change is waiting.
+    /// </summary>
+    /// <param name="mode">The mode the character is in, or is being asked into.</param>
+    /// <param name="currentStyle">The body's current motion style.</param>
+    /// <param name="forwardCommand">The body's current forward command.</param>
+    /// <param name="hasCombatTable">Whether the character's combat maneuver table is known.</param>
+    /// <param name="motionsPending">Whether the body still has motions queued, such as a stance change under way.</param>
+    /// <param name="lenient">
+    /// True for the attack-building callers, which accept a melee or missile
+    /// stance the moment it is held; false for a mode change, which also
+    /// waits for the motions to run out.
+    /// </param>
+    public static bool PlayerInReadyPosition(
+        CombatMode mode,
+        uint currentStyle,
+        uint forwardCommand,
+        bool hasCombatTable,
+        bool motionsPending,
+        bool lenient)
+    {
+        switch (mode)
+        {
+            case CombatMode.NonCombat:
+            case CombatMode.Magic:
+                return !motionsPending;
+            case CombatMode.Melee:
+                if (!hasCombatTable)
+                    return false;
+                return lenient || !motionsPending;
+            case CombatMode.Missile:
+                if (forwardCommand != ReadyForwardCommand
+                    || currentStyle is not (0x8000003Fu
+                        or 0x80000041u
+                        or 0x80000043u
+                        or 0x80000047u
+                        or 0x80000138u
+                        or 0x80000139u))
+                {
+                    return false;
+                }
+                return lenient || !motionsPending;
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// The lenient form the attack builders use, for a character whose combat
+    /// table is known. An attack is only ever built in melee or missile mode,
+    /// so any other mode is not ready for one.
+    /// </summary>
     public static bool PlayerInReadyPositionForAttack(
         CombatMode mode,
         uint currentStyle,
-        uint forwardCommand)
-    {
-        if (mode == CombatMode.Melee)
-            return true;
-        if (mode != CombatMode.Missile || forwardCommand != ReadyForwardCommand)
-            return false;
-        return currentStyle is 0x8000003Fu
-            or 0x80000041u
-            or 0x80000043u
-            or 0x80000047u
-            or 0x80000138u
-            or 0x80000139u;
-    }
+        uint forwardCommand) =>
+        mode is CombatMode.Melee or CombatMode.Missile
+        && PlayerInReadyPosition(
+            mode,
+            currentStyle,
+            forwardCommand,
+            hasCombatTable: true,
+            motionsPending: false,
+            lenient: true);
 
     private const EquipMask PrimaryWeaponLocations =
         EquipMask.MeleeWeapon | EquipMask.MissileWeapon | EquipMask.TwoHanded;

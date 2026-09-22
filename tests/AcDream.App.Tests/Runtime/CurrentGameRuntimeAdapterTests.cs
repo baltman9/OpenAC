@@ -105,17 +105,18 @@ public sealed class CurrentGameRuntimeAdapterTests
 
         Assert.True(selection.Accepted);
         Assert.True(movement.Accepted);
-        Assert.True(combat.Accepted);
+        // The toggle reaches the current combat-mode owner too, which is
+        // why it is refused: this character is mid-portal, and a combat
+        // mode cannot change while teleporting, as in the original.
+        Assert.Equal(RuntimeCommandStatus.Rejected, combat.Status);
         Assert.True(chat.Accepted);
         Assert.True(portal.Accepted);
         Assert.True(allegianceRecall.Accepted);
         Assert.Equal(Harness.TargetGuid, harness.Selection.SelectedObjectId);
         Assert.True(harness.MovementInput.AutoRunActive);
+        Assert.Empty(harness.CombatMode.Sent);
         Assert.Equal(
-            [AcDream.Core.Combat.CombatMode.Melee],
-            harness.CombatMode.Sent);
-        Assert.Equal(
-            AcDream.Core.Combat.CombatMode.Melee,
+            AcDream.Core.Combat.CombatMode.NonCombat,
             harness.Actions.Combat.CurrentMode);
         Assert.Contains(
             harness.Commands.Published,

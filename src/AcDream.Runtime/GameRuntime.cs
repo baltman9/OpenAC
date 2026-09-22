@@ -416,6 +416,12 @@ public sealed class GameRuntime
             GenerationReset = generationReset;
             _events = context.Events;
 
+            // A combat-mode change asks the body whether it is in position
+            // and the session whether a teleport is under way, on every
+            // client alike, so it is bound here from runtime state alone.
+            ActionOwner.CombatMode.BindReadiness(
+                new RuntimeCombatModeReadiness(this));
+
             // The walk-to-then-use route. It is built here, from runtime
             // state alone, so a client with no window reaches an object the
             // character does not own exactly the way a client with one does.
@@ -796,6 +802,10 @@ public sealed class GameRuntime
     public void FinishRemoteBodyPass()
     {
         ObjectDisposedException.ThrowIf(_disposeRequested || _disposed, this);
+        // The one close both clients run every frame after the character's
+        // own step, which is where a combat-mode change parked behind a
+        // motion learns that the motion has run out.
+        ActionOwner.CombatMode.ApplyPendingMode();
         AcDream.Runtime.Physics.RuntimePhysicsState physics =
             EntityObjects.Physics;
         try

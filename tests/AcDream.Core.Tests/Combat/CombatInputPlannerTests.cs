@@ -100,6 +100,43 @@ public sealed class CombatInputPlannerTests
         Assert.Equal(expected, CombatInputPlanner.SupportsTargetedAttack(mode));
     }
 
+    /// <summary>
+    /// The whole ready-position rule, arm by arm. Peace and magic are ready
+    /// once no motion is queued. Melee needs the combat table, then is ready
+    /// at once to an attack builder (lenient) and once the motions have run
+    /// out to a mode change (strict). Missile needs a bow-family stance held
+    /// at the Ready command, with the same split.
+    /// </summary>
+    [Theory]
+    [InlineData(CombatMode.Magic, 0x8000003Du, 0u, true, false, false, true)]
+    [InlineData(CombatMode.Magic, 0x8000003Du, 0u, true, true, false, false)]
+    [InlineData(CombatMode.Magic, 0x8000003Du, 0u, true, true, true, false)]
+    [InlineData(CombatMode.NonCombat, 0x8000003Du, 0u, true, false, false, true)]
+    [InlineData(CombatMode.NonCombat, 0x8000003Du, 0u, true, true, true, false)]
+    [InlineData(CombatMode.Melee, 0x8000003Du, 0u, false, false, true, false)]
+    [InlineData(CombatMode.Melee, 0x8000003Du, 0u, true, true, true, true)]
+    [InlineData(CombatMode.Melee, 0x8000003Du, 0u, true, true, false, false)]
+    [InlineData(CombatMode.Melee, 0x8000003Du, 0u, true, false, false, true)]
+    [InlineData(CombatMode.Missile, 0x8000003Fu, CombatInputPlanner.ReadyForwardCommand, true, true, true, true)]
+    [InlineData(CombatMode.Missile, 0x8000003Fu, CombatInputPlanner.ReadyForwardCommand, true, true, false, false)]
+    [InlineData(CombatMode.Missile, 0x8000003Fu, CombatInputPlanner.ReadyForwardCommand, true, false, false, true)]
+    [InlineData(CombatMode.Missile, 0x8000003Du, CombatInputPlanner.ReadyForwardCommand, true, false, true, false)]
+    [InlineData(CombatMode.Missile, 0x8000003Fu, 0x41000006u, true, false, true, false)]
+    public void PlayerInReadyPosition_MatchesEveryArmOfTheRetailRule(
+        CombatMode mode,
+        uint style,
+        uint forward,
+        bool hasCombatTable,
+        bool motionsPending,
+        bool lenient,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            CombatInputPlanner.PlayerInReadyPosition(
+                mode, style, forward, hasCombatTable, motionsPending, lenient));
+    }
+
     [Theory]
     [InlineData(CombatMode.Melee, 0x8000003Du, 0u, true)]
     [InlineData(CombatMode.Missile, 0x8000003Fu, CombatInputPlanner.ReadyForwardCommand, true)]
