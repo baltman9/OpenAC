@@ -207,6 +207,13 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     /// </summary>
     private const int ParsedNoteCapacity = 64;
 
+    /// <summary>
+    /// The coarsest file-time resolution a peer folder is expected to sit on
+    /// (two seconds covers FAT and every common Unix mount), so a note
+    /// written within that window is never served from the parse cache.
+    /// </summary>
+    private static readonly TimeSpan FileTimeGranularity = TimeSpan.FromSeconds(2);
+
     private const long MaximumDocumentBytes = 64 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -247,14 +254,6 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     private readonly Dictionary<string, CachedNote> _parsedNotes =
         new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// What the last scan of the folder found, the folder's stamp when it
-    /// was made, and when. A scan is repeated only when the folder has
-    /// changed or the heartbeat has come round again.
-    /// </summary>
-    private List<PeerNote>? _scannedNotes;
-    private DateTime _scannedFolderStamp;
-    private DateTimeOffset _scannedAt;
 
     private long _castSequence;
     private long _commandSequence;
@@ -671,18 +670,8 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         // A folder that is not there answers with the zero of file time
         // rather than throwing, which is the same answer as "nothing has
         // ever announced itself here".
-        DateTime folderStamp = Directory.GetLastWriteTimeUtc(_directory);
-        if (folderStamp.Year < 1700)
+        if (!Directory.Exists(_directory))
             return NoNotes;
-        // Scanned again on the heartbeat regardless, so a note that somehow
-        // changed without the folder saying so is picked up within one
-        // period rather than never.
-        if (_scannedNotes is { } lastScan
-            && folderStamp == _scannedFolderStamp
-            && now - _scannedAt < HeartbeatPeriod)
-        {
-            return lastScan;
-        }
         var notes = new List<PeerNote>();
         foreach (string file in Directory.EnumerateFiles(
             _directory,
@@ -705,7 +694,15 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                 // time is the file system's clock, and judging freshness by
                 // both would be two clocks deciding one question.
                 DateTime writtenAt = info.LastWriteTimeUtc;
-                if (!_parsedNotes.TryGetValue(file, out CachedNote cached)
+                // The file time is the cache key, and file times are coarse on
+                // some file systems: a note rewritten within the same tick at
+                // the same length would look unchanged. A file written within
+                // the last granularity window is read again regardless, so the
+                // cache only ever spares files that have been still for a while.
+                bool justWritten =
+                    DateTime.UtcNow - writtenAt < FileTimeGranularity;
+                if (justWritten
+                    || !_parsedNotes.TryGetValue(file, out CachedNote cached)
                     || cached.Length != info.Length
                     || cached.LastWriteUtc != writtenAt)
                 {
@@ -740,9 +737,6 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
             {
             }
         }
-        _scannedNotes = notes;
-        _scannedFolderStamp = folderStamp;
-        _scannedAt = now;
         return notes;
     }
 

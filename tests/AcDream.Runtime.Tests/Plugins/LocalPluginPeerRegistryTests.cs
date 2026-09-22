@@ -492,6 +492,41 @@ public sealed class LocalPluginPeerRegistryTests
     /// identity alone, the genuine client's three casts never arrived -- zero
     /// instead of three.
     /// </summary>
+    /// <summary>
+    /// File times are coarse on some file systems: a note rewritten at the
+    /// same length within the same tick looks unchanged to a cache keyed on
+    /// length and file time. Seen on the Linux release runner, where two
+    /// publishes in one second came back as the first. A note written within
+    /// the file-time granularity is read again regardless. Mutation: a zero
+    /// granularity serves the stale name.
+    /// </summary>
+    [Fact]
+    public void ANoteRewrittenAtTheSameLengthAndFileTimeIsReadAgain()
+    {
+        string root = TemporaryRoot();
+        var now = new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);
+        var time = new ManualTimeProvider(now);
+        try
+        {
+            using var reader = Registry(root, time, 2);
+            JsonObject note = RawNote(now, Instance(1));
+            WriteRawNote(root, Instance(1), note);
+            string path = Path.Combine(root, $"peer-{Instance(1):N}.json");
+            DateTime stamp = File.GetLastWriteTimeUtc(path);
+            Assert.Equal("Alpha", Assert.Single(reader.CaptureRemoteClients()).Name);
+
+            note["Name"] = "Alphb";
+            WriteRawNote(root, Instance(1), note);
+            File.SetLastWriteTimeUtc(path, stamp);
+
+            Assert.Equal("Alphb", Assert.Single(reader.CaptureRemoteClients()).Name);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public void AFileClaimingAPeersIdentityCannotSilenceThatPeer()
     {
