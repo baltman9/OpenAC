@@ -431,7 +431,8 @@ public sealed class HeadlessSessionIsolationTests
                 credential,
                 new HeadlessDiagnosticWriter(TextWriter.Null),
                 operations,
-                timeProvider);
+                timeProvider,
+                dataDirectory: SessionDataDirectory);
         }
         catch
         {
@@ -439,6 +440,19 @@ public sealed class HeadlessSessionIsolationTests
             throw;
         }
     }
+
+    /// <summary>
+    /// A scratch folder standing in for the player's own data folder. The
+    /// sessions announce themselves to the other clients on this machine
+    /// there, and they read what the others left: pointed at the real folder
+    /// they would read -- and measure the cost of reading -- every note any
+    /// client ever left on the machine running the test, which makes what
+    /// this file measures depend on the machine's history rather than on the
+    /// code.
+    /// </summary>
+    private static readonly string SessionDataDirectory = Path.Combine(
+        Path.GetTempPath(),
+        $"acdream-headless-isolation-{Guid.NewGuid():N}");
 
     private static void SpawnInto(
         WorldSession session,

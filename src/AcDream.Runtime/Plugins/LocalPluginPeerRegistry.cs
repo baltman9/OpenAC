@@ -696,23 +696,15 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                 var info = new FileInfo(file);
                 if (info.Length is <= 0 or > MaximumDocumentBytes)
                     continue;
+                // What the file looked like when it was last read. It says
+                // whether this file has to be READ again -- a note is
+                // rewritten every few seconds and most reads find exactly
+                // what the last one did -- and nothing else. Whether a note
+                // is still fresh is the note's own stamp against this
+                // registry's clock, asked where the note is used; a file
+                // time is the file system's clock, and judging freshness by
+                // both would be two clocks deciding one question.
                 DateTime writtenAt = info.LastWriteTimeUtc;
-                // The folder keeps a note for every client that ever ran on
-                // this machine, and a client that crashed leaves its own
-                // behind for good. The file system already knows when each
-                // was last written, so a note that cannot possibly be fresh
-                // is skipped before it is read at all. The margin is
-                // generous because this stamp is the file system's clock and
-                // the one inside the note is the writing client's; the
-                // authority is still the note's own, checked below.
-                //
-                // Measured against the wall clock rather than this
-                // registry's own, because it is the file system's stamp
-                // being judged and only the file system's clock is
-                // comparable with it. Nothing this rule skips could have
-                // passed the note's own stamp anyway.
-                if (DateTime.UtcNow - writtenAt > StaleAfter * 4)
-                    continue;
                 if (!_parsedNotes.TryGetValue(file, out CachedNote cached)
                     || cached.Length != info.Length
                     || cached.LastWriteUtc != writtenAt)
@@ -783,6 +775,12 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
             .ThenBy(static note => note.Document.InstanceId))
         {
             PeerDocument document = note.Document;
+            // A note nobody is writing any more speaks for nobody: every
+            // cast in it is older than the window as well, so there is
+            // nothing in it to take and nothing to remember about the client
+            // that left it behind.
+            if (!IsRecent(document, now))
+                continue;
             // A peer logged in somewhere else shares nothing but a hard disk:
             // its object ids name other creatures entirely.
             if (!string.Equals(
@@ -854,7 +852,10 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
             .ThenBy(static note => note.Document.InstanceId))
         {
             PeerDocument document = note.Document;
-            if (!IsSameWorld(document, worldName))
+            // The same rule as the casts: a note nobody is writing any more
+            // carries no line this client could still run, and the client
+            // that left it behind is not worth remembering a cursor for.
+            if (!IsRecent(document, now) || !IsSameWorld(document, worldName))
                 continue;
             var cursor = new PeerCursorKey(note.Path, document.InstanceId);
             ObservedPeer peer = _observedPeers.TryGetValue(

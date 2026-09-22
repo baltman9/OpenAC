@@ -983,6 +983,48 @@ public sealed class LocalPluginPeerRegistryTests
     }
 
     /// <summary>
+    /// Whether a note is fresh is the note's own stamp against this
+    /// client's clock. The file system's stamp is a different clock, and the
+    /// two need not agree: a note can be minutes old by the file's time and
+    /// this instant's by the clock both clients are keeping. The file time
+    /// says only whether the file has to be read again.
+    ///
+    /// Mutation check (2026-09-22): skipping a file whose file-system stamp
+    /// is older than four staleness windows lost this client entirely --
+    /// "the peer was not seen at all".
+    /// </summary>
+    [Fact]
+    public void AFileStampOlderThanTheClockThisClientKeepsIsStillRead()
+    {
+        string root = TemporaryRoot();
+        // Two minutes off the wall clock, which is more than any margin the
+        // file's own stamp could be judged by.
+        var time = new ManualTimeProvider(
+            DateTimeOffset.UtcNow + TimeSpan.FromMinutes(2));
+        try
+        {
+            using var peer = Registry(root, time, 1);
+            using var reader = Registry(root, time, 2);
+            Assert.True(peer.Publish(Client(peer.ClientId, 10u, "Alpha", [])));
+            // What the file system put on the file is its clock's answer,
+            // not this client's. Put it two minutes behind the wall clock,
+            // which is what a note written where the two clocks differ looks
+            // like from here.
+            File.SetLastWriteTimeUtc(
+                Path.Combine(root, $"peer-{Instance(1):N}.json"),
+                DateTime.UtcNow - TimeSpan.FromMinutes(2));
+
+            PluginNetworkClient seen = Assert.Single(
+                reader.CaptureRemoteClients());
+            Assert.Equal("Alpha", seen.Name);
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    /// <summary>
     /// What never enters the ring. Each row is a line that would be wrong to
     /// pass on -- and the note is written as JSON and read by another
     /// process, so a line carrying a control character or running to
