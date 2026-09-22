@@ -43,8 +43,32 @@ internal sealed class RuntimeAutomationSurface
     private readonly AcDream.Runtime.Navigation.RuntimeNavigationAutomation _navigation;
     private readonly AcDream.Runtime.Maps.RuntimeDungeonMapAutomation _dungeonMap = new();
     private readonly AcDream.Core.Plugins.IPluginEventSink? _events;
+    private static readonly double PeerCommandPollSeconds =
+        LocalPluginPeerRegistry.CommandPollPeriod.TotalSeconds;
     private readonly LocalPluginPeerRegistry _peers;
-    private readonly string[] _peerTags;
+
+    /// <summary>
+    /// The labels this client answers to. The host starts it with whatever
+    /// the player configured; a plugin may replace them, which is why this
+    /// is not fixed at birth.
+    /// </summary>
+    private string[] _peerTags;
+
+    /// <summary>
+    /// Broadcast lines this client has taken but not run yet, each with the
+    /// instant it is due. The wait is this client's place in the recipients'
+    /// order, so several clients taking one line do not all act at once.
+    /// </summary>
+    private readonly List<PendingPeerCommand> _pendingPeerCommands = [];
+
+    /// <summary>
+    /// How far this client's own delivery has read the peers' command rings.
+    /// Its own cursor, separate from every plugin's, so a plugin reading
+    /// <c>CaptureCommands</c> cannot make the client skip a line or run one
+    /// twice.
+    /// </summary>
+    private long _deliveredCommandSequence;
+    private double _peerCommandPollRemaining;
     private double _peerHeartbeatRemaining;
     private long _lastNavigationSequence;
     private PluginGoToState _lastNavigationState;
@@ -183,12 +207,7 @@ internal sealed class RuntimeAutomationSurface
         _peers = peers ?? new LocalPluginPeerRegistry(Path.Combine(
             AcDream.Platform.ApplicationPathSet.Resolve().DataDirectory,
             "plugin-peers"));
-        _peerTags = (peerTags ?? Array.Empty<string>())
-            .Where(static tag => !string.IsNullOrWhiteSpace(tag))
-            .Select(static tag => tag.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(128)
-            .ToArray();
+        _peerTags = NormalizePeerTags(peerTags);
         if (_events is not null)
             _events.Tick += OnPeerTick;
     }
@@ -533,6 +552,126 @@ internal sealed class RuntimeAutomationSurface
             ? Array.Empty<PluginPeerCast>()
             : known;
     }
+
+    bool INetworkAutomation.SetTags(IReadOnlyList<string> tags)
+    {
+        if (tags is null)
+            return false;
+        foreach (string tag in tags)
+        {
+            // A label too long to travel is refused outright rather than cut
+            // short: a client answering to half a label is worse than one
+            // that says it would not take them.
+            if (tag is not null
+                && tag.Trim().Length > LocalPluginPeerRegistry.MaximumTagLength)
+            {
+                return false;
+            }
+        }
+        string[] normalized = NormalizePeerTags(tags);
+        lock (_gate)
+        {
+            if (_disposed)
+                return false;
+            _peerTags = normalized;
+        }
+        // The labels live in the note, and the note is what another client
+        // reads to decide whether a broadcast is for this one, so the change
+        // goes out on the next tick rather than at the next heartbeat.
+        PublishPeerSnapshot();
+        return true;
+    }
+
+    bool INetworkAutomation.BroadcastCommand(
+        string line,
+        IReadOnlyList<string> tags,
+        int delayMilliseconds)
+    {
+        ICharacterInfo character = this;
+        uint senderObjectId = character.ObjectId;
+        if (senderObjectId == 0u)
+            return false;
+        lock (_gate)
+        {
+            if (_disposed)
+                return false;
+        }
+
+        // Everything else about the line -- an empty one, one too long or
+        // carrying a control character, too many labels or one too long, a
+        // delay outside what a stagger may ask for -- is the ring's one
+        // rule, applied in the same place for a line this client writes and
+        // a line it reads, so the two cannot drift.
+        if (!_peers.RecordCommand(new LocalPluginCommand(
+            senderObjectId,
+            tags ?? Array.Empty<string>(),
+            line ?? string.Empty,
+            delayMilliseconds)))
+        {
+            return false;
+        }
+        // A broadcast is an event on a transport that otherwise only carries
+        // state, so the note is rewritten for it as soon as the debounce
+        // allows rather than waiting for the next heartbeat.
+        if (_peers.IsCommandWriteDue())
+            PublishPeerSnapshot();
+        return true;
+    }
+
+    IReadOnlyList<PluginPeerCommand> INetworkAutomation.CaptureCommands(
+        long afterSequence)
+    {
+        if (_events is null)
+            PublishPeerSnapshot();
+        IReadOnlyList<LocalPluginPeerCommand> commands = ReadPeerCommands(
+            afterSequence);
+        if (commands.Count == 0)
+            return Array.Empty<PluginPeerCommand>();
+        return commands
+            .Select(static command => command.Command)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// The broadcast lines the other clients on this computer have asked for
+    /// above <paramref name="afterSequence"/>, aimed at labels this client
+    /// answers to. One reader for the client's own delivery and for a
+    /// plugin's capture, so what a plugin sees and what the client runs are
+    /// never two different lists.
+    /// </summary>
+    private IReadOnlyList<LocalPluginPeerCommand> ReadPeerCommands(
+        long afterSequence)
+    {
+        ICharacterInfo character = this;
+        string[] tags;
+        lock (_gate)
+        {
+            if (_disposed)
+                return Array.Empty<LocalPluginPeerCommand>();
+            tags = _peerTags;
+        }
+        return _peers.CaptureRemoteCommands(
+            afterSequence,
+            character.WorldName,
+            character.ObjectId,
+            tags);
+    }
+
+    /// <summary>
+    /// The labels as they travel: trimmed, empties dropped, anything longer
+    /// than a label may be dropped, repeats ignoring case folded together,
+    /// and capped. The same shape the note is written with, so what a plugin
+    /// sets and what a peer reads back are the same words.
+    /// </summary>
+    private static string[] NormalizePeerTags(IReadOnlyList<string>? tags) =>
+        (tags ?? Array.Empty<string>())
+            .Where(static tag => !string.IsNullOrWhiteSpace(tag))
+            .Select(static tag => tag.Trim())
+            .Where(static tag =>
+                tag.Length <= LocalPluginPeerRegistry.MaximumTagLength)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(128)
+            .ToArray();
 
     bool ILoginAutomation.IsAvailable
     {
@@ -1004,6 +1143,11 @@ internal sealed class RuntimeAutomationSurface
         _composeChat = null;
         _trackedEnchantments.Clear();
         _trackedCastCompletionRevision = 0;
+        // A line waiting out its stagger was asked of the character that has
+        // just left the world; running it against whatever session comes
+        // next is not what the sender asked for. The cursor stays where it
+        // is, so a line already taken is not taken again on the way back in.
+        _pendingPeerCommands.Clear();
         _projectileDebugSamples = Array.Empty<PluginProjectileDebugSample>();
         _projectileDebugSamplesExpireAt = 0;
         // The objects the labels hung from are gone with the session.
@@ -1034,16 +1178,136 @@ internal sealed class RuntimeAutomationSurface
         _navigation.PublishSnapshotChanged();
         PublishNavigationChange();
 
+        PumpPeerCommands(elapsedSeconds);
+
         _peerHeartbeatRemaining -= Math.Max(0d, elapsedSeconds);
-        // The heartbeat is for state; a cast is an event and cannot wait for
-        // it. The debounce is what keeps a burst of casts from rewriting the
-        // whole note once each, and the note carries everything either way,
-        // so a write for a cast counts as this period's heartbeat too.
-        if (_peerHeartbeatRemaining > 0d && !_peers.IsCastWriteDue())
+        // The heartbeat is for state; a cast or a broadcast line is an event
+        // and cannot wait for it. The debounce is what keeps a burst from
+        // rewriting the whole note once each, and the note carries
+        // everything either way, so one write counts as this period's
+        // heartbeat too.
+        if (_peerHeartbeatRemaining > 0d
+            && !_peers.IsCastWriteDue()
+            && !_peers.IsCommandWriteDue())
+        {
             return;
+        }
         _peerHeartbeatRemaining = PeerHeartbeatSeconds;
         PublishPeerSnapshot();
     }
+
+    /// <summary>
+    /// Takes in the broadcast lines the other clients have asked this one to
+    /// run, and runs the ones whose wait is up. The client does this itself
+    /// rather than leaving it to a plugin: a line sent to this client is a
+    /// line this client was asked to run, and a machine where it depended on
+    /// which plugins happened to be installed would answer a broadcast
+    /// differently from one client to the next.
+    /// </summary>
+    /// <param name="elapsedSeconds">However long this frame or turn took.</param>
+    private void PumpPeerCommands(double elapsedSeconds)
+    {
+        _peerCommandPollRemaining -= Math.Max(0d, elapsedSeconds);
+        if (_peerCommandPollRemaining <= 0d)
+        {
+            _peerCommandPollRemaining = PeerCommandPollSeconds;
+            // A character with no object id is not in the world: it has no
+            // name to tell its own broadcasts from anybody else's, and a
+            // client that is not playing has nothing to run a line with.
+            // The same gate an announcement is held to.
+            ICharacterInfo character = this;
+            if (character.ObjectId != 0u)
+                TakeInPeerCommands();
+        }
+        RunDuePeerCommands();
+    }
+
+    /// <summary>
+    /// Reads what is new in the peers' command rings and puts each line in
+    /// the queue at the instant this client owes it.
+    /// </summary>
+    private void TakeInPeerCommands()
+    {
+        IReadOnlyList<LocalPluginPeerCommand> taken;
+        try
+        {
+            taken = ReadPeerCommands(_deliveredCommandSequence);
+        }
+        catch (IOException)
+        {
+            // A peer can replace or remove its own note between the folder
+            // scan and the read. It will be read again on the next poll.
+            return;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return;
+        }
+        if (taken.Count == 0)
+            return;
+        DateTimeOffset now = _peers.UtcNow;
+        lock (_gate)
+        {
+            if (_disposed)
+                return;
+            foreach (LocalPluginPeerCommand command in taken)
+            {
+                _deliveredCommandSequence = Math.Max(
+                    _deliveredCommandSequence, command.Command.Sequence);
+                _pendingPeerCommands.Add(new PendingPeerCommand(
+                    now + TimeSpan.FromMilliseconds(
+                        command.StaggerMilliseconds),
+                    command.Command.Line));
+            }
+            // The same ceiling the reader keeps for unread lines: a burst
+            // nobody could have run is bounded rather than growing with the
+            // session.
+            if (_pendingPeerCommands.Count
+                > LocalPluginPeerRegistry.ObservedCommandCapacity)
+            {
+                _pendingPeerCommands.RemoveRange(
+                    0,
+                    _pendingPeerCommands.Count
+                        - LocalPluginPeerRegistry.ObservedCommandCapacity);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Hands every line whose wait is up to this client's own command bus,
+    /// which is exactly where a line the player typed goes.
+    /// </summary>
+    private void RunDuePeerCommands()
+    {
+        List<string>? due = null;
+        lock (_gate)
+        {
+            // Runs on every tick, and on almost all of them there is nothing
+            // waiting, so the queue is asked before the clock is.
+            if (_disposed || _pendingPeerCommands.Count == 0)
+                return;
+            DateTimeOffset now = _peers.UtcNow;
+            for (int index = _pendingPeerCommands.Count - 1; index >= 0; index--)
+            {
+                if (_pendingPeerCommands[index].DueAt > now)
+                    continue;
+                (due ??= []).Add(_pendingPeerCommands[index].Line);
+                _pendingPeerCommands.RemoveAt(index);
+            }
+        }
+        if (due is null)
+            return;
+        // Oldest first: the loop above walked the queue backwards so a line
+        // could be taken out of it as it went.
+        due.Reverse();
+        foreach (string line in due)
+            _ = TryHandlePluginCommand(line);
+    }
+
+    /// <summary>A broadcast line this client has taken, and when it is due.</summary>
+    private readonly record struct PendingPeerCommand(
+        DateTimeOffset DueAt,
+        string Line);
 
     private void PublishNavigationChange()
     {

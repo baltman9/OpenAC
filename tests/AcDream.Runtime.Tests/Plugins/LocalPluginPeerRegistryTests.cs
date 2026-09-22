@@ -748,6 +748,371 @@ public sealed class LocalPluginPeerRegistryTests
             ["Landed"] = true,
         };
 
+    /// <summary>
+    /// The point of the command ring: one client asks the others on this
+    /// machine to run a line, they read it once, and a note that claims the
+    /// READER asked for something is not believed. Nothing stops a client
+    /// writing that; the reader has to refuse it.
+    ///
+    /// Mutation checks (2026-09-22):
+    /// * dropping the per-peer command high-water mark (taking every ring
+    ///   entry in on every read) turned this red with two lines after the
+    ///   cursor moved;
+    /// * dropping the own-sender rule let the planted line through and the
+    ///   count went to two.
+    /// </summary>
+    [Fact]
+    public void ACommandLineCrossesToTheOtherClientOnceAndNeverComesBackAsItsOwn()
+    {
+        string root = TemporaryRoot();
+        var time = new ManualTimeProvider(
+            new DateTimeOffset(2026, 9, 22, 12, 0, 0, TimeSpan.Zero));
+        try
+        {
+            using var sender = Registry(root, time, 1);
+            using var reader = Registry(root, time, 2);
+            sender.Publish(Client(sender.ClientId, 10u, "Alpha", []));
+            reader.Publish(Client(reader.ClientId, 20u, "Beta", []));
+
+            Assert.True(sender.RecordCommand(
+                new LocalPluginCommand(10u, [], "/example go", 0)));
+            // A note that claims the READER asked for a line.
+            Assert.True(sender.RecordCommand(
+                new LocalPluginCommand(20u, [], "/example stop", 0)));
+            sender.Publish(Client(sender.ClientId, 10u, "Alpha", []));
+
+            LocalPluginPeerCommand only = Assert.Single(
+                reader.CaptureRemoteCommands(0L, "Coldeve", 20u, []));
+            Assert.Equal(sender.ClientId, only.Command.ClientId);
+            Assert.Equal(10u, only.Command.SenderObjectId);
+            Assert.Equal("/example go", only.Command.Line);
+            Assert.Empty(only.Command.Tags);
+            Assert.Equal(0, only.StaggerMilliseconds);
+            Assert.Equal(time.GetUtcNow(), only.Command.SentAt);
+
+            Assert.Empty(reader.CaptureRemoteCommands(
+                only.Command.Sequence, "Coldeve", 20u, []));
+            // Reading from the start again hands back the one line, not two:
+            // a heartbeat republishing the same ring is not a new ask.
+            Assert.Single(reader.CaptureRemoteCommands(0L, "Coldeve", 20u, []));
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    /// <summary>
+    /// Labels are how a broadcast picks its audience: a line aimed at labels
+    /// reaches a client wearing one of them and nobody else, and a line
+    /// aimed at none reaches everybody.
+    ///
+    /// Mutation check (2026-09-22): treating an aimed line as if it were
+    /// aimed at nobody in particular -- always matching -- turned the
+    /// "tank" row red.
+    /// </summary>
+    [Theory]
+    [InlineData(new string[0], new[] { "healer" }, true)]
+    [InlineData(new[] { "healer" }, new[] { "healer" }, true)]
+    [InlineData(new[] { "HEALER" }, new[] { "healer" }, true)]
+    [InlineData(new[] { "healer", "tank" }, new[] { "tank" }, true)]
+    [InlineData(new[] { "tank" }, new[] { "healer" }, false)]
+    [InlineData(new[] { "tank" }, new string[0], false)]
+    public void ALineOnlyReachesAClientWearingOneOfTheLabelsItIsAimedAt(
+        string[] aimedAt,
+        string[] readerTags,
+        bool reaches)
+    {
+        string root = TemporaryRoot();
+        var time = new ManualTimeProvider(
+            new DateTimeOffset(2026, 9, 22, 12, 0, 0, TimeSpan.Zero));
+        try
+        {
+            using var sender = Registry(root, time, 1);
+            using var reader = Registry(root, time, 2);
+            reader.Publish(Client(reader.ClientId, 20u, "Beta", readerTags));
+
+            Assert.True(sender.RecordCommand(
+                new LocalPluginCommand(10u, aimedAt, "/example go", 0)));
+            sender.Publish(Client(sender.ClientId, 10u, "Alpha", []));
+
+            Assert.Equal(
+                reaches ? 1 : 0,
+                reader.CaptureRemoteCommands(0L, "Coldeve", 20u, readerTags)
+                    .Count);
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    /// <summary>
+    /// The stagger: the clients taking one line order themselves by client
+    /// id with the sender first, and each waits its own place in that order
+    /// times the delay the sender asked for. Three clients here, so the two
+    /// recipients wait one delay and two delays -- and neither has to be
+    /// told, because each works its own place out from the notes in the
+    /// folder.
+    ///
+    /// Mutation checks (2026-09-22):
+    /// * counting the sender as a recipient (dropping the +1) turned the
+    ///   lower client's wait to zero;
+    /// * counting every peer rather than only those ahead by client id gave
+    ///   both clients the same wait.
+    /// </summary>
+    [Fact]
+    public void TheRecipientsStaggerThemselvesByClientIdWithTheSenderFirst()
+    {
+        string root = TemporaryRoot();
+        var time = new ManualTimeProvider(
+            new DateTimeOffset(2026, 9, 22, 12, 0, 0, TimeSpan.Zero));
+        try
+        {
+            using var sender = Registry(root, time, 1);
+            using var first = Registry(root, time, 2);
+            using var second = Registry(root, time, 3);
+            sender.Publish(Client(sender.ClientId, 10u, "Alpha", []));
+            first.Publish(Client(first.ClientId, 20u, "Beta", []));
+            second.Publish(Client(second.ClientId, 30u, "Gamma", []));
+
+            Assert.True(sender.RecordCommand(
+                new LocalPluginCommand(10u, [], "/example go", 100)));
+            sender.Publish(Client(sender.ClientId, 10u, "Alpha", []));
+
+            Assert.Equal(
+                100,
+                Assert.Single(first.CaptureRemoteCommands(
+                    0L, "Coldeve", 20u, [])).StaggerMilliseconds);
+            Assert.Equal(
+                200,
+                Assert.Single(second.CaptureRemoteCommands(
+                    0L, "Coldeve", 30u, [])).StaggerMilliseconds);
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    /// <summary>
+    /// A client wearing none of the labels a line is aimed at is not a
+    /// recipient, so it does not take a place in the order either: the
+    /// clients that do take the line close up behind the sender.
+    ///
+    /// Mutation check (2026-09-22): counting every client in the order
+    /// rather than only those the line is aimed at turned the wait from one
+    /// delay to two.
+    /// </summary>
+    [Fact]
+    public void AClientTheLineIsNotAimedAtTakesNoPlaceInTheOrder()
+    {
+        string root = TemporaryRoot();
+        var time = new ManualTimeProvider(
+            new DateTimeOffset(2026, 9, 22, 12, 0, 0, TimeSpan.Zero));
+        try
+        {
+            using var sender = Registry(root, time, 1);
+            using var bystander = Registry(root, time, 2);
+            using var reader = Registry(root, time, 3);
+            sender.Publish(Client(sender.ClientId, 10u, "Alpha", []));
+            bystander.Publish(Client(bystander.ClientId, 20u, "Beta", ["tank"]));
+            reader.Publish(Client(reader.ClientId, 30u, "Gamma", ["healer"]));
+
+            Assert.True(sender.RecordCommand(
+                new LocalPluginCommand(10u, ["healer"], "/example go", 100)));
+            sender.Publish(Client(sender.ClientId, 10u, "Alpha", []));
+
+            Assert.Equal(
+                100,
+                Assert.Single(reader.CaptureRemoteCommands(
+                    0L, "Coldeve", 30u, ["healer"])).StaggerMilliseconds);
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    /// <summary>
+    /// What never enters the ring. Each row is a line that would be wrong to
+    /// pass on -- and the note is written as JSON and read by another
+    /// process, so a line carrying a control character or running to
+    /// kilobytes is a broken or hostile client rather than something to
+    /// hand a command bus.
+    ///
+    /// Mutation check (2026-09-22): removing the line rule from the ring
+    /// turned the empty, long and control-character rows red; removing the
+    /// delay rule turned the negative and minute-long rows red.
+    /// </summary>
+    [Theory]
+    [InlineData(10u, "/example go", 0, true)]
+    [InlineData(0u, "/example go", 0, false)]
+    [InlineData(10u, "", 0, false)]
+    [InlineData(10u, "   ", 0, false)]
+    [InlineData(10u, "/example\ngo", 0, false)]
+    [InlineData(10u, "/example go", -1, false)]
+    [InlineData(10u, "/example go", 60_001, false)]
+    [InlineData(10u, "/example go", 60_000, true)]
+    public void ACommandLineThatMakesNoSenseNeverEntersTheRing(
+        uint senderObjectId,
+        string line,
+        int delayMilliseconds,
+        bool accepted)
+    {
+        string root = TemporaryRoot();
+        try
+        {
+            using var sender = Registry(root, TimeProvider.System, 1);
+            Assert.Equal(
+                accepted,
+                sender.RecordCommand(new LocalPluginCommand(
+                    senderObjectId, [], line, delayMilliseconds)));
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    /// <summary>
+    /// A line longer than a player could type, and one aimed at more labels
+    /// than a broadcast may carry, are both refused. Separate from the rows
+    /// above because the caps are what keeps thirty-two of these inside the
+    /// note's size limit.
+    /// </summary>
+    [Fact]
+    public void ALineOrALabelBeyondTheCapsIsRefused()
+    {
+        string root = TemporaryRoot();
+        try
+        {
+            using var sender = Registry(root, TimeProvider.System, 1);
+            Assert.False(sender.RecordCommand(new LocalPluginCommand(
+                10u,
+                [],
+                new string('a', LocalPluginPeerRegistry.MaximumCommandLineLength + 1),
+                0)));
+            Assert.True(sender.RecordCommand(new LocalPluginCommand(
+                10u,
+                [],
+                new string('a', LocalPluginPeerRegistry.MaximumCommandLineLength),
+                0)));
+            Assert.False(sender.RecordCommand(new LocalPluginCommand(
+                10u,
+                [new string('t', LocalPluginPeerRegistry.MaximumTagLength + 1)],
+                "/example go",
+                0)));
+            Assert.False(sender.RecordCommand(new LocalPluginCommand(
+                10u,
+                Enumerable
+                    .Range(0, LocalPluginPeerRegistry.MaximumCommandTags + 1)
+                    .Select(static index => $"tag{index}")
+                    .ToArray(),
+                "/example go",
+                0)));
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    /// <summary>
+    /// The note carries its last few lines and no more, so a client that
+    /// broadcasts faster than the others poll loses the oldest rather than
+    /// growing the note without limit.
+    /// </summary>
+    [Fact]
+    public void TheCommandRingKeepsOnlyItsLastLines()
+    {
+        string root = TemporaryRoot();
+        var time = new ManualTimeProvider(
+            new DateTimeOffset(2026, 9, 22, 12, 0, 0, TimeSpan.Zero));
+        try
+        {
+            using var sender = Registry(root, time, 1);
+            using var reader = Registry(root, time, 2);
+            for (int index = 0;
+                index < LocalPluginPeerRegistry.CommandRingCapacity + 4;
+                index++)
+            {
+                Assert.True(sender.RecordCommand(new LocalPluginCommand(
+                    10u, [], $"/example {index}", 0)));
+            }
+            sender.Publish(Client(sender.ClientId, 10u, "Alpha", []));
+
+            IReadOnlyList<LocalPluginPeerCommand> read =
+                reader.CaptureRemoteCommands(0L, "Coldeve", 20u, []);
+            Assert.Equal(LocalPluginPeerRegistry.CommandRingCapacity, read.Count);
+            Assert.Equal("/example 4", read[0].Command.Line);
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    /// <summary>
+    /// The two rings in one note are read with cursors of their own. A
+    /// client that only wanted the command lines must not move the cast
+    /// mark past casts it never looked at, and the sequences count from one
+    /// in both rings, so a single mark would swallow one of them.
+    ///
+    /// Mutation check (2026-09-22): folding the two high-water marks into
+    /// one turned this red -- the cast never arrived.
+    /// </summary>
+    [Fact]
+    public void ReadingTheCommandRingLeavesTheCastRingsCursorWhereItWas()
+    {
+        string root = TemporaryRoot();
+        var time = new ManualTimeProvider(
+            new DateTimeOffset(2026, 9, 22, 12, 0, 0, TimeSpan.Zero));
+        try
+        {
+            using var sender = Registry(root, time, 1);
+            using var reader = Registry(root, time, 2);
+            Assert.True(sender.RecordCommand(
+                new LocalPluginCommand(10u, [], "/example go", 0)));
+            Assert.True(sender.RecordCast(Landed(10u, 0x50000012u, 42u)));
+            sender.Publish(Client(sender.ClientId, 10u, "Alpha", []));
+
+            Assert.Single(reader.CaptureRemoteCommands(0L, "Coldeve", 20u, []));
+            Assert.Single(reader.CaptureRemoteCasts(0L, "Coldeve", 20u));
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    /// <summary>
+    /// A client playing on another server shares a hard disk and nothing
+    /// else: its object ids and its commands mean nothing here.
+    /// </summary>
+    [Fact]
+    public void ALineFromAClientInAnotherWorldIsNotRead()
+    {
+        string root = TemporaryRoot();
+        var time = new ManualTimeProvider(
+            new DateTimeOffset(2026, 9, 22, 12, 0, 0, TimeSpan.Zero));
+        try
+        {
+            using var sender = Registry(root, time, 1);
+            using var reader = Registry(root, time, 2);
+            Assert.True(sender.RecordCommand(
+                new LocalPluginCommand(10u, [], "/example go", 0)));
+            sender.Publish(Client(sender.ClientId, 10u, "Alpha", []));
+
+            Assert.Empty(
+                reader.CaptureRemoteCommands(0L, "Darktide", 20u, []));
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
     private static void WriteRawNote(
         string root,
         Guid instanceId,

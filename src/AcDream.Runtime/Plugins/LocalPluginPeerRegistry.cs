@@ -24,6 +24,40 @@ internal readonly record struct LocalPluginCast(
     double DurationSeconds,
     bool Landed);
 
+/// <summary>
+/// One command line this client wants the other clients on this computer to
+/// run, before the registry stamps it with a sequence and a time.
+/// </summary>
+/// <param name="SenderObjectId">The character asking for it.</param>
+/// <param name="Tags">
+/// The labels it is aimed at; empty aims it at every client.
+/// </param>
+/// <param name="Line">The command line, as it would be typed.</param>
+/// <param name="DelayMilliseconds">
+/// How far apart the recipients are asked to run it, one place in the order
+/// per this many milliseconds.
+/// </param>
+internal readonly record struct LocalPluginCommand(
+    uint SenderObjectId,
+    IReadOnlyList<string> Tags,
+    string Line,
+    int DelayMilliseconds);
+
+/// <summary>
+/// One command line read from another client on this computer, with the wait
+/// this client owes before running it. The wait is not part of what a plugin
+/// is handed: it is how the client staggers itself against the other
+/// recipients, which is the client's own business.
+/// </summary>
+/// <param name="Command">What a plugin reading the same line is handed.</param>
+/// <param name="StaggerMilliseconds">
+/// How long this client waits before running the line, being this client's
+/// place in the recipients' order times the delay the sender asked for.
+/// </param>
+internal readonly record struct LocalPluginPeerCommand(
+    PluginPeerCommand Command,
+    int StaggerMilliseconds);
+
 internal sealed class LocalPluginPeerRegistry : IDisposable
 {
     internal static readonly TimeSpan StaleAfter = TimeSpan.FromSeconds(15);
@@ -48,6 +82,62 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     /// burst nobody has read yet.
     /// </summary>
     internal const int ObservedCastCapacity = 128;
+
+    /// <summary>
+    /// How often a client looks for command lines the others have asked it
+    /// to run. Unlike a cast, which is read when a plugin asks for one, a
+    /// broadcast line is something the client itself has to act on, so it
+    /// polls. Four times a second is prompt enough for a line somebody just
+    /// typed on another client and is a scan of a folder holding one small
+    /// file per client running on this computer.
+    /// </summary>
+    internal static readonly TimeSpan CommandPollPeriod =
+        TimeSpan.FromMilliseconds(250);
+
+    /// <summary>
+    /// How many broadcast command lines one client's note carries, for the
+    /// same reason the cast ring exists: the note is a snapshot replaced on
+    /// every write, so a line kept in a single field would be lost by the
+    /// next heartbeat, and a reader polling slower than the writer still
+    /// sees every line as long as no more than this many are sent between
+    /// two of its reads.
+    /// </summary>
+    internal const int CommandRingCapacity = 32;
+
+    /// <summary>
+    /// How many command lines read from other clients this one keeps to hand
+    /// back. A read cannot consume -- the client's own delivery and each
+    /// plugin read with a cursor of their own -- so this is a ceiling for a
+    /// burst nobody has read yet.
+    /// </summary>
+    internal const int ObservedCommandCapacity = 128;
+
+    /// <summary>
+    /// The longest command line a broadcast may carry. A command line is a
+    /// line somebody could have typed, and 512 characters is far beyond any
+    /// of those; a longer one is a broken or hostile note, and thirty-two of
+    /// them still sit well inside the document cap below.
+    /// </summary>
+    internal const int MaximumCommandLineLength = 512;
+
+    /// <summary>
+    /// The longest one label may be, and how many a single broadcast may be
+    /// aimed at. A label is a word the player chose for a client's role, so
+    /// these are generous rather than tight; they keep one note from filling
+    /// the document cap with labels alone.
+    /// </summary>
+    internal const int MaximumTagLength = 64;
+
+    /// <summary>How many labels one broadcast may be aimed at.</summary>
+    internal const int MaximumCommandTags = 16;
+
+    /// <summary>
+    /// The longest stagger a broadcast may ask for, per place in the
+    /// recipients' order. A minute between two clients running the same line
+    /// is already far past anything worth waiting for, and a note asking for
+    /// more would park a line in every recipient for as long as it liked.
+    /// </summary>
+    internal const int MaximumCommandDelayMilliseconds = 60_000;
 
     /// <summary>
     /// The shortest gap between two notes written because of a cast. The
@@ -102,6 +192,13 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     private static readonly long LatestCastUnixMs =
         DateTimeOffset.MaxValue.ToUnixTimeMilliseconds();
 
+    /// <summary>
+    /// What a scan of a folder that is not there answers. Shared because
+    /// every caller only reads it, and a client with no company on the
+    /// machine would otherwise allocate one of these on every poll.
+    /// </summary>
+    private static readonly List<PeerNote> NoNotes = [];
+
     private const long MaximumDocumentBytes = 64 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -117,15 +214,30 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     /// <summary>What this client is telling the others, oldest first.</summary>
     private readonly List<PeerCastEntry> _ring = [];
 
+    /// <summary>
+    /// The command lines this client is asking the others to run, oldest
+    /// first. A ring of its own beside the cast ring: the two carry
+    /// different things and are read with cursors of their own, and folding
+    /// them together would have a client that only wants one of them move
+    /// the other's cursor past lines it never looked at.
+    /// </summary>
+    private readonly List<PeerCommandEntry> _commandRing = [];
+
     /// <summary>The highest sequence taken in from each peer's note.</summary>
     private readonly Dictionary<PeerCursorKey, ObservedPeer> _observedPeers = [];
 
     /// <summary>What this client has read from the others, oldest first.</summary>
     private readonly List<ObservedCast> _observedCasts = [];
 
+    /// <summary>The command lines read from the others, oldest first.</summary>
+    private readonly List<ObservedCommand> _observedCommands = [];
+
     private long _castSequence;
+    private long _commandSequence;
     private long _observedSequence;
+    private long _observedCommandSequence;
     private bool _castWritePending;
+    private bool _commandWritePending;
     private DateTimeOffset? _lastWriteAt;
 
     /// <summary>
@@ -173,14 +285,17 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         }
         PeerDocument document;
         long publishedThrough;
+        long publishedCommandsThrough;
         lock (_gate)
         {
             publishedThrough = _castSequence;
+            publishedCommandsThrough = _commandSequence;
             document = PeerDocument.From(
                 client with { ClientId = ClientId },
                 _instanceId,
                 now.ToUnixTimeMilliseconds(),
-                [.. _ring]);
+                [.. _ring],
+                [.. _commandRing]);
         }
         string temporary = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         bool written = false;
@@ -206,6 +321,8 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                 {
                     if (_castSequence == publishedThrough)
                         _castWritePending = false;
+                    if (_commandSequence == publishedCommandsThrough)
+                        _commandWritePending = false;
                     _lastWriteAt = now;
                     _holdWritesUntil = null;
                 }
@@ -304,6 +421,127 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         }
     }
 
+    /// <summary>
+    /// This registry's clock, so the one owner that schedules a broadcast
+    /// line measures its wait on the same clock the line was stamped by. Two
+    /// clocks behind one wait is a silent refusal waiting to happen.
+    /// </summary>
+    internal DateTimeOffset UtcNow => _time.GetUtcNow();
+
+    /// <summary>
+    /// Adds a command line to the ring this client publishes. As with a
+    /// cast, the note is not written here: the caller asks
+    /// <see cref="IsCommandWriteDue"/> and writes when the debounce allows.
+    /// </summary>
+    /// <returns>
+    /// False for a line that makes no sense, which is left out of the ring
+    /// entirely, by the same rule a peer's note is read under.
+    /// </returns>
+    public bool RecordCommand(in LocalPluginCommand command)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        long atUnixMs = _time.GetUtcNow().ToUnixTimeMilliseconds();
+        lock (_gate)
+        {
+            var entry = new PeerCommandEntry
+            {
+                Sequence = _commandSequence + 1L,
+                AtUnixMs = atUnixMs,
+                SenderObjectId = command.SenderObjectId,
+                Tags = NormalizeTags(command.Tags),
+                Line = command.Line ?? string.Empty,
+                DelayMilliseconds = command.DelayMilliseconds,
+            };
+            if (!IsWellFormed(entry))
+                return false;
+            _commandSequence = entry.Sequence;
+            _commandRing.Add(entry);
+            if (_commandRing.Count > CommandRingCapacity)
+            {
+                _commandRing.RemoveRange(
+                    0, _commandRing.Count - CommandRingCapacity);
+            }
+            _commandWritePending = true;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Whether a recorded command line is waiting to be published and enough
+    /// time has passed since the last write to publish it. The same debounce
+    /// the cast ring uses, because the note carries both rings and one write
+    /// gets both out.
+    /// </summary>
+    public bool IsCommandWriteDue()
+    {
+        if (_disposed)
+            return false;
+        DateTimeOffset now = _time.GetUtcNow();
+        lock (_gate)
+        {
+            if (_holdWritesUntil is { } until && now < until)
+                return false;
+            return _commandWritePending
+                && (_lastWriteAt is not { } last
+                    || now - last >= CastWriteDebounce);
+        }
+    }
+
+    /// <summary>
+    /// The command lines other clients on this computer have asked for that
+    /// this one has not handed back yet under a sequence above
+    /// <paramref name="afterSequence"/>.
+    /// </summary>
+    /// <param name="afterSequence">
+    /// The highest sequence the caller has already dealt with; zero for
+    /// everything still inside the staleness window.
+    /// </param>
+    /// <param name="worldName">
+    /// The world this client is logged in to. A peer naming a different one
+    /// is playing somewhere else, so its lines are skipped entirely.
+    /// </param>
+    /// <param name="ownPlayerObjectId">
+    /// This client's own character, so a line it asked for is never read
+    /// back as somebody else's.
+    /// </param>
+    /// <param name="ownTags">
+    /// The labels this client answers to. A line aimed at labels is taken
+    /// only when one of them is here; a line aimed at none is taken by
+    /// everybody.
+    /// </param>
+    public IReadOnlyList<LocalPluginPeerCommand> CaptureRemoteCommands(
+        long afterSequence,
+        string worldName,
+        uint ownPlayerObjectId,
+        IReadOnlyList<string>? ownTags)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        DateTimeOffset now = _time.GetUtcNow();
+        lock (_gate)
+        {
+            TakeInRemoteCommands(
+                now,
+                worldName ?? string.Empty,
+                ownPlayerObjectId,
+                ownTags);
+            ForgetStaleObservations(now);
+            // This one is read on a timer rather than when a plugin asks, so
+            // the case where there is nothing to hand back is the usual one
+            // and costs nothing.
+            if (_observedCommands.Count == 0)
+                return Array.Empty<LocalPluginPeerCommand>();
+            List<LocalPluginPeerCommand>? result = null;
+            foreach (ObservedCommand observed in _observedCommands)
+            {
+                if (observed.Sequence > afterSequence)
+                    (result ??= []).Add(observed.Project());
+            }
+            return result is null
+                ? Array.Empty<LocalPluginPeerCommand>()
+                : result.ToArray();
+        }
+    }
+
     public IReadOnlyList<PluginNetworkClient> CaptureRemoteClients()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -364,9 +602,10 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
             return;
         lock (_gate)
         {
-            // Nothing to write the ring into any more; a later publish will
+            // Nothing to write the rings into any more; a later publish will
             // carry whatever is still young enough to matter.
             _castWritePending = false;
+            _commandWritePending = false;
         }
         try
         {
@@ -396,9 +635,12 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     /// </summary>
     private List<PeerNote> ReadRemoteNotes(DateTimeOffset now)
     {
-        var notes = new List<PeerNote>();
+        // No folder means no other client has ever announced itself here.
+        // Answered before anything is allocated, because a client reads this
+        // on a timer whether or not it has company.
         if (!Directory.Exists(_directory))
-            return notes;
+            return NoNotes;
+        var notes = new List<PeerNote>();
         long newestAllowed = now.Subtract(StaleAfter).ToUnixTimeMilliseconds();
         foreach (string file in Directory.EnumerateFiles(
             _directory,
@@ -427,13 +669,17 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                     || document.WorldName.Length > 128
                     || document.Tags is null
                     || document.Tags.Length > 128
+                    || !AreTagsWellFormed(document.Tags)
                     || !double.IsFinite(document.EastWest)
                     || !double.IsFinite(document.NorthSouth)
                     || !double.IsFinite(document.Elevation)
                     || !float.IsFinite(document.Heading)
                     || document.Casts is null
                     || document.Casts.Length > CastRingCapacity
-                    || !AreCastsWellFormed(document.Casts))
+                    || !AreCastsWellFormed(document.Casts)
+                    || document.Commands is null
+                    || document.Commands.Length > CommandRingCapacity
+                    || !AreCommandsWellFormed(document.Commands))
                 {
                     continue;
                 }
@@ -481,10 +727,11 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                 continue;
             }
             var cursor = new PeerCursorKey(note.Path, document.InstanceId);
-            long highest =
-                _observedPeers.TryGetValue(cursor, out ObservedPeer peer)
-                    ? peer.HighestSequence
-                    : 0L;
+            ObservedPeer peer = _observedPeers.TryGetValue(
+                cursor, out ObservedPeer known)
+                ? known
+                : default;
+            long highest = peer.HighestCastSequence;
             foreach (PeerCastEntry entry in OldestFirst(document.Casts))
             {
                 if (entry.Sequence <= highest)
@@ -497,7 +744,11 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                     document.ClientId,
                     entry));
             }
-            _observedPeers[cursor] = new ObservedPeer(highest, now);
+            _observedPeers[cursor] = peer with
+            {
+                HighestCastSequence = highest,
+                LastSeen = now,
+            };
         }
         if (_observedCasts.Count > ObservedCastCapacity)
         {
@@ -506,6 +757,156 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                 _observedCasts.Count - ObservedCastCapacity);
         }
     }
+
+    /// <summary>
+    /// Takes every command line this client has not seen before out of the
+    /// peers' notes and into its own list, numbering them in the order it
+    /// first read them. A line is counted against the peer's high-water mark
+    /// even when it is then dropped -- as one aimed at labels this client
+    /// does not answer to is -- so a note nobody here can use is not
+    /// re-examined on every read.
+    /// </summary>
+    /// <param name="now">This read's instant.</param>
+    /// <param name="worldName">The world this client is playing in.</param>
+    /// <param name="ownPlayerObjectId">This client's own character.</param>
+    /// <param name="ownTags">The labels this client answers to.</param>
+    private void TakeInRemoteCommands(
+        DateTimeOffset now,
+        string worldName,
+        uint ownPlayerObjectId,
+        IReadOnlyList<string>? tags)
+    {
+        List<PeerNote> notes = ReadRemoteNotes(now);
+        // No other client is running here, which is the ordinary case on a
+        // machine playing one character. Nothing below it is worth doing,
+        // and this is reached on a timer rather than when a plugin asks.
+        if (notes.Count == 0)
+            return;
+        string[] ownTags = NormalizeTags(tags);
+        foreach (PeerNote note in notes
+            .OrderBy(static note => note.Document.ClientId)
+            .ThenBy(static note => note.Document.InstanceId))
+        {
+            PeerDocument document = note.Document;
+            if (!IsSameWorld(document, worldName))
+                continue;
+            var cursor = new PeerCursorKey(note.Path, document.InstanceId);
+            ObservedPeer peer = _observedPeers.TryGetValue(
+                cursor, out ObservedPeer known)
+                ? known
+                : default;
+            long highest = peer.HighestCommandSequence;
+            foreach (PeerCommandEntry entry in OldestFirst(document.Commands))
+            {
+                if (entry.Sequence <= highest)
+                    continue;
+                highest = entry.Sequence;
+                if (!IsUsable(entry, now, ownPlayerObjectId))
+                    continue;
+                string[] aimedAt = NormalizeTags(entry.Tags);
+                // A line aimed at labels is for the clients wearing one of
+                // them and nobody else; a line aimed at none is for
+                // everybody.
+                if (!IsAimedAt(aimedAt, ownTags))
+                    continue;
+                _observedCommands.Add(new ObservedCommand(
+                    ++_observedCommandSequence,
+                    document.ClientId,
+                    entry,
+                    aimedAt,
+                    StaggerFor(
+                        notes,
+                        worldName,
+                        document.ClientId,
+                        aimedAt,
+                        entry.DelayMilliseconds)));
+            }
+            _observedPeers[cursor] = peer with
+            {
+                HighestCommandSequence = highest,
+                LastSeen = now,
+            };
+        }
+        if (_observedCommands.Count > ObservedCommandCapacity)
+        {
+            _observedCommands.RemoveRange(
+                0,
+                _observedCommands.Count - ObservedCommandCapacity);
+        }
+    }
+
+    /// <summary>
+    /// How long this client waits before running a broadcast line, so the
+    /// clients taking it do not all act on the same instant.
+    ///
+    /// <para>The order is by client id with the sender first, and every
+    /// recipient can work out its own place in it from the notes in the
+    /// folder: the recipients are this client and every other client playing
+    /// in the same world whose labels the line is aimed at. The sender holds
+    /// place zero, so the first recipient waits one delay, the second two,
+    /// and so on.</para>
+    /// </summary>
+    /// <param name="notes">Every other client's note, as read this pass.</param>
+    /// <param name="worldName">The world this client is playing in.</param>
+    /// <param name="senderClientId">The client that asked for the line.</param>
+    /// <param name="aimedAt">The labels the line is aimed at.</param>
+    /// <param name="delayMilliseconds">The delay the sender asked for.</param>
+    private int StaggerFor(
+        List<PeerNote> notes,
+        string worldName,
+        uint senderClientId,
+        string[] aimedAt,
+        int delayMilliseconds)
+    {
+        if (delayMilliseconds <= 0)
+            return 0;
+        int ahead = 0;
+        foreach (PeerNote note in notes)
+        {
+            PeerDocument document = note.Document;
+            if (document.ClientId == senderClientId
+                || document.ClientId >= ClientId
+                || !IsSameWorld(document, worldName)
+                || !IsAimedAt(aimedAt, NormalizeTags(document.Tags)))
+            {
+                continue;
+            }
+            ahead++;
+        }
+        return (ahead + 1) * delayMilliseconds;
+    }
+
+    private static bool IsSameWorld(PeerDocument document, string worldName) =>
+        string.Equals(
+            document.WorldName,
+            worldName,
+            StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether a line aimed at <paramref name="aimedAt"/> is for a client
+    /// wearing <paramref name="clientTags"/>. A line aimed at nothing is for
+    /// everybody, which is what a broadcast with no labels means.
+    /// </summary>
+    private static bool IsAimedAt(string[] aimedAt, string[] clientTags) =>
+        aimedAt.Length == 0
+        || aimedAt.Any(tag => clientTags.Contains(
+            tag, StringComparer.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// The labels as they travel: trimmed, empties dropped, repeats ignoring
+    /// case folded together, and no more than the cap. One rule for the
+    /// labels a client wears and the labels a line is aimed at, so the two
+    /// are compared as the same kind of thing.
+    /// </summary>
+    private static string[] NormalizeTags(IReadOnlyList<string?>? tags) =>
+        tags is null
+            ? []
+            : tags
+                .Where(static tag => !string.IsNullOrWhiteSpace(tag))
+                .Select(static tag => tag!.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(128)
+                .ToArray();
 
     /// <summary>
     /// Whether every cast in a note is one this client could have written
@@ -529,11 +930,47 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     }
 
     /// <summary>
+    /// Whether every command line in a note is one this client could have
+    /// written itself, by the same rule and for the same reason as the
+    /// casts: one bad entry refuses the whole note.
+    /// </summary>
+    private static bool AreCommandsWellFormed(PeerCommandEntry?[] commands)
+    {
+        foreach (PeerCommandEntry? entry in commands)
+        {
+            if (entry is null || !IsWellFormed(entry))
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Whether a note's own labels are labels at all. They are compared
+    /// against what a broadcast is aimed at, so an empty or absurdly long
+    /// one is a broken or hostile note rather than a role.
+    /// </summary>
+    private static bool AreTagsWellFormed(string?[] tags)
+    {
+        foreach (string? tag in tags)
+        {
+            if (string.IsNullOrWhiteSpace(tag) || tag.Length > MaximumTagLength)
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>
     /// A note's casts, oldest first. Null elements cannot reach here: a note
     /// carrying one was refused whole when it was read.
     /// </summary>
     private static IEnumerable<PeerCastEntry> OldestFirst(PeerCastEntry?[] casts) =>
         casts.OfType<PeerCastEntry>().OrderBy(static entry => entry.Sequence);
+
+    /// <summary>A note's command lines, oldest first, by the same rule.</summary>
+    private static IEnumerable<PeerCommandEntry> OldestFirst(
+        PeerCommandEntry?[] commands) =>
+        commands.OfType<PeerCommandEntry>()
+            .OrderBy(static entry => entry.Sequence);
 
     /// <summary>
     /// Whether a cast makes sense at all. The one rule, applied on the way
@@ -581,6 +1018,51 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     private static TimeSpan Age(PeerCastEntry entry, DateTimeOffset now) =>
         now - DateTimeOffset.FromUnixTimeMilliseconds(entry.AtUnixMs);
 
+    private static TimeSpan Age(PeerCommandEntry entry, DateTimeOffset now) =>
+        now - DateTimeOffset.FromUnixTimeMilliseconds(entry.AtUnixMs);
+
+    /// <summary>
+    /// Whether a command line makes sense at all. The one rule, applied on
+    /// the way into this client's own ring and again on the way out of a
+    /// peer's note, so a note this client would refuse to read is a note it
+    /// never writes either.
+    ///
+    /// <para>A control character is refused because the line is handed to
+    /// the command bus as though it had been typed, and nothing a player can
+    /// type carries one.</para>
+    /// </summary>
+    private static bool IsWellFormed(PeerCommandEntry entry) =>
+        entry.Sequence > 0L
+        && entry.Sequence <= MaximumCastSequence
+        && entry.AtUnixMs >= EarliestCastUnixMs
+        && entry.AtUnixMs <= LatestCastUnixMs
+        && entry.SenderObjectId != 0u
+        && entry.DelayMilliseconds >= 0
+        && entry.DelayMilliseconds <= MaximumCommandDelayMilliseconds
+        && !string.IsNullOrWhiteSpace(entry.Line)
+        && entry.Line.Length <= MaximumCommandLineLength
+        && !entry.Line.Any(char.IsControl)
+        && entry.Tags is not null
+        && entry.Tags.Length <= MaximumCommandTags
+        && AreTagsWellFormed(entry.Tags);
+
+    /// <summary>
+    /// Whether one command line in a peer's note is one this client can act
+    /// on: well formed, recent, and not its own doing. Whether it is aimed
+    /// at this client is settled by the caller, which knows this client's
+    /// labels.
+    /// </summary>
+    private static bool IsUsable(
+        PeerCommandEntry entry,
+        DateTimeOffset now,
+        uint ownPlayerObjectId)
+    {
+        if (!IsWellFormed(entry) || entry.SenderObjectId == ownPlayerObjectId)
+            return false;
+        TimeSpan age = Age(entry, now);
+        return age <= StaleAfter && age >= -StaleAfter;
+    }
+
     /// <summary>
     /// Drops casts that have aged out of the staleness window and peers that
     /// have not been heard from for several windows, so neither list grows
@@ -588,7 +1070,17 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     /// </summary>
     private void ForgetStaleObservations(DateTimeOffset now)
     {
+        // Nothing has ever been read from anybody, which is the usual state
+        // on a machine playing one character, and this runs on a timer.
+        if (_observedCasts.Count == 0
+            && _observedCommands.Count == 0
+            && _observedPeers.Count == 0)
+        {
+            return;
+        }
         _observedCasts.RemoveAll(observed => Age(observed.Entry, now) > StaleAfter);
+        _observedCommands.RemoveAll(
+            observed => Age(observed.Entry, now) > StaleAfter);
         TimeSpan forgetPeerAfter = StaleAfter * 4;
         foreach (PeerCursorKey cursor in _observedPeers
             .Where(pair => now - pair.Value.LastSeen > forgetPeerAfter)
@@ -617,9 +1109,15 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     /// </summary>
     private readonly record struct PeerCursorKey(string Path, Guid InstanceId);
 
-    /// <summary>How far one peer's casts have been read.</summary>
+    /// <summary>
+    /// How far one peer's note has been read. A mark per ring, because the
+    /// two count from one independently of each other and a client reading
+    /// only one of them must not move the other's mark past lines it never
+    /// looked at.
+    /// </summary>
     private readonly record struct ObservedPeer(
-        long HighestSequence,
+        long HighestCastSequence,
+        long HighestCommandSequence,
         DateTimeOffset LastSeen);
 
     /// <summary>One cast read from a peer, under this client's numbering.</summary>
@@ -651,6 +1149,28 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         }
     }
 
+    /// <summary>
+    /// One command line read from a peer, under this client's numbering,
+    /// with the wait this client owes before running it.
+    /// </summary>
+    private readonly record struct ObservedCommand(
+        long Sequence,
+        uint ClientId,
+        PeerCommandEntry Entry,
+        string[] AimedAt,
+        int StaggerMilliseconds)
+    {
+        internal LocalPluginPeerCommand Project() => new(
+            new PluginPeerCommand(
+                Sequence,
+                ClientId,
+                Entry.SenderObjectId,
+                AimedAt,
+                Entry.Line,
+                DateTimeOffset.FromUnixTimeMilliseconds(Entry.AtUnixMs)),
+            StaggerMilliseconds);
+    }
+
     /// <summary>One cast as it travels in the document.</summary>
     private sealed class PeerCastEntry
     {
@@ -664,6 +1184,24 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         public bool Landed { get; set; }
     }
 
+    /// <summary>One broadcast command line as it travels in the document.</summary>
+    private sealed class PeerCommandEntry
+    {
+        public long Sequence { get; set; }
+        public long AtUnixMs { get; set; }
+        public uint SenderObjectId { get; set; }
+
+        /// <summary>
+        /// The labels the line is aimed at; empty aims it at everybody.
+        /// Nullable elements because the wire is a file another process
+        /// wrote: a JSON null lands here as a null element.
+        /// </summary>
+        public string?[] Tags { get; set; } = [];
+
+        public string Line { get; set; } = string.Empty;
+        public int DelayMilliseconds { get; set; }
+    }
+
     private sealed class PeerDocument
     {
         public Guid InstanceId { get; set; }
@@ -672,7 +1210,12 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         public uint PlayerId { get; set; }
         public string Name { get; set; } = string.Empty;
         public string WorldName { get; set; } = string.Empty;
-        public string[] Tags { get; set; } = [];
+
+        /// <summary>
+        /// The labels this client answers to. Nullable elements for the same
+        /// reason the rings' are: the wire is a file another process wrote.
+        /// </summary>
+        public string?[] Tags { get; set; } = [];
         public uint CellId { get; set; }
         public double EastWest { get; set; }
         public double NorthSouth { get; set; }
@@ -697,11 +1240,18 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         /// </summary>
         public PeerCastEntry?[] Casts { get; set; } = [];
 
+        /// <summary>
+        /// The recent command lines this client has asked the others to run,
+        /// oldest first. Nullable for the same reason as the casts.
+        /// </summary>
+        public PeerCommandEntry?[] Commands { get; set; } = [];
+
         public static PeerDocument From(
             in PluginNetworkClient client,
             Guid instanceId,
             long updatedUnixMs,
-            PeerCastEntry[] casts) => new()
+            PeerCastEntry[] casts,
+            PeerCommandEntry[] commands) => new()
         {
             InstanceId = instanceId,
             UpdatedUnixMs = updatedUnixMs,
@@ -709,12 +1259,7 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
             PlayerId = client.PlayerId,
             Name = client.Name,
             WorldName = client.WorldName,
-            Tags = client.Tags
-                .Where(static tag => !string.IsNullOrWhiteSpace(tag))
-                .Select(static tag => tag.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Take(128)
-                .ToArray(),
+            Tags = NormalizeTags(client.Tags),
             CellId = client.Position.CellId,
             EastWest = client.Position.EastWest,
             NorthSouth = client.Position.NorthSouth,
@@ -728,6 +1273,7 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
             MaxMana = client.MaxMana,
             MaxStamina = client.MaxStamina,
             Casts = casts,
+            Commands = commands,
         };
 
         public PluginNetworkClient ToClient() => new(
@@ -742,7 +1288,9 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                 Elevation,
                 Heading,
                 IsOutdoor),
-            Tags,
+            // Every element is a label: a note carrying a null or blank one
+            // was refused when it was read.
+            NormalizeTags(Tags),
             CurrentHealth,
             CurrentMana,
             CurrentStamina,

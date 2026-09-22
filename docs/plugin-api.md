@@ -1191,7 +1191,88 @@ A `PluginNetworkClient` carries:
   `docs/building-and-running.md` describes. Tags are trimmed, de-duplicated
   ignoring case and capped at 128; a client started without any publishes an
   empty list. They mean whatever the plugin decides they mean: a role, a
-  group name, a job for a bot. A plugin cannot set them; the player does.
+  group name, a job for a bot. The player sets them at startup and a plugin
+  can replace them with `SetTags`, below.
+
+### Tags
+
+```csharp
+peers.SetTags(["healer", "buffbot"]);
+```
+
+`SetTags` replaces the labels this client answers to, whatever it was started
+with. The labels are trimmed, blank ones dropped, repeats ignoring case
+folded together and the list capped at 128; an empty list clears them. It
+returns false for a null list and for a label longer than 64 characters,
+which is refused outright rather than cut short. The change goes into this
+client's note on the next tick, so the other clients see it within a
+heartbeat, and it takes effect for broadcast commands straight away.
+
+Labels are the only addressing the channel has: a broadcast aimed at labels
+reaches a client wearing one of them and nobody else.
+
+### Broadcast commands
+
+```csharp
+// On the client giving the orders:
+peers.BroadcastCommand("/myplugin follow", ["healer"], delayMilliseconds: 250);
+
+// On any client, to watch what was asked rather than let a verb answer it:
+long cursor = 0L;
+foreach (PluginPeerCommand command in peers.CaptureCommands(cursor))
+{
+    cursor = command.Sequence;
+    Console.WriteLine($"{command.SenderObjectId} asked for {command.Line}");
+}
+```
+
+`BroadcastCommand` asks the other clients on this computer to run a command
+line, exactly as though the player had typed it there. It is the one
+free-form channel between clients: what a line means is whatever the
+receiving client's own command verbs make of it, and a line no verb answers
+is simply not run.
+
+The delivery is the client's own, not a plugin's. Every client reads the
+notes four times a second, takes the lines aimed at labels it answers to, and
+hands each one to the same command bus a typed line goes to. So a broadcast
+is answered the same way on every client, whatever plugins happen to be
+loaded there, and a plugin that registers a verb has that verb reachable from
+another character without doing anything else.
+
+The rules the host applies before a line is run:
+
+- a line from a client logged in to a **different world** is skipped, as a
+  cast is;
+- this client's **own** broadcast is never run here. A plugin that wants the
+  line run on the sending client too runs it there itself;
+- a line aimed at **labels** is taken only by a client wearing one of them;
+  a line aimed at none is taken by every client in the same world;
+- a line **older than fifteen seconds**, or stamped that far in the future,
+  is dropped, along with the whole note if any entry in it is malformed.
+
+`delayMilliseconds` staggers the recipients so several characters do not act
+on the same instant. Every client that takes the line orders itself against
+the other recipients by client id, with the sender holding the first place,
+and waits its own place in that order times the delay: the first recipient
+waits one delay, the second two, and so on. Each recipient works its own
+place out from the notes in the folder, so nothing has to be agreed in
+advance. Zero has every recipient run it as soon as it reads it. A client
+the line is not aimed at takes no place in the order.
+
+`BroadcastCommand` returns false, and nothing is published, for an empty
+line, a line longer than 512 characters or carrying a control character,
+more than 16 labels or one longer than 64 characters, a delay below zero or
+above sixty seconds, and a character that is not in the world.
+
+`CaptureCommands` hands back the same lines for a plugin to read, oldest
+first, with a `Sequence` cursor that behaves exactly like the cast one: hand
+the highest back and each line arrives once, and reading consumes nothing, so
+several plugins can each keep a cursor and none of them stops the client
+running the lines. Each `PluginPeerCommand` carries the publishing
+`ClientId`, the `SenderObjectId`, the `Tags` the line was aimed at, the
+`Line` itself and `SentAt`, the instant the sending client said it asked.
+The caps mirror the cast ring: a note carries its last 32 lines and a reader
+keeps up to 128 unread ones, inside the same fifteen-second window.
 
 ### Cast sharing
 
@@ -1287,9 +1368,9 @@ so is a client not heard from. A plugin polling on every tick, or every
 second, sees every cast; one polling every twenty seconds does not.
 
 What the surface does **not** carry yet: what a peer is holding or how many
-of something it has, its enchantments, its target, or any free-form message
-channel between plugins. A plugin that needs to tell another client
-something the record does not say has to arrange that itself.
+of something it has, its enchantments, or its target. A plugin that needs to
+tell another client something the record does not say can send it as a
+broadcast command line and answer it with a verb of its own.
 
 Both clients publish and read the same way, from the same data-directory
 rule and on the same heartbeat, so a windowed client and a headless bot on
