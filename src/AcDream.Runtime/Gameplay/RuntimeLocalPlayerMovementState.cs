@@ -406,6 +406,27 @@ public sealed class RuntimeLocalPlayerMovementState
     public bool ReportExhaustion() =>
         _controller?.ReportExhaustionAtMovementBoundary() == true;
 
+    /// <summary>
+    /// Whether the character's body is in position for <paramref name="mode"/>,
+    /// by the original client's rule: a stance still being taken up is not
+    /// ready for a mode change, and a melee or missile stance not yet held is
+    /// not ready for an attack. False with no body to ask.
+    /// </summary>
+    public bool IsInReadyPosition(CombatMode mode, bool lenient, bool hasCombatTable)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_controller is not { } controller)
+            return false;
+        var motion = controller.Motion.InterpretedState;
+        return CombatInputPlanner.PlayerInReadyPosition(
+            mode,
+            motion.CurrentStyle,
+            motion.ForwardCommand,
+            hasCombatTable,
+            controller.Motion.MotionsPending(),
+            lenient);
+    }
+
     public bool IsReadyForAttack(CombatMode mode)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

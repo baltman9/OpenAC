@@ -218,6 +218,20 @@ internal abstract class ParityArm : IDisposable
     internal void Advance() => Advance(TickSeconds);
 
     /// <summary>
+    /// The character's own step and the close after it, and nothing else: no
+    /// network, no post-network commands, no plugin tick. Staging uses it to
+    /// let the body finish the pose it took on arrival without the client
+    /// telling anyone anything in the meantime.
+    /// </summary>
+    internal void StepBody()
+    {
+        _ = Runtime.AdvanceFrameClock(TickSeconds);
+        _body?.Drive();
+        _frame?.AdvanceBeforeNetwork((float)TickSeconds);
+        Runtime.FinishRemoteBodyPass();
+    }
+
+    /// <summary>
     /// The same step, over however long this arm's client says its frame or
     /// turn really took. A client with a window draws at whatever rate it
     /// manages and a client without one takes a turn on a schedule, so an
@@ -229,6 +243,10 @@ internal abstract class ParityArm : IDisposable
         _ = Runtime.AdvanceFrameClock(hostDeltaSeconds);
         _body?.Drive();
         _frame?.AdvanceBeforeNetwork((float)hostDeltaSeconds);
+        // The close both clients run after the character's own step and
+        // before anything the server said this frame is read: it is where a
+        // combat-mode change parked behind a motion learns the motion is over.
+        Runtime.FinishRemoteBodyPass();
         Runtime.Session.Tick();
         _frame?.RunPostNetworkCommandPhase();
         OnAdvanced(hostDeltaSeconds);

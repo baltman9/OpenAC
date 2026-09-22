@@ -4924,6 +4924,9 @@ internal sealed class RuntimeAutomationSurface
                     .QualifiedSelfMotionRevision,
                 QualifiedSelfMotionAgeSeconds = runtime.ActionOwner.CombatMode
                     .QualifiedSelfMotionAgeSeconds(runtime.Clock.SimulationTimeSeconds),
+                ServerMode = runtime.ActionOwner.Combat.ServerMode is { } serverMode
+                    ? Project(serverMode)
+                    : PluginCombatMode.Unknown,
             };
         }
     }
@@ -4984,7 +4987,11 @@ internal sealed class RuntimeAutomationSurface
         RuntimeCombatModeRequestResult result = runtime.ActionOwner.CombatMode.Toggle();
         return result.Status switch
         {
-            RuntimeCombatModeRequestStatus.Sent => new(
+            // Parked behind a motion still running: it goes out by itself
+            // on the first frame the body is ready, which is what "sent"
+            // means to a plugin that then waits for the mode to change.
+            RuntimeCombatModeRequestStatus.Sent
+                or RuntimeCombatModeRequestStatus.Deferred => new(
                 PluginCombatCommandStatus.ModeChangeSent),
             RuntimeCombatModeRequestStatus.Rejected => new(
                 PluginCombatCommandStatus.Refused, result.Notice),
@@ -5016,7 +5023,11 @@ internal sealed class RuntimeAutomationSurface
             runtime.ActionOwner.CombatMode.Request(requested);
         return result.Status switch
         {
-            RuntimeCombatModeRequestStatus.Sent => new(
+            // Parked behind a motion still running: it goes out by itself
+            // on the first frame the body is ready, which is what "sent"
+            // means to a plugin that then waits for the mode to change.
+            RuntimeCombatModeRequestStatus.Sent
+                or RuntimeCombatModeRequestStatus.Deferred => new(
                 PluginCombatCommandStatus.ModeChangeSent),
             RuntimeCombatModeRequestStatus.Rejected => new(
                 PluginCombatCommandStatus.Refused, result.Notice),

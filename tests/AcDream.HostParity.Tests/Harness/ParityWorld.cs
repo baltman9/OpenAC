@@ -3,6 +3,7 @@ using AcDream.Core.Items;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
+using AcDream.Core.Properties;
 using AcDream.Runtime;
 using AcDream.Runtime.Entities;
 
@@ -20,6 +21,8 @@ namespace AcDream.HostParity.Tests;
 internal static class ParityWorld
 {
     internal const uint Player = 0x50000001u;
+    /// <summary>The combat table the staged character's stances come from.</summary>
+    internal const uint CombatTable = 0x30000000u;
     internal const uint Monster = 0x50000012u;
     internal const uint SecondMonster = 0x50000013u;
     internal const uint DeadMonster = 0x50000011u;
@@ -52,7 +55,34 @@ internal static class ParityWorld
         Add(runtime, SecondMonster, PlayerX + 7f, MonsterObject(SecondMonster));
         Add(runtime, Bystander, PlayerX + 4f, BystanderObject(Bystander));
         body.Drive();
+        SettleTheBody(arm);
         return body;
+    }
+
+    /// <summary>
+    /// Runs the character's first frames until the pose it took on arrival
+    /// has finished. A character that has just logged in is left standing
+    /// before any plugin gets to it, and a stance change asks the body
+    /// whether it is still busy with a motion before it goes out, so a
+    /// scenario that started on the very frame of arrival would have every
+    /// stance parked behind that first pose on both clients alike.
+    /// </summary>
+    private static void SettleTheBody(ParityArm arm)
+    {
+        // The body steps once per physics quantum, a thirtieth of a second,
+        // so a handful of ticks covers the arrival pose several times over.
+        const int MaximumTicks = 12;
+        for (int tick = 0; tick < MaximumTicks; tick++)
+        {
+            if (arm.Runtime.MovementOwner.Controller is { } controller
+                && !controller.Motion.MotionsPending())
+            {
+                return;
+            }
+            arm.StepBody();
+        }
+        throw new InvalidOperationException(
+            $"{arm.Name}'s character is still taking up its arrival pose after {MaximumTicks} ticks.");
     }
 
     internal static ClientObject PlayerObject(uint objectId) => new()
@@ -61,6 +91,9 @@ internal static class ParityWorld
         Type = ItemType.Creature,
         Name = "Parity",
         PublicWeenieBitfield = SelectedObjectHealthPolicy.BfPlayer,
+        // Every character the server sends carries the table its combat
+        // stances come from; a body without one is never ready for melee.
+        Properties = { DataIds = { [(uint)PropertyDataId.CombatTable] = CombatTable } },
     };
 
     internal static ClientObject MonsterObject(uint objectId) => new()

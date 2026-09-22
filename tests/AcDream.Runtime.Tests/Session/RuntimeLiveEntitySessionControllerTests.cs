@@ -54,6 +54,105 @@ public sealed class RuntimeLiveEntitySessionControllerTests
         Assert.Equal(1, combat.Snapshot.QualifiedSelfMotionRevision);
     }
 
+    /// <summary>
+    /// The stance the server puts this character's body in is taken up by
+    /// the body: its style changes, and the change is a motion the body is
+    /// still playing, so the body is not in position for another combat-mode
+    /// change until it finishes. The echo of a movement this character made
+    /// itself changes nothing.
+    /// </summary>
+    [Fact]
+    public void AServerSentStanceForTheLocalBodyIsTakenUpAndKeepsTheBodyBusyUntilItFinishes()
+    {
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        const uint playerGuid = 0x50000001u;
+        runtime.PlayerIdentity.ServerGuid = playerGuid;
+        var body = new PlayerMovementController(new PhysicsEngine());
+        body.SeedPlacementForTest(
+            new System.Numerics.Vector3(96f, 96f, 50f),
+            0x01010001u,
+            new System.Numerics.Vector3(96f, 96f, 50f));
+        runtime.MovementOwner.Controller = body;
+        using var session = new WorldSession(
+            new IPEndPoint(IPAddress.Loopback, 9000),
+            new FixtureTransport());
+        session.GameActionCapture = _ => { };
+        var controller = new RuntimeLiveEntitySessionController(runtime, session);
+        controller.BindRemoteArming(
+            AcDream.Runtime.Physics.RuntimeRemoteArming.Create(
+                runtime.EntityObjects,
+                runtime.Clock,
+                new UnusedCollisionSource(),
+                new EveryDestination()));
+        LiveEntitySessionSink sink = controller.CreateSink();
+        sink.Spawned(Spawn(playerGuid, incarnation: 1));
+        // Arriving queues motions of its own; a body with nothing to play
+        // them finishes them in its next pass, which this test stands in for.
+        RuntimeLocalPlayerPhysicsPublicationState.CompleteDispatchedMotions(body.Motion);
+        Assert.Equal(0x8000003Du, body.Motion.InterpretedState.CurrentStyle);
+        Assert.False(body.Motion.MotionsPending());
+
+        sink.MotionUpdated(StanceFromServer(
+            playerGuid, stance: 0x3Fu, autonomous: true, sequence: 2));
+        Assert.Equal(0x8000003Du, body.Motion.InterpretedState.CurrentStyle);
+        Assert.False(body.Motion.MotionsPending());
+
+        sink.MotionUpdated(StanceFromServer(
+            playerGuid, stance: 0x3Fu, autonomous: false, sequence: 3));
+
+        Assert.Equal(0x8000003Fu, body.Motion.InterpretedState.CurrentStyle);
+        Assert.True(body.Motion.MotionsPending());
+        Assert.False(runtime.MovementOwner.IsInReadyPosition(
+            CombatMode.Magic, lenient: false, hasCombatTable: true));
+    }
+
+    private static WorldSession.EntityMotionUpdate StanceFromServer(
+        uint guid, uint stance, bool autonomous, ushort sequence) =>
+        new(
+            guid,
+            new CreateObject.ServerMotionState(
+                Stance: (ushort)stance,
+                ForwardCommand: null,
+                MovementType: 0),
+            InstanceSequence: 1,
+            MovementSequence: sequence,
+            ServerControlSequence: 1,
+            IsAutonomous: autonomous);
+
+    /// <summary>
+    /// A plugin can tell the client's own word from the server's: the
+    /// snapshot's mode moves with a change the client makes, the server mode
+    /// only with the server's property, and it reads Unknown before the
+    /// server has said anything.
+    /// </summary>
+    [Fact]
+    public void TheCombatSnapshotCarriesTheServersModeApartFromTheClients()
+    {
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        runtime.PlayerIdentity.ServerGuid = 0x50000005u;
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        Assert.True(surface.IsAvailable);
+
+        Assert.Equal(PluginCombatMode.Unknown, surface.Combat.Snapshot.ServerMode);
+
+        runtime.ActionOwner.Combat.SetCombatMode(CombatMode.Magic);
+        Assert.Equal(PluginCombatMode.Magic, surface.Combat.Snapshot.Mode);
+        Assert.Equal(PluginCombatMode.Unknown, surface.Combat.Snapshot.ServerMode);
+
+        Assert.True(CombatStateWiring.ApplyPlayerIntProperty(
+            runtime.ActionOwner.Combat,
+            CombatStateWiring.CombatModePropertyId,
+            (int)CombatMode.Magic));
+        Assert.Equal(PluginCombatMode.Magic, surface.Combat.Snapshot.ServerMode);
+
+        runtime.ActionOwner.Combat.SetCombatMode(CombatMode.NonCombat);
+        Assert.Equal(PluginCombatMode.Peace, surface.Combat.Snapshot.Mode);
+        Assert.Equal(PluginCombatMode.Magic, surface.Combat.Snapshot.ServerMode);
+    }
+
     private static void SendMotion(
         LiveEntitySessionSink sink, uint objectId,
         byte type, byte headerFlags, uint packed)

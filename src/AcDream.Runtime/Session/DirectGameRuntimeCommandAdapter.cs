@@ -326,7 +326,10 @@ public sealed class DirectGameRuntimeCommandAdapter
                 _runtime.ActionOwner.CombatMode.Toggle();
             status = result.Status switch
             {
-                RuntimeCombatModeRequestStatus.Sent =>
+                // A change parked until the body is in position was taken
+                // just as one sent at once was; it goes out on its own.
+                RuntimeCombatModeRequestStatus.Sent
+                    or RuntimeCombatModeRequestStatus.Deferred =>
                     RuntimeCommandStatus.Accepted,
                 RuntimeCombatModeRequestStatus.Inactive =>
                     RuntimeCommandStatus.Inactive,
