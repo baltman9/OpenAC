@@ -218,6 +218,31 @@ public sealed class RuntimeAutomationSurfaceAllegianceTests
         Assert.Empty(commands.Broken);
     }
 
+    /// <summary>
+    /// The target was fine and the command adapter still turned the command
+    /// down. That is about the session, not about who was named, so it is
+    /// reported as its own answer: a plugin told "wrong target" would go
+    /// looking for a different patron over something no other patron fixes.
+    /// </summary>
+    [Fact]
+    public void ACommandTheAdapterTurnsDownIsRefusedRatherThanBlamedOnTheTarget()
+    {
+        using Fixture fixture = Fixture.InWorld();
+        fixture.Commands.TurnEverythingDown = true;
+
+        PluginAllegianceCommandResult sworn = fixture.Allegiance.Swear(Stranger);
+        PluginAllegianceCommandResult broken = fixture.Allegiance.Break(PatronGuid);
+
+        Assert.Equal(PluginAllegianceCommandStatus.Refused, sworn.Status);
+        Assert.Equal(PluginAllegianceCommandStatus.Refused, broken.Status);
+        Assert.False(string.IsNullOrWhiteSpace(sworn.Notice));
+        Assert.False(string.IsNullOrWhiteSpace(broken.Notice));
+        // Both were composed and handed over: the refusal came from the
+        // adapter, not from the surface's own target checks.
+        Assert.Equal(Stranger, Assert.Single(fixture.Commands.Sworn));
+        Assert.Equal(PatronGuid, Assert.Single(fixture.Commands.Broken));
+    }
+
     /// <summary>A surface no host ever bound answers rather than throwing.</summary>
     [Fact]
     public void AnUnboundSurfaceAnswersUnavailableRatherThanThrowing()
@@ -413,6 +438,12 @@ public sealed class RuntimeAutomationSurfaceAllegianceTests
 
         internal IReadOnlyList<uint> Broken => _broken;
 
+        /// <summary>
+        /// Stands in for a client that cannot send right now: the command is
+        /// still composed and handed over, and the adapter says no.
+        /// </summary>
+        internal bool TurnEverythingDown { get; set; }
+
         public IRuntimeAllegianceCommands Allegiance => this;
 
         // Read when the surface is bound, so it has to answer.
@@ -435,7 +466,7 @@ public sealed class RuntimeAutomationSurfaceAllegianceTests
             uint patronGuid)
         {
             _sworn.Add(patronGuid);
-            return new(RuntimeCommandStatus.Accepted, expectedGeneration);
+            return new(Outcome, expectedGeneration);
         }
 
         public RuntimeCommandResult Break(
@@ -443,8 +474,12 @@ public sealed class RuntimeAutomationSurfaceAllegianceTests
             uint targetGuid)
         {
             _broken.Add(targetGuid);
-            return new(RuntimeCommandStatus.Accepted, expectedGeneration);
+            return new(Outcome, expectedGeneration);
         }
+
+        private RuntimeCommandStatus Outcome => TurnEverythingDown
+            ? RuntimeCommandStatus.Rejected
+            : RuntimeCommandStatus.Accepted;
 
         public RuntimeCommandResult Kick(
             RuntimeGenerationToken expectedGeneration,

@@ -36,6 +36,15 @@ public enum PluginAllegianceCommandStatus
     /// own allegiance.
     /// </summary>
     InvalidTarget,
+
+    /// <summary>
+    /// The client had a target it could act on and still did not send the
+    /// command: something about the session itself stood in the way. The
+    /// reason, where there is one to give, is in the result's notice. This
+    /// is not a statement about the target, and a plugin that is choosing
+    /// another target on a refusal should not treat it as one.
+    /// </summary>
+    Refused,
 }
 
 /// <summary>The outcome of one allegiance command.</summary>
@@ -73,7 +82,9 @@ public interface IAllegianceAutomation
     /// <returns>
     /// <see cref="PluginAllegianceCommandStatus.Sent"/> once it is on its way,
     /// <see cref="PluginAllegianceCommandStatus.InvalidTarget"/> when that is
-    /// not a player standing there, and
+    /// not a player standing there,
+    /// <see cref="PluginAllegianceCommandStatus.Refused"/> when the client
+    /// would not send it for a reason that is not about the target, and
     /// <see cref="PluginAllegianceCommandStatus.Unavailable"/> off-world.
     /// </returns>
     PluginAllegianceCommandResult Swear(uint patronObjectId) =>
@@ -89,7 +100,9 @@ public interface IAllegianceAutomation
     /// <returns>
     /// <see cref="PluginAllegianceCommandStatus.Sent"/> once it is on its way,
     /// <see cref="PluginAllegianceCommandStatus.InvalidTarget"/> when that
-    /// character is not in the allegiance, and
+    /// character is not in the allegiance,
+    /// <see cref="PluginAllegianceCommandStatus.Refused"/> when the client
+    /// would not send it for a reason that is not about the target, and
     /// <see cref="PluginAllegianceCommandStatus.Unavailable"/> off-world.
     /// </returns>
     PluginAllegianceCommandResult Break(uint targetObjectId) =>

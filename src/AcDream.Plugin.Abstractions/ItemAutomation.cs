@@ -252,18 +252,18 @@ public readonly record struct PluginInventoryItem(
     public int ItemMaximumMana { get; init; }
 
     /// <summary>
-    /// The item's workmanship, which an appraisal supplies; zero for an item
-    /// that has none or has not been appraised.
+    /// The item's workmanship as the server sends it with the object itself:
+    /// a fractional number from 1 to 10, not the whole-number band an
+    /// appraisal shows a player. A bag of salvage carries the average
+    /// workmanship of everything melted into it here. Zero when the server
+    /// sent none.
     /// </summary>
     public float Workmanship { get; init; }
 
     /// <summary>
-    /// The item's workmanship at full precision, as the server sends it with
-    /// the object itself rather than as a whole-number band. A bag of salvage
-    /// carries the average workmanship of everything melted into it here, so
-    /// this is the number a crafting calculator divides by; zero when the
-    /// server sent none. It is the same quantity as
-    /// <see cref="Workmanship"/>, widened for arithmetic.
+    /// The same value as <see cref="Workmanship"/>, as a double. Nothing is
+    /// recovered by widening it -- the server sent a single -- so this is
+    /// only a convenience for a crafting calculator that works in doubles.
     /// </summary>
     public double SalvageWorkmanship { get; init; }
 

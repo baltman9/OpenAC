@@ -573,8 +573,8 @@ identical numbers windowed and headless.
 
 | Field | Type | Where it comes from | When it is absent |
 |---|---|---|---|
-| `Workmanship` | `float` | the object's own workmanship | `0` |
-| `SalvageWorkmanship` | `double` | the same number, widened — a bag of salvage carries the average workmanship of everything melted into it | `0` |
+| `Workmanship` | `float` | the workmanship the server sends with the object: fractional, 1 to 10, not the whole-number band an appraisal shows. A bag of salvage carries the average workmanship of everything melted into it | `0` |
+| `SalvageWorkmanship` | `double` | the same value as a `double`. Widening recovers nothing the server did not send; it is there for a calculator that works in doubles | `0` |
 | `NumTimesTinkered` | `int` | the item's tinker count | `0` |
 | `ImbuedEffect` | `int` | the imbue flags: the rends and the critical bonuses. Any non-zero value means the item cannot be imbued again | `0` |
 | `MaterialType` | `uint` | what the item is made of | `0` |
@@ -690,6 +690,7 @@ mean different things:
 | `Sent` | the command went to the server; its answer arrives later as a restated allegiance |
 | `Unavailable` | the character is not in the world, or there is no session |
 | `InvalidTarget` | a zero id, a patron who is not a visible player, or a break target outside the allegiance |
+| `Refused` | the target was fine and the client still did not send it, for a reason of its own; see `Notice`. Never a statement about the target, so do not pick a different one on it |
 
 `Sent` means the command left the client, not that it worked: the server
 decides whether the character may swear or break -- experience owed, a

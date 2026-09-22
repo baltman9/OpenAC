@@ -149,7 +149,10 @@ Children follow a resize through `anchor`, a subset of `left top right bottom`
 naming the edges of the **direct parent** the element keeps a fixed margin to.
 Separate the names with commas or spaces (`anchor="right,bottom"` and
 `anchor="right bottom"` are the same thing); the names are case-insensitive
-and their order does not matter. The default is `left top`.
+and their order does not matter. Leaving the attribute off gives the default,
+`left top`; writing it and naming no edge (`anchor=""`, `anchor=" "`,
+`anchor=","`) throws, because an attribute that is there was meant to say
+something.
 
 - `left top`: fixed position and size.
 - `left,right`: stretches horizontally. `top,bottom`: stretches vertically.
@@ -185,8 +188,8 @@ tabbed panel, say — therefore opens laid out exactly as it would have been had
 it been on screen the whole time; whether and when an element was ever visible
 never changes where it lands.
 
-An unknown anchor token, or a value that names no edge at all, throws at
-build time naming the element and the value. Changing a panel's authored
+An unknown anchor token, or a value that is present and names no edge at all,
+throws at build time naming the element and the value. Changing a panel's authored
 size or limits in a later plugin version resets each user's stored size once;
 their saved position is kept.
 

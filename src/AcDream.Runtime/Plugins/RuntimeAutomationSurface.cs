@@ -2889,15 +2889,24 @@ internal sealed class RuntimeAutomationSurface
             commands.Allegiance.Break(runtime.Generation, targetObjectId));
     }
 
+    // A command the adapter turned down is a statement about the session, not
+    // about the target: the target was already checked above, and by the time
+    // the adapter sees the command it is only deciding whether this client can
+    // send anything at all. Reporting that as a wrong target would send a
+    // plugin off looking for a different patron over something that has
+    // nothing to do with who was named.
     private static PluginAllegianceCommandResult ProjectAllegiance(
         RuntimeCommandResult result) =>
-        new(result.Status switch
+        result.Status switch
         {
-            RuntimeCommandStatus.Accepted => PluginAllegianceCommandStatus.Sent,
+            RuntimeCommandStatus.Accepted =>
+                new(PluginAllegianceCommandStatus.Sent),
             RuntimeCommandStatus.Rejected =>
-                PluginAllegianceCommandStatus.InvalidTarget,
-            _ => PluginAllegianceCommandStatus.Unavailable,
-        });
+                new(
+                    PluginAllegianceCommandStatus.Refused,
+                    "The client did not send the command."),
+            _ => new(PluginAllegianceCommandStatus.Unavailable),
+        };
 
     PluginRecallRequest IRecallAutomation.LastRequest
     {

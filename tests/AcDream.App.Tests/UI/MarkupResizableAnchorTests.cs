@@ -193,6 +193,46 @@ public sealed class MarkupResizableAnchorTests
         Assert.Contains(",,", ex.Message);
     }
 
+    /// <summary>
+    /// An anchor attribute that is there and says nothing -- empty, or
+    /// nothing but spaces -- is the same mistake as anchor=",": the author
+    /// meant to anchor the element and did not. Left as the default corner it
+    /// would look as though the attribute had worked, and the element would
+    /// sit still through every resize with nothing to explain it.
+    /// </summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("\t")]
+    public void Build_AnchorPresentButEmpty_ThrowsNamingTheElement(string anchor)
+    {
+        string xml =
+            "<panel x=\"0\" y=\"0\" w=\"100\" h=\"60\">" +
+            $"<button name=\"Fire4\" x=\"0\" y=\"0\" w=\"40\" h=\"20\" text=\"Go\" anchor=\"{anchor}\"/>" +
+            "</panel>";
+
+        FormatException ex = Assert.Throws<FormatException>(
+            () => MarkupDocument.Build(xml, new object(), _ => (1u, 32, 32)));
+
+        Assert.Contains("Fire4", ex.Message);
+        Assert.Contains("names no edge", ex.Message);
+    }
+
+    /// <summary>
+    /// No attribute at all is not a mistake: it is the default corner, which
+    /// is what nearly every element in a layout wants.
+    /// </summary>
+    [Fact]
+    public void Build_NoAnchorAttribute_IsTheDefaultCorner()
+    {
+        string xml = WrapSingle("group", anchor: null);
+        var panel = MarkupDocument.Build(xml, new ListBinding(), _ => (1u, 32, 32));
+
+        Assert.Equal(
+            AnchorEdges.Left | AnchorEdges.Top,
+            panel.Children[0].Anchors);
+    }
+
     [Fact]
     public void Build_UnknownCommaSeparatedAnchorToken_ThrowsNamingTheElementAndTheValue()
     {

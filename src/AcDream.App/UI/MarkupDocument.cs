@@ -12,6 +12,12 @@ public static class MarkupDocument
     private const uint RuntimeTooltipRootElementId = 0x10000397u;
     private const uint RuntimeTooltipLayoutDid = 0x21000041u;
 
+    /// <summary>
+    /// What separates the edge names in an anchor attribute. An author writes
+    /// either "right bottom" or "right,bottom"; both read the same aloud.
+    /// </summary>
+    private static readonly char[] AnchorSeparators = [',', ' ', '\t', '\r', '\n'];
+
     public static UiNineSlicePanel Build(
         string xml, object binding, Func<uint, (uint, int, int)> resolve,
         ControlsIni? style = null, UiDatFont? datFont = null,
@@ -1157,7 +1163,11 @@ public static class MarkupDocument
 
     private static AnchorEdges ParseAnchor(string? tokens, XElement source)
     {
-        if (string.IsNullOrWhiteSpace(tokens))
+        // No attribute at all is the default corner. An attribute that IS
+        // there names edges: anchor="", anchor=" " and anchor="," are all an
+        // author who meant something and wrote nothing, and they are told so
+        // below rather than silently given the default.
+        if (tokens is null)
             return AnchorEdges.Left | AnchorEdges.Top;
 
         var edges = AnchorEdges.None;
@@ -1179,8 +1189,9 @@ public static class MarkupDocument
         }
         if (edges == AnchorEdges.None)
         {
-            // Separators only, e.g. anchor=",". Silently leaving the element
-            // unanchored would look like the attribute had worked.
+            // Empty or separators only, e.g. anchor="" or anchor=",".
+            // Silently leaving the element at the default would look like
+            // the attribute had worked.
             throw new FormatException(
                 $"{ElementIdentity(source)} anchor=\"{tokens}\" names no edge "
                 + "(expected a comma- or space-separated subset of left, top, "
@@ -1188,8 +1199,6 @@ public static class MarkupDocument
         }
         return edges;
     }
-
-    private static readonly char[] AnchorSeparators = [',', ' ', '\t', '\r', '\n'];
 
     private static string ElementIdentity(XElement source)
     {
