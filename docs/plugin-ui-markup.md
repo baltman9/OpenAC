@@ -145,18 +145,29 @@ Panels are fixed-size unless the root declares `resizable="true"`. `minw` and
 `minh` set the floor for a drag or a restored layout; they default to the
 authored `w` and `h`. `resize="x|y|both|none"` limits the axes.
 
-Children follow a resize through `anchor`, a space-separated subset of
-`left top right bottom` naming the edges of the **direct parent** the element
-keeps a fixed margin to. The default is `left top`.
+Children follow a resize through `anchor`, a subset of `left top right bottom`
+naming the edges of the **direct parent** the element keeps a fixed margin to.
+Separate the names with commas or spaces (`anchor="right,bottom"` and
+`anchor="right bottom"` are the same thing); the names are case-insensitive
+and their order does not matter. The default is `left top`.
 
 - `left top`: fixed position and size.
-- `left right`: stretches horizontally. `top bottom`: stretches vertically.
-- `left top right bottom`: stretches both ways.
+- `left,right`: stretches horizontally. `top,bottom`: stretches vertically.
+- `left,top,right,bottom`: stretches both ways.
 - `right` alone: fixed width, moves with the parent's right edge. Same for
   `bottom`.
 
-A `group` propagates a resize to its own children, so anchor the group to the
-panel and the list to the group:
+```xml
+<panel x="0" y="0" w="300" h="200" resizable="true" minw="200" minh="150">
+  <label x="10" y="10" text="Title"/>                        <!-- stays put -->
+  <field anchor="left,right" x="10" y="40" w="280" h="20"/>  <!-- widens -->
+  <button anchor="right,bottom" x="250" y="170" w="40" h="20" text="OK"/>
+</panel>
+```
+
+`anchor` applies to every element kind in the table above. A `group`
+propagates a resize to its own children, so anchor the group to the panel and
+the list to the group:
 
 ```xml
 <panel x="0" y="0" w="420" h="320" title="My Plugin" resizable="true" minw="360" minh="260">
@@ -168,7 +179,8 @@ panel and the list to the group:
 </panel>
 ```
 
-An unknown anchor token throws at build time. Changing a panel's authored
+An unknown anchor token, or a value that names no edge at all, throws at
+build time naming the element and the value. Changing a panel's authored
 size or limits in a later plugin version resets each user's stored size once;
 their saved position is kept.
 

@@ -13,6 +13,7 @@ public sealed class MarkupResizableAnchorTests
         public IReadOnlyList<string> Items => ["A", "B", "C"];
         public int Selected { get; set; } = -1;
         public Action<int> OnSelect => value => Selected = value;
+        public bool Flag => true;
     }
 
     // ── resizable / minw / minh parse tests ─────────────────────────────────
@@ -79,6 +80,10 @@ public sealed class MarkupResizableAnchorTests
     [InlineData("label")]
     [InlineData("button")]
     [InlineData("icon")]
+    [InlineData("meter")]
+    [InlineData("tab")]
+    [InlineData("toggle")]
+    [InlineData("slider")]
     public void Build_ElementWithoutAnchorAttribute_DefaultsToLeftTop(string tag)
     {
         string xml = WrapSingle(tag, anchor: null);
@@ -96,6 +101,10 @@ public sealed class MarkupResizableAnchorTests
     [InlineData("label")]
     [InlineData("button")]
     [InlineData("icon")]
+    [InlineData("meter")]
+    [InlineData("tab")]
+    [InlineData("toggle")]
+    [InlineData("slider")]
     public void Build_ElementAnchorLeftRight_SetsBothHorizontalEdges(string tag)
     {
         string xml = WrapSingle(tag, anchor: "left right");
@@ -123,6 +132,80 @@ public sealed class MarkupResizableAnchorTests
         var panel = MarkupDocument.Build(xml, new ListBinding(), _ => (1u, 32, 32));
 
         Assert.Equal(AnchorEdges.Bottom | AnchorEdges.Right, panel.Children[0].Anchors);
+    }
+
+    [Theory]
+    [InlineData("group")]
+    [InlineData("list")]
+    [InlineData("menu")]
+    [InlineData("field")]
+    [InlineData("label")]
+    [InlineData("button")]
+    [InlineData("icon")]
+    [InlineData("meter")]
+    [InlineData("tab")]
+    [InlineData("toggle")]
+    [InlineData("slider")]
+    public void Build_ElementAnchorCommaSeparated_ReadsLikeTheSpacedForm(string tag)
+    {
+        string xml = WrapSingle(tag, anchor: "right,bottom");
+        var panel = MarkupDocument.Build(xml, new ListBinding(), _ => (1u, 32, 32));
+
+        Assert.Equal(AnchorEdges.Right | AnchorEdges.Bottom, panel.Children[0].Anchors);
+    }
+
+    [Theory]
+    [InlineData("right,bottom")]
+    [InlineData("right, bottom")]
+    [InlineData(" RIGHT ,Bottom ")]
+    [InlineData("bottom right")]
+    public void Build_AnchorSeparatorsAndCasingAreInterchangeable(string anchor)
+    {
+        string xml = WrapSingle("button", anchor);
+        var panel = MarkupDocument.Build(xml, new ListBinding(), _ => (1u, 32, 32));
+
+        Assert.Equal(AnchorEdges.Right | AnchorEdges.Bottom, panel.Children[0].Anchors);
+    }
+
+    [Fact]
+    public void Build_AnchorAllFourCommaSeparated_SetsEveryEdge()
+    {
+        string xml = WrapSingle("group", anchor: "left,top,right,bottom");
+        var panel = MarkupDocument.Build(xml, new ListBinding(), _ => (1u, 32, 32));
+
+        Assert.Equal(
+            AnchorEdges.Left | AnchorEdges.Top | AnchorEdges.Right | AnchorEdges.Bottom,
+            panel.Children[0].Anchors);
+    }
+
+    [Fact]
+    public void Build_AnchorOfSeparatorsOnly_ThrowsNamingTheElementAndTheValue()
+    {
+        const string xml =
+            "<panel x=\"0\" y=\"0\" w=\"100\" h=\"60\">" +
+            "<button name=\"Fire2\" x=\"0\" y=\"0\" w=\"40\" h=\"20\" text=\"Go\" anchor=\",,\"/>" +
+            "</panel>";
+
+        FormatException ex = Assert.Throws<FormatException>(
+            () => MarkupDocument.Build(xml, new object(), _ => (1u, 32, 32)));
+
+        Assert.Contains("Fire2", ex.Message);
+        Assert.Contains(",,", ex.Message);
+    }
+
+    [Fact]
+    public void Build_UnknownCommaSeparatedAnchorToken_ThrowsNamingTheElementAndTheValue()
+    {
+        const string xml =
+            "<panel x=\"0\" y=\"0\" w=\"100\" h=\"60\">" +
+            "<button name=\"Fire3\" x=\"0\" y=\"0\" w=\"40\" h=\"20\" text=\"Go\" anchor=\"left,frotz\"/>" +
+            "</panel>";
+
+        FormatException ex = Assert.Throws<FormatException>(
+            () => MarkupDocument.Build(xml, new object(), _ => (1u, 32, 32)));
+
+        Assert.Contains("Fire3", ex.Message);
+        Assert.Contains("frotz", ex.Message);
     }
 
     [Fact]
@@ -153,6 +236,12 @@ public sealed class MarkupResizableAnchorTests
             "label" => $"<label x=\"10\" y=\"10\" text=\"Hi\"{anchorAttr}/>",
             "button" => $"<button x=\"10\" y=\"10\" w=\"40\" h=\"20\" text=\"Go\"{anchorAttr}/>",
             "icon" => $"<icon x=\"10\" y=\"10\" w=\"32\" h=\"32\" did=\"0x06000001\"{anchorAttr}/>",
+            "meter" => $"<meter x=\"10\" y=\"10\" w=\"100\" h=\"12\" fill=\"0.5\"{anchorAttr}/>",
+            "tab" => $"<tab x=\"10\" y=\"10\" w=\"60\" h=\"20\" text=\"T\" " +
+                     $"selected=\"{{Flag}}\"{anchorAttr}/>",
+            "toggle" => $"<toggle x=\"10\" y=\"10\" w=\"60\" h=\"20\" text=\"T\" " +
+                        $"checked=\"{{Flag}}\"{anchorAttr}/>",
+            "slider" => $"<slider x=\"10\" y=\"10\" w=\"100\" h=\"14\"{anchorAttr}/>",
             _ => throw new ArgumentOutOfRangeException(nameof(tag)),
         };
         return "<panel x=\"0\" y=\"0\" w=\"200\" h=\"150\">" + inner + "</panel>";
@@ -250,6 +339,47 @@ public sealed class MarkupResizableAnchorTests
         // The nested list follows the GROUP's new width (5px margin to each
         // side of the group, not the panel).
         Assert.Equal(470f, list.Width);   // 480 - 5 - 5
+    }
+
+    [Fact]
+    public void ResizingPanel_CommaAnchoredChildren_MoveStretchAndStayPut()
+    {
+        // One panel, three children, one drag: the comma form is what an
+        // author actually writes, and each child's outcome is a separate pin.
+        const string xml = """
+            <panel x="0" y="0" w="300" h="200" resizable="true" minw="200" minh="150">
+              <button anchor="right,bottom" x="250" y="170" w="40" h="20" text="OK"/>
+              <field anchor="left,right" x="10" y="40" w="280" h="20"/>
+              <label x="10" y="10" text="Title"/>
+            </panel>
+            """;
+        var panel = MarkupDocument.Build(xml, new ListBinding(), _ => (1u, 32, 32));
+        var corner = Assert.IsType<UiSimpleButton>(panel.Children[0]);
+        var field = Assert.IsType<UiField>(panel.Children[1]);
+        var title = Assert.IsType<UiLabel>(panel.Children[2]);
+
+        UiRenderContext ctx = MakeContext(600f, 400f);
+        panel.DrawSelfAndChildren(ctx);
+
+        panel.Width = 500f;
+        panel.Height = 300f;
+        panel.DrawSelfAndChildren(ctx);
+
+        // right,bottom: fixed size, follows both far edges (10px margins).
+        Assert.Equal(450f, corner.Left);
+        Assert.Equal(270f, corner.Top);
+        Assert.Equal(40f, corner.Width);
+        Assert.Equal(20f, corner.Height);
+
+        // left,right: stretches horizontally, keeps its authored top.
+        Assert.Equal(10f, field.Left);
+        Assert.Equal(480f, field.Width);
+        Assert.Equal(40f, field.Top);
+        Assert.Equal(20f, field.Height);
+
+        // No anchor attribute: the default left,top, so nothing moves.
+        Assert.Equal(10f, title.Left);
+        Assert.Equal(10f, title.Top);
     }
 
     // ── golden: a plain panel with none of the new attributes is unaffected ──

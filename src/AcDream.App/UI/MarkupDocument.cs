@@ -1153,8 +1153,10 @@ public static class MarkupDocument
             return AnchorEdges.Left | AnchorEdges.Top;
 
         var edges = AnchorEdges.None;
+        // An author writes either "right bottom" or "right,bottom"; both read
+        // the same aloud, so a comma separates exactly as a space does.
         foreach (string token in tokens.Split(
-            (char[]?)null, System.StringSplitOptions.RemoveEmptyEntries))
+            AnchorSeparators, System.StringSplitOptions.RemoveEmptyEntries))
         {
             edges |= token.ToLowerInvariant() switch
             {
@@ -1167,8 +1169,19 @@ public static class MarkupDocument
                     + $"\"{token}\" (expected left, top, right, bottom)"),
             };
         }
+        if (edges == AnchorEdges.None)
+        {
+            // Separators only, e.g. anchor=",". Silently leaving the element
+            // unanchored would look like the attribute had worked.
+            throw new FormatException(
+                $"{ElementIdentity(source)} anchor=\"{tokens}\" names no edge "
+                + "(expected a comma- or space-separated subset of left, top, "
+                + "right, bottom)");
+        }
         return edges;
     }
+
+    private static readonly char[] AnchorSeparators = [',', ' ', '\t', '\r', '\n'];
 
     private static string ElementIdentity(XElement source)
     {
