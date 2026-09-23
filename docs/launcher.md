@@ -150,8 +150,8 @@ acdream-launcher --update-manifest-uri https://github.com/eriknihlen/OpenAC/rele
 That launcher then offers the pre-release's client, and the pre-release's
 launcher as well when it is newer than the one running. The option is not
 saved: start the launcher without it and it is back on the ordinary feed. Add
-`--config-dir`, `--data-dir` and `--cache-dir` (all three together) to keep the
-test install away from your real one.
+`--root-dir <folder>` (or `--config-dir`, `--data-dir` and `--cache-dir`, all
+three together) to keep the test install away from your real one.
 
 **Build one from source.** `tools/run-launcher-trial.ps1` publishes the client
 and launcher from a checkout, installs the client into a scratch directory and

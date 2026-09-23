@@ -136,12 +136,16 @@ contains a `plugin.json`:
 
 | Platform | Plugins folder |
 |---|---|
-| Windows | `%LOCALAPPDATA%\acdream\plugins` |
-| macOS | `~/Library/Application Support/acdream/plugins` |
-| Linux | `$XDG_DATA_HOME/acdream/plugins` (default `~/.local/share/acdream/plugins`) |
+| Windows | `%LOCALAPPDATA%\OpenAC\plugins` |
+| macOS | `~/Library/Application Support/OpenAC/plugins` |
+| Linux | `$XDG_DATA_HOME/openac/plugins` (default `~/.local/share/openac/plugins`) |
 
-`ACDREAM_DATA_DIR` moves the data directory, and the plugins folder with
-it. Copy your assembly, its `.deps.json`, `plugin.json` and any markup into
+The plugins folder lives in the OpenAC install folder, which the launcher
+settings show and can move; `ACDREAM_ROOT_DIR` (or `--root-dir`) names
+another install folder for one run. What your plugin writes through
+`Storage` lands in `plugins/<id>/files/`, inside its own folder: installs,
+updates and removing the plugin's code never touch it, and a package that
+ships its own top-level `files` folder is refused. Copy your assembly, its `.deps.json`, `plugin.json` and any markup into
 one subdirectory, then start the client. Plugin log lines go to the
 client's log with your plugin id as the prefix.
 
