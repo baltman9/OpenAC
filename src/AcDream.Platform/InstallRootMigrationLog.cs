@@ -37,6 +37,13 @@ public static class InstallRootMigrationLog
                 break;
         }
 
+        foreach (string conflict in result.Conflicts)
+        {
+            warning(
+                "install folder: the new folder already had this file; the old copy was kept as "
+                + conflict);
+        }
+
         foreach (string line in result.Warnings)
             warning("install folder: " + line);
     }

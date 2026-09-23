@@ -181,18 +181,81 @@ public sealed class InstallRootMigrationTests : IDisposable
         Assert.Empty(Directory.EnumerateFiles(_paths.RootDirectory, "*.moving", SearchOption.AllDirectories));
     }
 
-    /// <summary>Mutation: overwriting a file the new root already has fails this.</summary>
+    /// <summary>
+    /// A file the new root already has is a conflict, and neither copy is
+    /// lost: the new one stays, the old one lands beside it as .from-old, and
+    /// the run reports it (and the marker records it). Mutation: skipping a
+    /// conflicting file (leaving it in the old folder that "Remove the old
+    /// folders" later deletes) or overwriting the new one fails this.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AConflictKeepsBothCopiesAndIsReported(bool sameVolume)
+    {
+        SeedOldLayout();
+        File.WriteAllText(Path.Combine(_old.ConfigDirectory, "settings.json"), "{\"old\":true}");
+        Directory.CreateDirectory(_paths.ConfigDirectory);
+        File.WriteAllText(_paths.SettingsFile, "{\"new\":true}");
+
+        InstallRootMigrationResult result = InstallRootMigration.Run(
+            _old,
+            _paths,
+            (_, _) => sameVolume);
+
+        string kept = _paths.SettingsFile + ".from-old";
+        Assert.Equal(InstallRootMigrationOutcome.Migrated, result.Outcome);
+        Assert.Equal("{\"new\":true}", File.ReadAllText(_paths.SettingsFile));
+        Assert.Equal("{\"old\":true}", File.ReadAllText(kept));
+        Assert.False(File.Exists(Path.Combine(_old.ConfigDirectory, "settings.json")));
+        Assert.Equal([kept], result.Conflicts);
+        Assert.Contains(
+            kept,
+            File.ReadAllText(_paths.LayoutMarkerFile).Replace("\\\\", "\\"),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>Mutation: reusing an existing .from-old name fails this.</summary>
     [Fact]
-    public void AFileTheNewRootAlreadyHasIsKept()
+    public void ASecondConflictTakesTheNextFreeName()
+    {
+        string folder = Path.Combine(_scratch, "conflict");
+        Directory.CreateDirectory(folder);
+        string destination = Path.Combine(folder, "a.json");
+        File.WriteAllText(destination, "new");
+        File.WriteAllText(destination + ".from-old", "earlier");
+        string source = Path.Combine(_scratch, "a.json");
+        File.WriteAllText(source, "old");
+        var failures = new List<string>();
+        var conflicts = new List<string>();
+
+        Assert.True(InstallRootFileMover.MoveTree(source, destination, (_, _) => true, failures, conflicts));
+
+        Assert.Equal([destination + ".from-old-2"], conflicts);
+        Assert.Equal("old", File.ReadAllText(destination + ".from-old-2"));
+        Assert.Equal("earlier", File.ReadAllText(destination + ".from-old"));
+        Assert.Empty(failures);
+    }
+
+    /// <summary>
+    /// Conflicts of an interrupted run are still reported by the run that
+    /// finishes. Mutation: dropping the pending conflicts file fails this.
+    /// </summary>
+    [Fact]
+    public void ConflictsOfAnInterruptedRunReachTheRunThatFinishes()
     {
         SeedOldLayout();
         Directory.CreateDirectory(_paths.ConfigDirectory);
         File.WriteAllText(_paths.SettingsFile, "{\"new\":true}");
+        File.WriteAllText(_paths.LogsDirectory, "in the way");
 
-        InstallRootMigration.Run(_old, _paths);
+        InstallRootMigrationResult first = InstallRootMigration.Run(_old, _paths);
+        File.Delete(_paths.LogsDirectory);
+        InstallRootMigrationResult second = InstallRootMigration.Run(_old, _paths);
 
-        Assert.Equal("{\"new\":true}", File.ReadAllText(_paths.SettingsFile));
-        Assert.True(File.Exists(Path.Combine(_old.ConfigDirectory, "settings.json")));
+        Assert.Equal(InstallRootMigrationOutcome.Incomplete, first.Outcome);
+        Assert.Equal(InstallRootMigrationOutcome.Migrated, second.Outcome);
+        Assert.Equal([_paths.SettingsFile + ".from-old"], second.Conflicts);
     }
 
     /// <summary>Mutation: writing the marker despite a failed step fails this.</summary>

@@ -154,6 +154,24 @@ public sealed class InstallFolderViewModelTests : IDisposable
         Assert.Contains("in use", viewModel.MigrationNotice, StringComparison.Ordinal);
     }
 
+    /// <summary>Mutation: leaving conflicts out of the notice fails this.</summary>
+    [Fact]
+    public void ConflictsAreShownInTheMigrationNotice()
+    {
+        string kept = Path.Combine(_defaultRoot, "settings", "settings.json.from-old");
+        InstallFolderViewModel viewModel = Create(migration: new InstallRootMigrationResult(
+            InstallRootMigrationOutcome.Migrated,
+            [],
+            [],
+            [])
+        {
+            Conflicts = [kept],
+        });
+
+        Assert.Contains(kept, viewModel.MigrationNotice, StringComparison.Ordinal);
+        Assert.Contains(".from-old", viewModel.MigrationNotice, StringComparison.Ordinal);
+    }
+
     private InstallFolderViewModel Create(
         bool canMove = true,
         InstallRootMigrationResult? migration = null)

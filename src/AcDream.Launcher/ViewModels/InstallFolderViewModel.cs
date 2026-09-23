@@ -330,6 +330,22 @@ public sealed class InstallFolderViewModel : ObservableObject
 
     private static string? DescribeMigration(
         InstallRootMigrationResult? migration,
+        string root)
+    {
+        string? outcome = DescribeOutcome(migration, root);
+        if (migration is not { Conflicts.Count: > 0 })
+            return outcome;
+
+        string conflicts =
+            $"{migration.Conflicts.Count} file(s) already existed in the new folder, so the old "
+            + "copies were kept beside them with \".from-old\" added to the name: "
+            + string.Join("; ", migration.Conflicts.Take(5))
+            + (migration.Conflicts.Count > 5 ? "; …" : string.Empty);
+        return outcome is null ? conflicts : outcome + " " + conflicts;
+    }
+
+    private static string? DescribeOutcome(
+        InstallRootMigrationResult? migration,
         string root) => migration?.Outcome switch
     {
         InstallRootMigrationOutcome.Migrated =>

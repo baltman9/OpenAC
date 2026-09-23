@@ -166,6 +166,13 @@ public sealed record InstallRootMigrationResult(
     IReadOnlyList<string> Failures,
     IReadOnlyList<string> Warnings)
 {
+    /// <summary>
+    /// Old files whose name the new root already had: each was kept beside
+    /// the new one as <c>&lt;name&gt;.from-old</c>, so neither copy is lost. A run
+    /// that finishes an earlier interrupted one reports that run's too.
+    /// </summary>
+    public IReadOnlyList<string> Conflicts { get; init; } = [];
+
     internal static InstallRootMigrationResult Of(InstallRootMigrationOutcome outcome) =>
         new(outcome, [], [], []);
 }
@@ -270,8 +277,9 @@ public static class InstallRootMigration
                     InstallRootMigrationOutcome.Fresh);
             }
 
-            (IReadOnlyList<string> moved, IReadOnlyList<string> failures) =
+            (IReadOnlyList<string> moved, IReadOnlyList<string> failures, IReadOnlyList<string> newConflicts) =
                 Execute(plan, sameVolume ?? SameVolume);
+            IReadOnlyList<string> conflicts = [.. ReadPendingConflicts(paths), .. newConflicts];
             var warnings = new List<string>();
             foreach (string oldRoot in plan.OldRoots)
             {
@@ -281,19 +289,29 @@ public static class InstallRootMigration
 
             if (failures.Count > 0)
             {
+                // Kept for the run that finishes, so the conflicts of every
+                // run reach the player once.
+                WritePendingConflicts(paths, conflicts);
                 return new InstallRootMigrationResult(
                     InstallRootMigrationOutcome.Incomplete,
                     moved,
                     failures,
-                    warnings);
+                    warnings)
+                {
+                    Conflicts = conflicts,
+                };
             }
 
-            WriteLayoutMarker(paths, plan.OldRoots);
+            WriteLayoutMarker(paths, plan.OldRoots, conflicts);
+            File.Delete(PendingConflictsPath(paths));
             return new InstallRootMigrationResult(
                 InstallRootMigrationOutcome.Migrated,
                 moved,
                 failures,
-                warnings);
+                warnings)
+            {
+                Conflicts = conflicts,
+            };
         }
     }
 
@@ -622,12 +640,13 @@ public static class InstallRootMigration
         && !name.Contains('/')
         && !name.Contains('\\');
 
-    private static (IReadOnlyList<string> Moved, IReadOnlyList<string> Failures) Execute(
+    private static (IReadOnlyList<string> Moved, IReadOnlyList<string> Failures, IReadOnlyList<string> Conflicts) Execute(
         InstallRootMigrationPlan plan,
         Func<string, string, bool> sameVolume)
     {
         var moved = new List<string>();
         var failures = new List<string>();
+        var conflicts = new List<string>();
         foreach (InstallRootMigrationStep step in plan.Steps)
         {
             try
@@ -639,7 +658,8 @@ public static class InstallRootMigration
                                 step.Source,
                                 step.Destination,
                                 sameVolume,
-                                failures))
+                                failures,
+                                conflicts))
                         {
                             moved.Add(step.Destination);
                         }
@@ -662,7 +682,7 @@ public static class InstallRootMigration
             }
         }
 
-        return (moved, failures);
+        return (moved, failures, conflicts);
     }
 
     /// <summary>
@@ -718,10 +738,46 @@ public static class InstallRootMigration
         File.Move(temporary, recordPath, overwrite: true);
     }
 
+    private static string PendingConflictsPath(ApplicationPathSet paths) =>
+        Path.Combine(paths.RootDirectory, ".migration.conflicts.json");
+
+    private static IReadOnlyList<string> ReadPendingConflicts(ApplicationPathSet paths)
+    {
+        string path = PendingConflictsPath(paths);
+        if (!File.Exists(path))
+            return [];
+
+        return JsonNode.Parse(File.ReadAllText(path)) is JsonArray array
+            ? array
+                .Select(static node => node?.GetValue<string>())
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Select(static value => value!)
+                .ToArray()
+            : [];
+    }
+
+    private static void WritePendingConflicts(
+        ApplicationPathSet paths,
+        IReadOnlyList<string> conflicts)
+    {
+        string path = PendingConflictsPath(paths);
+        if (conflicts.Count == 0)
+        {
+            File.Delete(path);
+            return;
+        }
+
+        File.WriteAllText(
+            path,
+            new JsonArray(conflicts.Select(static value => (JsonNode?)JsonValue.Create(value)).ToArray())
+                .ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+    }
+
     /// <summary>Marks a root as laid out, recording where a migration came from.</summary>
     public static void WriteLayoutMarker(
         ApplicationPathSet paths,
-        IReadOnlyList<string> migratedFrom)
+        IReadOnlyList<string> migratedFrom,
+        IReadOnlyList<string>? conflicts = null)
     {
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(migratedFrom);
@@ -731,6 +787,12 @@ public static class InstallRootMigration
         {
             marker["migratedFrom"] = new JsonArray(
                 migratedFrom.Select(static root => (JsonNode?)JsonValue.Create(root)).ToArray());
+        }
+
+        if (conflicts is { Count: > 0 })
+        {
+            marker["conflicts"] = new JsonArray(
+                conflicts.Select(static path => (JsonNode?)JsonValue.Create(path)).ToArray());
         }
 
         string temporary = paths.LayoutMarkerFile + ".tmp";

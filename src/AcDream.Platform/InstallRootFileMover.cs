@@ -9,30 +9,38 @@ namespace AcDream.Platform;
 /// </summary>
 public static class InstallRootFileMover
 {
+    /// <summary>The suffix a moved file takes when its destination already has a file of that name.</summary>
+    public const string ConflictSuffix = ".from-old";
+
     private const string PartialSuffix = ".moving";
 
     /// <summary>
-    /// Moves <paramref name="source"/> to <paramref name="destination"/>. A
-    /// destination file that already exists is kept and its source left where
-    /// it is. Returns true when nothing is left at the source.
+    /// Moves <paramref name="source"/> to <paramref name="destination"/>.
+    /// Returns true when nothing is left at the source. A destination file
+    /// that already exists is a conflict: it stays as it is, and the moved
+    /// file lands beside it as <c>&lt;name&gt;.from-old</c> (then
+    /// <c>.from-old-2</c>, …), so neither copy is ever lost.
     /// </summary>
     /// <param name="sameVolume">Whether a rename can move between two paths.</param>
     /// <param name="failures">Receives one line per entry that could not be moved.</param>
+    /// <param name="conflicts">Receives the path each conflicting file was moved to.</param>
     /// <param name="onFile">Called with each file's destination as it lands.</param>
     public static bool MoveTree(
         string source,
         string destination,
         Func<string, string, bool> sameVolume,
         ICollection<string> failures,
+        ICollection<string> conflicts,
         Action<string>? onFile = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(source);
         ArgumentException.ThrowIfNullOrWhiteSpace(destination);
         ArgumentNullException.ThrowIfNull(sameVolume);
         ArgumentNullException.ThrowIfNull(failures);
+        ArgumentNullException.ThrowIfNull(conflicts);
 
         if (File.Exists(source))
-            return MoveFile(source, destination, sameVolume, failures, onFile);
+            return MoveFile(source, destination, sameVolume, failures, conflicts, onFile);
 
         if (!Directory.Exists(source))
             return true;
@@ -74,6 +82,7 @@ public static class InstallRootFileMover
                 Path.Combine(destination, Path.GetFileName(entry)),
                 sameVolume,
                 failures,
+                conflicts,
                 onFile);
         }
 
@@ -83,12 +92,7 @@ public static class InstallRootFileMover
             {
                 Directory.Delete(source);
             }
-            catch (IOException ex)
-            {
-                failures.Add($"{source}: {ex.Message}");
-                return false;
-            }
-            catch (UnauthorizedAccessException ex)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 failures.Add($"{source}: {ex.Message}");
                 return false;
@@ -98,51 +102,68 @@ public static class InstallRootFileMover
         return complete;
     }
 
+    /// <summary>The first free <c>.from-old</c> name beside <paramref name="destination"/>.</summary>
+    public static string ConflictPath(string destination)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destination);
+        string candidate = destination + ConflictSuffix;
+        for (int attempt = 2; File.Exists(candidate) || Directory.Exists(candidate); attempt++)
+        {
+            candidate = $"{destination}{ConflictSuffix}-{attempt}";
+        }
+
+        return candidate;
+    }
+
     private static bool MoveFile(
         string source,
         string destination,
         Func<string, string, bool> sameVolume,
         ICollection<string> failures,
+        ICollection<string> conflicts,
         Action<string>? onFile)
     {
-        if (File.Exists(destination) || Directory.Exists(destination))
-        {
-            // The new root already has its own copy; that one wins.
-            return false;
-        }
-
+        bool conflict = File.Exists(destination) || Directory.Exists(destination);
+        string target = conflict ? ConflictPath(destination) : destination;
         try
         {
             Directory.CreateDirectory(
-                Path.GetDirectoryName(Path.GetFullPath(destination))!);
-            if (sameVolume(source, destination))
+                Path.GetDirectoryName(Path.GetFullPath(target))!);
+            if (sameVolume(source, target))
             {
                 try
                 {
-                    File.Move(source, destination);
-                    onFile?.Invoke(destination);
+                    File.Move(source, target);
+                    Landed(target);
                     return true;
                 }
                 catch (IOException) when (!OperatingSystem.IsWindows()
                                            && File.Exists(source)
-                                           && !File.Exists(destination))
+                                           && !File.Exists(target))
                 {
                     // A different device behind one path prefix: copy below.
                 }
             }
 
-            string partial = destination + PartialSuffix;
+            string partial = target + PartialSuffix;
             File.Copy(source, partial, overwrite: true);
             File.SetLastWriteTimeUtc(partial, File.GetLastWriteTimeUtc(source));
-            File.Move(partial, destination);
+            File.Move(partial, target);
             File.Delete(source);
-            onFile?.Invoke(destination);
+            Landed(target);
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             failures.Add($"{source}: {ex.Message}");
             return false;
+        }
+
+        void Landed(string path)
+        {
+            if (conflict)
+                conflicts.Add(path);
+            onFile?.Invoke(path);
         }
     }
 }
