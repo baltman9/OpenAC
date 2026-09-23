@@ -214,12 +214,9 @@ public sealed class InstallFolderViewModel : ObservableObject
     /// are theirs to delete. Null when there were no earlier folders.
     /// </summary>
     public string? NewInstallationNotice => HasEarlierFolders
-        ? "This is a new installation. OpenAC now keeps all its files in one folder, "
-          + $"{RootPath}, and nothing was copied from the earlier version: launcher "
-          + "settings, account profiles and plugins start fresh, so add your accounts and "
-          + "install your plugins again. The earlier version's folders were left untouched "
-          + "and are no longer used; delete them yourself once you no longer need anything "
-          + "in them:"
+        ? "New installation. Settings, accounts and plugins start fresh."
+          + Environment.NewLine
+          + "Your old folders weren't touched; delete them when you're done:"
           + Environment.NewLine
           + EarlierFoldersText
         : null;

@@ -133,7 +133,7 @@ public sealed class InstallFolderViewModelTests : IDisposable
         Assert.False(fresh.HasEarlierFolders);
         Assert.Null(fresh.NewInstallationNotice);
         Assert.True(upgraded.HasEarlierFolders);
-        Assert.StartsWith("This is a new installation.", upgraded.NewInstallationNotice, StringComparison.Ordinal);
+        Assert.StartsWith("New installation.", upgraded.NewInstallationNotice, StringComparison.Ordinal);
         Assert.Contains("start fresh", upgraded.NewInstallationNotice, StringComparison.Ordinal);
         Assert.Contains(roaming, upgraded.NewInstallationNotice, StringComparison.Ordinal);
         Assert.Contains(local, upgraded.NewInstallationNotice, StringComparison.Ordinal);
