@@ -8,8 +8,44 @@ using AcDream.Platform;
 const string SelfUpdateDataEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_DATA";
 const string SelfUpdateTargetEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_TARGET";
 const string SelfUpdateHelperPidEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_HELPER_PID";
+const string SelfUpdateProfileEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_PROFILE";
 
 string[] effectiveArgs = args;
+string? selfUpdateProfile = Environment.GetEnvironmentVariable(SelfUpdateProfileEnvironment);
+if (!string.IsNullOrWhiteSpace(selfUpdateProfile) && IsBootstrapInvocation(effectiveArgs))
+{
+    // The launcher's own start: the self-update step finds the transaction
+    // wherever it lives, in a per-user profile kept in a scratch folder.
+    var profile = new ScratchProfileEnvironment(Path.GetFullPath(selfUpdateProfile));
+    using var http = new HttpClient();
+    SelfUpdateStartupResult startup;
+    try
+    {
+        startup = await LauncherSelfUpdateBootstrap.HandleAsync(
+            effectiveArgs,
+            ApplicationPathSet.Resolve(platform: profile),
+            http,
+            Path.GetFullPath(AppContext.BaseDirectory),
+            Path.GetFullPath(
+                Environment.ProcessPath
+                ?? throw new InvalidOperationException("Process path is unavailable.")),
+            profile,
+            LauncherSelfUpdateBootstrap.EarlierHelperWait);
+    }
+    catch (LauncherUpdateException exception)
+    {
+        Console.Error.WriteLine(exception.Message);
+        return 74;
+    }
+
+    if (startup.ShouldExit)
+    {
+        return startup.ExitCode;
+    }
+
+    effectiveArgs = startup.RemainingArguments;
+}
+
 string? selfUpdateData = Environment.GetEnvironmentVariable(SelfUpdateDataEnvironment);
 string? selfUpdateTarget = Environment.GetEnvironmentVariable(SelfUpdateTargetEnvironment);
 if (!string.IsNullOrWhiteSpace(selfUpdateData)
@@ -371,6 +407,36 @@ static int RunOrphanChild(string[] arguments)
     File.WriteAllText(exitPath, exitCode.ToString(
         System.Globalization.CultureInfo.InvariantCulture));
     return exitCode;
+}
+
+/// <summary>A per-user profile rooted in a scratch folder, with no path variables set.</summary>
+file sealed class ScratchProfileEnvironment(string home) : IApplicationPathEnvironment
+{
+    private string Local => Path.Combine(home, "AppData", "Local");
+
+    private string Roaming => Path.Combine(home, "AppData", "Roaming");
+
+    public bool IsWindows => OperatingSystem.IsWindows();
+
+    public bool IsMacOS => OperatingSystem.IsMacOS();
+
+    public string CurrentDirectory => home;
+
+    public string? GetEnvironmentVariable(string name) => name switch
+    {
+        "XDG_DATA_HOME" => Local,
+        "XDG_CONFIG_HOME" => Roaming,
+        "XDG_CACHE_HOME" => Path.Combine(home, ".cache"),
+        _ => null,
+    };
+
+    public string GetFolderPath(Environment.SpecialFolder folder) => folder switch
+    {
+        Environment.SpecialFolder.LocalApplicationData => Local,
+        Environment.SpecialFolder.ApplicationData => Roaming,
+        Environment.SpecialFolder.UserProfile => home,
+        _ => string.Empty,
+    };
 }
 
 file sealed class OrphanBakeProcessRunner(

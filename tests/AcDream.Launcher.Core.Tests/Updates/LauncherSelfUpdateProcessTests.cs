@@ -2,6 +2,7 @@ using System.Diagnostics;
 using AcDream.Launcher.Core;
 using AcDream.Launcher.Core.Integrity;
 using AcDream.Launcher.Core.Updates;
+using AcDream.Platform;
 
 namespace AcDream.Launcher.Core.Tests.Updates;
 
@@ -10,6 +11,7 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
     private const string FixtureBaseName =
         "AcDream.Launcher.Core.Tests.Fixtures.InstallLeaseHolder";
     private const string DataEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_DATA";
+    private const string ProfileVariable = "ACDREAM_SELF_UPDATE_FIXTURE_PROFILE";
     private const string TargetEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_TARGET";
     private const string HelperPidEnvironment =
         "ACDREAM_SELF_UPDATE_FIXTURE_HELPER_PID";
@@ -144,6 +146,110 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
                 await crash.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
             }
         }
+    }
+
+    /// <summary>
+    /// A launcher from before the single install folder staged this version
+    /// in its own data folder. Its start hands over to the staged helper,
+    /// which swaps the files and starts the installed copy to confirm; every
+    /// role finds the transaction in the earlier folder, finishes it there,
+    /// and the confirmed launcher carries on with its arguments on its own,
+    /// empty install folder. The player's earlier files are not touched.
+    /// Mutation: routing the helper or the confirmer to the new install
+    /// folder fails this.
+    /// </summary>
+    [Fact]
+    public async Task AnEarlierLayoutUpdateSwapsConfirmsAndFinishesWhereItLives()
+    {
+        string profile = Path.Combine(_root, "profile");
+        string target = Path.Combine(_root, "launcher");
+        string launched = Path.Combine(_root, "replacement.ready");
+        string[] publicArguments = ["--update-manifest-uri", "http://127.0.0.1:43119/manifest.json"];
+        var platform = new ProfileEnvironment(profile);
+        LegacyApplicationLayout earlierLayout = LegacyApplicationLayout.Detect(platform);
+        ApplicationPathSet newPaths = ApplicationPathSet.Resolve(platform: platform);
+        Directory.CreateDirectory(_root);
+        foreach ((string folder, string name) in new[]
+                 {
+                     (earlierLayout.ConfigDirectory, "launcher-profiles.json"),
+                     (earlierLayout.DataDirectory, Path.Combine("app", "current.json")),
+                     (earlierLayout.DataDirectory, Path.Combine("plugins", "p", "plugin.json")),
+                 })
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(folder, name))!);
+            await File.WriteAllTextAsync(Path.Combine(folder, name), "earlier " + name);
+        }
+
+        string rid = LauncherRuntimeIdentity.DetectRid();
+        PreparedLauncher prepared = PrepareLauncherClosure(target, rid);
+        using var server = new LocalHttpFixture();
+        server.Add("launcher.zip", prepared.NewArchive);
+        using var http = new HttpClient();
+        LauncherSelfUpdateManager earlier = LauncherSelfUpdateManager.ForEarlierLayout(
+            earlierLayout.DataDirectory,
+            http);
+        _ = await earlier.StageAsync(
+            LauncherVersion.Parse("2.0.0"),
+            rid,
+            new ReleaseArtifact(
+                server.UriFor("launcher.zip"),
+                UpdateTestData.Sha256(prepared.NewArchive),
+                prepared.NewArchive.LongLength),
+            target,
+            progress: null,
+            CancellationToken.None);
+        SelfUpdatePlan plan = Assert.IsType<SelfUpdatePlan>(await earlier.LoadPendingAsync());
+        Dictionary<string, string> before = await SnapshotAsync(earlierLayout, earlier);
+
+        using Process start = StartProcess(
+            prepared.CanonicalPath,
+            ["canonical-probe", launched, .. publicArguments],
+            new Dictionary<string, string> { [ProfileVariable] = profile });
+        await start.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Equal(0, start.ExitCode);
+        await WaitForFileAsync(launched, process: null, TimeSpan.FromSeconds(60));
+
+        Assert.Equal(
+            prepared.NewCanonicalHash,
+            await FileIntegrity.ComputeSha256HexAsync(prepared.CanonicalPath));
+        Assert.False(File.Exists(earlier.PendingPlanPath));
+        Assert.False(Directory.Exists(earlier.GetTransactionDirectory(plan.TransactionId)));
+        Assert.Empty(Directory.EnumerateDirectories(target, ".acdream-self-update-*"));
+        Assert.Equal(before, await SnapshotAsync(earlierLayout, earlier));
+        Assert.Equal(
+            [Path.Combine("app", ".update-session.lock")],
+            Directory.EnumerateFiles(newPaths.RootDirectory, "*", SearchOption.AllDirectories)
+                .Select(file => Path.GetRelativePath(newPaths.RootDirectory, file))
+                .ToArray());
+        string launchMarker = await File.ReadAllTextAsync(launched);
+        Assert.EndsWith(
+            Environment.NewLine + string.Join(Environment.NewLine, publicArguments),
+            launchMarker,
+            StringComparison.Ordinal);
+        await WaitForProcessExitAsync(ParsePid(launchMarker), TimeSpan.FromSeconds(10));
+    }
+
+    /// <summary>The earlier folders' files and hashes, less the update's own folder and lock.</summary>
+    private static async Task<Dictionary<string, string>> SnapshotAsync(
+        LegacyApplicationLayout layout,
+        LauncherSelfUpdateManager earlier)
+    {
+        var files = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (string folder in layout.TopLevelRoots())
+        {
+            foreach (string file in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories))
+            {
+                if (file.StartsWith(earlier.RootDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                    || PathsEqual(file, earlier.Barrier.LockPath))
+                {
+                    continue;
+                }
+
+                files[file] = await FileIntegrity.ComputeSha256HexAsync(file);
+            }
+        }
+
+        return files;
     }
 
     [Fact]

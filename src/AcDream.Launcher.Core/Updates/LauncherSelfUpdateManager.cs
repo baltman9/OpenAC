@@ -118,19 +118,60 @@ public sealed class LauncherSelfUpdateManager
         HttpClient httpClient,
         SafeZipExtractor? extractor,
         Action<SelfUpdateApplyObservation>? applyObserver)
+        : this(
+            Path.Combine(
+                Path.GetFullPath((paths ?? throw new ArgumentNullException(nameof(paths))).AppDirectory),
+                UpdateFolderName),
+            paths.DataDirectory,
+            httpClient,
+            extractor,
+            applyObserver)
     {
-        ArgumentNullException.ThrowIfNull(paths);
-        RootDirectory = Path.Combine(
-            Path.GetFullPath(paths.AppDirectory),
-            "launcher-update");
+    }
+
+    private LauncherSelfUpdateManager(
+        string rootDirectory,
+        string barrierDataDirectory,
+        HttpClient httpClient,
+        SafeZipExtractor? extractor,
+        Action<SelfUpdateApplyObservation>? applyObserver)
+    {
+        RootDirectory = rootDirectory;
         TransactionsDirectory = Path.Combine(RootDirectory, "transactions");
         PendingPlanPath = Path.Combine(RootDirectory, "pending.json");
-        Barrier = new UpdateSessionBarrier(paths.DataDirectory);
+        Barrier = new UpdateSessionBarrier(barrierDataDirectory);
         _downloader = new VerifiedArtifactDownloader(
             httpClient ?? throw new ArgumentNullException(nameof(httpClient)));
         _extractor = extractor ?? new SafeZipExtractor();
         _applyObserver = applyObserver;
     }
+
+    /// <summary>
+    /// The self-update state of a launcher from before the single install
+    /// folder, which kept it directly in its data folder: the update folder
+    /// at <c>&lt;data&gt;/launcher-update</c> and the update/session lock at
+    /// <c>&lt;data&gt;/app/.update-session.lock</c>. When such a launcher
+    /// updates itself into this version, this version runs as its helper and
+    /// confirmer and finishes that transaction there; nothing is moved.
+    /// </summary>
+    /// <param name="dataDirectory">The earlier launcher's data folder.</param>
+    /// <param name="httpClient">What the manager downloads with; finishing a transaction downloads nothing.</param>
+    public static LauncherSelfUpdateManager ForEarlierLayout(
+        string dataDirectory,
+        HttpClient httpClient)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(dataDirectory);
+        string data = Path.GetFullPath(dataDirectory);
+        return new LauncherSelfUpdateManager(
+            Path.Combine(data, UpdateFolderName),
+            data,
+            httpClient,
+            extractor: null,
+            applyObserver: null);
+    }
+
+    /// <summary>The name of the folder that holds the self-update state.</summary>
+    public const string UpdateFolderName = "launcher-update";
 
     public string RootDirectory { get; }
 

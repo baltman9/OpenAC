@@ -23,16 +23,19 @@ internal static class Program
             RepairContentRecords(options.Paths);
 
             using var httpClient = new HttpClient();
-            var selfUpdates = new LauncherSelfUpdateManager(options.Paths, httpClient);
             string executable = Environment.ProcessPath
                 ?? throw new InvalidOperationException(
                     "The launcher executable path is unavailable.");
             LauncherInstallationLayout layout = LauncherInstallationLayout.Detect(
                 AppContext.BaseDirectory,
                 LauncherRuntimeIdentity.DetectRid());
+            // Picks the self-update state by where the transaction lives: an
+            // update started by a launcher from before the single install
+            // folder is finished in that launcher's data folder.
             SelfUpdateStartupResult startup = LauncherSelfUpdateBootstrap.HandleAsync(
                     args,
-                    selfUpdates,
+                    options.Paths,
+                    httpClient,
                     layout,
                     executable)
                 .GetAwaiter()
