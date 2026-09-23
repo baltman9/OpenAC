@@ -96,6 +96,7 @@ public sealed class UiRoot : UiElement
     public bool MiddleButtonDown { get; private set; }
 
     public UiElement? KeyboardFocus { get; private set; }
+    public Silk.NET.Input.IKeyboard? Keyboard { get; set; }
 
     private int? _suppressedPhysicalKey;
     private bool _suppressedCharTailPending;
@@ -789,6 +790,11 @@ public sealed class UiRoot : UiElement
             return;
         }
 
+        if (vk == (int)Silk.NET.Input.Key.Tab && MoveMarkupFocus(
+                Keyboard?.IsKeyPressed(Silk.NET.Input.Key.ShiftLeft) == true
+                || Keyboard?.IsKeyPressed(Silk.NET.Input.Key.ShiftRight) == true))
+            return;
+
         // Focus widget first.
         if (KeyboardFocus is not null)
         {
@@ -854,8 +860,35 @@ public sealed class UiRoot : UiElement
         _suppressedCharTailPending = true;
     }
 
+    private bool MoveMarkupFocus(bool backwards)
+    {
+        UiElement? focused = KeyboardFocus;
+        if (focused?.TabStop != true) return false;
+        UiElement window = focused;
+        while (window.Parent is not null && !ReferenceEquals(window.Parent, this))
+            window = window.Parent;
+        var stops = new List<UiElement>();
+        CollectTabStops(window, stops);
+        if (stops.Count == 0) return false;
+        int index = stops.IndexOf(focused);
+        int next = (index + (backwards ? stops.Count - 1 : 1)) % stops.Count;
+        SetKeyboardFocus(stops[next]);
+        return true;
+    }
+
+    private static void CollectTabStops(UiElement element, List<UiElement> stops)
+    {
+        if (!element.Visible || !element.Enabled) return;
+        if (element.TabStop && element.AcceptsFocus)
+            stops.Add(element);
+        foreach (UiElement child in element.Children)
+            CollectTabStops(child, stops);
+    }
+
     public void SetKeyboardFocus(UiElement? e)
     {
+        if (e is UiField field && field.Keyboard is null)
+            field.Keyboard = Keyboard;
         if (KeyboardFocus == e) return;
         UiElement? previous = KeyboardFocus;
         if (previous is not null)

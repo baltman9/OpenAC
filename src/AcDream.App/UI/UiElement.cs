@@ -143,6 +143,7 @@ public abstract class UiElement
     public Func<bool>? EnabledSource { get; set; }
 
     public bool AcceptsFocus    { get; set; }
+    public bool TabStop         { get; set; }
 
     /// <summary>
     /// True if this is a text-entry (edit box); used by focus routing

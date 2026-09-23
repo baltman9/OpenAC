@@ -188,6 +188,8 @@ public static class MarkupDocument
                     }
                     var button = new UiSimpleButton
                     {
+                        AcceptsFocus = true,
+                        TabStop = true,
                         Left = F(el, "x"),
                         Top = F(el, "y"),
                         Width = F(el, "w"),
@@ -293,6 +295,8 @@ public static class MarkupDocument
 
                 var tab = new UiMarkupTabButton
                 {
+                    AcceptsFocus = true,
+                    TabStop = true,
                     Left = F(el, "x"),
                     Top = F(el, "y"),
                     Width = F(el, "w"),
@@ -323,6 +327,8 @@ public static class MarkupDocument
                 string? toggleCaption = (string?)el.Attribute("text");
                 var toggle = new UiMarkupToggle
                 {
+                    AcceptsFocus = true,
+                    TabStop = true,
                     Left = F(el, "x"),
                     Top = F(el, "y"),
                     Width = F(el, "w"),
@@ -423,6 +429,8 @@ public static class MarkupDocument
 
                 var field = new UiField
                 {
+                    Selectable = true,
+                    TabStop = true,
                     Left = F(el, "x"),
                     Top = F(el, "y"),
                     Width = F(el, "w"),
