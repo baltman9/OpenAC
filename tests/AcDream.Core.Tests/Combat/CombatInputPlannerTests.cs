@@ -170,6 +170,10 @@ public sealed class CombatInputPlannerTests
     [InlineData(CombatMode.Melee, 0x8000003Du, 0u, true)]
     [InlineData(CombatMode.Missile, 0x8000003Fu, CombatInputPlanner.ReadyForwardCommand, true)]
     [InlineData(CombatMode.Missile, 0x80000041u, CombatInputPlanner.ReadyForwardCommand, true)]
+    // OpenAC #174: a thrown weapon with a shield, and an atlatl, can build a
+    // charged attack; the bar charges only while this answers true.
+    [InlineData(CombatMode.Missile, 0x8000013Cu, CombatInputPlanner.ReadyForwardCommand, true)]
+    [InlineData(CombatMode.Missile, 0x8000013Bu, CombatInputPlanner.ReadyForwardCommand, true)]
     [InlineData(CombatMode.Missile, 0x8000003Du, CombatInputPlanner.ReadyForwardCommand, false)]
     [InlineData(CombatMode.Missile, 0x8000003Fu, 0x41000006u, false)]
     [InlineData(CombatMode.NonCombat, 0x8000003Du, CombatInputPlanner.ReadyForwardCommand, false)]
