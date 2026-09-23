@@ -4,5 +4,7 @@
   <ItemGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
     <Compile Include="$(MSBuildThisFileDirectory)TestCultureInitializer.cs"
              Link="TestCultureInitializer.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)TestPathIsolation.cs"
+             Link="TestPathIsolation.cs" />
   </ItemGroup>
 </Project>
