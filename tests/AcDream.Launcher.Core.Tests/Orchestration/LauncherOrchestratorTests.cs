@@ -184,6 +184,15 @@ public sealed class LauncherOrchestratorTests : IDisposable
         Assert.Equal(
             ["--session-config", config.LastComposed!.ConfigFilePath],
             supervisor.Spec.Arguments);
+        // The child is told the launcher's own install folder rather than
+        // left to guess it. Mutation: dropping the environment from the spec
+        // in StartActivityCore fails this.
+        Assert.Equal(
+            _paths.RootDirectory,
+            supervisor.Spec.Environment!["ACDREAM_ROOT_DIR"]);
+        Assert.Equal(
+            _paths.ConfigDirectory,
+            supervisor.Spec.Environment["ACDREAM_CONFIG_DIR"]);
         Assert.Equal(Password, supervisor.PasswordWrittenToStdin);
         Assert.DoesNotContain(
             Password,
