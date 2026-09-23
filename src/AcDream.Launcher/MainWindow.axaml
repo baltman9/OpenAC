@@ -894,10 +894,10 @@
       <Border Classes="card" Margin="24" MaxWidth="480" VerticalAlignment="Center">
         <StackPanel Spacing="10">
           <TextBlock Text="{Binding Plugins.RemoveDisplayName}" FontSize="22" FontWeight="Bold" />
-          <TextBlock Text="This removes the plugin's files. Vtank profiles are kept; they live outside any plugin's scope." TextWrapping="Wrap" Classes="muted" />
-          <CheckBox Content="Also delete this plugin's files"
+          <TextBlock Text="This removes the plugin's code. Its saved files are kept unless you tick the box below; Vtank profiles are always kept." TextWrapping="Wrap" Classes="muted" />
+          <CheckBox Content="Also delete its saved files"
                     IsChecked="{Binding Plugins.RemoveDeleteStorage, Mode=TwoWay}"
-                    AutomationProperties.Name="Also delete this plugin's files" />
+                    AutomationProperties.Name="Also delete its saved files" />
           <TextBlock Text="{Binding Plugins.Error}" Foreground="#FFB0A0" IsVisible="{Binding Plugins.HasError}" TextWrapping="Wrap" />
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
             <Button x:Name="RemoveCancelButton" Content="Cancel" IsCancel="True" Command="{Binding Plugins.CancelRemoveCommand}" />
