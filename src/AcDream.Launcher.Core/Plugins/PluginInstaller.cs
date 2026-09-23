@@ -61,6 +61,12 @@ public sealed class PluginInstaller
     private readonly PluginInventory _inventory;
     private readonly UpdateSessionBarrier _barrier;
 
+    /// <summary>
+    /// Runs right after an update moved the player's files into staging; a
+    /// test throws here to stand in for the process dying at that moment.
+    /// </summary>
+    internal Action? AfterFilesStaged { get; set; }
+
     public PluginInstaller(
         ApplicationPathSet paths,
         HttpClient httpClient,
@@ -222,9 +228,6 @@ public sealed class PluginInstaller
             _paths.PluginsDirectory,
             ".staging",
             $"{manifest.Id}-{Guid.NewGuid():N}");
-        // Set once the swap may have moved the player's files into staging;
-        // before that, a files/ folder there came from the package itself.
-        bool swapStarted = false;
         try
         {
             _ = await _downloader.DownloadAsync(
@@ -286,7 +289,6 @@ public sealed class PluginInstaller
                 // while the download ran must not be swapped out as if it were the old version.
                 RefuseUnmanagedFolder(existingRecord, manifest.Id, targetDirectory);
 
-                swapStarted = true;
                 SwapIntoPlace(
                     manifest.Id,
                     repo,
@@ -306,13 +308,9 @@ public sealed class PluginInstaller
         finally
         {
             VerifiedArtifactDownloader.TryDelete(zipPath);
-            // A staging folder can only hold the player's files if a swap
-            // failed part-way and could not hand them back; it is then left
-            // for Recover rather than deleted with them inside.
-            if (!swapStarted || ReturnStagedFiles(stagingDirectory, targetDirectory))
-            {
-                SafeZipExtractor.TryDeleteDirectory(stagingDirectory);
-            }
+            // A staging folder holds the player's files only if a swap
+            // failed part-way; they go back, or stay for Recover.
+            ReclaimStaging(stagingDirectory, targetDirectory);
 
             TryDeleteIfEmpty(Path.Combine(_paths.PluginsDirectory, ".staging"));
         }
@@ -464,13 +462,16 @@ public sealed class PluginInstaller
             {
                 foreach (string directory in Directory.EnumerateDirectories(stagingRoot))
                 {
-                    string original = Path.Combine(
-                        _paths.PluginsDirectory,
-                        IdFromTrashPath(directory));
-                    if (ReturnStagedFiles(directory, original))
-                    {
-                        SafeZipExtractor.TryDeleteDirectory(directory);
-                    }
+                    ReclaimStaging(
+                        directory,
+                        Path.Combine(_paths.PluginsDirectory, IdFromTrashPath(directory)));
+                }
+
+                // A marker whose staging folder is already gone says nothing.
+                foreach (string marker in Directory.EnumerateFiles(stagingRoot, "*.player-files"))
+                {
+                    if (!Directory.Exists(marker[..^".player-files".Length]))
+                        VerifiedArtifactDownloader.TryDelete(marker);
                 }
 
                 TryDeleteIfEmpty(stagingRoot);
@@ -597,7 +598,12 @@ public sealed class PluginInstaller
         bool carryFiles = hadExistingFolder && Directory.Exists(existingFiles);
         if (carryFiles)
         {
+            // The marker goes down first: from here on, a files/ folder in
+            // this staging folder is the player's, and recovery hands it
+            // back instead of deleting it with the package.
+            File.WriteAllText(PlayerFilesMarker(stagingDirectory), id);
             Directory.Move(existingFiles, stagedFiles);
+            AfterFilesStaged?.Invoke();
         }
 
         string trashDirectory = CreateTrashPath(id);
@@ -650,7 +656,31 @@ public sealed class PluginInstaller
             SafeZipExtractor.TryDeleteDirectory(trashDirectory);
         }
 
+        VerifiedArtifactDownloader.TryDelete(PlayerFilesMarker(stagingDirectory));
         TryDeleteIfEmpty(Path.Combine(_paths.PluginsDirectory, ".trash"));
+    }
+
+    /// <summary>
+    /// The file beside a staging folder that says its files/ holds the
+    /// player's files rather than anything the package brought. It sits
+    /// outside the staging folder, so no package can ship it.
+    /// </summary>
+    private static string PlayerFilesMarker(string stagingDirectory) =>
+        Path.TrimEndingDirectorySeparator(stagingDirectory) + ".player-files";
+
+    /// <summary>
+    /// Hands a staging folder's files/ back only when the marker says they
+    /// are the player's, then deletes the staging folder and its marker.
+    /// Leaves both when the files could not be handed back.
+    /// </summary>
+    private static void ReclaimStaging(string stagingDirectory, string pluginDirectory)
+    {
+        string marker = PlayerFilesMarker(stagingDirectory);
+        if (File.Exists(marker) && !ReturnStagedFiles(stagingDirectory, pluginDirectory))
+            return;
+
+        SafeZipExtractor.TryDeleteDirectory(stagingDirectory);
+        VerifiedArtifactDownloader.TryDelete(marker);
     }
 
     private static void RefuseUnmanagedFolder(

@@ -930,10 +930,58 @@ public sealed class PluginInstallerTests
         string staged = Path.Combine(fixture.Paths.PluginsDirectory, ".staging", $"{Id}-abc123", "files");
         Directory.CreateDirectory(staged);
         File.WriteAllText(Path.Combine(staged, "state.json"), "{}");
+        File.WriteAllText(
+            Path.Combine(fixture.Paths.PluginsDirectory, ".staging", $"{Id}-abc123.player-files"),
+            Id);
 
         fixture.Installer.Recover();
 
         Assert.True(File.Exists(Path.Combine(fixture.Paths.PluginFilesDirectory(Id), "state.json")));
+        Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, ".staging")));
+    }
+
+    /// <summary>
+    /// An update that dies right after moving the player's files into
+    /// staging still hands them back. Mutation: not writing the marker before
+    /// staging the files (so they read as package content) fails this.
+    /// </summary>
+    [Fact]
+    public async Task AnUpdateThatFailsWithFilesStagedHandsThemBack()
+    {
+        using var fixture = new Fixture();
+        var first = fixture.BuildRelease(Id, "0.1.0");
+        fixture.RegisterRelease(Repo, first);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, first.Tag, null, null);
+        string files = fixture.Paths.PluginFilesDirectory(Id);
+        Directory.CreateDirectory(files);
+        File.WriteAllText(Path.Combine(files, "state.json"), "mine");
+        fixture.Installer.AfterFilesStaged = () => throw new IOException("stopped here");
+
+        var second = fixture.BuildRelease(Id, "0.2.0");
+        fixture.RegisterRelease(Repo, second);
+        await Assert.ThrowsAsync<IOException>(
+            () => fixture.Installer.InstallOrUpdateAsync(Repo, second.Tag, null, null));
+
+        Assert.Equal("mine", File.ReadAllText(Path.Combine(files, "state.json")));
+    }
+
+    /// <summary>
+    /// A staging folder left by an interrupted install whose package shipped
+    /// its own files/ (refused later, or never checked) is not the player's
+    /// data: without the marker, recovery deletes it rather than adopting it.
+    /// Mutation: returning a staging folder's files/ without the marker fails this.
+    /// </summary>
+    [Fact]
+    public void RecoveryNeverAdoptsAPackagesOwnFilesFolder()
+    {
+        using var fixture = new Fixture();
+        string staged = Path.Combine(fixture.Paths.PluginsDirectory, ".staging", $"{Id}-abc123", "files");
+        Directory.CreateDirectory(staged);
+        File.WriteAllText(Path.Combine(staged, "defaults.json"), "{}");
+
+        fixture.Installer.Recover();
+
+        Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, Id)));
         Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, ".staging")));
     }
 
