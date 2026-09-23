@@ -132,6 +132,26 @@ Close active sessions before installing. Long content preparation retains its
 progress and cancellation controls. Content and client compatibility checks
 continue to gate launching.
 
+A release's client is installed only by a launcher at least as new as the
+release; the launcher always updates itself first and then offers the client.
+
+### Coming from 0.1.16 or earlier
+
+OpenAC now keeps everything in one install folder (Windows
+`%LOCALAPPDATA%\OpenAC`, macOS `~/Library/Application Support/OpenAC`, Linux
+`~/.local/share/openac`), shown under Settings with Open and Move… buttons.
+Earlier versions spread their files over per-user `acdream` folders
+(`%APPDATA%\acdream` and `%LOCALAPPDATA%\acdream` on Windows).
+
+Updating from such a version moves nothing. The old launcher updates itself as
+usual, and the new one then starts as a new installation: first setup runs
+again (point it at your Asheron's Call folder; it prepares the game content and
+downloads the client), and launcher settings, account profiles and plugins
+start fresh, so add your accounts and install your plugins again. The first
+setup form says so and names the old folders. They are left exactly as they
+were and are no longer used; delete them once you no longer need anything in
+them.
+
 ## Testing a pre-release
 
 Pre-releases are development builds. The launcher never finds one by itself:

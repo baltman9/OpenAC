@@ -9,7 +9,13 @@ param(
     # osx-x64: where tools/build-macos-x64-vulkan.ps1 builds or reuses its runtime.
     [string]$MacVulkanRuntimeDirectory,
     [string]$MacArtifactsDirectory,
-    [string]$MinimumLauncherVersion = '0.0.1'
+    # The oldest launcher that may install this release's client. Empty means
+    # this release's own launcher: a launcher always updates itself before the
+    # client, and one that predates a change in how the two share the install
+    # (the single install folder, for one) must not put the new client in
+    # place first. Pass an older version only for a release whose client
+    # works with every launcher back to it.
+    [string]$MinimumLauncherVersion
 )
 
 Set-StrictMode -Version Latest
@@ -32,11 +38,21 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
     throw "Requested version '$Version' differs from repository version '$repositoryVersion'. Update Directory.Build.props before publishing."
 }
 
+if ([string]::IsNullOrWhiteSpace($MinimumLauncherVersion)) {
+    $MinimumLauncherVersion = $Version
+}
+
 $semver = '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
 foreach ($candidate in @($Version, $MinimumLauncherVersion)) {
     if ($candidate -notmatch $semver) {
         throw "Version '$candidate' is not SemVer 2.0 (build metadata '+' is not allowed here)."
     }
+}
+
+# The launcher refuses a manifest whose minimum is newer than its release.
+if ([System.Management.Automation.SemanticVersion]::new($MinimumLauncherVersion) -gt
+    [System.Management.Automation.SemanticVersion]::new($Version)) {
+    throw "Minimum launcher version '$MinimumLauncherVersion' is newer than release '$Version'."
 }
 
 $RawBase = if ([string]::IsNullOrWhiteSpace($BaseUrl)) {
