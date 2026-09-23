@@ -17,6 +17,9 @@
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="Fixtures\EarlierLauncher0116\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <Compile Include="..\Fixtures\plugin-icons\PngTestData.cs"
              Link="Fixtures\PngTestData.cs" />
   </ItemGroup>

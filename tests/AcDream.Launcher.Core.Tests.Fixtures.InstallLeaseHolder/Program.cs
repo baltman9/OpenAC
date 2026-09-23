@@ -9,6 +9,7 @@ const string SelfUpdateDataEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_DATA";
 const string SelfUpdateTargetEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_TARGET";
 const string SelfUpdateHelperPidEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_HELPER_PID";
 const string SelfUpdateProfileEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_PROFILE";
+const string SelfUpdateRefusedEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_REFUSED";
 
 string[] effectiveArgs = args;
 string? selfUpdateProfile = Environment.GetEnvironmentVariable(SelfUpdateProfileEnvironment);
@@ -23,19 +24,24 @@ if (!string.IsNullOrWhiteSpace(selfUpdateProfile) && IsBootstrapInvocation(effec
     {
         startup = await LauncherSelfUpdateBootstrap.HandleAsync(
             effectiveArgs,
-            ApplicationPathSet.Resolve(platform: profile),
+            FixturePaths(effectiveArgs, profile),
             http,
             Path.GetFullPath(AppContext.BaseDirectory),
             Path.GetFullPath(
                 Environment.ProcessPath
                 ?? throw new InvalidOperationException("Process path is unavailable.")),
-            profile,
-            LauncherSelfUpdateBootstrap.EarlierHelperWait);
+            new SelfUpdateStartSettings { Platform = profile });
     }
     catch (LauncherUpdateException exception)
     {
         Console.Error.WriteLine(exception.Message);
         return 74;
+    }
+
+    if (startup.Refusal is { } refusal
+        && Environment.GetEnvironmentVariable(SelfUpdateRefusedEnvironment) is { Length: > 0 } refusedPath)
+    {
+        File.WriteAllText(Path.GetFullPath(refusedPath), refusal);
     }
 
     if (startup.ShouldExit)
@@ -109,6 +115,23 @@ static bool IsBootstrapInvocation(string[] arguments) =>
         or LauncherSelfUpdateBootstrap.ConfirmArgument
         or "--acdream-self-update-deferred-v1"
         or "canonical-probe";
+
+// The three folder options the launcher reads, all together, as the earlier
+// launcher took them; otherwise the scratch profile's default.
+static ApplicationPathSet FixturePaths(string[] arguments, IApplicationPathEnvironment profile)
+{
+    string? Option(string name)
+    {
+        int index = Array.IndexOf(arguments, name);
+        return index >= 0 && index + 1 < arguments.Length ? arguments[index + 1] : null;
+    }
+
+    return Option("--config-dir") is { } config
+        && Option("--data-dir") is { } data
+        && Option("--cache-dir") is { } cache
+            ? new ApplicationPathSet(config, data, cache)
+            : ApplicationPathSet.Resolve(platform: profile);
+}
 
 static ApplicationPathSet Paths(string dataDirectory)
 {

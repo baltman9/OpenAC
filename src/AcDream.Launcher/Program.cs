@@ -20,8 +20,6 @@ internal static class Program
                 return 0;
             }
 
-            RepairContentRecords(options.Paths);
-
             using var httpClient = new HttpClient();
             string executable = Environment.ProcessPath
                 ?? throw new InvalidOperationException(
@@ -37,15 +35,27 @@ internal static class Program
                     options.Paths,
                     httpClient,
                     layout,
-                    executable)
+                    executable,
+                    App.GetLauncherVersion())
                 .GetAwaiter()
                 .GetResult();
+            if (startup.Refusal is { } refusal)
+            {
+                // Refused before anything opened a file in the folder: an
+                // earlier version's folder named as the install, say. The
+                // window says why; nothing else starts.
+                Console.Error.WriteLine(refusal);
+                BuildAvaloniaApp(options, refusal).StartWithClassicDesktopLifetime([]);
+                return startup.ExitCode;
+            }
+
             if (startup.ShouldExit)
             {
                 return startup.ExitCode;
             }
 
             RequireUnchangedPublicArguments(options, startup);
+            RepairContentRecords(options.Paths);
 
             return BuildAvaloniaApp(options).StartWithClassicDesktopLifetime([]);
         }
@@ -159,10 +169,12 @@ internal static class Program
         }
     }
 
-    internal static AppBuilder BuildAvaloniaApp(LauncherStartupOptions options)
+    internal static AppBuilder BuildAvaloniaApp(
+        LauncherStartupOptions options,
+        string? refusal = null)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return AppBuilder.Configure(() => new App(options))
+        return AppBuilder.Configure(() => new App(options, refusal))
             .UsePlatformDetect();
     }
 

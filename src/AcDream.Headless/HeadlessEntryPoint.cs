@@ -85,6 +85,15 @@ internal static class HeadlessEntryPoint
                 configuredPaths.Merge(commandLine.Paths));
             if (commandLine.Command == "run")
             {
+                // An earlier version's data folder named as the install
+                // folder is refused, not taken over.
+                if (LegacyApplicationLayout.RefusalToUseAsInstallFolder(paths.Application)
+                    is { } earlierFolder)
+                {
+                    error.WriteLine(earlierFolder);
+                    return (int)HeadlessExitCode.ConfigurationError;
+                }
+
                 // Held for the whole run, like the window client's, so an
                 // update or a move of the install waits for this bot.
                 using InstallSessionLease? installSession =

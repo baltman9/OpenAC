@@ -109,8 +109,7 @@ public sealed class EarlierLayoutSelfUpdateTests : IDisposable
             harness.Http,
             harness.Target,
             harness.LauncherPath,
-            harness.Platform,
-            TimeSpan.FromSeconds(20));
+            Settings(harness.Platform, TimeSpan.FromSeconds(20)));
         await helper.WaitAsync(TimeSpan.FromSeconds(20));
 
         Assert.False(result.ShouldExit);
@@ -152,8 +151,7 @@ public sealed class EarlierLayoutSelfUpdateTests : IDisposable
             harness.Http,
             harness.Target,
             harness.LauncherPath,
-            harness.Platform,
-            TimeSpan.FromSeconds(5));
+            Settings(harness.Platform, TimeSpan.FromSeconds(5)));
 
         Assert.False(result.ShouldExit);
         Assert.Equal(PublicArguments, result.RemainingArguments);
@@ -182,8 +180,7 @@ public sealed class EarlierLayoutSelfUpdateTests : IDisposable
             harness.Http,
             otherCopy,
             Path.Combine(otherCopy, harness.LauncherName),
-            harness.Platform,
-            TimeSpan.FromSeconds(5));
+            Settings(harness.Platform, TimeSpan.FromSeconds(5)));
 
         Assert.False(result.ShouldExit);
         Assert.Equal(pending, await File.ReadAllTextAsync(harness.Earlier.PendingPlanPath));
@@ -209,13 +206,390 @@ public sealed class EarlierLayoutSelfUpdateTests : IDisposable
             http,
             target,
             Path.Combine(target, "acdream-launcher.exe"),
-            platform,
-            TimeSpan.FromSeconds(5));
+            Settings(platform, TimeSpan.FromSeconds(5)));
 
         Assert.False(result.ShouldExit);
         Assert.False(Directory.Exists(LegacyApplicationLayout.Detect(platform).DataDirectory));
         Assert.True(File.Exists(Path.Combine(paths.AppDirectory, ".update-session.lock")));
     }
+
+    /// <summary>
+    /// The data folder an earlier launcher ran with (<c>--data-dir</c>) named
+    /// as this version's install folder is refused with the reason, after the
+    /// earlier update in it is finished, and nothing in it changes. Mutation:
+    /// dropping the refusal fails this.
+    /// </summary>
+    [Fact]
+    public async Task AnEarlierDataFolderNamedAsTheInstallFolderIsRefusedAndLeftAsItIs()
+    {
+        using var harness = await EarlierHarness.StageAsync(_root);
+        SelfUpdatePlan applied;
+        using (harness.Earlier.Barrier.AcquireExclusive())
+        {
+            applied = await harness.Earlier.ApplyPendingAsync(harness.Target);
+        }
+
+        var named = new ApplicationPathSet(
+            harness.EarlierConfig,
+            harness.EarlierData,
+            Path.Combine(harness.EarlierData, "cache"));
+        IReadOnlyDictionary<string, string> before = harness.SnapshotEarlierFolders();
+
+        SelfUpdateStartupResult result = await LauncherSelfUpdateBootstrap.HandleAsync(
+            PublicArguments,
+            named,
+            harness.Http,
+            harness.Target,
+            harness.LauncherPath,
+            Settings(harness.Platform, TimeSpan.FromSeconds(5)));
+
+        Assert.True(result.ShouldExit);
+        Assert.Equal(LauncherSelfUpdateBootstrap.RefusedExitCode, result.ExitCode);
+        Assert.Contains(harness.EarlierData, result.Refusal, StringComparison.Ordinal);
+        Assert.Contains("new, empty folder", result.Refusal, StringComparison.Ordinal);
+        Assert.Equal("new-launcher", await File.ReadAllTextAsync(harness.LauncherPath));
+        harness.AssertEarlierTransactionGone(applied.TransactionId);
+        Assert.Equal(before, harness.SnapshotEarlierFolders());
+        Assert.False(Directory.Exists(Path.Combine(harness.EarlierData, "app", "launcher-update")));
+        Assert.False(Directory.Exists(Path.Combine(harness.EarlierData, "data")));
+    }
+
+    /// <summary>
+    /// An earlier update whose plan cannot be read stops the start with the
+    /// reason, and the rollback copy it left beside the launcher stays.
+    /// Mutation: swallowing the unreadable plan fails this.
+    /// </summary>
+    [Fact]
+    public async Task AnUnreadableEarlierUpdateStopsTheStartAndKeepsItsRollbackCopy()
+    {
+        using var harness = await EarlierHarness.StageAsync(_root);
+        SelfUpdatePlan applied;
+        using (harness.Earlier.Barrier.AcquireExclusive())
+        {
+            applied = await harness.Earlier.ApplyPendingAsync(harness.Target);
+        }
+
+        string rollbackCopy = harness.Earlier.GetTargetTransactionDirectory(applied);
+        Assert.True(Directory.Exists(rollbackCopy));
+        await File.WriteAllTextAsync(harness.Earlier.PendingPlanPath, "{ not a plan");
+
+        SelfUpdateStartupResult result = await LauncherSelfUpdateBootstrap.HandleAsync(
+            PublicArguments,
+            harness.Paths,
+            harness.Http,
+            harness.Target,
+            harness.LauncherPath,
+            Settings(harness.Platform, TimeSpan.FromSeconds(5)));
+
+        Assert.True(result.ShouldExit);
+        Assert.Contains(harness.Earlier.PendingPlanPath, result.Refusal, StringComparison.Ordinal);
+        Assert.True(Directory.Exists(rollbackCopy));
+        Assert.False(Directory.Exists(harness.Paths.RootDirectory));
+    }
+
+    /// <summary>
+    /// A start that knows nothing of an earlier update (its plan is in a
+    /// data folder this start does not look in) leaves that update's rollback
+    /// copy beside the launcher: this version only removes its own kind.
+    /// Mutation: giving both layouts the same prefix fails this.
+    /// </summary>
+    [Fact]
+    public async Task AnEarlierRollbackCopyIsNotThisVersionsToRemove()
+    {
+        using var harness = await EarlierHarness.StageAsync(_root);
+        SelfUpdatePlan applied;
+        using (harness.Earlier.Barrier.AcquireExclusive())
+        {
+            applied = await harness.Earlier.ApplyPendingAsync(harness.Target);
+        }
+
+        string rollbackCopy = harness.Earlier.GetTargetTransactionDirectory(applied);
+        var elsewhere = new ProfileEnvironment(Path.Combine(_root, "another profile"));
+
+        SelfUpdateStartupResult result = await LauncherSelfUpdateBootstrap.HandleAsync(
+            PublicArguments,
+            ApplicationPathSet.Resolve(platform: elsewhere),
+            harness.Http,
+            harness.Target,
+            harness.LauncherPath,
+            Settings(elsewhere, TimeSpan.FromSeconds(5)));
+
+        Assert.False(result.ShouldExit);
+        Assert.True(Directory.Exists(rollbackCopy));
+    }
+
+    /// <summary>
+    /// A staged earlier update to a version this launcher already is (it was
+    /// unzipped over the old one by hand) is dropped instead of run, which
+    /// would take the launcher back. Mutation: running it regardless of the
+    /// version fails this.
+    /// </summary>
+    [Fact]
+    public async Task AStagedEarlierUpdateThisLauncherAlreadyHasIsDropped()
+    {
+        using var harness = await EarlierHarness.StageAsync(_root);
+        SelfUpdatePlan staged = Assert.IsType<SelfUpdatePlan>(await harness.Earlier.LoadPendingAsync());
+        var started = new List<System.Diagnostics.ProcessStartInfo>();
+
+        SelfUpdateStartupResult result = await LauncherSelfUpdateBootstrap.HandleAsync(
+            PublicArguments,
+            harness.Paths,
+            harness.Http,
+            harness.Target,
+            harness.LauncherPath,
+            Settings(harness.Platform, TimeSpan.FromSeconds(5), started) with
+            {
+                CurrentVersion = LauncherVersion.Parse("2.0.0"),
+            });
+
+        Assert.False(result.ShouldExit);
+        Assert.Empty(started);
+        Assert.False(File.Exists(harness.Earlier.PendingPlanPath));
+        Assert.False(Directory.Exists(harness.Earlier.GetTransactionDirectory(staged.TransactionId)));
+        Assert.Equal("old-launcher", await File.ReadAllTextAsync(harness.LauncherPath));
+    }
+
+    /// <summary>
+    /// A normal start that undoes an interrupted earlier update puts the
+    /// earlier launcher back and starts it, instead of carrying on as the
+    /// version that was being put in. Mutation: carrying on fails this.
+    /// </summary>
+    [Fact]
+    public async Task UndoingAnEarlierUpdateStartsTheRestoredLauncher()
+    {
+        using var harness = await EarlierHarness.StageAsync(_root);
+        using (harness.Earlier.Barrier.AcquireExclusive())
+        {
+            _ = await harness.Earlier.ApplyPendingAsync(harness.Target);
+            _ = await harness.Earlier.RollbackAwaitingConfirmationAsync(harness.Target);
+        }
+
+        var started = new List<System.Diagnostics.ProcessStartInfo>();
+
+        SelfUpdateStartupResult result = await LauncherSelfUpdateBootstrap.HandleAsync(
+            PublicArguments,
+            harness.Paths,
+            harness.Http,
+            harness.Target,
+            harness.LauncherPath,
+            Settings(harness.Platform, TimeSpan.FromSeconds(5), started));
+
+        Assert.True(result.ShouldExit);
+        Assert.Equal(0, result.ExitCode);
+        System.Diagnostics.ProcessStartInfo restored = Assert.Single(started);
+        Assert.Equal(harness.LauncherPath, restored.FileName);
+        Assert.Equal(PublicArguments, restored.ArgumentList);
+        Assert.Equal("old-launcher", await File.ReadAllTextAsync(harness.LauncherPath));
+        Assert.False(File.Exists(harness.Earlier.PendingPlanPath));
+        Assert.False(Directory.Exists(harness.Paths.RootDirectory));
+    }
+
+    /// <summary>
+    /// A helper that keeps the lease past the wait does not stop the
+    /// confirmed launcher: it starts with its arguments, and the next start
+    /// completes the confirmed update in the earlier folder. Mutation:
+    /// failing the start on the timeout fails this.
+    /// </summary>
+    [Fact]
+    public async Task AConfirmerThatOutwaitsTheHelperStillStartsAndTheNextStartFinishes()
+    {
+        using var harness = await EarlierHarness.StageAsync(_root);
+        UpdateSessionBarrier.ExclusiveLease helperLease = harness.Earlier.Barrier.AcquireExclusive();
+        SelfUpdatePlan applied = await harness.Earlier.ApplyPendingAsync(harness.Target);
+
+        SelfUpdateStartupResult confirmed;
+        try
+        {
+            confirmed = await LauncherSelfUpdateBootstrap.HandleAsync(
+                [LauncherSelfUpdateBootstrap.ConfirmArgument, applied.TransactionId, .. PublicArguments],
+                harness.Paths,
+                harness.Http,
+                harness.Target,
+                harness.LauncherPath,
+                Settings(harness.Platform, TimeSpan.FromMilliseconds(300)));
+        }
+        finally
+        {
+            helperLease.Dispose();
+        }
+
+        Assert.False(confirmed.ShouldExit);
+        Assert.Equal(PublicArguments, confirmed.RemainingArguments);
+        Assert.True(harness.Earlier.IsConfirmed(applied.TransactionId));
+        Assert.True(File.Exists(harness.Earlier.PendingPlanPath));
+
+        SelfUpdateStartupResult next = await LauncherSelfUpdateBootstrap.HandleAsync(
+            PublicArguments,
+            harness.Paths,
+            harness.Http,
+            harness.Target,
+            harness.LauncherPath,
+            Settings(harness.Platform, TimeSpan.FromSeconds(5)));
+
+        Assert.False(next.ShouldExit);
+        harness.AssertEarlierTransactionGone(applied.TransactionId);
+    }
+
+    /// <summary>
+    /// A helper that is slow to exit leaves its copy in the earlier folder;
+    /// the next start removes it. Mutation: not removing an earlier folder's
+    /// leftovers when no plan is pending fails this.
+    /// </summary>
+    [Fact]
+    public async Task TheHelpersCopyLeftByASlowExitIsRemovedByTheNextStart()
+    {
+        using var harness = await EarlierHarness.StageAsync(_root);
+        UpdateSessionBarrier.ExclusiveLease helperLease = harness.Earlier.Barrier.AcquireExclusive();
+        SelfUpdatePlan applied = await harness.Earlier.ApplyPendingAsync(harness.Target);
+        string stagedLauncher = Path.Combine(
+            harness.Earlier.GetPayloadDirectory(applied.TransactionId),
+            harness.LauncherName);
+        FileStream running = File.Open(stagedLauncher, FileMode.Open, FileAccess.Read, FileShare.Read);
+        Task helper = Task.Run(async () =>
+        {
+            DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(20);
+            while (!harness.Earlier.IsConfirmed(applied.TransactionId)
+                   && DateTimeOffset.UtcNow < deadline)
+                await Task.Delay(20);
+            await harness.Earlier.CompleteConfirmedAsync(applied.TransactionId, harness.Target);
+            helperLease.Dispose();
+        });
+
+        try
+        {
+            SelfUpdateStartupResult confirmed = await LauncherSelfUpdateBootstrap.HandleAsync(
+                [LauncherSelfUpdateBootstrap.ConfirmArgument, applied.TransactionId, .. PublicArguments],
+                harness.Paths,
+                harness.Http,
+                harness.Target,
+                harness.LauncherPath,
+                Settings(harness.Platform, TimeSpan.FromSeconds(10)) with
+                {
+                    HelperExitWait = TimeSpan.FromMilliseconds(300),
+                });
+            await helper.WaitAsync(TimeSpan.FromSeconds(20));
+            Assert.False(confirmed.ShouldExit);
+            Assert.True(Directory.Exists(harness.Earlier.GetTransactionDirectory(applied.TransactionId)));
+        }
+        finally
+        {
+            running.Dispose();
+            helperLease.Dispose();
+        }
+
+        SelfUpdateStartupResult next = await LauncherSelfUpdateBootstrap.HandleAsync(
+            PublicArguments,
+            harness.Paths,
+            harness.Http,
+            harness.Target,
+            harness.LauncherPath,
+            Settings(harness.Platform, TimeSpan.FromSeconds(5)));
+
+        Assert.False(next.ShouldExit);
+        Assert.False(Directory.Exists(harness.Earlier.GetTransactionDirectory(applied.TransactionId)));
+    }
+
+    /// <summary>
+    /// The wait for the helper to exit starts when it lets the lease go, not
+    /// when the confirmer started: a helper that is slow to finish still gets
+    /// the full wait to exit, and its copy is removed. Mutation: one deadline
+    /// for both waits fails this.
+    /// </summary>
+    [Fact]
+    public async Task TheHelpersExitIsWaitedForOnItsOwnDeadline()
+    {
+        using var harness = await EarlierHarness.StageAsync(_root);
+        UpdateSessionBarrier.ExclusiveLease helperLease = harness.Earlier.Barrier.AcquireExclusive();
+        SelfUpdatePlan applied = await harness.Earlier.ApplyPendingAsync(harness.Target);
+        string stagedLauncher = Path.Combine(
+            harness.Earlier.GetPayloadDirectory(applied.TransactionId),
+            harness.LauncherName);
+        FileStream running = File.Open(stagedLauncher, FileMode.Open, FileAccess.Read, FileShare.Read);
+        Task helper = Task.Run(async () =>
+        {
+            try
+            {
+                DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(20);
+                while (!harness.Earlier.IsConfirmed(applied.TransactionId)
+                       && DateTimeOffset.UtcNow < deadline)
+                    await Task.Delay(20);
+
+                // Slow to finish: the lease goes after 1 s, the process after 2 s more.
+                await Task.Delay(TimeSpan.FromSeconds(1));
+                await harness.Earlier.CompleteConfirmedAsync(applied.TransactionId, harness.Target);
+                helperLease.Dispose();
+                await Task.Delay(TimeSpan.FromSeconds(2));
+            }
+            finally
+            {
+                running.Dispose();
+                helperLease.Dispose();
+            }
+        });
+
+        SelfUpdateStartupResult confirmed = await LauncherSelfUpdateBootstrap.HandleAsync(
+            [LauncherSelfUpdateBootstrap.ConfirmArgument, applied.TransactionId, .. PublicArguments],
+            harness.Paths,
+            harness.Http,
+            harness.Target,
+            harness.LauncherPath,
+            Settings(harness.Platform, TimeSpan.FromSeconds(10)) with
+            {
+                HelperLeaseWait = TimeSpan.FromSeconds(2),
+            });
+        await helper.WaitAsync(TimeSpan.FromSeconds(20));
+
+        Assert.False(confirmed.ShouldExit);
+        harness.AssertEarlierTransactionGone(applied.TransactionId);
+    }
+
+    /// <summary>
+    /// Starting the launcher by hand while its helper still waits for the
+    /// confirmation is refused, and nothing starts on the new folder.
+    /// Mutation: skipping the earlier update on a normal start fails this.
+    /// </summary>
+    [Fact]
+    public async Task AHandStartWhileTheUpdateAwaitsConfirmationIsRefused()
+    {
+        using var harness = await EarlierHarness.StageAsync(_root);
+        using UpdateSessionBarrier.ExclusiveLease helperLease = harness.Earlier.Barrier.AcquireExclusive();
+        SelfUpdatePlan applied = await harness.Earlier.ApplyPendingAsync(harness.Target);
+
+        await Assert.ThrowsAsync<LauncherUpdateException>(() => LauncherSelfUpdateBootstrap.HandleAsync(
+            PublicArguments,
+            harness.Paths,
+            harness.Http,
+            harness.Target,
+            harness.LauncherPath,
+            Settings(harness.Platform, TimeSpan.FromSeconds(5))));
+
+        Assert.Equal(
+            SelfUpdatePlanState.AwaitingConfirmation,
+            Assert.IsType<SelfUpdatePlan>(await harness.Earlier.LoadPendingAsync()).State);
+        Assert.False(harness.Earlier.IsConfirmed(applied.TransactionId));
+        Assert.False(Directory.Exists(harness.Paths.RootDirectory));
+    }
+
+    /// <summary>
+    /// The start's settings for a scratch profile: the given waits, a
+    /// launcher older than the staged 2.0.0, and processes recorded instead
+    /// of started.
+    /// </summary>
+    internal static SelfUpdateStartSettings Settings(
+        IApplicationPathEnvironment platform,
+        TimeSpan wait,
+        List<System.Diagnostics.ProcessStartInfo>? started = null) => new()
+    {
+        Platform = platform,
+        CurrentVersion = LauncherVersion.Parse("1.0.0"),
+        HelperLeaseWait = wait,
+        HelperExitWait = wait,
+        StartProcess = start =>
+        {
+            started?.Add(start);
+            return true;
+        },
+    };
 
     private sealed class EarlierHarness : IDisposable
     {
@@ -316,7 +690,7 @@ public sealed class EarlierLayoutSelfUpdateTests : IDisposable
         {
             Assert.False(File.Exists(Earlier.PendingPlanPath));
             Assert.False(Directory.Exists(Earlier.GetTransactionDirectory(transactionId)));
-            Assert.Empty(Directory.EnumerateDirectories(Target, ".acdream-self-update-*"));
+            Assert.Empty(Directory.EnumerateDirectories(Target, Earlier.TargetTransactionPrefix + "*"));
         }
 
         /// <summary>The profile's default install folder holds nothing but the start's lock.</summary>
@@ -338,7 +712,7 @@ public sealed class EarlierLayoutSelfUpdateTests : IDisposable
             _server.Dispose();
         }
 
-        private static void Write(string folder, string relative, string content)
+        public static void Write(string folder, string relative, string content)
         {
             string path = Path.Combine(folder, relative.Replace('/', Path.DirectorySeparatorChar));
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);

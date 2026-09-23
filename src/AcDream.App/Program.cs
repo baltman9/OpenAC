@@ -16,6 +16,14 @@ Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Debug()
     .WriteTo.Console()
     .CreateLogger();
+// An earlier version's data folder named as the install folder is refused,
+// not taken over: its files stay as they were.
+if (LegacyApplicationLayout.RefusalToUseAsInstallFolder(applicationPaths) is { } earlierFolder)
+{
+    Log.Error("{Reason}", earlierFolder);
+    Log.CloseAndFlush();
+    return 5;
+}
 // Held for the whole run, so a client update or a move of the install folder
 // waits for this client, however it was started.
 using InstallSessionLease? installSession =

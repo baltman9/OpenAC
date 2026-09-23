@@ -57,6 +57,7 @@ public sealed class MainWindowViewTests
         TheGearOpensSettingsAndTheBetaCheckboxRoundTripsThroughThePlugins();
         SettingsShowTheInstallFolderAndOpenItsRowsThroughTheWindow();
         TheFirstRunFormTellsAnUpgradingPlayerThisIsANewInstallation();
+        ARefusedStartShowsItsReason();
     }
 
     /// <summary>
@@ -240,6 +241,35 @@ public sealed class MainWindowViewTests
             CloseTestWindow(window);
             if (Directory.Exists(root))
                 Directory.Delete(root, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// A refused start shows its reason in a window of its own, selectable
+    /// for copying, with a way to close it. Mutation: leaving the reason out
+    /// of the window fails this.
+    /// </summary>
+    private static void ARefusedStartShowsItsReason()
+    {
+        const string reason = "The folder holds files from an earlier OpenAC version (pak).";
+        Window window = App.CreateRefusalWindow(reason);
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Contains(
+                window.GetVisualDescendants().OfType<SelectableTextBlock>(),
+                block => block.Text == reason && block.IsEffectivelyVisible);
+            Button close = window.GetVisualDescendants().OfType<Button>()
+                .Single(button => Equals(button.Content, "Close"));
+            close.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            Dispatcher.UIThread.RunJobs();
+            Assert.False(window.IsVisible);
+        }
+        finally
+        {
+            window.Close();
         }
     }
 

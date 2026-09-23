@@ -12,6 +12,7 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
         "AcDream.Launcher.Core.Tests.Fixtures.InstallLeaseHolder";
     private const string DataEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_DATA";
     private const string ProfileVariable = "ACDREAM_SELF_UPDATE_FIXTURE_PROFILE";
+    private const string RefusedVariable = "ACDREAM_SELF_UPDATE_FIXTURE_REFUSED";
     private const string TargetEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_TARGET";
     private const string HelperPidEnvironment =
         "ACDREAM_SELF_UPDATE_FIXTURE_HELPER_PID";
@@ -117,7 +118,7 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
             }
             Assert.Empty(Directory.EnumerateDirectories(
                 target,
-                ".acdream-self-update-*",
+                manager.TargetTransactionPrefix + "*",
                 SearchOption.TopDirectoryOnly));
             Assert.Null(await manager.LoadPendingAsync());
 
@@ -214,7 +215,7 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
             await FileIntegrity.ComputeSha256HexAsync(prepared.CanonicalPath));
         Assert.False(File.Exists(earlier.PendingPlanPath));
         Assert.False(Directory.Exists(earlier.GetTransactionDirectory(plan.TransactionId)));
-        Assert.Empty(Directory.EnumerateDirectories(target, ".acdream-self-update-*"));
+        Assert.Empty(Directory.EnumerateDirectories(target, earlier.TargetTransactionPrefix + "*"));
         Assert.Equal(before, await SnapshotAsync(earlierLayout, earlier));
         Assert.Equal(
             [Path.Combine("app", ".update-session.lock")],
@@ -227,6 +228,95 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
             launchMarker,
             StringComparison.Ordinal);
         await WaitForProcessExitAsync(ParsePid(launchMarker), TimeSpan.FromSeconds(10));
+    }
+
+    /// <summary>
+    /// An earlier launcher run with <c>--data-dir</c> updates itself: the
+    /// helper and the confirmer find the transaction in that data folder and
+    /// finish it there, and then the confirmed launcher refuses to take that
+    /// folder over as its install folder, saying why, instead of starting on
+    /// it. Nothing else in the folder changes. Mutation: dropping the refusal,
+    /// or not looking in a named data folder, fails this.
+    /// </summary>
+    [Fact]
+    public async Task AnEarlierLauncherRunWithADataFolderFinishesItsUpdateThereAndIsRefusedIt()
+    {
+        string profile = Path.Combine(_root, "profile");
+        string target = Path.Combine(_root, "launcher");
+        string launched = Path.Combine(_root, "replacement.ready");
+        string refused = Path.Combine(_root, "refused.txt");
+        string config = Path.Combine(_root, "earlier config");
+        string data = Path.Combine(_root, "earlier data");
+        string cache = Path.Combine(_root, "earlier cache");
+        string[] publicArguments =
+        [
+            "--config-dir", config,
+            "--data-dir", data,
+            "--cache-dir", cache,
+            "--update-manifest-uri", "http://127.0.0.1:43119/manifest.json",
+        ];
+        Directory.CreateDirectory(_root);
+        foreach ((string folder, string name) in new[]
+                 {
+                     (config, "launcher-profiles.json"),
+                     (data, "install.json"),
+                     (data, Path.Combine("pak", "acdream.pak")),
+                     (data, Path.Combine("app", "current.json")),
+                     (data, Path.Combine("plugins", "p", "plugin.json")),
+                     (cache, "plugins.json"),
+                 })
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(folder, name))!);
+            await File.WriteAllTextAsync(Path.Combine(folder, name), "earlier " + name);
+        }
+
+        string rid = LauncherRuntimeIdentity.DetectRid();
+        PreparedLauncher prepared = PrepareLauncherClosure(target, rid);
+        using var server = new LocalHttpFixture();
+        server.Add("launcher.zip", prepared.NewArchive);
+        using var http = new HttpClient();
+        LauncherSelfUpdateManager earlier = LauncherSelfUpdateManager.ForEarlierLayout(data, http);
+        _ = await earlier.StageAsync(
+            LauncherVersion.Parse("2.0.0"),
+            rid,
+            new ReleaseArtifact(
+                server.UriFor("launcher.zip"),
+                UpdateTestData.Sha256(prepared.NewArchive),
+                prepared.NewArchive.LongLength),
+            target,
+            progress: null,
+            CancellationToken.None);
+        SelfUpdatePlan plan = Assert.IsType<SelfUpdatePlan>(await earlier.LoadPendingAsync());
+        var layout = new LegacyApplicationLayout(config, data, cache);
+        Dictionary<string, string> before = await SnapshotAsync(layout, earlier);
+
+        using Process start = StartProcess(
+            prepared.CanonicalPath,
+            ["canonical-probe", launched, .. publicArguments],
+            new Dictionary<string, string>
+            {
+                [ProfileVariable] = profile,
+                [RefusedVariable] = refused,
+            });
+        await start.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Equal(0, start.ExitCode);
+        await WaitForFileAsync(refused, process: null, TimeSpan.FromSeconds(60));
+        await WaitUntilAsync(
+            () => !Directory.Exists(earlier.GetTransactionDirectory(plan.TransactionId)),
+            TimeSpan.FromSeconds(30),
+            "The earlier transaction was not finished.");
+
+        Assert.Contains(data, await File.ReadAllTextAsync(refused), StringComparison.Ordinal);
+        Assert.False(File.Exists(launched));
+        Assert.Equal(
+            prepared.NewCanonicalHash,
+            await FileIntegrity.ComputeSha256HexAsync(prepared.CanonicalPath));
+        Assert.False(File.Exists(earlier.PendingPlanPath));
+        Assert.Empty(Directory.EnumerateDirectories(target, earlier.TargetTransactionPrefix + "*"));
+        Assert.Equal(before, await SnapshotAsync(layout, earlier));
+        Assert.False(Directory.Exists(Path.Combine(data, "data")));
+        Assert.False(Directory.Exists(Path.Combine(data, "app", "launcher-update")));
+        Assert.False(Directory.Exists(Path.Combine(profile, "AppData")));
     }
 
     /// <summary>The earlier folders' files and hashes, less the update's own folder and lock.</summary>

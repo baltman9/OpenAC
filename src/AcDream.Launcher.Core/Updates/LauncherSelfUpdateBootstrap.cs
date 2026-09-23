@@ -6,7 +6,37 @@ namespace AcDream.Launcher.Core.Updates;
 public sealed record SelfUpdateStartupResult(
     bool ShouldExit,
     int ExitCode,
-    string[] RemainingArguments);
+    string[] RemainingArguments)
+{
+    /// <summary>
+    /// Why the launcher may not start, in words for the player, or null.
+    /// Set together with <see cref="ShouldExit"/>.
+    /// </summary>
+    public string? Refusal { get; init; }
+}
+
+/// <summary>What the start's self-update step needs beyond the launcher's paths.</summary>
+internal sealed record SelfUpdateStartSettings
+{
+    /// <summary>Where the per-user folders are; the real ones when null.</summary>
+    public IApplicationPathEnvironment? Platform { get; init; }
+
+    /// <summary>This launcher's version, when known.</summary>
+    public LauncherVersion? CurrentVersion { get; init; }
+
+    /// <summary>How long a confirmer waits for an earlier update's helper to let the lease go.</summary>
+    public TimeSpan HelperLeaseWait { get; init; } = LauncherSelfUpdateBootstrap.EarlierHelperWait;
+
+    /// <summary>How long it then waits for that helper to exit so its copy can be removed.</summary>
+    public TimeSpan HelperExitWait { get; init; } = LauncherSelfUpdateBootstrap.EarlierHelperWait;
+
+    /// <summary>Starts a process; false when it did not start.</summary>
+    public Func<ProcessStartInfo, bool> StartProcess { get; init; } = static start =>
+    {
+        using Process? process = Process.Start(start);
+        return process is not null;
+    };
+}
 
 public static class LauncherSelfUpdateBootstrap
 {
@@ -19,9 +49,12 @@ public static class LauncherSelfUpdateBootstrap
     /// <summary>
     /// How long a confirming launcher waits for an earlier launcher's update
     /// to be let go by its helper, which finishes it right after the
-    /// confirmation and then exits.
+    /// confirmation, and then again for the helper to exit.
     /// </summary>
     public static readonly TimeSpan EarlierHelperWait = TimeSpan.FromSeconds(30);
+
+    /// <summary>The exit code of a start refused with a reason for the player.</summary>
+    public const int RefusedExitCode = 78;
 
     /// <summary>
     /// The launcher's start: runs the self-update step against wherever the
@@ -29,58 +62,75 @@ public static class LauncherSelfUpdateBootstrap
     /// single install folder lives in that launcher's data folder; this
     /// version, running as its helper or confirmer, or starting normally
     /// after it was interrupted, finishes it there and only then starts on
-    /// its own install folder. Nothing is moved between the two.
+    /// its own install folder. Nothing is moved between the two. A result
+    /// with a <see cref="SelfUpdateStartupResult.Refusal"/> means the start
+    /// must stop and show it.
     /// </summary>
+    /// <param name="currentVersion">This launcher's version.</param>
     public static Task<SelfUpdateStartupResult> HandleAsync(
         string[] args,
         ApplicationPathSet paths,
         HttpClient httpClient,
         LauncherInstallationLayout layout,
         string currentExecutablePath,
+        LauncherVersion currentVersion,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(layout);
+        ArgumentNullException.ThrowIfNull(currentVersion);
         return HandleAsync(
             args,
             paths,
             httpClient,
             layout.InstalledRoot,
             currentExecutablePath,
-            platform: null,
-            EarlierHelperWait,
+            new SelfUpdateStartSettings { CurrentVersion = currentVersion },
             cancellationToken);
     }
 
-    /// <inheritdoc cref="HandleAsync(string[], ApplicationPathSet, HttpClient, LauncherInstallationLayout, string, CancellationToken)"/>
-    /// <param name="platform">Where the per-user folders are; the real ones when null.</param>
-    /// <param name="earlierHelperWait">How long a confirmer waits for the earlier update's helper.</param>
-    public static async Task<SelfUpdateStartupResult> HandleAsync(
+    internal static async Task<SelfUpdateStartupResult> HandleAsync(
         string[] args,
         ApplicationPathSet paths,
         HttpClient httpClient,
         string launcherBaseDirectory,
         string currentExecutablePath,
-        IApplicationPathEnvironment? platform,
-        TimeSpan earlierHelperWait,
+        SelfUpdateStartSettings settings,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(httpClient);
+        ArgumentNullException.ThrowIfNull(settings);
         string baseDirectory = Path.TrimEndingDirectorySeparator(
             Path.GetFullPath(launcherBaseDirectory));
         string executable = Path.GetFullPath(currentExecutablePath);
         var current = new LauncherSelfUpdateManager(paths, httpClient);
         var earlierPending = new List<(LauncherSelfUpdateManager Manager, SelfUpdatePlan Plan)>();
+        var unreadable = new List<(LauncherSelfUpdateManager Manager, string Reason)>();
+        var withLeftovers = new List<LauncherSelfUpdateManager>();
         foreach (LauncherSelfUpdateManager candidate in EarlierLayoutSelfUpdate.ManagersFor(
                      paths,
                      httpClient,
-                     platform))
+                     settings.Platform))
         {
-            if (await TryLoadPendingAsync(candidate, cancellationToken).ConfigureAwait(false)
-                is { } pending)
+            if (!File.Exists(candidate.PendingPlanPath))
             {
-                earlierPending.Add((candidate, pending));
+                if (candidate.HasDataResidue())
+                    withLeftovers.Add(candidate);
+                continue;
+            }
+
+            try
+            {
+                if (await candidate.LoadPendingAsync(cancellationToken).ConfigureAwait(false)
+                    is { } pending)
+                {
+                    earlierPending.Add((candidate, pending));
+                }
+            }
+            catch (LauncherUpdateException ex)
+            {
+                unreadable.Add((candidate, ex.Message));
             }
         }
 
@@ -104,6 +154,7 @@ public static class LauncherSelfUpdateBootstrap
                 .ConfigureAwait(false);
         }
 
+        string[] remaining = args;
         if (string.Equals(mode, ConfirmArgument, StringComparison.Ordinal))
         {
             LauncherSelfUpdateManager? confirming = args.Length < 2
@@ -142,49 +193,158 @@ public static class LauncherSelfUpdateBootstrap
                     confirming,
                     baseDirectory,
                     executable,
-                    earlierHelperWait,
+                    settings,
                     cancellationToken)
                 .ConfigureAwait(false);
-            return await HandleAsync(
-                    confirmed.RemainingArguments,
-                    current,
-                    baseDirectory,
-                    executable,
-                    cancellationToken)
-                .ConfigureAwait(false);
+            remaining = confirmed.RemainingArguments;
+        }
+        else
+        {
+            foreach ((LauncherSelfUpdateManager earlier, SelfUpdatePlan plan) in earlierPending)
+            {
+                // An earlier update that targets another copy of the launcher
+                // belongs to that copy and is left alone.
+                if (!PathsEqual(plan.TargetDirectory, baseDirectory))
+                {
+                    continue;
+                }
+
+                SelfUpdateStartupResult? recovered = await RecoverEarlierAsync(
+                        args,
+                        earlier,
+                        plan,
+                        baseDirectory,
+                        executable,
+                        settings,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (recovered is not null)
+                {
+                    return recovered;
+                }
+            }
+
+            foreach (LauncherSelfUpdateManager earlier in withLeftovers)
+            {
+                RemoveEarlierLeftovers(earlier);
+            }
         }
 
-        // An earlier update of this very launcher that was interrupted is
-        // recovered where it lives. One that targets another copy of the
-        // launcher belongs to that copy and is left alone.
-        foreach ((LauncherSelfUpdateManager earlier, SelfUpdatePlan plan) in earlierPending)
+        // An earlier update this start cannot read may still need the
+        // rollback copy it left beside the launcher; carrying on is not safe.
+        if (unreadable.Count > 0)
         {
-            if (!PathsEqual(plan.TargetDirectory, baseDirectory))
-            {
-                continue;
-            }
+            (LauncherSelfUpdateManager manager, string reason) = unreadable[0];
+            return Refuse(
+                $"An update of an earlier OpenAC launcher is unfinished in {manager.RootDirectory} "
+                + $"and cannot be read ({reason}). Start the earlier launcher that made it to "
+                + "finish or undo it. If no earlier launcher uses that folder any more, delete "
+                + $"{manager.PendingPlanPath} and start again.");
+        }
 
-            SelfUpdateStartupResult recovered = await HandleAsync(
-                    args,
-                    earlier,
-                    baseDirectory,
-                    executable,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            if (recovered.ShouldExit)
-            {
-                return recovered;
-            }
+        if (LegacyApplicationLayout.RefusalToUseAsInstallFolder(paths) is { } refusal)
+        {
+            return Refuse(refusal);
         }
 
         return await HandleAsync(
-                args,
+                remaining,
                 current,
                 baseDirectory,
                 executable,
                 cancellationToken)
             .ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// A normal start that finds an earlier update of this launcher: a stale
+    /// staged one is dropped, anything else is finished or undone where it
+    /// lives. Null when the start carries on; otherwise how it ends.
+    /// </summary>
+    private static async Task<SelfUpdateStartupResult?> RecoverEarlierAsync(
+        string[] args,
+        LauncherSelfUpdateManager earlier,
+        SelfUpdatePlan plan,
+        string baseDirectory,
+        string executable,
+        SelfUpdateStartSettings settings,
+        CancellationToken cancellationToken)
+    {
+        // A staged update to a version this launcher already is (or passed;
+        // it was unzipped over the old one by hand, say) would only take the
+        // launcher back to it.
+        if (plan.State == SelfUpdatePlanState.Staged
+            && settings.CurrentVersion is { } currentVersion
+            && currentVersion >= LauncherVersion.Parse(plan.Version))
+        {
+            if (!earlier.Barrier.TryAcquireExclusive(out UpdateSessionBarrier.ExclusiveLease? acquired))
+            {
+                throw new LauncherUpdateException(
+                    "Launcher startup is blocked by an active update or recovery transaction.");
+            }
+
+            using UpdateSessionBarrier.ExclusiveLease lease = acquired
+                ?? throw new InvalidOperationException("Exclusive startup lease is missing.");
+            await earlier.DiscardStagedUnderLeaseAsync(plan, lease, cancellationToken)
+                .ConfigureAwait(false);
+            return null;
+        }
+
+        SelfUpdateStartupResult recovered = await HandleAsync(
+                args,
+                earlier,
+                baseDirectory,
+                executable,
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (recovered.ShouldExit)
+        {
+            return recovered;
+        }
+
+        if (plan.State is SelfUpdatePlanState.Applying or SelfUpdatePlanState.RolledBack)
+        {
+            // The earlier launcher's files are back in place, and this
+            // process is the version that was being put in. The restored
+            // launcher starts instead, on its own folders.
+            var restored = new ProcessStartInfo(executable)
+            {
+                UseShellExecute = false,
+                WorkingDirectory = Path.GetDirectoryName(executable)
+                    ?? throw new LauncherUpdateException("The installed launcher has no directory."),
+            };
+            foreach (string argument in recovered.RemainingArguments)
+            {
+                restored.ArgumentList.Add(argument);
+            }
+
+            return settings.StartProcess(restored)
+                ? new SelfUpdateStartupResult(true, 0, [])
+                : new SelfUpdateStartupResult(true, 75, []);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Removes the transaction folders an earlier launcher's finished update
+    /// left in its own update folder (the helper's copy, when the confirmer
+    /// could not wait for it to exit). Skipped while that folder is in use.
+    /// </summary>
+    private static void RemoveEarlierLeftovers(LauncherSelfUpdateManager earlier)
+    {
+        if (!earlier.Barrier.TryAcquireExclusive(out UpdateSessionBarrier.ExclusiveLease? acquired))
+        {
+            return;
+        }
+
+        using UpdateSessionBarrier.ExclusiveLease lease = acquired
+            ?? throw new InvalidOperationException("Exclusive lease is missing.");
+        _ = earlier.CleanupDataResidueUnderLease(lease);
+    }
+
+    private static SelfUpdateStartupResult Refuse(string reason) =>
+        new(true, RefusedExitCode, []) { Refusal = reason };
 
     public static async Task<SelfUpdateStartupResult> HandleAsync(
         string[] args,
@@ -661,24 +821,25 @@ public static class LauncherSelfUpdateBootstrap
     /// the helper to let the update lease go (it completes the transaction
     /// first), completes it here if the helper did not, and removes the
     /// transaction's files, so nothing of it is left pending in the earlier
-    /// launcher's folder.
+    /// launcher's folder. A helper that keeps the lease past the wait leaves
+    /// the confirmed update for the next start to complete; a helper that is
+    /// slow to exit leaves its copy for the next start to remove. Neither
+    /// stops this launcher, which is already the new version.
     /// </summary>
     private static async Task FinishEarlierTransactionAsync(
         LauncherSelfUpdateManager earlier,
         string baseDirectory,
         string executable,
-        TimeSpan wait,
+        SelfUpdateStartSettings settings,
         CancellationToken cancellationToken)
     {
-        DateTimeOffset deadline = DateTimeOffset.UtcNow + wait;
+        DateTimeOffset leaseDeadline = DateTimeOffset.UtcNow + settings.HelperLeaseWait;
         UpdateSessionBarrier.ExclusiveLease? acquired;
         while (!earlier.Barrier.TryAcquireExclusive(out acquired))
         {
-            if (DateTimeOffset.UtcNow >= deadline)
+            if (DateTimeOffset.UtcNow >= leaseDeadline)
             {
-                throw new LauncherUpdateException(
-                    "The launcher update was confirmed, but its helper did not finish in time. "
-                    + "Start the launcher again to finish it.");
+                return;
             }
 
             await Task.Delay(100, cancellationToken).ConfigureAwait(false);
@@ -707,29 +868,14 @@ public static class LauncherSelfUpdateBootstrap
 
         // The helper runs from the transaction's folder until it exits, a
         // moment after it lets the lease go; its files go once it has.
+        DateTimeOffset exitDeadline = DateTimeOffset.UtcNow + settings.HelperExitWait;
         while (!earlier.CleanupOwnedResidueUnderLease(
                    pending: null,
                    baseDirectory,
                    lease)
-               && DateTimeOffset.UtcNow < deadline)
+               && DateTimeOffset.UtcNow < exitDeadline)
         {
             await Task.Delay(100, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    private static async Task<SelfUpdatePlan?> TryLoadPendingAsync(
-        LauncherSelfUpdateManager manager,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            return await manager.LoadPendingAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (LauncherUpdateException)
-        {
-            // An unreadable plan cannot be finished from here. The launcher
-            // that wrote it reports it; this one starts on its own folder.
-            return null;
         }
     }
 
