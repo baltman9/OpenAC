@@ -666,6 +666,24 @@ public static class InstallRootMigration
     }
 
     /// <summary>
+    /// Points a root's install and verification records at that root's own
+    /// prepared content, after the root itself was moved.
+    /// </summary>
+    public static void RewriteContentRecords(ApplicationPathSet paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        string package = Path.Combine(paths.GameDataDirectory, "pak", "acdream.pak");
+        RewritePathProperty(
+            Path.Combine(paths.GameDataDirectory, "install.json"),
+            "preparedAssetPath",
+            package);
+        RewritePathProperty(
+            Path.Combine(paths.GameDataDirectory, "install.verification.json"),
+            "path",
+            package);
+    }
+
+    /// <summary>
     /// Points a record at the new content path. The launcher refuses a record
     /// whose content path is not the canonical one for its root, so a moved
     /// record that still named the old path would read as a broken install.
