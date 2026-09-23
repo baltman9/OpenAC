@@ -91,6 +91,72 @@ public sealed class RuntimeCombatModeStateTests
         Assert.Null(state.PendingMode);
     }
 
+    /// <summary>
+    /// OpenAC #180: from peace with a bow, the body is not in a missile
+    /// stance and cannot be until the change goes out. The change is asked
+    /// against the mode being left (peace: nothing still moving), so it goes
+    /// out at once; a parked change is retried against the same mode.
+    /// Mutation: ask readiness for the requested mode and the toggle parks
+    /// forever.
+    /// </summary>
+    [Fact]
+    public void PeaceWithBow_IsAskedAgainstPeaceNotTheMissileStance()
+    {
+        var combat = new CombatState();
+        var operations = new Operations();
+        operations.Equipment.Add(new ClientObject
+        {
+            ObjectId = 1u,
+            CurrentlyEquippedLocation = EquipMask.MissileWeapon,
+            Type = ItemType.MissileWeapon,
+            CombatUse = 2,
+        });
+        var readiness = new StanceReadiness { ReadyModes = { CombatMode.NonCombat } };
+        var state = new RuntimeCombatModeState(combat, operations);
+        state.BindReadiness(readiness);
+
+        RuntimeCombatModeRequestResult result = state.Toggle();
+
+        Assert.Equal(RuntimeCombatModeRequestStatus.Sent, result.Status);
+        Assert.Equal(CombatMode.Missile, combat.CurrentMode);
+        Assert.Contains("send:Missile", operations.Trace);
+        Assert.Equal([CombatMode.NonCombat], readiness.Asked);
+    }
+
+    [Fact]
+    public void AParkedChangeIsRetriedAgainstTheModeBeingLeft()
+    {
+        var combat = new CombatState();
+        var operations = new Operations();
+        var readiness = new StanceReadiness();
+        var state = new RuntimeCombatModeState(combat, operations);
+        state.BindReadiness(readiness);
+
+        Assert.Equal(
+            RuntimeCombatModeRequestStatus.Deferred,
+            state.Request(CombatMode.Missile).Status);
+        readiness.ReadyModes.Add(CombatMode.NonCombat);
+        state.ApplyPendingMode();
+
+        Assert.Contains("send:Missile", operations.Trace);
+        Assert.Equal(CombatMode.Missile, combat.CurrentMode);
+        Assert.All(readiness.Asked, mode => Assert.Equal(CombatMode.NonCombat, mode));
+    }
+
+    /// <summary>Ready only in the listed modes; records every mode asked.</summary>
+    private sealed class StanceReadiness : IRuntimeCombatModeReadiness
+    {
+        public HashSet<CombatMode> ReadyModes { get; } = [];
+        public List<CombatMode> Asked { get; } = [];
+        public bool IsTeleportInProgress => false;
+
+        public bool IsInReadyPosition(CombatMode mode)
+        {
+            Asked.Add(mode);
+            return ReadyModes.Contains(mode);
+        }
+    }
+
     private sealed class Readiness : IRuntimeCombatModeReadiness
     {
         public bool Ready { get; set; }
