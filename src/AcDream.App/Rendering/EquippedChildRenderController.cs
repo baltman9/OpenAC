@@ -659,6 +659,23 @@ public sealed class EquippedChildRenderController : IDisposable
         return null;
     }
 
+    /// <summary>
+    /// The objects held directly by the given object right now, such as a
+    /// creature's weapon and shield, each at the pose it is drawn at.
+    /// </summary>
+    internal void CollectAttachedChildren(uint parentLocalId, List<WorldEntity> into)
+    {
+        ArgumentNullException.ThrowIfNull(into);
+        foreach (AttachedChild child in _attachedByChild.Values)
+        {
+            if (TryResolveExactAttachment(child, out WorldEntity parent)
+                && parent.Id == parentLocalId)
+            {
+                into.Add(child.Entity);
+            }
+        }
+    }
+
     public uint? FindParentLocalId(uint childLocalId)
     {
         foreach (AttachedChild child in _attachedByChild.Values)

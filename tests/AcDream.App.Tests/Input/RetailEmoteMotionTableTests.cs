@@ -21,7 +21,7 @@ public sealed class RetailEmoteMotionTableTests
     }
 
     [Theory]
-    [InlineData(InputAction.EmoteAfkState, 0x43000118u)]
+    [InlineData(InputAction.EmoteAfkState, 0x4300011Bu)]
     [InlineData(InputAction.Cheer, 0x1300004Cu)]
     [InlineData(InputAction.Cry, 0x1300007Fu)]
     [InlineData(InputAction.Laugh, 0x13000080u)]
@@ -31,6 +31,27 @@ public sealed class RetailEmoteMotionTableTests
     public void RepresentativeActionsMatchNamedRetailGlobals(
         InputAction action,
         uint expectedMotion)
+    {
+        Assert.True(RetailEmoteMotionTable.TryGetMotion(action, out uint motion));
+        Assert.Equal(expectedMotion, motion);
+    }
+
+    /// <summary>
+    /// The later emotes in the server's numbering, which sits three above the
+    /// older client's own table from Helper onward. Mutation: the older
+    /// numbers send At Ease as ReadState and Helper as nothing at all.
+    /// </summary>
+    [Theory]
+    [InlineData(InputAction.EmoteAtEaseState, 0x43000149u)]
+    [InlineData(InputAction.EmoteReadState, 0x43000146u)]
+    [InlineData(InputAction.EmoteHelper, 0x13000135u)]
+    [InlineData(InputAction.EmoteSitState, 0x4300013Du)]
+    [InlineData(InputAction.EmoteSitCrossleggedState, 0x4300013Eu)]
+    [InlineData(InputAction.EmoteSitBackState, 0x4300013Fu)]
+    [InlineData(InputAction.EmoteNudgeLeft, 0x1300014Au)]
+    [InlineData(InputAction.EmoteDrudgeDance, 0x13000151u)]
+    [InlineData(InputAction.EmoteThinkerState, 0x43000147u)]
+    public void LaterEmotesUseTheServersNumbering(InputAction action, uint expectedMotion)
     {
         Assert.True(RetailEmoteMotionTable.TryGetMotion(action, out uint motion));
         Assert.Equal(expectedMotion, motion);

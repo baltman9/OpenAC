@@ -137,10 +137,43 @@ public sealed class CombatInputPlannerTests
                 mode, style, forward, hasCombatTable, motionsPending, lenient));
     }
 
+    /// <summary>
+    /// OpenAC #180: every missile stance, in the numbering the server sends,
+    /// counts as ready; the older client's own numbers for atlatl and
+    /// thrown-weapon-with-shield are pickup motions here and do not.
+    /// Mutation: the old 0x138/0x139 values leave atlatl and thrown+shield
+    /// never ready, so leaving combat from them parks forever.
+    /// </summary>
+    [Theory]
+    [InlineData(0x8000003Fu, true)]  // bow
+    [InlineData(0x80000041u, true)]  // crossbow
+    [InlineData(0x80000043u, true)]  // sling
+    [InlineData(0x80000047u, true)]  // thrown weapon
+    [InlineData(0x8000013Bu, true)]  // atlatl
+    [InlineData(0x8000013Cu, true)]  // thrown weapon and shield
+    [InlineData(0x80000138u, false)]
+    [InlineData(0x80000139u, false)]
+    public void EveryMissileStanceInTheServersNumberingIsReady(uint style, bool expected)
+    {
+        Assert.Equal(
+            expected,
+            CombatInputPlanner.PlayerInReadyPosition(
+                CombatMode.Missile,
+                style,
+                CombatInputPlanner.ReadyForwardCommand,
+                hasCombatTable: true,
+                motionsPending: false,
+                lenient: false));
+    }
+
     [Theory]
     [InlineData(CombatMode.Melee, 0x8000003Du, 0u, true)]
     [InlineData(CombatMode.Missile, 0x8000003Fu, CombatInputPlanner.ReadyForwardCommand, true)]
     [InlineData(CombatMode.Missile, 0x80000041u, CombatInputPlanner.ReadyForwardCommand, true)]
+    // OpenAC #174: a thrown weapon with a shield, and an atlatl, can build a
+    // charged attack; the bar charges only while this answers true.
+    [InlineData(CombatMode.Missile, 0x8000013Cu, CombatInputPlanner.ReadyForwardCommand, true)]
+    [InlineData(CombatMode.Missile, 0x8000013Bu, CombatInputPlanner.ReadyForwardCommand, true)]
     [InlineData(CombatMode.Missile, 0x8000003Du, CombatInputPlanner.ReadyForwardCommand, false)]
     [InlineData(CombatMode.Missile, 0x8000003Fu, 0x41000006u, false)]
     [InlineData(CombatMode.NonCombat, 0x8000003Du, CombatInputPlanner.ReadyForwardCommand, false)]

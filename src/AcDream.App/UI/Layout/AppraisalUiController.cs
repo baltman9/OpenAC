@@ -75,6 +75,7 @@ public sealed class AppraisalUiController : IRetainedPanelController
     private readonly Func<uint, uint> _resolveComponentIcon;
     private readonly Func<uint, IReadOnlyList<SpellExamineComponent>> _spellComponents;
     private readonly Func<MagicSchool, uint> _magicSkill;
+    private readonly Func<uint, AppraisalPlayerSkill>? _playerSkill;
     private readonly Func<uint, string?> _resolveCharacterTitle;
     private readonly Func<int> _localFactionBits;
     private readonly SpellExamineComponentTemplateFactory? _spellComponentTemplates;
@@ -134,7 +135,8 @@ public sealed class AppraisalUiController : IRetainedPanelController
         Func<MagicSchool, uint>? magicSkill,
         SpellExamineComponentTemplateFactory? spellComponentTemplates,
         Func<uint, string?>? resolveCharacterTitle,
-        Func<int>? localFactionBits)
+        Func<int>? localFactionBits,
+        Func<uint, AppraisalPlayerSkill>? playerSkill)
     {
         _layout = layout;
         _objects = objects;
@@ -163,6 +165,7 @@ public sealed class AppraisalUiController : IRetainedPanelController
         _magicSkill = magicSkill ?? (_ => 0u);
         _resolveCharacterTitle = resolveCharacterTitle ?? (_ => null);
         _localFactionBits = localFactionBits ?? (() => 0);
+        _playerSkill = playerSkill;
         _spellComponentTemplates = spellComponentTemplates;
         _spellSchool = (UiText)layout.FindElement(SpellSchoolTextId)!;
         _spellMana = (UiText)layout.FindElement(SpellManaTextId)!;
@@ -303,7 +306,8 @@ public sealed class AppraisalUiController : IRetainedPanelController
         Func<MagicSchool, uint>? magicSkill = null,
         SpellExamineComponentTemplateFactory? spellComponentTemplates = null,
         Func<uint, string?>? resolveCharacterTitle = null,
-        Func<int>? localFactionBits = null)
+        Func<int>? localFactionBits = null,
+        Func<uint, AppraisalPlayerSkill>? playerSkill = null)
     {
         ArgumentNullException.ThrowIfNull(layout);
         ArgumentNullException.ThrowIfNull(objects);
@@ -357,7 +361,8 @@ public sealed class AppraisalUiController : IRetainedPanelController
             magicSkill,
             spellComponentTemplates,
             resolveCharacterTitle,
-            localFactionBits);
+            localFactionBits,
+            playerSkill);
     }
 
     public bool ExamineSpell(uint spellId)
@@ -539,7 +544,8 @@ public sealed class AppraisalUiController : IRetainedPanelController
             obj,
             appraisal,
             ResolveSpell,
-            _itemNames);
+            _itemNames,
+            _playerSkill);
         SetInscription(obj, appraisal);
         if (newlySelected)
         {

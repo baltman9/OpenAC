@@ -1957,6 +1957,9 @@ public sealed class LiveEntityRuntime : ILiveEntityRadarSource
     public bool TryGetSnapshot(uint guid, out WorldSession.EntitySpawn spawn) =>
         _directory.TryGetSnapshot(guid, out spawn);
 
+    /// <summary>The translucency the object arrived with, or null; read without copying its record.</summary>
+    public float? TranslucencyOf(uint guid) => _directory.TranslucencyOf(guid);
+
     public bool TryApplyObjDesc(ObjDescEvent.Parsed update, out WorldSession.EntitySpawn accepted)
         => _entityObjects.TryApplyObjDesc(
             update,

@@ -33,6 +33,8 @@ internal sealed class PrivateEntityViewportRenderer :
 
     private readonly EntitySlot? _backdropSlot;
 
+    private readonly EntitySlot[] _attachmentSlots;
+
     private readonly PrivateViewportFlightTargets _flightTargets;
 
     public PrivateEntityViewportRenderer(
@@ -46,7 +48,8 @@ internal sealed class PrivateEntityViewportRenderer :
         uint renderId,
         IPrivateEntityViewportCamera camera,
         string diagnosticName,
-        uint? backdropRenderId = null)
+        uint? backdropRenderId = null,
+        IReadOnlyList<uint>? attachmentRenderIds = null)
     {
         if (renderId == 0u)
             throw new ArgumentOutOfRangeException(nameof(renderId));
@@ -81,6 +84,21 @@ internal sealed class PrivateEntityViewportRenderer :
         _animatedIds = backdropRenderId is uint animatedBackdropId
             ? [renderId, animatedBackdropId]
             : [renderId];
+
+        uint[] attachmentIds = attachmentRenderIds?.ToArray() ?? [];
+        _attachmentSlots = new EntitySlot[attachmentIds.Length];
+        for (int i = 0; i < attachmentIds.Length; i++)
+        {
+            if (attachmentIds[i] == 0u || !_animatedIds.Add(attachmentIds[i]))
+                throw new ArgumentException(
+                    "Attachment render ids must be nonzero and distinct.",
+                    nameof(attachmentRenderIds));
+            _attachmentSlots[i] = new EntitySlot(
+                _meshAdapter,
+                textureLifetimeChecked,
+                attachmentIds[i],
+                $"{_diagnosticName} attachment {i}");
+        }
     }
 
     public bool TextureIsBottomUp => false;
@@ -110,6 +128,38 @@ internal sealed class PrivateEntityViewportRenderer :
             _backdropSlot?.Entity,
             entity);
         return _dispatcher.PreparePrivateEntityResources(entities);
+    }
+
+    /// <summary>
+    /// The objects drawn with the main one, such as the weapon or shield a
+    /// creature holds. Extra objects beyond the slots built for them are
+    /// left out, and an empty list clears every slot.
+    /// </summary>
+    public void SetAttachments(IReadOnlyList<WorldEntity> attachments)
+    {
+        ArgumentNullException.ThrowIfNull(attachments);
+        for (int i = 0; i < _attachmentSlots.Length; i++)
+            _attachmentSlots[i].Set(i < attachments.Count ? attachments[i] : null);
+    }
+
+    /// <summary>
+    /// The attachments whose meshes and textures are ready. One still
+    /// loading is left out of this frame rather than holding back the main
+    /// object.
+    /// </summary>
+    private List<WorldEntity>? ReadyAttachments()
+    {
+        List<WorldEntity>? ready = null;
+        foreach (EntitySlot slot in _attachmentSlots)
+        {
+            if (slot.PrepareForDraw()
+                && slot.Entity is { MeshRefs.Count: > 0 } attachment
+                && _dispatcher.PreparePrivateEntityResources([attachment]))
+            {
+                (ready ??= []).Add(attachment);
+            }
+        }
+        return ready;
     }
 
     public void SetBackdrop(WorldEntity? entity)
@@ -147,11 +197,15 @@ internal sealed class PrivateEntityViewportRenderer :
         if (entity is null || entity.MeshRefs.Count == 0)
             return 0u;
 
+        if (!_dispatcher.PreparePrivateEntityResources(
+                BuildDrawEntities(_backdropSlot?.Entity, entity)))
+        {
+            return _flightTargets.CompletedHandle(frameSlot);
+        }
         IReadOnlyList<WorldEntity> drawEntities = BuildDrawEntities(
             _backdropSlot?.Entity,
-            entity);
-        if (!_dispatcher.PreparePrivateEntityResources(drawEntities))
-            return _flightTargets.CompletedHandle(frameSlot);
+            entity,
+            ReadyAttachments());
 
         PrivateViewportFlightTargets.TargetSlot? targetSlot =
             _flightTargets.Ensure(frameSlot, width, height);
@@ -205,10 +259,22 @@ internal sealed class PrivateEntityViewportRenderer :
         return UiTextureTableHandle.FromSlot(targetSlot.TextureSlot);
     }
 
-    internal static IReadOnlyList<WorldEntity> BuildDrawEntities(WorldEntity? backdrop, WorldEntity main) =>
-        backdrop is not null && backdrop.MeshRefs.Count > 0
-            ? [backdrop, main]
-            : [main];
+    internal static IReadOnlyList<WorldEntity> BuildDrawEntities(
+        WorldEntity? backdrop,
+        WorldEntity main,
+        IReadOnlyList<WorldEntity>? attachments = null)
+    {
+        bool hasBackdrop = backdrop is not null && backdrop.MeshRefs.Count > 0;
+        if (attachments is null || attachments.Count == 0)
+            return hasBackdrop ? [backdrop!, main] : [main];
+
+        var entities = new List<WorldEntity>(attachments.Count + 2);
+        if (hasBackdrop)
+            entities.Add(backdrop!);
+        entities.Add(main);
+        entities.AddRange(attachments);
+        return entities;
+    }
 
     private void UploadCreatureLight()
     {
@@ -247,6 +313,17 @@ internal sealed class PrivateEntityViewportRenderer :
         catch (Exception error)
         {
             (failures ??= []).Add(error);
+        }
+        foreach (EntitySlot slot in _attachmentSlots)
+        {
+            try
+            {
+                slot.Dispose();
+            }
+            catch (Exception error)
+            {
+                (failures ??= []).Add(error);
+            }
         }
         try
         {

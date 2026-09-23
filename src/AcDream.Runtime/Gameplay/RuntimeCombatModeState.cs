@@ -23,7 +23,12 @@ public enum RuntimeCombatModeRequestStatus
 /// </summary>
 public interface IRuntimeCombatModeReadiness
 {
-    /// <summary>Whether the body is in position for the mode; strict, as a mode change asks it.</summary>
+    /// <summary>
+    /// Whether the body is in position for the mode it is in; strict, as a
+    /// mode change asks it. A change is asked against the mode being left,
+    /// never the one requested: from peace that only waits for queued motions
+    /// to finish, where asking the missile stance first would wait forever.
+    /// </summary>
     bool IsInReadyPosition(CombatMode mode);
 
     /// <summary>Whether a teleport is under way, during which no mode change is accepted.</summary>
@@ -81,7 +86,8 @@ public sealed class RuntimeCombatModeState
             _pendingMode = null;
             return;
         }
-        if (_readiness is { } readiness && !readiness.IsInReadyPosition(mode))
+        if (_readiness is { } readiness
+            && !readiness.IsInReadyPosition(_combat.CurrentMode))
             return;
         _pendingMode = null;
         if (_combat.CurrentMode == mode)
@@ -96,7 +102,8 @@ public sealed class RuntimeCombatModeState
     /// </summary>
     private RuntimeCombatModeRequestResult SendOrPark(CombatMode mode)
     {
-        if (_readiness is { } readiness && !readiness.IsInReadyPosition(mode))
+        if (_readiness is { } readiness
+            && !readiness.IsInReadyPosition(_combat.CurrentMode))
         {
             _pendingMode = mode;
             return new RuntimeCombatModeRequestResult(

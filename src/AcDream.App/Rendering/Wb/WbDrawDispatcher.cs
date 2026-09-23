@@ -804,6 +804,7 @@ public sealed partial class WbDrawDispatcher : IDisposable, Walk.IWalkShellResid
             camera,
             out Matrix4x4 vp,
             out Vector3 camPos);
+        _opacityMemoEntityId = 0u;
 
         _nextInstanceSubmissionOrder = 0;
         foreach (InstanceGroup group in _groups.Values)
@@ -1005,7 +1006,7 @@ public sealed partial class WbDrawDispatcher : IDisposable, Walk.IWalkShellResid
 
                     var restPose = partTransform * meshRef.PartTransform;
 
-                    float opacityMultiplier = EntityOpacity(entity.ServerGuid);
+                    float opacityMultiplier = DrawEntityOpacity(entity.Id, entity.ServerGuid);
                     if (opacityMultiplier <= 0f) continue;
                     if (_translucencyFades.TryGetCurrentValue(entity.Id, (uint)setupPartIndex, out float translucencyValue))
                     {
@@ -1031,7 +1032,7 @@ public sealed partial class WbDrawDispatcher : IDisposable, Walk.IWalkShellResid
             }
             else
             {
-                float opacityMultiplier = EntityOpacity(entity.ServerGuid);
+                float opacityMultiplier = DrawEntityOpacity(entity.Id, entity.ServerGuid);
                 bool fullyInvisible = false;
                 if (opacityMultiplier <= 0f)
                     fullyInvisible = true;
@@ -1104,6 +1105,22 @@ public sealed partial class WbDrawDispatcher : IDisposable, Walk.IWalkShellResid
                 complete = false;
         }
         return complete;
+    }
+
+    // The draw walks (object, mesh) pairs, so the same object comes up once
+    // per part; its opacity is looked up once and reused until the walk moves
+    // to another object.
+    private uint _opacityMemoEntityId;
+    private float _opacityMemoValue;
+
+    private float DrawEntityOpacity(uint entityId, uint serverGuid)
+    {
+        if (entityId == 0u || entityId != _opacityMemoEntityId)
+        {
+            _opacityMemoEntityId = entityId;
+            _opacityMemoValue = EntityOpacity(serverGuid);
+        }
+        return _opacityMemoValue;
     }
 
     private float EntityOpacity(uint serverGuid)

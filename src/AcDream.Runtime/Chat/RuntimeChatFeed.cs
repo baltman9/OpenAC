@@ -177,9 +177,14 @@ public sealed class RuntimeChatFeed : IDisposable
             : Format(entry);
 
     /// <summary>Whether this line names another player we could click to tell.</summary>
+    // A channel line names its speaker without an object id (allegiance,
+    // fellowship and the other channels carry only the name), yet the name
+    // is still a link that starts a tell. Every other kind links only a
+    // speaker whose id is a player's.
     public static bool ShouldTagSender(ChatEntry entry)
-        => entry.SenderGuid >= FirstPlayerObjectId
-            && entry.SenderGuid <= LastPlayerObjectId
+        => (entry.Kind == ChatKind.Channel
+                || (entry.SenderGuid >= FirstPlayerObjectId
+                    && entry.SenderGuid <= LastPlayerObjectId))
             && !string.IsNullOrEmpty(entry.Sender)
             && entry.Sender.IndexOf('<') < 0
             && entry.Sender.IndexOf('>') < 0

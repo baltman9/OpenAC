@@ -15,6 +15,20 @@ public sealed class InboundPhysicsStateController
     public bool TryGetSnapshot(uint guid, out WorldSession.EntitySpawn spawn) =>
         _snapshots.TryGetValue(guid, out spawn);
 
+    /// <summary>
+    /// The translucency the object arrived with, or null. Read in place:
+    /// the renderer asks this for every object every frame, and copying the
+    /// whole creation record out to read one field is the cost it avoids.
+    /// </summary>
+    public float? TranslucencyOf(uint guid)
+    {
+        ref WorldSession.EntitySpawn spawn =
+            ref System.Runtime.InteropServices.CollectionsMarshal.GetValueRefOrNullRef(_snapshots, guid);
+        return System.Runtime.CompilerServices.Unsafe.IsNullRef(ref spawn)
+            ? null
+            : spawn.Physics?.Translucency;
+    }
+
     internal bool TryGetAcceptedTimestamps(
         uint guid,
         out AcceptedPhysicsTimestamps timestamps)
