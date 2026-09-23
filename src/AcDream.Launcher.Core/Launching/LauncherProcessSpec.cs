@@ -8,4 +8,11 @@ public sealed record LauncherProcessSpec(
     string? StderrLogPath = null,
     // The host reads commands from its input for as long as it runs, so the
     // pipe stays open after the password instead of being closed behind it.
-    bool KeepStandardInputOpen = false);
+    bool KeepStandardInputOpen = false)
+{
+    /// <summary>
+    /// Variables set in the child's environment on top of the launcher's own,
+    /// replacing any the launcher inherited under the same name.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? Environment { get; init; }
+}

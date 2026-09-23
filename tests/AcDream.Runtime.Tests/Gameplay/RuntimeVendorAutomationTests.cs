@@ -327,6 +327,46 @@ public sealed class RuntimeVendorAutomationTests
         Assert.NotEqual(0u, items[0].ItemType & vendor.Profile.DealsInItemTypes);
     }
 
+    /// <summary>
+    /// Using the vendor whose visit is still open (its window closed, not
+    /// walked away from) refreshes the window in place, and a plugin is told
+    /// the vendor opened, as a fresh use. The refresh that follows a buy is
+    /// not an opening. Mutation: raise opened only for a new vendor and the
+    /// second use is silent; raise it on every refresh and the post-buy one
+    /// fires too.
+    /// </summary>
+    [Fact]
+    public void UsingTheOpenVendorAgainOpensItForPluginsButABuyRefreshDoesNot()
+    {
+        const uint vendorId = 0x40001000u;
+        using var host = new NoWindowGameRuntimeHost();
+        host.Start();
+        using var vendor = new RuntimeVendorAutomation(host.Runtime);
+        var opened = new List<uint>();
+        vendor.Opened += opened.Add;
+        VendorShopItem listing = new(
+            ItemGuid: 0x50002000u,
+            StackSize: 5,
+            WeenieClassId: 1234u,
+            Name: "Fixture Sword",
+            ItemType: (uint)ItemType.Weapon,
+            IconId: 0x06000001u,
+            Value: 100);
+
+        host.Runtime.InventoryOwner.Vendor.Apply(vendorId, Profile, [listing]);
+        Assert.Equal([vendorId], opened);
+
+        host.Use(vendorId);
+        host.Runtime.InventoryOwner.Vendor.Apply(vendorId, Profile, [listing]);
+        Assert.Equal([vendorId, vendorId], opened);
+
+        host.Use(vendorId);
+        vendor.AddToBuyList(0x50002000u, 1);
+        Assert.Equal(PluginVendorCommandStatus.Sent, vendor.BuyAll().Status);
+        host.Runtime.InventoryOwner.Vendor.Apply(vendorId, Profile, [listing]);
+        Assert.Equal([vendorId, vendorId], opened);
+    }
+
     [Fact]
     public void StagesAndCommitsABuyListThroughTheWireBuilder()
     {

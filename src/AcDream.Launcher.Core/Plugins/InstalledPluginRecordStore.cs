@@ -44,7 +44,7 @@ public sealed record InstalledPluginRecord(
     public PluginReleaseChannel Channel { get; init; }
 }
 
-/// <summary><c>DataDirectory/app/plugins-installed.json</c>: the record of every plugin the launcher
+/// <summary><c>app/plugins-installed.json</c>: the record of every plugin the launcher
 /// itself installed. Load/save follow <c>LauncherProfileStore</c>'s temp-file-and-rename,
 /// owner-only idiom.</summary>
 public sealed class InstalledPluginRecordStore
@@ -77,7 +77,7 @@ public sealed class InstalledPluginRecordStore
     {
         ArgumentNullException.ThrowIfNull(paths);
         return new InstalledPluginRecordStore(
-            Path.Combine(paths.DataDirectory, "app", "plugins-installed.json"));
+            Path.Combine(paths.AppDirectory, "plugins-installed.json"));
     }
 
     public string FilePath { get; }

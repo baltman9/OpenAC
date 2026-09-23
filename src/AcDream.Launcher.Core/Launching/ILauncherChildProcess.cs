@@ -84,8 +84,19 @@ internal sealed partial class SystemChildProcess : ILauncherChildProcess
             startInfo.WorkingDirectory = spec.WorkingDirectory;
         }
 
+        if (spec.Environment is { } environment)
+        {
+            foreach ((string name, string value) in environment)
+            {
+                startInfo.Environment[name] = value;
+            }
+        }
+
         _process = new Process { StartInfo = startInfo };
     }
+
+    /// <summary>What the child will be started with, for tests.</summary>
+    internal ProcessStartInfo StartInfo => _process.StartInfo;
 
     public bool HasExited => _process.HasExited;
 

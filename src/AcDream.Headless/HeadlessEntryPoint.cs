@@ -2,6 +2,7 @@ using AcDream.Headless.Configuration;
 using AcDream.Headless.Credentials;
 using AcDream.Headless.Hosting;
 using AcDream.Headless.Platform;
+using AcDream.Platform;
 
 namespace AcDream.Headless;
 
@@ -21,6 +22,7 @@ internal static class HeadlessEntryPoint
           run        Run exactly one configured no-window session.
 
         Path overrides:
+          --root-dir <path>              The whole install folder.
           --config-dir <path>
           --data-dir <path>
           --cache-dir <path>
@@ -83,6 +85,24 @@ internal static class HeadlessEntryPoint
                 configuredPaths.Merge(commandLine.Paths));
             if (commandLine.Command == "run")
             {
+                // An earlier version's data folder named as the install
+                // folder is refused, not taken over.
+                if (LegacyApplicationLayout.RefusalToUseAsInstallFolder(paths.Application)
+                    is { } earlierFolder)
+                {
+                    error.WriteLine(earlierFolder);
+                    return (int)HeadlessExitCode.ConfigurationError;
+                }
+
+                // Held for the whole run, like the window client's, so an
+                // update or a move of the install waits for this bot.
+                using InstallSessionLease? installSession =
+                    InstallSessionLease.TryAcquireShared(paths.Application);
+                if (installSession is null)
+                {
+                    error.WriteLine(InstallSessionLease.BusyMessage(paths.Application));
+                    return (int)HeadlessExitCode.ConfigurationError;
+                }
                 bool consoleEnabled = HeadlessConsoleOptions.Resolve(
                     commandLine.ConsoleEnabled,
                     standardInputIsTerminal);

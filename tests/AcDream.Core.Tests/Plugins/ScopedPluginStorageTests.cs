@@ -7,6 +7,10 @@ namespace AcDream.Core.Tests.Plugins;
 
 public sealed class ScopedPluginStorageTests
 {
+    /// <summary>
+    /// A plugin's keys land in &lt;id&gt;/files, the folder installs and updates
+    /// never touch. Mutation: dropping the files segment fails this.
+    /// </summary>
     [Fact]
     public void EnsureDirectoryLandsUnderThePluginsOwnFolder()
     {
@@ -25,9 +29,44 @@ public sealed class ScopedPluginStorageTests
             // The plugin asked for "profiles/character"; the wrapper is what
             // keeps it inside the plugin's own namespace.
             Assert.True(Directory.Exists(Path.Combine(
-                root, "acdream.example", "profiles", "character")));
+                root, "acdream.example", "files", "profiles", "character")));
             Assert.False(Directory.Exists(
                 Path.Combine(root, "profiles")));
+            Assert.False(Directory.Exists(
+                Path.Combine(root, "acdream.example", "profiles")));
+
+            scope.Storage.WriteText("a/b.json", "{}");
+            Assert.Equal(["a/b.json"], scope.Storage.List("a"));
+            Assert.True(File.Exists(Path.Combine(
+                root, "acdream.example", "files", "a", "b.json")));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void AnEmptyPrefixListsThePluginsWholeFolderAndNothingElse()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-plugin-storage-{Guid.NewGuid():N}");
+        try
+        {
+            var shared = new FilePluginStorage(root);
+            shared.WriteText("acdream.other/secret.txt", "not yours");
+            using var scope = new ScopedPluginHost(
+                new StubHost(shared),
+                "acdream.example",
+                "Example Plugin");
+            scope.Storage.WriteText("settings.json", "{}");
+            scope.Storage.WriteText("profiles/a.utl", "x");
+
+            Assert.Equal(
+                ["profiles/a.utl", "settings.json"],
+                scope.Storage.List(string.Empty));
         }
         finally
         {

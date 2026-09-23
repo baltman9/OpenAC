@@ -9,6 +9,7 @@ using AcDream.Launcher.Core.Updates;
 using AcDream.Launcher.ViewModels;
 using AcDream.Platform;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 
@@ -27,11 +28,14 @@ public sealed partial class App : Application
     {
     }
 
-    internal App(LauncherStartupOptions startupOptions)
+    internal App(LauncherStartupOptions startupOptions, string? refusal = null)
     {
         _startupOptions = startupOptions
             ?? throw new ArgumentNullException(nameof(startupOptions));
+        _refusal = refusal;
     }
+
+    private readonly string? _refusal;
 
     internal LauncherStartupOptions StartupOptions => _startupOptions
         ?? throw new InvalidOperationException(
@@ -41,6 +45,16 @@ public sealed partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
+        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime refusedDesktop
+            && _refusal is { } refusal)
+        {
+            // The start was refused before any store opened a file: the
+            // window only says why.
+            refusedDesktop.MainWindow = CreateRefusalWindow(refusal);
+            base.OnFrameworkInitializationCompleted();
+            return;
+        }
+
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             LauncherStartupOptions startupOptions = StartupOptions;
@@ -101,6 +115,16 @@ public sealed partial class App : Application
                 updates.Updater,
                 applyLauncherUpdate,
                 () => desktop.Shutdown());
+            LauncherWindowViewModel windowViewModel = _viewModel;
+            _viewModel.ConfigureInstallFolder(new InstallFolderViewModel(
+                paths,
+                new InstallRootMover(paths),
+                new AvaloniaUiDispatcher(),
+                () => windowViewModel.CanMoveInstallFolder,
+                () => RestartLauncher(startupOptions, desktop),
+                LegacyApplicationLayout.ExistingFolders(
+                    paths,
+                    launcherDirectory: AppContext.BaseDirectory)));
             var mainWindow = new MainWindow
             {
                 DataContext = _viewModel,
@@ -141,6 +165,47 @@ public sealed partial class App : Application
         }
     }
 
+    /// <summary>A plain window with the reason the launcher cannot start, selectable for copying.</summary>
+    internal static Window CreateRefusalWindow(string refusal)
+    {
+        var close = new Button
+        {
+            Content = "Close",
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+            MinWidth = 96,
+        };
+        var window = new Window
+        {
+            Title = "OpenAC",
+            Width = 560,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+            CanResize = false,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(20),
+                Spacing = 16,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "OpenAC cannot start",
+                        FontSize = 20,
+                        FontWeight = Avalonia.Media.FontWeight.Bold,
+                    },
+                    new SelectableTextBlock
+                    {
+                        Text = refusal,
+                        TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                    },
+                    close,
+                },
+            },
+        };
+        close.Click += (_, _) => window.Close();
+        return window;
+    }
+
     private void OnDesktopExit(object? sender, ControlledApplicationLifetimeExitEventArgs e)
     {
         _viewModel?.Dispose();
@@ -154,7 +219,31 @@ public sealed partial class App : Application
         _pluginComposition = null;
     }
 
-    private static LauncherVersion GetLauncherVersion()
+    /// <summary>
+    /// Starts this launcher again with the same arguments and closes this one:
+    /// every store it opened still names the folder the install just left.
+    /// </summary>
+    private static void RestartLauncher(
+        LauncherStartupOptions options,
+        IClassicDesktopStyleApplicationLifetime desktop)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo(
+            Environment.ProcessPath
+            ?? throw new InvalidOperationException(
+                "The launcher executable path is unavailable."))
+        {
+            UseShellExecute = false,
+        };
+        foreach (string argument in options.PublicArguments)
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        System.Diagnostics.Process.Start(start)?.Dispose();
+        desktop.Shutdown();
+    }
+
+    internal static LauncherVersion GetLauncherVersion()
     {
         string? informationalVersion = typeof(App).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?

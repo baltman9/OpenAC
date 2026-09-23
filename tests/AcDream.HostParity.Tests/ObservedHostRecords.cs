@@ -279,7 +279,7 @@ internal static class ObservedHostRecords
             new GraphicalSurfaceInputParts
             {
                 Events = Part<AcDream.Core.Plugins.WorldEvents>(),
-                DataDirectory = "census",
+                PeerDirectory = "census",
                 PluginTags = ["census"],
             });
 
@@ -291,7 +291,7 @@ internal static class ObservedHostRecords
                 // The object this client really hands the surface is the
                 // plugin host itself, which is also what it hands plugins.
                 Events = Part<HeadlessPluginHost>(),
-                DataDirectory = "census",
+                PeerDirectory = "census",
                 PluginTags = ["census"],
             });
 

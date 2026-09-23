@@ -43,7 +43,10 @@ public interface IPluginHost
     IPluginCommandRegistry Commands => NoOpPluginCommandRegistry.Instance;
 
     /// <summary>
-    /// Durable storage scoped by the host to this plugin's manifest id.
+    /// Durable storage scoped by the host to this plugin's manifest id. The
+    /// shipped hosts keep it in the <c>files</c> folder inside the plugin's
+    /// own folder, which installs, updates and removing the plugin's code
+    /// leave alone.
     /// No-window/test hosts may explicitly expose the inert implementation.
     /// </summary>
     IPluginStorage Storage => NoOpPluginStorage.Instance;

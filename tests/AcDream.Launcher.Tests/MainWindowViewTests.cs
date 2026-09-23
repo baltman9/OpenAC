@@ -55,6 +55,53 @@ public sealed class MainWindowViewTests
         ProfileEditorsExposeTwoFieldsAndMaskPasswords();
         TabsRenderAndSwitchBetweenAccountsAndPlugins();
         TheGearOpensSettingsAndTheBetaCheckboxRoundTripsThroughThePlugins();
+        SettingsShowTheInstallFolderAndOpenItsRowsThroughTheWindow();
+        TheFirstRunFormTellsAnUpgradingPlayerThisIsANewInstallation();
+        ARefusedStartShowsItsReason();
+    }
+
+    /// <summary>
+    /// The install folder section is bound, not just present: its buttons
+    /// reach the view model and each folder row shows its path. Mutation:
+    /// misspelling a binding path in the settings markup fails this.
+    /// </summary>
+    private static void SettingsShowTheInstallFolderAndOpenItsRowsThroughTheWindow()
+    {
+        using LauncherWindowViewModel viewModel = CreateViewModel();
+        string root = Path.Combine(Path.GetTempPath(), "openac-view-" + Guid.NewGuid().ToString("N"));
+        AcDream.Platform.ApplicationPathSet paths = AcDream.Platform.ApplicationPathSet.ForRoot(
+            root,
+            AcDream.Platform.ApplicationRootSource.Default);
+        viewModel.ConfigureInstallFolder(new InstallFolderViewModel(
+            paths,
+            new InstallRootMover(paths, root),
+            new ImmediateUiDispatcher(),
+            () => true,
+            () => { }));
+        var window = new MainWindow { DataContext = viewModel };
+        try
+        {
+            window.Show();
+            ((Button)GetNamedField(window, "SettingsButton")!).Command?.Execute(null);
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+
+            Button[] buttons = window.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible).ToArray();
+            Button open = buttons.First(button => Equals(AutomationProperties.GetName(button), "Open the install folder"));
+            Button move = buttons.First(button => Equals(AutomationProperties.GetName(button), "Move the install folder"));
+            Assert.Same(viewModel.InstallFolder!.Root.OpenCommand, open.Command);
+            Assert.Same(viewModel.InstallFolder.MoveCommand, move.Command);
+            foreach (InstallFolderRowViewModel row in viewModel.InstallFolder.Folders)
+            {
+                Assert.Contains(buttons, button => Equals(button.Content, row.Path) && ReferenceEquals(button.Command, row.OpenCommand));
+            }
+        }
+        finally
+        {
+            CloseTestWindow(window);
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
     }
 
     private static void EveryExplicitlyNamedControlIsAssignedAfterConstruction()
@@ -150,6 +197,79 @@ public sealed class MainWindowViewTests
             {
                 CloseTestWindow(window);
             }
+        }
+    }
+
+    /// <summary>
+    /// The first-run form shows the new-installation notice, naming the
+    /// earlier folders, when a player comes from an earlier version.
+    /// Mutation: misspelling the notice's binding path or its visibility
+    /// binding in the markup fails this.
+    /// </summary>
+    private static void TheFirstRunFormTellsAnUpgradingPlayerThisIsANewInstallation()
+    {
+        using LauncherWindowViewModel viewModel = CreateViewModel();
+        string root = Path.Combine(Path.GetTempPath(), "openac-view-" + Guid.NewGuid().ToString("N"));
+        string earlier = Path.Combine(Path.GetTempPath(), "acdream-earlier-" + Guid.NewGuid().ToString("N"));
+        AcDream.Platform.ApplicationPathSet paths = AcDream.Platform.ApplicationPathSet.ForRoot(
+            root,
+            AcDream.Platform.ApplicationRootSource.Default);
+        viewModel.ConfigureInstallFolder(new InstallFolderViewModel(
+            paths,
+            new InstallRootMover(paths, root),
+            new ImmediateUiDispatcher(),
+            () => true,
+            () => { },
+            [earlier]));
+        var window = new MainWindow { DataContext = viewModel };
+        try
+        {
+            window.Show();
+            viewModel.FirstRunWizardShell.OpenCommand.Execute(null);
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+
+            SelectableTextBlock notice = window.GetVisualDescendants()
+                .OfType<SelectableTextBlock>()
+                .Single(block => Equals(AutomationProperties.GetName(block), "New installation notice"));
+            Assert.True(notice.IsEffectivelyVisible);
+            Assert.Equal(viewModel.InstallFolder!.NewInstallationNotice, notice.Text);
+            Assert.Contains(earlier, notice.Text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            CloseTestWindow(window);
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// A refused start shows its reason in a window of its own, selectable
+    /// for copying, with a way to close it. Mutation: leaving the reason out
+    /// of the window fails this.
+    /// </summary>
+    private static void ARefusedStartShowsItsReason()
+    {
+        const string reason = "The folder holds files from an earlier OpenAC version (pak).";
+        Window window = App.CreateRefusalWindow(reason);
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Contains(
+                window.GetVisualDescendants().OfType<SelectableTextBlock>(),
+                block => block.Text == reason && block.IsEffectivelyVisible);
+            Button close = window.GetVisualDescendants().OfType<Button>()
+                .Single(button => Equals(button.Content, "Close"));
+            close.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            Dispatcher.UIThread.RunJobs();
+            Assert.False(window.IsVisible);
+        }
+        finally
+        {
+            window.Close();
         }
     }
 

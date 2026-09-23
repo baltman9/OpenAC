@@ -171,6 +171,7 @@ public sealed class ScopedPluginChatTests
             () => scopedChat.Submit("hello"));
     }
 
+    /// <summary>Mutation: rooting the scope at &lt;id&gt; instead of &lt;id&gt;/files fails this.</summary>
     [Fact]
     public void ScopedStorageReportsThePluginsOwnDirectory()
     {
@@ -180,7 +181,7 @@ public sealed class ScopedPluginChatTests
             "Example");
 
         Assert.Equal(
-            Path.Combine("/data/plugins", "example.plugin"),
+            Path.Combine("/data/plugins", "example.plugin", "files"),
             scoped.Storage.RootPath);
 
         scoped.Dispose();

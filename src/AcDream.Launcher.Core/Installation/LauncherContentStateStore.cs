@@ -50,7 +50,7 @@ public sealed class LauncherContentStateStore
     {
         ArgumentNullException.ThrowIfNull(paths);
         _pakDirectory = Path.Combine(
-            Path.GetFullPath(paths.DataDirectory),
+            Path.GetFullPath(paths.GameDataDirectory),
             "pak");
         _computeSha256 = computeSha256
             ?? ((path, cancellationToken) =>

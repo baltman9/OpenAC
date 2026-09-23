@@ -354,8 +354,55 @@ internal sealed class WindowsProcessStartResult : IDisposable
     }
 }
 
+/// <summary>
+/// The environment block a Windows child is created with: the parent's
+/// variables with the overrides applied, one <c>NAME=value</c> per entry,
+/// sorted by name without regard to case, each ended by a null character and
+/// the whole block by one more.
+/// </summary>
+internal static class WindowsEnvironmentBlock
+{
+    internal static string Build(
+        System.Collections.IDictionary current,
+        IReadOnlyDictionary<string, string> overrides)
+    {
+        ArgumentNullException.ThrowIfNull(current);
+        ArgumentNullException.ThrowIfNull(overrides);
+        var merged = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (System.Collections.DictionaryEntry entry in current)
+        {
+            if (entry.Key is string name && entry.Value is string value && name.Length > 0)
+            {
+                merged[name] = value;
+            }
+        }
+
+        foreach ((string name, string value) in overrides)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(name);
+            if (name.Contains('=') || name.Contains('\0') || value.Contains('\0'))
+            {
+                throw new ArgumentException(
+                    $"'{name}' cannot be placed in a child environment.",
+                    nameof(overrides));
+            }
+
+            merged[name] = value;
+        }
+
+        var block = new StringBuilder();
+        foreach ((string name, string value) in merged)
+        {
+            block.Append(name).Append('=').Append(value).Append('\0');
+        }
+
+        return block.Append('\0').ToString();
+    }
+}
+
 internal static class WindowsProcessNative
 {
+    private const uint CreateUnicodeEnvironment = 0x00000400;
     private const uint CreateSuspended = 0x00000004;
     private const uint CreateNewProcessGroup = 0x00000200;
     private const uint ExtendedStartupInfoPresent = 0x00080000;
@@ -448,20 +495,42 @@ internal static class WindowsProcessNative
                 ? null
                 : Path.GetFullPath(spec.WorkingDirectory);
 
-            if (!CreateProcessW(
-                    executable,
-                    commandLine,
-                    IntPtr.Zero,
-                    IntPtr.Zero,
-                    inheritHandles: true,
-                    CreateSuspended | CreateNewProcessGroup | ExtendedStartupInfoPresent,
-                    IntPtr.Zero,
-                    workingDirectory,
-                    ref startup,
-                    out ProcessInformation information))
+            // Without overrides the child inherits the launcher's own block
+            // (a null pointer); with them it gets a merged copy.
+            IntPtr environmentBlock = spec.Environment is { Count: > 0 } overrides
+                ? Marshal.StringToHGlobalUni(
+                    WindowsEnvironmentBlock.Build(
+                        Environment.GetEnvironmentVariables(),
+                        overrides))
+                : IntPtr.Zero;
+            ProcessInformation information;
+            try
             {
-                throw new Win32Exception(Marshal.GetLastWin32Error(),
-                    "The Windows launcher child could not be created.");
+                if (!CreateProcessW(
+                        executable,
+                        commandLine,
+                        IntPtr.Zero,
+                        IntPtr.Zero,
+                        inheritHandles: true,
+                        CreateSuspended
+                            | CreateNewProcessGroup
+                            | ExtendedStartupInfoPresent
+                            | (environmentBlock == IntPtr.Zero ? 0u : CreateUnicodeEnvironment),
+                        environmentBlock,
+                        workingDirectory,
+                        ref startup,
+                        out information))
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error(),
+                        "The Windows launcher child could not be created.");
+                }
+            }
+            finally
+            {
+                if (environmentBlock != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(environmentBlock);
+                }
             }
 
             var processHandle = new SafeKernelHandle(

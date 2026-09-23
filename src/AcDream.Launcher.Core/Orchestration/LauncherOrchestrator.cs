@@ -824,14 +824,18 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
             RaiseStateChanged();
             request.Cancellation.Token.ThrowIfCancellationRequested();
 
-            LauncherProcessSpec processSpec = request.IsProbe
+            LauncherProcessSpec processSpec = (request.IsProbe
                 ? _executables.CreateProbeSpec(
                     composed.ConfigFilePath,
                     composed.StderrLogPath)
                 : _executables.CreatePlaySpec(
                     request.Activity.LaunchMode!.Value,
                     composed.ConfigFilePath,
-                    composed.StderrLogPath);
+                    composed.StderrLogPath))
+                with
+                {
+                    Environment = LauncherChildEnvironment.For(_paths),
+                };
             supervisor.Start(processSpec, password);
             hostStarted = true;
 

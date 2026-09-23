@@ -94,9 +94,6 @@ public sealed record LauncherInstallationLayout(
         return ClientVersionStore.ResolveContained(InstalledRoot, relative);
     }
 
-    internal string GetSiblingTransactionDirectory(string transactionId) =>
-        Path.Combine(ContainerDirectory, ".acdream-self-update-" + transactionId);
-
     private static string NormalizeDirectory(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);

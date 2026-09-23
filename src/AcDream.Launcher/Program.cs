@@ -1,3 +1,4 @@
+using AcDream.Launcher.Core.Installation;
 using AcDream.Launcher.Core.Updates;
 using AcDream.Platform;
 using Avalonia;
@@ -20,26 +21,41 @@ internal static class Program
             }
 
             using var httpClient = new HttpClient();
-            var selfUpdates = new LauncherSelfUpdateManager(options.Paths, httpClient);
             string executable = Environment.ProcessPath
                 ?? throw new InvalidOperationException(
                     "The launcher executable path is unavailable.");
             LauncherInstallationLayout layout = LauncherInstallationLayout.Detect(
                 AppContext.BaseDirectory,
                 LauncherRuntimeIdentity.DetectRid());
+            // Picks the self-update state by where the transaction lives: an
+            // update started by a launcher from before the single install
+            // folder is finished in that launcher's data folder.
             SelfUpdateStartupResult startup = LauncherSelfUpdateBootstrap.HandleAsync(
                     args,
-                    selfUpdates,
+                    options.Paths,
+                    httpClient,
                     layout,
-                    executable)
+                    executable,
+                    App.GetLauncherVersion())
                 .GetAwaiter()
                 .GetResult();
+            if (startup.Refusal is { } refusal)
+            {
+                // Refused before anything opened a file in the folder: an
+                // earlier version's folder named as the install, say. The
+                // window says why; nothing else starts.
+                Console.Error.WriteLine(refusal);
+                BuildAvaloniaApp(options, refusal).StartWithClassicDesktopLifetime([]);
+                return startup.ExitCode;
+            }
+
             if (startup.ShouldExit)
             {
                 return startup.ExitCode;
             }
 
             RequireUnchangedPublicArguments(options, startup);
+            RepairContentRecords(options.Paths);
 
             return BuildAvaloniaApp(options).StartWithClassicDesktopLifetime([]);
         }
@@ -54,22 +70,46 @@ internal static class Program
         }
     }
 
+    /// <summary>
+    /// Points the install record at this root's own content when a move of the
+    /// root left it naming the old one; the launcher would otherwise reject
+    /// the install as not at its canonical path.
+    /// </summary>
+    private static void RepairContentRecords(ApplicationPathSet paths)
+    {
+        try
+        {
+            foreach (string repaired in InstallRootMover.RepairContentRecords(paths))
+            {
+                Console.WriteLine($"install folder: {repaired} now names this folder's content");
+            }
+        }
+        catch (Exception ex) when (ex is IOException
+                                   or UnauthorizedAccessException
+                                   or System.Text.Json.JsonException
+                                   or InvalidOperationException)
+        {
+            // The install check that follows reports the record as it is.
+            Console.Error.WriteLine($"install folder: the install record could not be updated: {ex.Message}");
+        }
+    }
+
     internal static string? TryWriteCrashReport(string[] args, Exception failure)
     {
         try
         {
-            string dataDirectory;
+            string directory;
             try
             {
-                dataDirectory = LauncherStartupOptions.Parse(args).Paths.DataDirectory;
+                directory = LauncherStartupOptions.Parse(args).Paths.CrashReportsDirectory;
             }
             catch
             {
-                dataDirectory = TryReadRequestedDataDirectory(args)
-                    ?? ApplicationPathSet.Resolve().DataDirectory;
+                directory = TryReadRequestedRoot(args) is { } requested
+                    ? ApplicationPathSet.ForRoot(requested).CrashReportsDirectory
+                    : ResolveCrashReportsDirectory();
             }
 
-            string directory = Path.Combine(dataDirectory, "crash-reports");
             Directory.CreateDirectory(directory);
             string path = Path.Combine(
                 directory,
@@ -93,25 +133,48 @@ internal static class Program
         }
     }
 
-    private static string? TryReadRequestedDataDirectory(string[] args)
+    /// <summary>The root named by <c>--root-dir</c> or, failing that, <c>--data-dir</c>.</summary>
+    private static string? TryReadRequestedRoot(string[] args)
     {
-        for (int index = 0; index + 1 < args.Length; index++)
+        foreach (string option in new[] { "--root-dir", "--data-dir" })
         {
-            if (string.Equals(args[index], "--data-dir", StringComparison.Ordinal)
-                && !string.IsNullOrWhiteSpace(args[index + 1])
-                && Path.IsPathFullyQualified(args[index + 1]))
+            for (int index = 0; index + 1 < args.Length; index++)
             {
-                return args[index + 1];
+                if (string.Equals(args[index], option, StringComparison.Ordinal)
+                    && !string.IsNullOrWhiteSpace(args[index + 1])
+                    && Path.IsPathFullyQualified(args[index + 1]))
+                {
+                    return args[index + 1];
+                }
             }
         }
 
         return null;
     }
 
-    internal static AppBuilder BuildAvaloniaApp(LauncherStartupOptions options)
+    /// <summary>
+    /// The resolved crash folder, or the default root's when resolving is
+    /// what failed (an unreadable pointer file, say).
+    /// </summary>
+    private static string ResolveCrashReportsDirectory()
+    {
+        try
+        {
+            return ApplicationPathSet.Resolve().CrashReportsDirectory;
+        }
+        catch (InvalidOperationException)
+        {
+            return ApplicationPathSet.ForRoot(ApplicationPathSet.ResolveDefaultRoot())
+                .CrashReportsDirectory;
+        }
+    }
+
+    internal static AppBuilder BuildAvaloniaApp(
+        LauncherStartupOptions options,
+        string? refusal = null)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return AppBuilder.Configure(() => new App(options))
+        return AppBuilder.Configure(() => new App(options, refusal))
             .UsePlatformDetect();
     }
 

@@ -88,7 +88,7 @@ internal sealed class WindowlessArm : ParityArm
             // its own route, exactly as its session host hands it.
             submitChatText: SubmitChatText,
             sessionCommands: _commands,
-            dataDirectory: DataDirectory,
+            peerDirectory: PeerDirectory,
             pluginTags: ConfiguredPluginTags,
             sessionSettings: ConfiguredPluginSettings);
         _pluginTick = new AcDream.Runtime.Plugins.RuntimePluginTickClock(

@@ -139,6 +139,18 @@ and client label therefore describe the same release. Source builds may append
 commit metadata to the assembly informational version; the client label shows
 the release number without that suffix.
 
+The manifest's `minimumLauncherVersion` is the release's own version unless
+`-MinimumLauncherVersion` names an older one. A launcher refuses to install a
+client whose release asks for a newer launcher and updates itself first, which
+it does anyway whenever a release carries a newer launcher. Keeping the
+minimum at the release is what stops a launcher from before a change in how
+the launcher and client share the install from putting the new client in
+place first: the single install folder was such a change, and a 0.1.16
+launcher that installed a newer client would run it against the old folders.
+Name an older minimum only for a release whose client works with every
+launcher back to it. The launcher rejects a manifest whose minimum is newer
+than the release, and `publish-bin.ps1` refuses to write one.
+
 The Linux and macOS client zips carry Unix file modes, so the executables
 extract with the execute bit set; the launcher's own extractor applies them
 too. `launcher-osx-arm64.zip` has one top-level item, `OpenAC.app`. Expand it,

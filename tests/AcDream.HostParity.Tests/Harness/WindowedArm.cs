@@ -158,7 +158,7 @@ internal sealed class WindowedArm : ParityArm
                 new GraphicalSurfaceInputParts
                 {
                     Events = _events,
-                    DataDirectory = DataDirectory,
+                    PeerDirectory = PeerDirectory,
                     PluginTags = ConfiguredPluginTags,
                 }));
         RuntimeAutomationBindings.Apply(

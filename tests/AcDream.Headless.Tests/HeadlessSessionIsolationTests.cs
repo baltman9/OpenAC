@@ -432,7 +432,7 @@ public sealed class HeadlessSessionIsolationTests
                 new HeadlessDiagnosticWriter(TextWriter.Null),
                 operations,
                 timeProvider,
-                dataDirectory: SessionDataDirectory);
+                peerDirectory: SessionDataDirectory);
         }
         catch
         {

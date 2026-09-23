@@ -215,7 +215,7 @@ internal sealed class HeadlessSessionHost : IDisposable
         IPluginStorage? storage = null,
         IPluginStorage? vtankProfiles = null,
         Func<bool>? logoutConfirmedOverride = null,
-        string? dataDirectory = null)
+        string? peerDirectory = null)
     {
         _descriptor = descriptor
             ?? throw new ArgumentNullException(nameof(descriptor));
@@ -366,7 +366,7 @@ internal sealed class HeadlessSessionHost : IDisposable
                 contentLock: contentLease?.DatLock,
                 sessionCommands: commands,
                 navigationWalk: navigationWalk,
-                dataDirectory: dataDirectory,
+                peerDirectory: peerDirectory,
                 pluginTags: descriptor.PluginTags);
             // /nav and /motor are registered by the one binding pass both
             // hosts run, on the one registry the plugin surface owns, so

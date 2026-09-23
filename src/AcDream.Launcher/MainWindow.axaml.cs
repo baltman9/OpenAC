@@ -2,6 +2,7 @@ using System.ComponentModel;
 using AcDream.Launcher.ViewModels;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
@@ -71,6 +72,7 @@ public sealed partial class MainWindow : Window
         {
             _observedViewModel.PropertyChanged += OnViewModelPropertyChanged;
             _observedViewModel.ConsoleRequested += OnConsoleRequested;
+            _observedViewModel.InstallFolder?.AttachShell(new InstallFolderShell(this));
         }
 
         _wasModalOpen = viewModel?.IsModalOpen == true;
@@ -89,6 +91,13 @@ public sealed partial class MainWindow : Window
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(LauncherWindowViewModel.InstallFolder)
+            && sender is LauncherWindowViewModel configured)
+        {
+            configured.InstallFolder?.AttachShell(new InstallFolderShell(this));
+            return;
+        }
+
         if (e.PropertyName != nameof(LauncherWindowViewModel.IsModalOpen)
             || sender is not LauncherWindowViewModel viewModel)
         {
@@ -214,5 +223,34 @@ public sealed partial class MainWindow : Window
         }
 
         e.Handled = true;
+    }
+}
+
+/// <summary>
+/// The window's side of the install folder rows: the system file manager,
+/// the clipboard and the folder picker.
+/// </summary>
+internal sealed class InstallFolderShell(TopLevel window) : IInstallFolderShell
+{
+    public async Task<bool> OpenFolderAsync(string path) =>
+        await window.Launcher.LaunchDirectoryInfoAsync(new DirectoryInfo(path))
+            .ConfigureAwait(true);
+
+    public async Task CopyTextAsync(string text)
+    {
+        if (window.Clipboard is { } clipboard)
+            await clipboard.SetTextAsync(text).ConfigureAwait(true);
+    }
+
+    public async Task<string?> PickFolderAsync(string title)
+    {
+        IReadOnlyList<IStorageFolder> folders = await window.StorageProvider
+            .OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = title,
+                AllowMultiple = false,
+            })
+            .ConfigureAwait(true);
+        return folders.Count > 0 ? folders[0].Path.LocalPath : null;
     }
 }

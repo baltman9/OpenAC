@@ -2,6 +2,7 @@ using System.Diagnostics;
 using AcDream.Launcher.Core;
 using AcDream.Launcher.Core.Integrity;
 using AcDream.Launcher.Core.Updates;
+using AcDream.Platform;
 
 namespace AcDream.Launcher.Core.Tests.Updates;
 
@@ -10,6 +11,9 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
     private const string FixtureBaseName =
         "AcDream.Launcher.Core.Tests.Fixtures.InstallLeaseHolder";
     private const string DataEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_DATA";
+    private const string ProfileVariable = "ACDREAM_SELF_UPDATE_FIXTURE_PROFILE";
+    private const string RefusedVariable = "ACDREAM_SELF_UPDATE_FIXTURE_REFUSED";
+    private const string ConfirmerPidVariable = "ACDREAM_SELF_UPDATE_FIXTURE_CONFIRMER_PID";
     private const string TargetEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_TARGET";
     private const string HelperPidEnvironment =
         "ACDREAM_SELF_UPDATE_FIXTURE_HELPER_PID";
@@ -24,10 +28,57 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(_root))
+        // Every test waits for the processes it started. Windows can still
+        // hold a program that has just exited for a moment (its image being
+        // released or scanned), so a refused delete is tried again briefly;
+        // if it keeps failing, whatever still runs from the folder is named.
+        DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        while (Directory.Exists(_root))
         {
-            Directory.Delete(_root, recursive: true);
+            try
+            {
+                Directory.Delete(_root, recursive: true);
+            }
+            catch (UnauthorizedAccessException ex) when (OperatingSystem.IsWindows())
+            {
+                if (DateTimeOffset.UtcNow >= deadline)
+                {
+                    throw new UnauthorizedAccessException(
+                        $"{ex.Message} Still running from the test folder: {RunningFrom(_root)}",
+                        ex);
+                }
+
+                Thread.Sleep(100);
+            }
         }
+    }
+
+    private static string RunningFrom(string folder)
+    {
+        var running = new List<string>();
+        foreach (Process process in Process.GetProcesses())
+        {
+            using (process)
+            {
+                try
+                {
+                    string? path = process.MainModule?.FileName;
+                    if (path is not null
+                        && path.StartsWith(folder, StringComparison.OrdinalIgnoreCase))
+                    {
+                        running.Add($"{process.Id} {path}");
+                    }
+                }
+                catch (Exception ex) when (ex is InvalidOperationException
+                                           or System.ComponentModel.Win32Exception
+                                           or NotSupportedException)
+                {
+                    // Exited or not ours to inspect.
+                }
+            }
+        }
+
+        return running.Count == 0 ? "nothing" : string.Join("; ", running);
     }
 
     [Fact]
@@ -115,7 +166,7 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
             }
             Assert.Empty(Directory.EnumerateDirectories(
                 target,
-                ".acdream-self-update-*",
+                manager.TargetTransactionPrefix + "*",
                 SearchOption.TopDirectoryOnly));
             Assert.Null(await manager.LoadPendingAsync());
 
@@ -144,6 +195,223 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
                 await crash.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
             }
         }
+    }
+
+    /// <summary>
+    /// A launcher from before the single install folder staged this version
+    /// in its own data folder. Its start hands over to the staged helper,
+    /// which swaps the files and starts the installed copy to confirm; every
+    /// role finds the transaction in the earlier folder, finishes it there,
+    /// and the confirmed launcher carries on with its arguments on its own,
+    /// empty install folder. The player's earlier files are not touched.
+    /// Mutation: routing the helper or the confirmer to the new install
+    /// folder fails this.
+    /// </summary>
+    [Fact]
+    public async Task AnEarlierLayoutUpdateSwapsConfirmsAndFinishesWhereItLives()
+    {
+        string profile = Path.Combine(_root, "profile");
+        string target = Path.Combine(_root, "launcher");
+        string launched = Path.Combine(_root, "replacement.ready");
+        string helperPid = Path.Combine(_root, "helper.pid");
+        string confirmerPid = Path.Combine(_root, "confirmer.pid");
+        string[] publicArguments = ["--update-manifest-uri", "http://127.0.0.1:43119/manifest.json"];
+        var platform = new ProfileEnvironment(profile);
+        LegacyApplicationLayout earlierLayout = LegacyApplicationLayout.Detect(platform);
+        ApplicationPathSet newPaths = ApplicationPathSet.Resolve(platform: platform);
+        Directory.CreateDirectory(_root);
+        foreach ((string folder, string name) in new[]
+                 {
+                     (earlierLayout.ConfigDirectory, "launcher-profiles.json"),
+                     (earlierLayout.DataDirectory, Path.Combine("app", "current.json")),
+                     (earlierLayout.DataDirectory, Path.Combine("plugins", "p", "plugin.json")),
+                 })
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(folder, name))!);
+            await File.WriteAllTextAsync(Path.Combine(folder, name), "earlier " + name);
+        }
+
+        string rid = LauncherRuntimeIdentity.DetectRid();
+        PreparedLauncher prepared = PrepareLauncherClosure(target, rid);
+        using var server = new LocalHttpFixture();
+        server.Add("launcher.zip", prepared.NewArchive);
+        using var http = new HttpClient();
+        LauncherSelfUpdateManager earlier = LauncherSelfUpdateManager.ForEarlierLayout(
+            earlierLayout.DataDirectory,
+            http);
+        _ = await earlier.StageAsync(
+            LauncherVersion.Parse("2.0.0"),
+            rid,
+            new ReleaseArtifact(
+                server.UriFor("launcher.zip"),
+                UpdateTestData.Sha256(prepared.NewArchive),
+                prepared.NewArchive.LongLength),
+            target,
+            progress: null,
+            CancellationToken.None);
+        SelfUpdatePlan plan = Assert.IsType<SelfUpdatePlan>(await earlier.LoadPendingAsync());
+        Dictionary<string, string> before = await SnapshotAsync(earlierLayout, earlier);
+
+        using Process start = StartProcess(
+            prepared.CanonicalPath,
+            ["canonical-probe", launched, .. publicArguments],
+            new Dictionary<string, string>
+            {
+                [ProfileVariable] = profile,
+                [HelperPidEnvironment] = helperPid,
+                [ConfirmerPidVariable] = confirmerPid,
+            });
+        await start.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Equal(0, start.ExitCode);
+        await WaitForFileAsync(launched, process: null, TimeSpan.FromSeconds(60));
+        await WaitForRecordedExitAsync(helperPid);
+        await WaitForRecordedExitAsync(confirmerPid);
+
+        Assert.Equal(
+            prepared.NewCanonicalHash,
+            await FileIntegrity.ComputeSha256HexAsync(prepared.CanonicalPath));
+        Assert.False(File.Exists(earlier.PendingPlanPath));
+        Assert.False(Directory.Exists(earlier.GetTransactionDirectory(plan.TransactionId)));
+        Assert.Empty(Directory.EnumerateDirectories(target, earlier.TargetTransactionPrefix + "*"));
+        Assert.Equal(before, await SnapshotAsync(earlierLayout, earlier));
+        Assert.Equal(
+            [Path.Combine("app", ".update-session.lock")],
+            Directory.EnumerateFiles(newPaths.RootDirectory, "*", SearchOption.AllDirectories)
+                .Select(file => Path.GetRelativePath(newPaths.RootDirectory, file))
+                .ToArray());
+        string launchMarker = await File.ReadAllTextAsync(launched);
+        Assert.EndsWith(
+            Environment.NewLine + string.Join(Environment.NewLine, publicArguments),
+            launchMarker,
+            StringComparison.Ordinal);
+        await WaitForProcessExitAsync(ParsePid(launchMarker), TimeSpan.FromSeconds(10));
+    }
+
+    /// <summary>
+    /// An earlier launcher run with <c>--data-dir</c> updates itself: the
+    /// helper and the confirmer find the transaction in that data folder and
+    /// finish it there, and then the confirmed launcher refuses to take that
+    /// folder over as its install folder, saying why, instead of starting on
+    /// it. Nothing else in the folder changes. Mutation: dropping the refusal,
+    /// or not looking in a named data folder, fails this.
+    /// </summary>
+    [Fact]
+    public async Task AnEarlierLauncherRunWithADataFolderFinishesItsUpdateThereAndIsRefusedIt()
+    {
+        string profile = Path.Combine(_root, "profile");
+        string target = Path.Combine(_root, "launcher");
+        string launched = Path.Combine(_root, "replacement.ready");
+        string helperPid = Path.Combine(_root, "helper.pid");
+        string confirmerPid = Path.Combine(_root, "confirmer.pid");
+        string refused = Path.Combine(_root, "refused.txt");
+        string config = Path.Combine(_root, "earlier config");
+        string data = Path.Combine(_root, "earlier data");
+        string cache = Path.Combine(_root, "earlier cache");
+        string[] publicArguments =
+        [
+            "--config-dir", config,
+            "--data-dir", data,
+            "--cache-dir", cache,
+            "--update-manifest-uri", "http://127.0.0.1:43119/manifest.json",
+        ];
+        Directory.CreateDirectory(_root);
+        foreach ((string folder, string name) in new[]
+                 {
+                     (config, "launcher-profiles.json"),
+                     (data, "install.json"),
+                     (data, Path.Combine("pak", "acdream.pak")),
+                     (data, Path.Combine("app", "current.json")),
+                     (data, Path.Combine("plugins", "p", "plugin.json")),
+                     (cache, "plugins.json"),
+                 })
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(folder, name))!);
+            await File.WriteAllTextAsync(Path.Combine(folder, name), "earlier " + name);
+        }
+
+        string rid = LauncherRuntimeIdentity.DetectRid();
+        PreparedLauncher prepared = PrepareLauncherClosure(target, rid);
+        using var server = new LocalHttpFixture();
+        server.Add("launcher.zip", prepared.NewArchive);
+        using var http = new HttpClient();
+        LauncherSelfUpdateManager earlier = LauncherSelfUpdateManager.ForEarlierLayout(data, http);
+        _ = await earlier.StageAsync(
+            LauncherVersion.Parse("2.0.0"),
+            rid,
+            new ReleaseArtifact(
+                server.UriFor("launcher.zip"),
+                UpdateTestData.Sha256(prepared.NewArchive),
+                prepared.NewArchive.LongLength),
+            target,
+            progress: null,
+            CancellationToken.None);
+        SelfUpdatePlan plan = Assert.IsType<SelfUpdatePlan>(await earlier.LoadPendingAsync());
+        var layout = new LegacyApplicationLayout(config, data, cache);
+        Dictionary<string, string> before = await SnapshotAsync(layout, earlier);
+
+        using Process start = StartProcess(
+            prepared.CanonicalPath,
+            ["canonical-probe", launched, .. publicArguments],
+            new Dictionary<string, string>
+            {
+                [ProfileVariable] = profile,
+                [RefusedVariable] = refused,
+                [HelperPidEnvironment] = helperPid,
+                [ConfirmerPidVariable] = confirmerPid,
+            });
+        await start.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Equal(0, start.ExitCode);
+        await WaitForFileAsync(refused, process: null, TimeSpan.FromSeconds(60));
+        await WaitForRecordedExitAsync(helperPid);
+        await WaitForRecordedExitAsync(confirmerPid);
+        await WaitUntilAsync(
+            () => !Directory.Exists(earlier.GetTransactionDirectory(plan.TransactionId)),
+            TimeSpan.FromSeconds(30),
+            "The earlier transaction was not finished.");
+
+        Assert.Contains(data, await File.ReadAllTextAsync(refused), StringComparison.Ordinal);
+        Assert.False(File.Exists(launched));
+        Assert.Equal(
+            prepared.NewCanonicalHash,
+            await FileIntegrity.ComputeSha256HexAsync(prepared.CanonicalPath));
+        Assert.False(File.Exists(earlier.PendingPlanPath));
+        Assert.Empty(Directory.EnumerateDirectories(target, earlier.TargetTransactionPrefix + "*"));
+        Assert.Equal(before, await SnapshotAsync(layout, earlier));
+        Assert.False(Directory.Exists(Path.Combine(data, "data")));
+        Assert.False(Directory.Exists(Path.Combine(data, "app", "launcher-update")));
+        Assert.False(Directory.Exists(Path.Combine(profile, "AppData")));
+    }
+
+    /// <summary>The earlier folders' files and hashes, less the update's own folder and lock.</summary>
+    private static async Task<Dictionary<string, string>> SnapshotAsync(
+        LegacyApplicationLayout layout,
+        LauncherSelfUpdateManager earlier)
+    {
+        var files = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (string folder in layout.TopLevelRoots())
+        {
+            // Not every system gives the earlier layout the same folders
+            // (Linux has a separate cache folder); one that is absent must
+            // stay absent.
+            if (!Directory.Exists(folder))
+            {
+                files[folder] = "absent";
+                continue;
+            }
+
+            foreach (string file in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories))
+            {
+                if (file.StartsWith(earlier.RootDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                    || PathsEqual(file, earlier.Barrier.LockPath))
+                {
+                    continue;
+                }
+
+                files[file] = await FileIntegrity.ComputeSha256HexAsync(file);
+            }
+        }
+
+        return files;
     }
 
     [Fact]
@@ -764,6 +1032,33 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
     {
         string value = marker.Split('|', 2)[0];
         return int.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Waits for a process that recorded its id in <paramref name="pidFile"/> to exit.</summary>
+    private static async Task WaitForRecordedExitAsync(string pidFile)
+    {
+        int pid = 0;
+        await WaitUntilAsync(
+            () =>
+            {
+                try
+                {
+                    return File.Exists(pidFile)
+                        && int.TryParse(
+                            File.ReadAllText(pidFile),
+                            System.Globalization.NumberStyles.None,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out pid);
+                }
+                catch (IOException)
+                {
+                    // Still being written.
+                    return false;
+                }
+            },
+            TimeSpan.FromSeconds(30),
+            $"No process recorded itself in '{pidFile}'.");
+        await WaitForProcessExitAsync(pid, TimeSpan.FromSeconds(30));
     }
 
     private static async Task WaitForProcessExitAsync(int pid, TimeSpan timeout)

@@ -394,8 +394,7 @@ public sealed partial class LauncherWindowViewModelTests
             var paths = new ApplicationPathSet(
                 Path.Combine(_root, "config"),
                 Path.Combine(_root, "data"),
-                Path.Combine(_root, "cache"),
-                null);
+                Path.Combine(_root, "cache"));
             Inventory = new PluginInventory(paths, InstalledPluginRecordStore.ForApplicationPaths(paths));
             PluginsDirectory = paths.PluginsDirectory;
         }

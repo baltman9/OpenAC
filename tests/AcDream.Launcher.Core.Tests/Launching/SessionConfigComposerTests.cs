@@ -11,8 +11,7 @@ public sealed class SessionConfigComposerTests
     private static readonly ApplicationPathSet Paths = new(
         ConfigDirectory: "/cfg/acdream",
         DataDirectory: "/data/acdream",
-        CacheDirectory: "/cache/acdream",
-        LegacyConfigDirectory: null);
+        CacheDirectory: "/cache/acdream");
 
     private static readonly LauncherInstallRecord Install = new(
         DatDirectory: "/dats",
@@ -94,7 +93,7 @@ public sealed class SessionConfigComposerTests
             new[] { "/tell someone, hi" },
             session["loginCommands"]!.AsArray().Select(n => (string?)n));
         Assert.Equal(
-            Path.Combine(Paths.CacheDirectory, "launcher", "sessions", "session-gui", "status.jsonl"),
+            Path.Combine(Path.Combine(Paths.DataDirectory, "logs", "launcher"), "session-gui", "status.jsonl"),
             (string?)session["statusFile"]);
     }
 
@@ -458,8 +457,7 @@ public sealed class SessionConfigComposerTests
             Paths = new ApplicationPathSet(
                 Path.Combine(_root, "config"),
                 Path.Combine(_root, "data"),
-                Path.Combine(_root, "cache"),
-                LegacyConfigDirectory: null);
+                Path.Combine(_root, "cache"));
         }
 
         public ApplicationPathSet Paths { get; }
@@ -582,7 +580,7 @@ public sealed class SessionConfigComposerTests
         Assert.False(session.ContainsKey("loginCommandDelayMs"));
         Assert.Equal(
             Path.Combine(
-                Paths.CacheDirectory, "launcher", "sessions", "session-probe", "status.jsonl"),
+                Path.Combine(Paths.DataDirectory, "logs", "launcher"), "session-probe", "status.jsonl"),
             (string?)session["statusFile"]);
     }
 
@@ -653,8 +651,7 @@ public sealed class SessionConfigComposerTests
             var paths = new ApplicationPathSet(
                 Path.Combine(root, "cfg"),
                 Path.Combine(root, "data"),
-                Path.Combine(root, "cache"),
-                null);
+                Path.Combine(root, "cache"));
 
             ComposedSessionConfig composed = SessionConfigComposer.ComposeAndWrite(
                 Server(),
@@ -665,7 +662,7 @@ public sealed class SessionConfigComposerTests
                 sessionId: "session-write");
 
             string expectedPath = Path.Combine(
-                paths.CacheDirectory, "launcher", "sessions", "session-write", "session.json");
+                Path.Combine(paths.DataDirectory, "logs", "launcher"), "session-write", "session.json");
             Assert.Equal(expectedPath, composed.ConfigFilePath);
             Assert.True(File.Exists(expectedPath));
 
@@ -693,8 +690,7 @@ public sealed class SessionConfigComposerTests
             var paths = new ApplicationPathSet(
                 Path.Combine(root, "cfg"),
                 Path.Combine(root, "data"),
-                Path.Combine(root, "cache"),
-                null);
+                Path.Combine(root, "cache"));
             ComposedSessionConfig composed = SessionConfigComposer.ComposeProbeAndWrite(
                 Server(),
                 Account(),

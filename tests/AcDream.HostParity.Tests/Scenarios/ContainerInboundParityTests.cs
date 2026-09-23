@@ -232,6 +232,35 @@ public sealed class ContainerInboundParityTests
     /// opens; an open of something out of reach walks to it first, and the
     /// walk belongs to the scenarios that are about walking.
     /// </summary>
+    /// <summary>
+    /// A corpse the server no longer has (one that decayed while the
+    /// character was away) is answered with an empty, unsuccessful
+    /// appraisal. It never gains a description, but a plugin is told the
+    /// answer came, so a looter waiting on the description can stop waiting.
+    /// Mutation (2026-09-23), run: dropping the unsuccessful answer left the
+    /// corpse unanswered on both arms.
+    /// </summary>
+    [Fact]
+    public void AnUnsuccessfulAppraisalOfACorpseIsAnAnswerOnBothClients() =>
+        ParityScenario.Run(static (arm, transcript) =>
+        {
+            ILootAutomation loot = Stage(arm);
+            PluginLootContainer before = Assert.Single(loot.CaptureCorpses(10f));
+            transcript.Step("not yet asked");
+            transcript.Record("answered", before.IsAppraisalAnswered);
+            transcript.Record("identified", before.IsIdentified);
+            Assert.False(before.IsAppraisalAnswered);
+
+            transcript.Step("the server has nothing to say");
+            arm.Server.AppraisalResponse(ParityWorld.Corpse, [], success: false);
+            arm.Advance();
+            PluginLootContainer after = Assert.Single(loot.CaptureCorpses(10f));
+            transcript.Record("answered", after.IsAppraisalAnswered);
+            transcript.Record("identified", after.IsIdentified);
+            Assert.True(after.IsAppraisalAnswered);
+            Assert.False(after.IsIdentified);
+        });
+
     private static ILootAutomation Stage(ParityArm arm)
     {
         _ = ParityWorld.Stage(arm);

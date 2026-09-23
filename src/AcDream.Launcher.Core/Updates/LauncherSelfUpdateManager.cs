@@ -73,7 +73,12 @@ internal sealed record SelfUpdateApplyObservation(
 public sealed class LauncherSelfUpdateManager
 {
     public const string InstallRecordFileName = "launcher.install.json";
-    private const string TargetTransactionPrefix = ".acdream-self-update-";
+    // Each layout's transactions beside the launcher carry their own prefix,
+    // so a start only ever removes the leftovers of its own kind: an earlier
+    // launcher's interrupted update keeps its rollback copy until that
+    // launcher's state is found and finished.
+    private const string CurrentTargetTransactionPrefix = ".openac-self-update-";
+    private const string EarlierTargetTransactionPrefix = ".acdream-self-update-";
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
@@ -118,21 +123,69 @@ public sealed class LauncherSelfUpdateManager
         HttpClient httpClient,
         SafeZipExtractor? extractor,
         Action<SelfUpdateApplyObservation>? applyObserver)
+        : this(
+            Path.Combine(
+                Path.GetFullPath((paths ?? throw new ArgumentNullException(nameof(paths))).AppDirectory),
+                UpdateFolderName),
+            paths.DataDirectory,
+            CurrentTargetTransactionPrefix,
+            httpClient,
+            extractor,
+            applyObserver)
     {
-        ArgumentNullException.ThrowIfNull(paths);
-        RootDirectory = Path.Combine(
-            Path.GetFullPath(paths.DataDirectory),
-            "launcher-update");
+    }
+
+    private LauncherSelfUpdateManager(
+        string rootDirectory,
+        string barrierDataDirectory,
+        string targetTransactionPrefix,
+        HttpClient httpClient,
+        SafeZipExtractor? extractor,
+        Action<SelfUpdateApplyObservation>? applyObserver)
+    {
+        RootDirectory = rootDirectory;
         TransactionsDirectory = Path.Combine(RootDirectory, "transactions");
         PendingPlanPath = Path.Combine(RootDirectory, "pending.json");
-        Barrier = new UpdateSessionBarrier(paths.DataDirectory);
+        Barrier = new UpdateSessionBarrier(barrierDataDirectory);
+        TargetTransactionPrefix = targetTransactionPrefix;
         _downloader = new VerifiedArtifactDownloader(
             httpClient ?? throw new ArgumentNullException(nameof(httpClient)));
         _extractor = extractor ?? new SafeZipExtractor();
         _applyObserver = applyObserver;
     }
 
+    /// <summary>
+    /// The self-update state of a launcher from before the single install
+    /// folder, which kept it directly in its data folder: the update folder
+    /// at <c>&lt;data&gt;/launcher-update</c> and the update/session lock at
+    /// <c>&lt;data&gt;/app/.update-session.lock</c>. When such a launcher
+    /// updates itself into this version, this version runs as its helper and
+    /// confirmer and finishes that transaction there; nothing is moved.
+    /// </summary>
+    /// <param name="dataDirectory">The earlier launcher's data folder.</param>
+    /// <param name="httpClient">What the manager downloads with; finishing a transaction downloads nothing.</param>
+    public static LauncherSelfUpdateManager ForEarlierLayout(
+        string dataDirectory,
+        HttpClient httpClient)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(dataDirectory);
+        string data = Path.GetFullPath(dataDirectory);
+        return new LauncherSelfUpdateManager(
+            Path.Combine(data, UpdateFolderName),
+            data,
+            EarlierTargetTransactionPrefix,
+            httpClient,
+            extractor: null,
+            applyObserver: null);
+    }
+
+    /// <summary>The name of the folder that holds the self-update state.</summary>
+    public const string UpdateFolderName = "launcher-update";
+
     public string RootDirectory { get; }
+
+    /// <summary>The name prefix of this manager's transaction folders beside the launcher.</summary>
+    internal string TargetTransactionPrefix { get; }
 
     public string TransactionsDirectory { get; }
 
@@ -589,7 +642,9 @@ public sealed class LauncherSelfUpdateManager
         Path.Combine(GetTransactionDirectory(transactionId), "confirmed");
 
     internal string GetTargetTransactionDirectory(SelfUpdatePlan plan) =>
-        LayoutFor(plan).GetSiblingTransactionDirectory(plan.TransactionId);
+        Path.Combine(
+            LayoutFor(plan).ContainerDirectory,
+            TargetTransactionPrefix + plan.TransactionId);
 
     internal string GetStagedLauncherPath(SelfUpdatePlan plan) =>
         ClientVersionStore.ResolveContained(
@@ -620,6 +675,55 @@ public sealed class LauncherSelfUpdateManager
             pending?.TransactionId,
             transactionContainer,
             keepTarget);
+    }
+
+    /// <summary>
+    /// Drops a staged update that was never applied: its plan and its
+    /// downloaded payload. Nothing beside the launcher exists for it yet.
+    /// </summary>
+    internal async Task DiscardStagedUnderLeaseAsync(
+        SelfUpdatePlan plan,
+        UpdateSessionBarrier.ExclusiveLease lease,
+        CancellationToken cancellationToken = default)
+    {
+        Barrier.RequireOwned(lease);
+        SelfUpdatePlan current = await LoadPendingAsync(cancellationToken).ConfigureAwait(false)
+            ?? throw new LauncherUpdateException("There is no staged self-update to discard.");
+        if (current.State != SelfUpdatePlanState.Staged
+            || !string.Equals(current.TransactionId, plan.TransactionId, StringComparison.Ordinal))
+        {
+            throw new LauncherUpdateException(
+                "The staged self-update changed before it could be discarded.");
+        }
+
+        File.Delete(PendingPlanPath);
+        SafeZipExtractor.TryDeleteDirectory(GetTransactionDirectory(plan.TransactionId));
+    }
+
+    /// <summary>
+    /// Whether this manager's own folder holds transaction folders or plan
+    /// temporaries that no pending plan needs.
+    /// </summary>
+    internal bool HasDataResidue() =>
+        Directory.Exists(TransactionsDirectory)
+        && Directory.EnumerateDirectories(TransactionsDirectory, "*", SearchOption.TopDirectoryOnly)
+            .Select(Path.GetFileName)
+            .Any(name => name is not null && IsCanonicalTransactionId(name));
+
+    /// <summary>
+    /// Removes the transaction folders in this manager's own folder while no
+    /// plan is pending; nothing beside the launcher is touched.
+    /// </summary>
+    internal bool CleanupDataResidueUnderLease(UpdateSessionBarrier.ExclusiveLease lease)
+    {
+        Barrier.RequireOwned(lease);
+        if (File.Exists(PendingPlanPath))
+        {
+            return false;
+        }
+
+        CleanupDataResidue(keepTransactionId: null);
+        return !HasDataResidue();
     }
 
     private static string GetLauncherFileName(string rid) =>
@@ -2105,7 +2209,7 @@ public sealed class LauncherSelfUpdateManager
         }
     }
 
-    private static void CleanupTargetResidue(
+    private void CleanupTargetResidue(
         string targetDirectory,
         string? keepTransactionId)
     {

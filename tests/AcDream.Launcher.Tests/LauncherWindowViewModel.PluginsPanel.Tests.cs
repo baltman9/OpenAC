@@ -3560,8 +3560,7 @@ public sealed partial class LauncherWindowViewModelTests
             Paths = new ApplicationPathSet(
                 Path.Combine(_root, "config"),
                 Path.Combine(_root, "data"),
-                Path.Combine(_root, "cache"),
-                null);
+                Path.Combine(_root, "cache"));
         }
 
         public ApplicationPathSet Paths { get; }

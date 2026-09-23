@@ -8,8 +8,68 @@ using AcDream.Platform;
 const string SelfUpdateDataEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_DATA";
 const string SelfUpdateTargetEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_TARGET";
 const string SelfUpdateHelperPidEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_HELPER_PID";
+const string SelfUpdateProfileEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_PROFILE";
+const string SelfUpdateRefusedEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_REFUSED";
+const string SelfUpdateConfirmerPidEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_CONFIRMER_PID";
 
 string[] effectiveArgs = args;
+string? selfUpdateProfile = Environment.GetEnvironmentVariable(SelfUpdateProfileEnvironment);
+if (!string.IsNullOrWhiteSpace(selfUpdateProfile) && IsBootstrapInvocation(effectiveArgs))
+{
+    // The launcher's own start: the self-update step finds the transaction
+    // wherever it lives, in a per-user profile kept in a scratch folder.
+    var profile = new ScratchProfileEnvironment(Path.GetFullPath(selfUpdateProfile));
+    // The test waits for every process it caused: the helper and the
+    // confirmer name themselves.
+    string? pidFile = effectiveArgs[0] switch
+    {
+        LauncherSelfUpdateBootstrap.HelperArgument =>
+            Environment.GetEnvironmentVariable(SelfUpdateHelperPidEnvironment),
+        LauncherSelfUpdateBootstrap.ConfirmArgument =>
+            Environment.GetEnvironmentVariable(SelfUpdateConfirmerPidEnvironment),
+        _ => null,
+    };
+    if (!string.IsNullOrWhiteSpace(pidFile))
+    {
+        File.WriteAllText(
+            Path.GetFullPath(pidFile),
+            Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    using var http = new HttpClient();
+    SelfUpdateStartupResult startup;
+    try
+    {
+        startup = await LauncherSelfUpdateBootstrap.HandleAsync(
+            effectiveArgs,
+            FixturePaths(effectiveArgs, profile),
+            http,
+            Path.GetFullPath(AppContext.BaseDirectory),
+            Path.GetFullPath(
+                Environment.ProcessPath
+                ?? throw new InvalidOperationException("Process path is unavailable.")),
+            new SelfUpdateStartSettings { Platform = profile });
+    }
+    catch (LauncherUpdateException exception)
+    {
+        Console.Error.WriteLine(exception.Message);
+        return 74;
+    }
+
+    if (startup.Refusal is { } refusal
+        && Environment.GetEnvironmentVariable(SelfUpdateRefusedEnvironment) is { Length: > 0 } refusedPath)
+    {
+        File.WriteAllText(Path.GetFullPath(refusedPath), refusal);
+    }
+
+    if (startup.ShouldExit)
+    {
+        return startup.ExitCode;
+    }
+
+    effectiveArgs = startup.RemainingArguments;
+}
+
 string? selfUpdateData = Environment.GetEnvironmentVariable(SelfUpdateDataEnvironment);
 string? selfUpdateTarget = Environment.GetEnvironmentVariable(SelfUpdateTargetEnvironment);
 if (!string.IsNullOrWhiteSpace(selfUpdateData)
@@ -74,14 +134,30 @@ static bool IsBootstrapInvocation(string[] arguments) =>
         or "--acdream-self-update-deferred-v1"
         or "canonical-probe";
 
+// The three folder options the launcher reads, all together, as the earlier
+// launcher took them; otherwise the scratch profile's default.
+static ApplicationPathSet FixturePaths(string[] arguments, IApplicationPathEnvironment profile)
+{
+    string? Option(string name)
+    {
+        int index = Array.IndexOf(arguments, name);
+        return index >= 0 && index + 1 < arguments.Length ? arguments[index + 1] : null;
+    }
+
+    return Option("--config-dir") is { } config
+        && Option("--data-dir") is { } data
+        && Option("--cache-dir") is { } cache
+            ? new ApplicationPathSet(config, data, cache)
+            : ApplicationPathSet.Resolve(platform: profile);
+}
+
 static ApplicationPathSet Paths(string dataDirectory)
 {
     string data = Path.GetFullPath(dataDirectory);
     return new ApplicationPathSet(
         Path.Combine(data, "fixture-config"),
         data,
-        Path.Combine(data, "fixture-cache"),
-        null);
+        Path.Combine(data, "fixture-cache"));
 }
 
 static async Task<int> CrashSelfUpdateAsync(string[] arguments)
@@ -297,8 +373,7 @@ static async Task<int> RunOrphanParentAsync(string[] arguments)
     var paths = new ApplicationPathSet(
         Path.Combine(dataDirectory, "fixture-config"),
         dataDirectory,
-        Path.Combine(dataDirectory, "fixture-cache"),
-        null);
+        Path.Combine(dataDirectory, "fixture-cache"));
     var runner = new OrphanBakeProcessRunner(
         schedule,
         childReadyPath,
@@ -373,6 +448,36 @@ static int RunOrphanChild(string[] arguments)
     File.WriteAllText(exitPath, exitCode.ToString(
         System.Globalization.CultureInfo.InvariantCulture));
     return exitCode;
+}
+
+/// <summary>A per-user profile rooted in a scratch folder, with no path variables set.</summary>
+file sealed class ScratchProfileEnvironment(string home) : IApplicationPathEnvironment
+{
+    private string Local => Path.Combine(home, "AppData", "Local");
+
+    private string Roaming => Path.Combine(home, "AppData", "Roaming");
+
+    public bool IsWindows => OperatingSystem.IsWindows();
+
+    public bool IsMacOS => OperatingSystem.IsMacOS();
+
+    public string CurrentDirectory => home;
+
+    public string? GetEnvironmentVariable(string name) => name switch
+    {
+        "XDG_DATA_HOME" => Local,
+        "XDG_CONFIG_HOME" => Roaming,
+        "XDG_CACHE_HOME" => Path.Combine(home, ".cache"),
+        _ => null,
+    };
+
+    public string GetFolderPath(Environment.SpecialFolder folder) => folder switch
+    {
+        Environment.SpecialFolder.LocalApplicationData => Local,
+        Environment.SpecialFolder.ApplicationData => Roaming,
+        Environment.SpecialFolder.UserProfile => home,
+        _ => string.Empty,
+    };
 }
 
 file sealed class OrphanBakeProcessRunner(

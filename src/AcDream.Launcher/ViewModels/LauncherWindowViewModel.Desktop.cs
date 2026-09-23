@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using AcDream.Launcher.Core.Orchestration;
 using AcDream.Launcher.Core.Profiles;
 using AcDream.Launcher.Core.Status;
 using AcDream.Launcher.Core.Updates;
@@ -100,6 +101,34 @@ public sealed partial class LauncherWindowViewModel
         int plus = version.IndexOf('+');
         return "v" + (plus < 0 ? version : version[..plus]);
     }
+
+    private InstallFolderViewModel? _installFolder;
+
+    /// <summary>The install folder rows in the settings and the first-run form; null until configured.</summary>
+    public InstallFolderViewModel? InstallFolder => _installFolder;
+
+    /// <summary>Whether the install folder rows are available.</summary>
+    public bool HasInstallFolder => _installFolder is not null;
+
+    /// <summary>
+    /// Whether the first-run form tells the player this is a new installation:
+    /// an earlier version's folders exist, and the form is setting the game up
+    /// rather than updating content an install already has.
+    /// </summary>
+    public bool ShowNewInstallationNotice =>
+        _installFolder?.HasEarlierFolders == true && !FirstRunWizardShell.IsContentUpdate;
+
+    /// <summary>Gives the settings their install folder section.</summary>
+    public void ConfigureInstallFolder(InstallFolderViewModel installFolder)
+    {
+        _installFolder = installFolder ?? throw new ArgumentNullException(nameof(installFolder));
+        OnPropertyChanged(nameof(InstallFolder));
+        OnPropertyChanged(nameof(HasInstallFolder));
+        OnPropertyChanged(nameof(ShowNewInstallationNotice));
+    }
+
+    /// <summary>Whether the install may move now: nothing running and nothing busy.</summary>
+    internal bool CanMoveInstallFolder => !IsBusy && Sessions.All(session => !session.IsActive);
 
     public void ConfigureServerHealth(IServerHealthService service)
     {
@@ -217,6 +246,7 @@ public sealed partial class LauncherWindowViewModel
 
     private void NotifyDesktopCommands()
     {
+        _installFolder?.NotifyCanMoveChanged();
         OnPropertyChanged(nameof(HasActiveSessions));
         EditUsersTextCommand?.NotifyCanExecuteChanged();
         EditServersTextCommand?.NotifyCanExecuteChanged();

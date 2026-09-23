@@ -107,6 +107,8 @@ public sealed class GameEventWiringTests
             Assert.Equal(42, items.Get(guid)!.Properties.Ints[25u]);
         else
             Assert.False(items.Get(guid)!.Properties.Ints.ContainsKey(25u));
+        // Either way the server answered, and that is kept.
+        Assert.True(items.Get(guid)!.AppraisalAnswered);
     }
 
     [Fact]

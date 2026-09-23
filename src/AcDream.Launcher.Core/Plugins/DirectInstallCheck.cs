@@ -69,6 +69,18 @@ public static class DirectInstallCheck
                     continue;
                 }
 
+                // The plugin's own saved files are the player's, not part of
+                // what was installed, and grow without any install limit.
+                if (relativeDirectory.Length == 0
+                    && (entry.Attributes & FileAttributes.Directory) != 0
+                    && string.Equals(
+                        entry.Name,
+                        AcDream.Platform.ApplicationPathSet.PluginFilesFolderName,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 string relativePath = relativeDirectory.Length == 0
                     ? entry.Name
                     : $"{relativeDirectory}/{entry.Name}";

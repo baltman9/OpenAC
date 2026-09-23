@@ -843,6 +843,8 @@ public static class GameEventWiring
                     clientTime(),
                     ToClientWeaponProfile(p.Value.WeaponProfile),
                     ToClientArmorProfile(p.Value.ArmorProfile));
+            else if (!p.Value.Success)
+                items.RecordUnsuccessfulAppraisal(p.Value.Guid);
             if (p.Value.CreatureProfile is { HealthMax: > 0u } creature)
                 combat.OnUpdateHealth(
                     p.Value.Guid,

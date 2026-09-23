@@ -2,7 +2,7 @@ namespace AcDream.Launcher.Core.Updates;
 
 public sealed class UpdateSessionBarrier
 {
-    public const string LockFileName = ".update-session.lock";
+    public const string LockFileName = AcDream.Platform.InstallSessionLease.LockFileName;
 
     private readonly string _lockPath;
 

@@ -82,6 +82,15 @@ public sealed class LauncherExecutableSet
                 + "reinstall/update the client before launching.");
         }
 
+        string? clientDirectory = Path.GetDirectoryName(path);
+        if (clientDirectory is null
+            || !_fileExists(Path.Combine(
+                clientDirectory,
+                AcDream.Platform.ClientCapabilities.SingleInstallRootMarkerFileName)))
+        {
+            return LauncherCapability.Unavailable(OlderClientRefusal(clientDirectory));
+        }
+
         return LauncherCapability.Available;
     }
 
@@ -187,6 +196,16 @@ public sealed class LauncherExecutableSet
                 PayloadExecutableNames.HeadlessHost + executableSuffix),
             fullDirectory);
     }
+
+    /// <summary>
+    /// Why a client that predates the single install folder is not started:
+    /// it would read and write settings and plugins in the old per-user
+    /// folders, which the new install does not use.
+    /// </summary>
+    internal static string OlderClientRefusal(string? clientDirectory) =>
+        $"The installed client{(clientDirectory is null ? string.Empty : $" ({Path.GetFileName(clientDirectory)})")} "
+        + "is older than the single OpenAC install folder and would not find your settings, "
+        + "plugins or game files there. Update the client from the launcher before playing.";
 
     private static bool HasUnixExecutePermission(string path)
     {

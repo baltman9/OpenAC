@@ -580,6 +580,7 @@ public sealed class ClientObjectTable
         ArgumentNullException.ThrowIfNull(spellIds);
         if (!_objects.TryGetValue(itemId, out var item)) return false;
         MergeProperties(item, incoming);
+        item.AppraisalAnswered = true;
         item.AppraisedSpellIds = spellIds.Count == 0
             ? Array.Empty<uint>()
             : spellIds.ToArray();
@@ -609,6 +610,20 @@ public sealed class ClientObjectTable
         foreach (var kv in incoming.Strings)  item.Properties.Strings[kv.Key] = kv.Value;
         foreach (var kv in incoming.DataIds)  item.Properties.DataIds[kv.Key] = kv.Value;
         foreach (var kv in incoming.InstanceIds) item.Properties.InstanceIds[kv.Key] = kv.Value;
+    }
+
+    /// <summary>
+    /// Records that the server answered an appraisal it could not make. The
+    /// answer carries nothing to keep, so nothing else about the object
+    /// changes.
+    /// </summary>
+    public bool RecordUnsuccessfulAppraisal(uint itemId)
+    {
+        if (!_objects.TryGetValue(itemId, out var item)) return false;
+        if (item.AppraisalAnswered) return true;
+        item.AppraisalAnswered = true;
+        ObjectUpdated?.Invoke(item);
+        return true;
     }
 
     public void UpsertProperties(uint guid, PropertyBundle incoming)

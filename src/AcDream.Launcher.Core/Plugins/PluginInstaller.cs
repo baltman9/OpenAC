@@ -30,6 +30,14 @@ public sealed class PluginInstaller
     public const string CapabilitiesChangedRefusal =
         "This plugin changed since you reviewed it. Check it again before installing.";
 
+    /// <summary>The refusal shown when a package ships its own top-level <c>files</c> folder.</summary>
+    public const string PackagedFilesRefusal =
+        "This plugin's package contains a top-level 'files' folder. That name is kept for "
+        + "the plugin's own saved files, so the launcher will not install it.";
+
+    /// <summary>The folder inside a plugin's folder that holds the player's files for it.</summary>
+    private const string FilesFolderName = ApplicationPathSet.PluginFilesFolderName;
+
     /// <summary>The install-time caps from the plan's shared contract (Release contract, "Caps").
     /// The one place they're set, so the zip download cap and the extraction limits it feeds can't
     /// drift apart; <see cref="DirectInstallCheck"/> reuses the same extraction limits.</summary>
@@ -52,6 +60,12 @@ public sealed class PluginInstaller
     private readonly InstalledPluginRecordStore _recordStore;
     private readonly PluginInventory _inventory;
     private readonly UpdateSessionBarrier _barrier;
+
+    /// <summary>
+    /// Runs right after an update moved the player's files into staging; a
+    /// test throws here to stand in for the process dying at that moment.
+    /// </summary>
+    internal Action? AfterFilesStaged { get; set; }
 
     public PluginInstaller(
         ApplicationPathSet paths,
@@ -232,6 +246,7 @@ public sealed class PluginInstaller
                     cancellationToken)
                 .ConfigureAwait(false);
             PluginContentPolicy.Validate(extracted, manifest.EntryDll);
+            RefusePackagedFilesFolder(stagingDirectory);
 
             byte[] zipManifestBytes = await File.ReadAllBytesAsync(
                     Path.Combine(stagingDirectory, "plugin.json"),
@@ -293,7 +308,10 @@ public sealed class PluginInstaller
         finally
         {
             VerifiedArtifactDownloader.TryDelete(zipPath);
-            SafeZipExtractor.TryDeleteDirectory(stagingDirectory);
+            // A staging folder holds the player's files only if a swap
+            // failed part-way; they go back, or stay for Recover.
+            ReclaimStaging(stagingDirectory, targetDirectory);
+
             TryDeleteIfEmpty(Path.Combine(_paths.PluginsDirectory, ".staging"));
         }
     }
@@ -321,10 +339,9 @@ public sealed class PluginInstaller
         }
     }
 
-    /// <summary>Removes a launcher-managed plugin. <paramref name="deleteStorage"/> also deletes the
-    /// plugin's own subtree under <c>ConfigDirectory/plugins/&lt;id&gt;</c>
-    /// (<c>ScopedPluginHost</c>'s scope), never the shared root and never Vtank's own profile
-    /// directory.</summary>
+    /// <summary>Removes a launcher-managed plugin's code. Its private files in
+    /// <c>plugins/&lt;id&gt;/files</c> stay unless <paramref name="deleteStorage"/> asks for them
+    /// too; never the shared root and never Vtank's own profile directory.</summary>
     public void Remove(string id, bool deleteStorage)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
@@ -341,9 +358,7 @@ public sealed class PluginInstaller
             string targetDirectory = Path.Combine(_paths.PluginsDirectory, id);
             if (Directory.Exists(targetDirectory))
             {
-                string trashDirectory = CreateTrashPath(id);
-                Directory.Move(targetDirectory, trashDirectory);
-                SafeZipExtractor.TryDeleteDirectory(trashDirectory);
+                RemoveCodeKeepingFiles(id, targetDirectory, deleteStorage);
             }
 
             TryDeleteIfEmpty(Path.Combine(_paths.PluginsDirectory, ".trash"));
@@ -351,13 +366,27 @@ public sealed class PluginInstaller
             _recordStore.Records.RemoveAll(record =>
                 string.Equals(record.Id, id, StringComparison.OrdinalIgnoreCase));
             _recordStore.Save();
-
-            if (deleteStorage)
-            {
-                SafeZipExtractor.TryDeleteDirectory(
-                    Path.Combine(_paths.ConfigDirectory, "plugins", id));
-            }
         }
+    }
+
+    /// <summary>
+    /// Moves a plugin folder to the trash in one rename, hands its private
+    /// files back to a fresh folder of the same name unless asked to delete
+    /// them, then deletes the trash. A crash between the two renames leaves
+    /// the files in the trash, where Recover finds and returns them.
+    /// </summary>
+    private void RemoveCodeKeepingFiles(string trashName, string pluginDirectory, bool deleteFiles)
+    {
+        string trashDirectory = CreateTrashPath(trashName);
+        Directory.Move(pluginDirectory, trashDirectory);
+        string trashedFiles = Path.Combine(trashDirectory, FilesFolderName);
+        if (!deleteFiles && Directory.Exists(trashedFiles))
+        {
+            Directory.CreateDirectory(pluginDirectory);
+            Directory.Move(trashedFiles, Path.Combine(pluginDirectory, FilesFolderName));
+        }
+
+        SafeZipExtractor.TryDeleteDirectory(trashDirectory);
     }
 
     /// <summary>Removes a Direct install by its folder rather than its manifest id, which
@@ -395,15 +424,18 @@ public sealed class PluginInstaller
                 throw new LauncherUpdateException("That folder is not a plugin install.");
             }
 
-            string trashDirectory = CreateTrashPath(folderName);
-            Directory.Move(row.Directory, trashDirectory);
-            SafeZipExtractor.TryDeleteDirectory(trashDirectory);
+            RemoveCodeKeepingFiles(folderName, row.Directory, deleteStorage);
             TryDeleteIfEmpty(Path.Combine(_paths.PluginsDirectory, ".trash"));
 
-            if (deleteStorage && LauncherPluginManifest.HasValidInstallId(row.Id))
+            // A plugin keeps its files under its manifest id, which for a
+            // hand-unzipped folder need not match the folder's own name.
+            if (deleteStorage
+                && LauncherPluginManifest.HasValidInstallId(row.Id)
+                && !string.Equals(row.Id, folderName, StringComparison.OrdinalIgnoreCase))
             {
-                SafeZipExtractor.TryDeleteDirectory(
-                    Path.Combine(_paths.ConfigDirectory, "plugins", row.Id));
+                string idFiles = _paths.PluginFilesDirectory(row.Id);
+                SafeZipExtractor.TryDeleteDirectory(idFiles);
+                TryDeleteIfEmpty(Path.Combine(_paths.PluginsDirectory, row.Id));
             }
         }
     }
@@ -420,12 +452,26 @@ public sealed class PluginInstaller
 
         using (lease)
         {
+            // The trash first: an interrupted update may have moved the old
+            // folder there, and it has to be back in place before a staged
+            // copy of the player's files can be returned into it.
+            RecoverTrash();
+
             string stagingRoot = Path.Combine(_paths.PluginsDirectory, ".staging");
             if (Directory.Exists(stagingRoot))
             {
                 foreach (string directory in Directory.EnumerateDirectories(stagingRoot))
                 {
-                    SafeZipExtractor.TryDeleteDirectory(directory);
+                    ReclaimStaging(
+                        directory,
+                        Path.Combine(_paths.PluginsDirectory, IdFromTrashPath(directory)));
+                }
+
+                // A marker whose staging folder is already gone says nothing.
+                foreach (string marker in Directory.EnumerateFiles(stagingRoot, "*.player-files"))
+                {
+                    if (!Directory.Exists(marker[..^".player-files".Length]))
+                        VerifiedArtifactDownloader.TryDelete(marker);
                 }
 
                 TryDeleteIfEmpty(stagingRoot);
@@ -438,28 +484,6 @@ public sealed class PluginInstaller
                 {
                     VerifiedArtifactDownloader.TryDelete(file);
                 }
-            }
-
-            string trashRoot = Path.Combine(_paths.PluginsDirectory, ".trash");
-            if (Directory.Exists(trashRoot))
-            {
-                foreach (string trashDirectory in Directory.EnumerateDirectories(trashRoot))
-                {
-                    string id = IdFromTrashPath(trashDirectory);
-                    string original = Path.Combine(_paths.PluginsDirectory, id);
-                    // Record-less trash is a Direct removal, never a managed one; resurrecting it
-                    // would undo a removal that already succeeded.
-                    if (!Directory.Exists(original) && _recordStore.Find(id) is not null)
-                    {
-                        Directory.Move(trashDirectory, original);
-                    }
-                    else
-                    {
-                        SafeZipExtractor.TryDeleteDirectory(trashDirectory);
-                    }
-                }
-
-                TryDeleteIfEmpty(trashRoot);
             }
 
             bool changed = ReconcilePendingRecords();
@@ -515,7 +539,7 @@ public sealed class PluginInstaller
         foreach (InstalledPluginRecord record in _recordStore.Records.ToArray())
         {
             if (record.Pending is null
-                && !Directory.Exists(Path.Combine(_paths.PluginsDirectory, record.Id)))
+                && !HasPluginCode(Path.Combine(_paths.PluginsDirectory, record.Id)))
             {
                 _recordStore.Records.Remove(record);
                 changed = true;
@@ -567,10 +591,37 @@ public sealed class PluginInstaller
 
         Directory.CreateDirectory(_paths.PluginsDirectory);
         bool hadExistingFolder = Directory.Exists(targetDirectory);
-        string trashDirectory = CreateTrashPath(id);
-        if (hadExistingFolder)
+        string existingFiles = Path.Combine(targetDirectory, FilesFolderName);
+        string stagedFiles = Path.Combine(stagingDirectory, FilesFolderName);
+        // The player's files ride along inside the new folder, so the swap
+        // below stays one rename and never has a moment where they are gone.
+        bool carryFiles = hadExistingFolder && Directory.Exists(existingFiles);
+        if (carryFiles)
         {
-            Directory.Move(targetDirectory, trashDirectory);
+            // The marker goes down first: from here on, a files/ folder in
+            // this staging folder is the player's, and recovery hands it
+            // back instead of deleting it with the package.
+            File.WriteAllText(PlayerFilesMarker(stagingDirectory), id);
+            Directory.Move(existingFiles, stagedFiles);
+            AfterFilesStaged?.Invoke();
+        }
+
+        string trashDirectory = CreateTrashPath(id);
+        try
+        {
+            if (hadExistingFolder)
+            {
+                Directory.Move(targetDirectory, trashDirectory);
+            }
+        }
+        catch
+        {
+            if (carryFiles)
+            {
+                Directory.Move(stagedFiles, existingFiles);
+            }
+
+            throw;
         }
 
         try
@@ -582,6 +633,10 @@ public sealed class PluginInstaller
             if (hadExistingFolder)
             {
                 Directory.Move(trashDirectory, targetDirectory);
+                if (carryFiles)
+                {
+                    Directory.Move(stagedFiles, existingFiles);
+                }
             }
 
             throw;
@@ -601,7 +656,31 @@ public sealed class PluginInstaller
             SafeZipExtractor.TryDeleteDirectory(trashDirectory);
         }
 
+        VerifiedArtifactDownloader.TryDelete(PlayerFilesMarker(stagingDirectory));
         TryDeleteIfEmpty(Path.Combine(_paths.PluginsDirectory, ".trash"));
+    }
+
+    /// <summary>
+    /// The file beside a staging folder that says its files/ holds the
+    /// player's files rather than anything the package brought. It sits
+    /// outside the staging folder, so no package can ship it.
+    /// </summary>
+    private static string PlayerFilesMarker(string stagingDirectory) =>
+        Path.TrimEndingDirectorySeparator(stagingDirectory) + ".player-files";
+
+    /// <summary>
+    /// Hands a staging folder's files/ back only when the marker says they
+    /// are the player's, then deletes the staging folder and its marker.
+    /// Leaves both when the files could not be handed back.
+    /// </summary>
+    private static void ReclaimStaging(string stagingDirectory, string pluginDirectory)
+    {
+        string marker = PlayerFilesMarker(stagingDirectory);
+        if (File.Exists(marker) && !ReturnStagedFiles(stagingDirectory, pluginDirectory))
+            return;
+
+        SafeZipExtractor.TryDeleteDirectory(stagingDirectory);
+        VerifiedArtifactDownloader.TryDelete(marker);
     }
 
     private static void RefuseUnmanagedFolder(
@@ -609,7 +688,9 @@ public sealed class PluginInstaller
         string id,
         string targetDirectory)
     {
-        if (existingRecord is not null || !Directory.Exists(targetDirectory))
+        // A folder holding nothing but files/ is what removing a plugin's
+        // code leaves behind; installing the plugin again picks its files up.
+        if (existingRecord is not null || !HasPluginCode(targetDirectory))
             return;
 
         // The full path stays out of the player-facing message; the inner exception keeps it
@@ -619,6 +700,110 @@ public sealed class PluginInstaller
             + "launcher didn't install it. Move or delete that folder, then try again.",
             new LauncherUpdateException(
                 $"'{targetDirectory}' already exists and is not a launcher-managed plugin."));
+    }
+
+    /// <summary>
+    /// Refuses a package that ships its own top-level <c>files</c> folder:
+    /// that name inside a plugin's folder belongs to the player's saved
+    /// files, and an update carries the old one into the new version.
+    /// </summary>
+    private static void RefusePackagedFilesFolder(string stagingDirectory)
+    {
+        foreach (string entry in Directory.EnumerateFileSystemEntries(stagingDirectory))
+        {
+            if (string.Equals(
+                    Path.GetFileName(entry),
+                    FilesFolderName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new LauncherUpdateException(PackagedFilesRefusal);
+            }
+        }
+    }
+
+    /// <summary>Whether a plugin folder holds anything besides the player's files.</summary>
+    internal static bool HasPluginCode(string pluginDirectory) =>
+        Directory.Exists(pluginDirectory)
+        && Directory.EnumerateFileSystemEntries(pluginDirectory).Any(entry =>
+            !string.Equals(
+                Path.GetFileName(entry),
+                FilesFolderName,
+                StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Returns files a swap staged beside new code to their plugin folder.
+    /// True when nothing of the player's is left in <paramref name="stagingDirectory"/>.
+    /// </summary>
+    private static bool ReturnStagedFiles(string stagingDirectory, string pluginDirectory)
+    {
+        string staged = Path.Combine(stagingDirectory, FilesFolderName);
+        if (!Directory.Exists(staged))
+            return true;
+
+        string target = Path.Combine(pluginDirectory, FilesFolderName);
+        if (Directory.Exists(target))
+            return false;
+
+        try
+        {
+            Directory.CreateDirectory(pluginDirectory);
+            Directory.Move(staged, target);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Left where it is; the next Recover pass tries again.
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Restores a managed plugin whose update or removal was interrupted
+    /// with its folder in the trash, and otherwise returns any of the
+    /// player's files the trash still holds before deleting it.
+    /// </summary>
+    private void RecoverTrash()
+    {
+        string trashRoot = Path.Combine(_paths.PluginsDirectory, ".trash");
+        if (!Directory.Exists(trashRoot))
+            return;
+
+        foreach (string trashDirectory in Directory.EnumerateDirectories(trashRoot))
+        {
+            string id = IdFromTrashPath(trashDirectory);
+            string original = Path.Combine(_paths.PluginsDirectory, id);
+            // Record-less trash is a Direct removal, never a managed one; resurrecting it
+            // would undo a removal that already succeeded.
+            if (_recordStore.Find(id) is not null && !HasPluginCode(original))
+            {
+                string originalFiles = Path.Combine(original, FilesFolderName);
+                string trashFiles = Path.Combine(trashDirectory, FilesFolderName);
+                if (Directory.Exists(originalFiles))
+                {
+                    if (Directory.Exists(trashFiles))
+                    {
+                        // Two copies cannot arise from one swap; leave both
+                        // for the player rather than pick one.
+                        continue;
+                    }
+
+                    Directory.Move(originalFiles, trashFiles);
+                }
+
+                if (Directory.Exists(original))
+                {
+                    Directory.Delete(original);
+                }
+
+                Directory.Move(trashDirectory, original);
+            }
+            else if (ReturnStagedFiles(trashDirectory, original))
+            {
+                SafeZipExtractor.TryDeleteDirectory(trashDirectory);
+            }
+        }
+
+        TryDeleteIfEmpty(trashRoot);
     }
 
     private void Upsert(InstalledPluginRecord record)

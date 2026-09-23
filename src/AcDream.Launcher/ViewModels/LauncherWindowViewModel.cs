@@ -485,6 +485,13 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
 
     private void OnModalPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (ReferenceEquals(sender, FirstRunWizardShell)
+            && e.PropertyName == nameof(FirstRunInstallerViewModel.IsContentUpdate))
+        {
+            OnPropertyChanged(nameof(ShowNewInstallationNotice));
+            return;
+        }
+
         if (e.PropertyName != nameof(ProfileEditorDialogViewModel.IsOpen)
             && e.PropertyName != nameof(LauncherShellViewModel.IsOpen)
             && e.PropertyName != nameof(FirstRunInstallerViewModel.IsOpen)

@@ -39,8 +39,9 @@ public static class RuntimeWorldObjectProjection
         // A thing with no body yet has only that last word.
         Position? source = record is null
             ? null
-            : record.PhysicsBody?.CellPosition
-                ?? ConvertPosition(record.Snapshot.Position);
+            : record.PhysicsBody is { } body
+                ? LivePosition(body)
+                : ConvertPosition(record.Snapshot.Position);
         bool owned = item is not null && IsPlayerOwned(item, playerId, objects);
         IReadOnlyList<uint> activeSpells = objectId == playerId
             ? activeSpellIdsForPlayer?.Invoke(playerId) ?? Array.Empty<uint>()
@@ -103,6 +104,18 @@ public static class RuntimeWorldObjectProjection
             parentId = parent.ContainerId;
         }
         return false;
+    }
+
+    /// <summary>
+    /// Where a body is and which way it faces now. The cell frame keeps the
+    /// orientation the body had when it was last placed; turning changes only
+    /// the body's own orientation, which is how the local player's movement
+    /// reads its facing too.
+    /// </summary>
+    internal static Position LivePosition(PhysicsBody body)
+    {
+        Position carried = body.CellPosition;
+        return new Position(carried.ObjCellId, carried.Frame.Origin, body.Orientation);
     }
 
     public static bool HasPropertyData(PropertyBundle properties) =>

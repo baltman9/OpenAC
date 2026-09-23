@@ -258,8 +258,7 @@ public sealed class GraphicalPluginSessionTests
     private static ApplicationPathSet Paths(string root) => new(
         Path.Combine(root, "config"),
         Path.Combine(root, "data"),
-        Path.Combine(root, "cache"),
-        LegacyConfigDirectory: null);
+        Path.Combine(root, "cache"));
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void AssertPanelWasRegisteredAndReleaseBinding(

@@ -174,7 +174,8 @@ jobs:
             "$clientExpanded/Frameworks/libvulkan.1.dylib",
             "$clientExpanded/Frameworks/libMoltenVK.dylib",
             "$clientExpanded/Resources/vulkan/icd.d/MoltenVK_icd.json",
-            "$clientExpanded/Resources/PrivacyInfo.xcprivacy")) {
+            "$clientExpanded/Resources/PrivacyInfo.xcprivacy",
+            "$clientExpanded/single-install-root.capability")) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing packaged client path '$path'." }
           }
           & /bin/test -x "$clientExpanded/acdream-client"
@@ -275,7 +276,8 @@ jobs:
             "$clientExpanded/Frameworks/libvulkan.1.dylib",
             "$clientExpanded/Frameworks/libMoltenVK.dylib",
             "$clientExpanded/Resources/vulkan/icd.d/MoltenVK_icd.json",
-            "$clientExpanded/Resources/PrivacyInfo.xcprivacy")) {
+            "$clientExpanded/Resources/PrivacyInfo.xcprivacy",
+            "$clientExpanded/single-install-root.capability")) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing packaged client path '$path'." }
           }
           & /bin/test -x "$clientExpanded/acdream-client"

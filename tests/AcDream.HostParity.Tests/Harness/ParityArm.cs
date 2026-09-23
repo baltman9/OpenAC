@@ -110,10 +110,7 @@ internal abstract class ParityArm : IDisposable
     /// The folder this client's announcements land in, read by a scenario the
     /// way a second client on the same machine reads them.
     /// </summary>
-    internal string PeerDirectory => Path.Combine(
-        DataDirectory,
-        AcDream.Runtime.Plugins.RuntimeAutomationSurfaceInputs
-            .PeerDirectoryName);
+    internal string PeerDirectory => Path.Combine(DataDirectory, "plugin-peers");
 
     internal GameRuntimeDependencies Dependencies { get; }
 

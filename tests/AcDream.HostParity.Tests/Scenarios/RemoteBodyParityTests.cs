@@ -180,6 +180,31 @@ public sealed class RemoteBodyParityTests
         });
 
     /// <summary>
+    /// A creature that turns where it stands is told to a plugin as facing its
+    /// new way on both clients: the heading is the body's, not the one its
+    /// cell frame kept from when it was placed.
+    /// Mutation (2026-09-23), run: reading the cell frame's orientation left
+    /// the heading at the placement's on both arms.
+    /// </summary>
+    [Fact]
+    public void ACreatureThatTurnsIsToldToAPluginFacingItsNewWayOnBoth() =>
+        RemoteBodyScenario.Run(static (arm, transcript) =>
+        {
+            Stage(arm, transcript);
+            Quaternion turned =
+                Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI / 3f);
+            arm.Body.Body.Orientation = turned;
+
+            transcript.Step("turned");
+            Record(arm, transcript);
+
+            Assert.Equal(
+                AcDream.Core.Physics.Motion.MoveToMath.GetHeading(turned),
+                arm.PluginPosition().HeadingDegrees,
+                3);
+        });
+
+    /// <summary>
     /// A creature further off than the bubble a client keeps alive is not
     /// carried on either client, which is what keeps a crowded landblock
     /// affordable.
@@ -231,6 +256,7 @@ public sealed class RemoteBodyParityTests
         transcript.Record("plugin.cell", plugin.CellId);
         transcript.Record("plugin.eastWest", plugin.EastWest);
         transcript.Record("plugin.northSouth", plugin.NorthSouth);
+        transcript.Record("plugin.heading", plugin.HeadingDegrees);
 
         // Said outright rather than left to the transcript: a plugin is told
         // where the BODY is. Reading the server's last word about the
@@ -238,7 +264,9 @@ public sealed class RemoteBodyParityTests
         // of a second stale on both.
         Assert.Equal(
             AcDream.Runtime.Gameplay.RuntimeWorldObjectProjection
-                .ProjectNavigationPosition(arm.Body.Body.CellPosition),
+                .ProjectNavigationPosition(
+                    AcDream.Runtime.Gameplay.RuntimeWorldObjectProjection
+                        .LivePosition(arm.Body.Body)),
             plugin);
     }
 }

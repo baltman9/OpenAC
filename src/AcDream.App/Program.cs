@@ -11,18 +11,28 @@ GraphicalHostPlatformServices graphicalPlatform =
     GraphicalHostPlatformServices.Resolve();
 graphicalPlatform.ConfigureWindowBackend();
 ApplicationPathSet applicationPaths = graphicalPlatform.Paths;
-IReadOnlyList<string> migratedConfigurationFiles =
-    GraphicalLegacyConfigurationMigrator.Migrate(applicationPaths);
 
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Debug()
     .WriteTo.Console()
     .CreateLogger();
-foreach (string migratedConfigurationFile in migratedConfigurationFiles)
+// An earlier version's data folder named as the install folder is refused,
+// not taken over: its files stay as they were.
+if (LegacyApplicationLayout.RefusalToUseAsInstallFolder(applicationPaths) is { } earlierFolder)
 {
-    Log.Information(
-        "migrated legacy graphical configuration to {Path}",
-        migratedConfigurationFile);
+    Log.Error("{Reason}", earlierFolder);
+    Log.CloseAndFlush();
+    return 5;
+}
+// Held for the whole run, so a client update or a move of the install folder
+// waits for this client, however it was started.
+using InstallSessionLease? installSession =
+    InstallSessionLease.TryAcquireShared(applicationPaths);
+if (installSession is null)
+{
+    Log.Error("{Reason}", InstallSessionLease.BusyMessage(applicationPaths));
+    Log.CloseAndFlush();
+    return 5;
 }
 Log.Information(
     "graphical platform {RuntimeIdentifier}; native closure: {NativeDependencies}",
@@ -187,7 +197,7 @@ using var automation = AcDream.Runtime.Plugins.RuntimeAutomationBindings
             new AcDream.App.Plugins.GraphicalSurfaceInputParts
             {
                 Events = worldEvents,
-                DataDirectory = applicationPaths.DataDirectory,
+                PeerDirectory = applicationPaths.PluginPeersDirectory,
                 PluginTags = runtimeOptions.PluginTags,
             }));
 var lootClassifiers = new AcDream.Core.Plugins.PluginLootClassifierRegistry();
@@ -210,12 +220,12 @@ var host = new AppPluginHost(
     uiRegistry,
     automation,
     new AcDream.Core.Plugins.FilePluginStorage(
-        Path.Combine(applicationPaths.ConfigDirectory, "plugins")),
+        applicationPaths.PluginStorageDirectory),
     automation.PluginCommands,
     lootClassifiers,
     new AcDream.Core.Plugins.FilePluginStorage(
         runtimeOptions.VtankProfileDirectoryOverride
-            ?? VtankProfilesDefault.Resolve(applicationPaths.DataDirectory)),
+            ?? applicationPaths.VtankProfilesDirectory),
     new AcDream.App.Plugins.WindowPluginClipboard(
         () => window.ClipboardKeyboard,
         () => window.ClipboardDispatch),

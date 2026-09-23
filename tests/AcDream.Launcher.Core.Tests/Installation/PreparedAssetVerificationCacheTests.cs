@@ -23,8 +23,7 @@ public sealed class PreparedAssetVerificationCacheTests : IDisposable
         _paths = new ApplicationPathSet(
             Path.Combine(_root, "config"),
             Path.Combine(_root, "data"),
-            Path.Combine(_root, "cache"),
-            null);
+            Path.Combine(_root, "cache"));
         _dats = Path.Combine(_root, "retail-dats");
         Directory.CreateDirectory(_dats);
         foreach (string fileName in DatDirectoryLocator.RequiredFileNames)
@@ -218,7 +217,7 @@ public sealed class PreparedAssetVerificationCacheTests : IDisposable
     }
 
     private string CachePath => Path.Combine(
-        Path.GetFullPath(_paths.DataDirectory),
+        Path.GetFullPath(_paths.GameDataDirectory),
         "install.verification.json");
 
     private async Task<LauncherInstallRecordStore> CreateInstalledStoreAsync()

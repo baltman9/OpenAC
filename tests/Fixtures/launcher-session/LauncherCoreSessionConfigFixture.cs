@@ -35,8 +35,7 @@ internal static class LauncherCoreSessionConfigFixture
         var paths = new ApplicationPathSet(
             Path.Combine(Path.GetTempPath(), "composer-config"),
             Path.Combine(Path.GetTempPath(), "composer-data"),
-            Path.Combine(Path.GetTempPath(), "composer-cache"),
-            LegacyConfigDirectory: null);
+            Path.Combine(Path.GetTempPath(), "composer-cache"));
 
         ComposedSessionConfig composed = SessionConfigComposer.Compose(
             server,
@@ -109,6 +108,5 @@ internal static class LauncherCoreSessionConfigFixture
             new ApplicationPathSet(
                 Path.Combine(Path.GetTempPath(), "composer-config"),
                 Path.Combine(Path.GetTempPath(), "composer-data"),
-                Path.Combine(Path.GetTempPath(), "composer-cache"),
-                LegacyConfigDirectory: null));
+                Path.Combine(Path.GetTempPath(), "composer-cache")));
 }

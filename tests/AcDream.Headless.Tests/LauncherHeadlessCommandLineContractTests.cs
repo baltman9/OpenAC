@@ -24,6 +24,9 @@ public sealed class LauncherHeadlessCommandLineContractTests : IDisposable
                 PayloadExecutableNames.GraphicalHostForCurrentOs() + suffix));
         CreateStubExecutable(
             Path.Combine(AppDirectory, PayloadExecutableNames.HeadlessHost + suffix));
+        File.WriteAllText(
+            Path.Combine(AppDirectory, AcDream.Platform.ClientCapabilities.SingleInstallRootMarkerFileName),
+            "single root");
     }
 
     private static void CreateStubExecutable(string path)

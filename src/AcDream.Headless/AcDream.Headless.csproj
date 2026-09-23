@@ -17,4 +17,16 @@
   <ItemGroup>
     <ProjectReference Include="..\AcDream.Runtime\AcDream.Runtime.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- Says this host knows the single install folder; the launcher refuses
+         to start a client folder without it. Only the client and windowless
+         host carry it: the launcher checks the client's folder, not its own,
+         and a stray file in the macOS app bundle's code folder breaks its
+         signature. -->
+    <None Include="..\AcDream.Platform\single-install-root.capability"
+          Link="single-install-root.capability"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

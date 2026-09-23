@@ -46,6 +46,16 @@ public readonly record struct PluginLootContainer(
     public bool IsIdentified { get; init; }
 
     /// <summary>
+    /// True once the server has answered an appraisal of this corpse,
+    /// successfully or not. A corpse the server no longer has (one that
+    /// decayed while the character was away) is answered with nothing, so it
+    /// never becomes <see cref="IsIdentified"/>; a looter waiting on the
+    /// description can stop waiting when this is true. Always true when
+    /// <see cref="IsIdentified"/> is.
+    /// </summary>
+    public bool IsAppraisalAnswered { get; init; }
+
+    /// <summary>
     /// Whether <see cref="Position"/> carries a real place in the world. A
     /// corpse the client knows of but cannot place has none.
     /// </summary>
