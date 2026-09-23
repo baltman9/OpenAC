@@ -62,6 +62,7 @@ back at runtime instead.
 | `onclick` (button, tab, toggle) | `Action` | throws |
 | `slider onchange` | `Action<float>` | throws |
 | `field onchange`, `field onsubmit`, `menu onchange` | `Action<string>` | throws |
+| `field onup`, `field ondown` | `Action` | throws |
 | `list onchange` | `Action<int>` | throws |
 | `column` attributes | see "Columns" | see "Columns" |
 
@@ -127,6 +128,9 @@ Unknown or miscased element names throw at build time.
 Every element except the root also accepts `name` (or `id`), `visible`,
 `enabled`, `tooltip`, and `anchor`. The root `panel` accepts `visible` only as
 a binding.
+
+A `field` can bind `onup` and `ondown` to handle arrow keys while focused.
+Fields without these callbacks retain their usual history navigation.
 
 A `field` shows its bound `text` and goes on following it: while nobody is
 typing in the field, a value that changes behind it -- a profile loaded after

@@ -76,6 +76,8 @@ public sealed class UiField : UiElement
     public uint FocusFieldSprite { get; set; }
 
     public Action<string>? OnSubmit { get; set; }
+    public Action? OnUp { get; set; }
+    public Action? OnDown { get; set; }
     public Action? OnFocusGained { get; set; }
     public Action<string>? OnFocusLost { get; set; }
     public Action<string>? OnTextChanged { get; set; }
@@ -872,8 +874,8 @@ public sealed class UiField : UiElement
                     case Silk.NET.Input.Key.Right:     MoveCaret(1, shift);  StartRepeat(key); return true;
                     case Silk.NET.Input.Key.Home:      MoveCaretTo(0, shift); return true;
                     case Silk.NET.Input.Key.End:       MoveCaretTo(_text.Length, shift); return true;
-                    case Silk.NET.Input.Key.Up:        HistoryPrev(); return true;
-                    case Silk.NET.Input.Key.Down:      HistoryNext(); return true;
+                    case Silk.NET.Input.Key.Up:        if (OnUp is { } up) up(); else HistoryPrev(); return true;
+                    case Silk.NET.Input.Key.Down:      if (OnDown is { } down) down(); else HistoryNext(); return true;
                 }
                 return false;
             }
