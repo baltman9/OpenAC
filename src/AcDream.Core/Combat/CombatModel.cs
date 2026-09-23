@@ -77,13 +77,16 @@ public static class CombatInputPlanner
                     return false;
                 return lenient || !motionsPending;
             case CombatMode.Missile:
+                // The missile stances, in the numbering the server and the
+                // game data use: atlatl and thrown-weapon-with-shield sit
+                // three higher there than in the older client's own table.
                 if (forwardCommand != ReadyForwardCommand
-                    || currentStyle is not (0x8000003Fu
-                        or 0x80000041u
-                        or 0x80000043u
-                        or 0x80000047u
-                        or 0x80000138u
-                        or 0x80000139u))
+                    || currentStyle is not (CombatAnimationMotionCommands.BowCombat
+                        or CombatAnimationMotionCommands.CrossbowCombat
+                        or CombatAnimationMotionCommands.SlingCombat
+                        or CombatAnimationMotionCommands.ThrownWeaponCombat
+                        or CombatAnimationMotionCommands.AtlatlCombat
+                        or CombatAnimationMotionCommands.ThrownShieldCombat))
                 {
                     return false;
                 }
