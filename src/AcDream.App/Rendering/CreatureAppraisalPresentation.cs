@@ -16,6 +16,9 @@ internal interface ICreatureAppraisalRenderer
         Vector3 boundsMin,
         Vector3 boundsMax);
 
+    /// <summary>The objects the creature holds, drawn with it.</summary>
+    void SetAttachments(IReadOnlyList<WorldEntity> attachments) { }
+
     uint Render(int width, int height);
 }
 
@@ -32,6 +35,9 @@ internal interface ICreatureAppraisalFrameView
 internal interface ICreatureAppraisalEntityLookup
 {
     bool TryGet(uint serverGuid, out WorldEntity entity);
+
+    /// <summary>Adds the objects <paramref name="parent"/> holds right now.</summary>
+    void CollectAttachments(WorldEntity parent, List<WorldEntity> into) { }
 }
 
 internal interface ICreatureAppraisalCloneFactory
@@ -42,6 +48,12 @@ internal interface ICreatureAppraisalCloneFactory
         out WorldEntity? synchronizedClone,
         out Vector3 boundsMin,
         out Vector3 boundsMax);
+
+    /// <summary>
+    /// Copies of the objects the creature holds, placed on the copy the
+    /// way they sit on the creature. Called after <see cref="TrySynchronize"/>.
+    /// </summary>
+    IReadOnlyList<WorldEntity> SynchronizeAttachments(uint serverGuid) => [];
 }
 
 internal sealed class CreatureAppraisalFramePresenter :
@@ -88,12 +100,14 @@ internal sealed class CreatureAppraisalFramePresenter :
         {
             _clone = null;
             _renderer.SetCreature(null, Vector3.Zero, Vector3.Zero);
+            _renderer.SetAttachments([]);
             _view.SetTextureHandle(0u);
             return;
         }
 
         _clone = synchronized;
         _renderer.SetCreature(_clone, boundsMin, boundsMax);
+        _renderer.SetAttachments(_factory.SynchronizeAttachments(serverGuid));
         _view.SetTextureHandle(_renderer.Render(width, height));
     }
 }
@@ -157,15 +171,22 @@ internal sealed class LiveCreatureAppraisalEntityLookup :
     ICreatureAppraisalEntityLookup
 {
     private readonly LiveEntityRuntime _liveEntities;
+    private readonly EquippedChildRenderController? _equipped;
 
-    public LiveCreatureAppraisalEntityLookup(LiveEntityRuntime liveEntities)
+    public LiveCreatureAppraisalEntityLookup(
+        LiveEntityRuntime liveEntities,
+        EquippedChildRenderController? equipped = null)
     {
         _liveEntities = liveEntities
             ?? throw new ArgumentNullException(nameof(liveEntities));
+        _equipped = equipped;
     }
 
     public bool TryGet(uint serverGuid, out WorldEntity entity) =>
         _liveEntities.TryGetWorldEntity(serverGuid, out entity);
+
+    public void CollectAttachments(WorldEntity parent, List<WorldEntity> into) =>
+        _equipped?.CollectAttachedChildren(parent.Id, into);
 }
 
 internal sealed class RetailCreatureAppraisalCloneFactory :
@@ -213,12 +234,70 @@ internal sealed class RetailCreatureAppraisalCloneFactory :
         synchronizedClone = clone;
         return true;
     }
+
+    private readonly WorldEntity?[] _attachmentClones =
+        new WorldEntity?[CreatureAppraisalEntityBuilder.AttachmentRenderIds.Length];
+    private readonly uint[] _attachmentSources =
+        new uint[CreatureAppraisalEntityBuilder.AttachmentRenderIds.Length];
+    private readonly List<WorldEntity> _heldScratch = [];
+    private readonly List<WorldEntity> _attachments = [];
+
+    public IReadOnlyList<WorldEntity> SynchronizeAttachments(uint serverGuid)
+    {
+        _attachments.Clear();
+        _heldScratch.Clear();
+        if (_entities.TryGet(serverGuid, out WorldEntity source))
+            _entities.CollectAttachments(source, _heldScratch);
+        // A steady order keeps each held object in the same slot from frame
+        // to frame, so its copy is reused rather than rebuilt.
+        _heldScratch.Sort(static (a, b) => a.Id.CompareTo(b.Id));
+
+        int slot = 0;
+        foreach (WorldEntity held in _heldScratch)
+        {
+            if (slot >= _attachmentClones.Length)
+                break;
+            if (held.MeshRefs.Count == 0)
+                continue;
+
+            WorldEntity? clone = _attachmentClones[slot];
+            if (clone is null
+                || _attachmentSources[slot] != held.Id
+                || clone.SourceGfxObjOrSetupId != held.SourceGfxObjOrSetupId)
+            {
+                clone = CreatureAppraisalEntityBuilder.BuildAttachment(held, slot);
+                _attachmentClones[slot] = clone;
+                _attachmentSources[slot] = held.Id;
+            }
+
+            clone.ApplyAppearance(held.MeshRefs, held.PaletteOverride, held.PartOverrides);
+            clone.IsDrawVisible = held.IsDrawVisible;
+            clone.IsAncestorDrawVisible = held.IsAncestorDrawVisible;
+            CreatureAppraisalEntityBuilder.PlaceAttachment(clone, held, source);
+            _attachments.Add(clone);
+            slot++;
+        }
+
+        for (int i = slot; i < _attachmentClones.Length; i++)
+        {
+            _attachmentClones[i] = null;
+            _attachmentSources[i] = 0u;
+        }
+        return _attachments;
+    }
 }
 
 internal static class CreatureAppraisalEntityBuilder
 {
     public const uint RenderId = 0xDA11_D022u;
     public const uint ServerGuid = 0xDA11_D021u;
+
+    /// <summary>Render ids of the copies of what the creature holds, one per slot.</summary>
+    public static readonly uint[] AttachmentRenderIds =
+        [0xDA11_D023u, 0xDA11_D024u, 0xDA11_D025u, 0xDA11_D026u];
+
+    public static readonly uint[] AttachmentServerGuids =
+        [0xDA11_D027u, 0xDA11_D028u, 0xDA11_D029u, 0xDA11_D02Au];
     private const float HeadingDegrees = 191.367905f;
     private static readonly Quaternion Heading = Quaternion.CreateFromAxisAngle(
         Vector3.UnitZ,
@@ -245,6 +324,43 @@ internal static class CreatureAppraisalEntityBuilder
         if (source.HasLocalBounds)
             clone.SetLocalBounds(source.LocalBoundMin, source.LocalBoundMax);
         return clone;
+    }
+
+    public static WorldEntity BuildAttachment(WorldEntity held, int slot)
+    {
+        ArgumentNullException.ThrowIfNull(held);
+        var clone = new WorldEntity
+        {
+            Id = AttachmentRenderIds[slot],
+            ServerGuid = AttachmentServerGuids[slot],
+            SourceGfxObjOrSetupId = held.SourceGfxObjOrSetupId,
+            Position = Vector3.Zero,
+            Rotation = Heading,
+            MeshRefs = held.MeshRefs,
+            PaletteOverride = held.PaletteOverride,
+            PartOverrides = held.PartOverrides,
+            HiddenPartsMask = held.HiddenPartsMask,
+            Scale = held.Scale,
+            ParentCellId = null,
+            EffectCellId = null,
+        };
+        if (held.HasLocalBounds)
+            clone.SetLocalBounds(held.LocalBoundMin, held.LocalBoundMax);
+        return clone;
+    }
+
+    /// <summary>
+    /// Puts the copy of a held object where the object sits relative to the
+    /// creature holding it, measured on the creature and carried over to the
+    /// creature's copy (at the origin, turned to face the viewer).
+    /// </summary>
+    public static void PlaceAttachment(WorldEntity clone, WorldEntity held, WorldEntity holder)
+    {
+        Quaternion holderInverse = Quaternion.Inverse(holder.Rotation);
+        Vector3 offset = Vector3.Transform(held.Position - holder.Position, holderInverse);
+        Quaternion turn = Quaternion.Concatenate(held.Rotation, holderInverse);
+        clone.SetPosition(Vector3.Transform(offset, Heading));
+        clone.Rotation = Quaternion.Normalize(Quaternion.Concatenate(turn, Heading));
     }
 
     public static (Vector3 Min, Vector3 Max) RotatedBounds(
@@ -372,7 +488,8 @@ internal sealed class CreatureAppraisalViewportRenderer :
             meshAdapter,
             CreatureAppraisalEntityBuilder.RenderId,
             _camera,
-            "creature examination");
+            "creature examination",
+            attachmentRenderIds: CreatureAppraisalEntityBuilder.AttachmentRenderIds);
     }
 
     public bool TextureIsBottomUp => _renderer.TextureIsBottomUp;
@@ -386,6 +503,9 @@ internal sealed class CreatureAppraisalViewportRenderer :
             _camera.Fit(boundsMin, boundsMax);
         _renderer.SetEntity(creature);
     }
+
+    public void SetAttachments(IReadOnlyList<WorldEntity> attachments) =>
+        _renderer.SetAttachments(attachments);
 
     public uint Render(int width, int height) =>
         _renderer.Render(width, height);

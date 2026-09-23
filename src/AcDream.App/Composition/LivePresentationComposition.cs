@@ -997,7 +997,9 @@ internal sealed class LivePresentationCompositionPhase
                     examinationFrame,
                     appraisalController),
                 new RetailCreatureAppraisalCloneFactory(
-                    new LiveCreatureAppraisalEntityLookup(liveEntities)));
+                    new LiveCreatureAppraisalEntityLookup(
+                        liveEntities,
+                        equippedLease.Resource)));
         }
 
         CompositionAcquisitionScope.CompositionAcquisitionLease<
