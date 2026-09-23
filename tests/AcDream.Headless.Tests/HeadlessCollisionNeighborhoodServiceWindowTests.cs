@@ -70,6 +70,58 @@ public sealed class HeadlessCollisionNeighborhoodServiceWindowTests
                 .IsWithinServiceWindow(neighborCell));
     }
 
+    [Fact]
+    public void AWalkNorthPublishesOnlyTheNewRowMeasuredFromTheSameFrame()
+    {
+        // Arrived in 0x282A; the window is 0x27..0x29 by 0x29..0x2B. The
+        // player walks into 0x282B, so the row y = 0x2C is new.
+        const uint frame = 0x282AFFFFu;
+        var resident = new HashSet<uint>();
+        for (uint x = 0x27; x <= 0x29; x++)
+        {
+            for (uint y = 0x29; y <= 0x2B; y++)
+                resident.Add((x << 24) | (y << 16) | 0xFFFFu);
+        }
+        var plan = new Queue<HeadlessCollisionNeighborhood.PublicationSpec>();
+
+        HeadlessCollisionNeighborhood.BuildPublicationPlan(
+            0x282BFFFFu,
+            frame,
+            resident,
+            plan);
+
+        Assert.Equal(
+            [
+                (0x272CFFFFu, new System.Numerics.Vector3(-192f, 384f, 0f)),
+                (0x282CFFFFu, new System.Numerics.Vector3(0f, 384f, 0f)),
+                (0x292CFFFFu, new System.Numerics.Vector3(192f, 384f, 0f)),
+            ],
+            plan.Select(spec => (spec.LandblockId, spec.Origin)));
+        Assert.False(
+            HeadlessCollisionNeighborhood.IsInWindow(0x282BFFFFu, 0x2829FFFFu));
+        Assert.True(
+            HeadlessCollisionNeighborhood.IsInWindow(0x282BFFFFu, 0x292AFFFFu));
+    }
+
+    [Fact]
+    public void AFreshFramePublishesTheCentreFirstAtTheWorldsZero()
+    {
+        var plan = new Queue<HeadlessCollisionNeighborhood.PublicationSpec>();
+
+        HeadlessCollisionNeighborhood.BuildPublicationPlan(
+            0x282AFFFFu,
+            0x282AFFFFu,
+            new HashSet<uint>(),
+            plan);
+
+        HeadlessCollisionNeighborhood.PublicationSpec first = plan.Dequeue();
+        Assert.Equal(0x282AFFFFu, first.LandblockId);
+        Assert.Equal(System.Numerics.Vector3.Zero, first.Origin);
+        Assert.True(first.Required);
+        Assert.Equal(8, plan.Count);
+        Assert.All(plan, spec => Assert.False(spec.Required));
+    }
+
     private static void SeedResident(
         HeadlessCollisionNeighborhood neighborhood,
         uint landblockId)

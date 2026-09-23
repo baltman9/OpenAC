@@ -1838,6 +1838,64 @@ public sealed class HeadlessSessionHostTests
     }
 
     [Fact]
+    public void TheCollisionFollowsTheLocalPlayerWalkingIntoTheNextLandblock()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        GameRuntime runtime = host.Runtime;
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+        const uint player = 0x50000022u;
+        runtime.PlayerIdentity.ServerGuid = player;
+        runtime.EntityObjects.Physics.SetPosition.BeginCollisionGeneration(
+            0xA9B40000u, 1UL);
+        AddFlatLandblock(runtime.EntityObjects.Physics.Engine);
+        runtime.EntityObjects.Physics.SetPosition.CommitCollisionGeneration(
+            0xA9B40000u, 1UL, ready: true);
+        AcDream.Runtime.Session.RuntimeFirstEntryDriveController firstEntry =
+            CreateFirstEntryDrive(runtime);
+        RuntimeEntityRecord record = runtime.EntityObjects
+            .RegisterEntityWithInitialResidence(Spawn(player), isLocalPlayer: true)
+            .Canonical!;
+        Assert.True(runtime.EntityObjects.ApplyAcceptedSpawn(
+            record,
+            record.CreateIntegrationVersion,
+            record.Snapshot,
+            replaceGeneration: false));
+        var collision = new FixtureCollisionNeighborhood();
+        var projection = new HeadlessSessionWorldProjection(
+            runtime,
+            collision,
+            firstEntry,
+            CreateAcceptedPositionDrive(runtime));
+        projection.ProjectSpawn(record, isLocalPlayer: true);
+        PlayerMovementController controller =
+            Assert.IsType<PlayerMovementController>(
+                runtime.MovementOwner.Controller);
+        int centred = collision.CenterCount;
+
+        // A step north over the landblock's edge: the server has said
+        // nothing, the character's own movement moved it.
+        controller.SeedPlacementForTest(
+            new Vector3(48f, 193f, 50f),
+            0xA9B50001u, new Vector3(48f, 1f, 50f));
+        projection.PumpFirstEntry();
+
+        Assert.Equal(
+            0xA9B50000u,
+            Assert.Single(collision.Followed) & 0xFFFF0000u);
+        Assert.Equal(centred, collision.CenterCount);
+    }
+
+    [Fact]
     public void WorldProjectionHydratesCanonicalMovementAndTeleportState()
     {
         var operations = new FixtureSessionOperations();
@@ -3287,6 +3345,10 @@ public sealed class HeadlessSessionHostTests
         public bool IsCollisionPublished(uint fullCellId) => true;
 
         public bool IsQuiescent => true;
+
+        public void Follow(uint fullCellId)
+        {
+        }
     }
 
     [Fact]
@@ -3392,6 +3454,10 @@ public sealed class HeadlessSessionHostTests
         public bool IsCollisionPublished(uint fullCellId) => true;
 
         public bool IsQuiescent => true;
+
+        public void Follow(uint fullCellId)
+        {
+        }
     }
 
     internal static void CommitSyntheticCollisionGeneration(
@@ -4596,6 +4662,9 @@ public sealed class HeadlessSessionHostTests
     {
         public int CenterCount { get; private set; }
         public uint LastCell { get; private set; }
+        public List<uint> Followed { get; } = [];
+
+        public void Follow(uint fullCellId) => Followed.Add(fullCellId);
 
         public void CenterOn(uint fullCellId)
         {
@@ -4654,6 +4723,10 @@ public sealed class HeadlessSessionHostTests
 
         public bool IsQuiescent => _admission is null;
 
+        public void Follow(uint fullCellId)
+        {
+        }
+
         public void CenterOn(uint fullCellId)
         {
         }
@@ -4681,6 +4754,10 @@ public sealed class HeadlessSessionHostTests
         public bool IsCollisionPublished(uint fullCellId) => true;
 
         public bool IsQuiescent => QuiescentOverride;
+
+        public void Follow(uint fullCellId)
+        {
+        }
     }
 
     private sealed class FixtureEventRoute(

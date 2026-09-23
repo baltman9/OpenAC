@@ -16,6 +16,15 @@ internal interface IHeadlessCollisionNeighborhood
 {
     void CenterOn(uint fullCellId);
 
+    /// <summary>
+    /// Keeps the published collision around the local player while it walks:
+    /// the window of landblocks moves with the player, the frame the world is
+    /// measured in stays where it was. <see cref="CenterOn"/> starts a new
+    /// frame and is for arrivals the server decides (login, portals, forced
+    /// moves); walking into the next landblock is not one of those.
+    /// </summary>
+    void Follow(uint fullCellId);
+
     bool IsReady(uint fullCellId);
 
     bool IsWithinServiceWindow(uint fullCellId);
@@ -177,7 +186,7 @@ internal sealed class HeadlessCollisionNeighborhood
     : IHeadlessCollisionNeighborhood,
       AcDream.Runtime.Session.IRuntimeRemotePlacementServiceWindow
 {
-    private readonly record struct PublicationSpec(
+    internal readonly record struct PublicationSpec(
         uint LandblockId,
         Vector3 Origin,
         bool Required);
@@ -191,7 +200,9 @@ internal sealed class HeadlessCollisionNeighborhood
     private HeadlessCollisionGenerationTransaction? _pendingPublication;
     private bool _pendingPublicationCancellation;
     private bool _resetRequired;
+    private bool _slideRequired;
     private bool _publicationPlanBuilt;
+    private uint _frameLandblock;
     private uint _requestedCenterLandblock;
     private uint _requestedFullCell;
     private uint _centerLandblock;
@@ -240,6 +251,34 @@ internal sealed class HeadlessCollisionNeighborhood
             return;
         }
         AdvanceWork();
+    }
+
+    public void Follow(uint fullCellId)
+    {
+        uint center = CanonicalLandblock(fullCellId);
+        // Nothing to follow from until a frame exists, and a new frame the
+        // server asked for finishes before the window moves inside it.
+        if (center == 0x0000FFFFu
+            || _frameLandblock == 0u
+            || _resetRequired)
+        {
+            return;
+        }
+        if (center != _requestedCenterLandblock)
+        {
+            _requestedCenterLandblock = center;
+            _requestedFullCell = fullCellId;
+            _slideRequired = true;
+            _publicationPlanBuilt = false;
+            _publicationQueue.Clear();
+            _pendingPublicationCancellation =
+                _pendingPublication is not null;
+            AdvanceWork();
+            return;
+        }
+        _requestedFullCell = fullCellId;
+        if (!IsQuiescent || _retirementQueue.Count != 0)
+            AdvanceWork();
     }
 
     public bool IsWithinServiceWindow(uint fullCellId)
@@ -407,7 +446,20 @@ internal sealed class HeadlessCollisionNeighborhood
             foreach (uint landblock in _resident)
                 _retirementQueue.Enqueue(landblock);
             _centerLandblock = 0u;
+            _frameLandblock = _requestedCenterLandblock;
             _resetRequired = false;
+            _slideRequired = false;
+        }
+
+        if (_slideRequired)
+        {
+            _retirementQueue.Clear();
+            foreach (uint landblock in _resident)
+            {
+                if (!IsInWindow(_requestedCenterLandblock, landblock))
+                    _retirementQueue.Enqueue(landblock);
+            }
+            _slideRequired = false;
         }
 
         while (_retirementQueue.TryPeek(out uint retiring))
@@ -424,6 +476,8 @@ internal sealed class HeadlessCollisionNeighborhood
         {
             BuildPublicationPlan(
                 _requestedCenterLandblock,
+                _frameLandblock,
+                _resident,
                 _publicationQueue);
             _publicationPlanBuilt = true;
         }
@@ -466,16 +520,32 @@ internal sealed class HeadlessCollisionNeighborhood
         }
     }
 
-    private static void BuildPublicationPlan(
+    /// <summary>
+    /// The landblocks to publish for a window centred on
+    /// <paramref name="center"/>, centre first, each placed by its distance
+    /// from <paramref name="frame"/> - the landblock whose corner is the
+    /// world's zero. What is already resident stays as it is.
+    /// </summary>
+    internal static void BuildPublicationPlan(
         uint center,
+        uint frame,
+        IReadOnlySet<uint> resident,
         Queue<PublicationSpec> destination)
     {
-        destination.Enqueue(new PublicationSpec(
-            center,
-            Vector3.Zero,
-            Required: true));
         int centerX = (int)((center >> 24) & 0xFFu);
         int centerY = (int)((center >> 16) & 0xFFu);
+        int frameX = (int)((frame >> 24) & 0xFFu);
+        int frameY = (int)((frame >> 16) & 0xFFu);
+        if (!resident.Contains(center))
+        {
+            destination.Enqueue(new PublicationSpec(
+                center,
+                new Vector3(
+                    (centerX - frameX) * 192f,
+                    (centerY - frameY) * 192f,
+                    0f),
+                Required: true));
+        }
         for (int dx = -1; dx <= 1; dx++)
         {
             for (int dy = -1; dy <= 1; dy++)
@@ -486,12 +556,24 @@ internal sealed class HeadlessCollisionNeighborhood
                 int y = centerY + dy;
                 if ((uint)x > byte.MaxValue || (uint)y > byte.MaxValue)
                     continue;
+                uint landblock = ((uint)x << 24) | ((uint)y << 16) | 0xFFFFu;
+                if (resident.Contains(landblock))
+                    continue;
                 destination.Enqueue(new PublicationSpec(
-                    ((uint)x << 24) | ((uint)y << 16) | 0xFFFFu,
-                    new Vector3(dx * 192f, dy * 192f, 0f),
+                    landblock,
+                    new Vector3((x - frameX) * 192f, (y - frameY) * 192f, 0f),
                     Required: false));
             }
         }
+    }
+
+    internal static bool IsInWindow(uint center, uint landblock)
+    {
+        int dx = Math.Abs(
+            (int)((landblock >> 24) & 0xFFu) - (int)((center >> 24) & 0xFFu));
+        int dy = Math.Abs(
+            (int)((landblock >> 16) & 0xFFu) - (int)((center >> 16) & 0xFFu));
+        return dx <= 1 && dy <= 1;
     }
 
     private static uint CanonicalLandblock(uint fullCellId) =>
@@ -675,6 +757,14 @@ internal sealed class HeadlessSessionWorldProjection
 
     internal void PumpFirstEntry()
     {
+        if (_runtime.MovementOwner.Controller is
+            {
+                State: not PlayerState.PortalSpace,
+                CellId: not 0u,
+            } controller)
+        {
+            _collision.Follow(controller.CellId);
+        }
         if (_requestedLocalPlayerCell != 0u)
             _ = _collision.IsReady(_requestedLocalPlayerCell);
         if (!_collision.IsQuiescent)
