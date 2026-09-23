@@ -254,7 +254,8 @@ public sealed record AppraisalRuntimeBindings(
     Func<string> PlayerName,
     Action<uint, string> SendSetInscription,
     Action<string> DisplaySystemMessage,
-    Func<int> LocalFactionBits);
+    Func<int> LocalFactionBits,
+    Func<uint, AppraisalPlayerSkill>? PlayerSkill = null);
 
 public sealed record VendorRuntimeBindings(
     VendorState State,
@@ -2077,7 +2078,8 @@ public sealed class RetailUiRuntime : IDisposable
             magicSkill: _bindings.Magic.MagicSkill,
             spellComponentTemplates: spellComponentTemplates,
             resolveCharacterTitle: ResolveCharacterTitle,
-            localFactionBits: _bindings.Appraisal.LocalFactionBits);
+            localFactionBits: _bindings.Appraisal.LocalFactionBits,
+            playerSkill: _bindings.Appraisal.PlayerSkill);
         if (controller is null)
         {
             Console.WriteLine(

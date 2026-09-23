@@ -50,6 +50,45 @@ public sealed class ItemAppraisalTextFormatterTests
         Assert.DoesNotContain("Unknown Skill", report);
     }
 
+    // OpenAC #172: a shield's appraisal follows its base level with the
+    // level the viewer can use: their buffed Shield skill, halved unless
+    // specialized, capped at the shield's level. Mutations: dropping the
+    // halving turns the trained row red; dropping the cap turns the
+    // specialized row red; dropping the line turns them all red.
+    [Theory]
+    [InlineData(300, 2u, 150)]
+    [InlineData(301, 1u, 150)]
+    [InlineData(150, 3u, 150)]
+    [InlineData(500, 3u, 200)]
+    [InlineData(0, 0u, 0)]
+    public void ShieldAppraisal_ShowsTheEffectiveLevelFromTheViewersShieldSkill(
+        int skillLevel,
+        uint advancementClass,
+        int expected)
+    {
+        var obj = new ClientObject
+        {
+            ObjectId = 0x50000012u,
+            Name = "Kite Shield",
+            ValidLocations = EquipMask.Shield,
+        };
+        var properties = new PropertyBundle();
+        properties.Ints[28u] = 200;
+
+        string report = ItemAppraisalTextFormatter.Build(
+            obj,
+            Parsed(properties),
+            _ => null,
+            playerSkill: skill => skill == 48u
+                ? new AppraisalPlayerSkill(skillLevel, advancementClass)
+                : default);
+
+        Assert.Contains("Base Shield Level: 200", report);
+        Assert.Contains(
+            $"Effective Shield Level : {expected} (with Shield skill)",
+            report);
+    }
+
     // OpenAC #143: the server sends an item's mana drain as a negative rate,
     // and the line read "1 point per -20 seconds". The interval is the size of
     // the rate, rounded half up, and the wording does not change for one.

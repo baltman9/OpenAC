@@ -57,6 +57,43 @@ public sealed class ChatVmTaggedSenderTests
         Assert.False(ChatVM.ShouldTagSender(Speech("P", "hi", 0x70000000u)));
     }
 
+    /// <summary>
+    /// Allegiance, fellowship and the other channels name their speaker
+    /// without an id; the name is still a link and draws in the link color.
+    /// Mutation: require a player id for channel lines too and the
+    /// allegiance speaker comes back untagged.
+    /// </summary>
+    [Theory]
+    [InlineData("Allegiance")]
+    [InlineData("Fellowship")]
+    [InlineData("Trade")]
+    public void AChannelSpeakerWithoutAnIdIsTagged(string channel)
+    {
+        ChatLog log = new();
+        log.OnChannelBroadcast(0x02u, "Dww", "hi", channelName: channel);
+        ChatEntry entry = log.Snapshot()[^1];
+
+        IReadOnlyList<ChatTextSpan> spans =
+            ChatTagMarkup.Parse(ChatVM.FormatEntryTagged(entry));
+
+        ChatTextSpan name = Assert.Single(spans, span => span.Tag is not null);
+        Assert.Equal("Dww", name.Text);
+        Assert.True(name.Tag!.Value.TryGetIidString(out _, out string tellTo));
+        Assert.Equal("Dww", tellTo);
+        Assert.Equal(
+            ChatVM.FormatEntry(entry),
+            string.Concat(spans.Select(span => span.Text)));
+    }
+
+    [Fact]
+    public void OurOwnChannelLineIsNotTagged()
+    {
+        ChatLog log = new();
+        log.OnSelfSent(ChatKind.Channel, "hi", 0u, "Allegiance");
+
+        Assert.False(ChatVM.ShouldTagSender(log.Snapshot()[^1]));
+    }
+
     [Fact]
     public void OurOwnLinesAndUnnamedSendersAreNotTagged()
     {

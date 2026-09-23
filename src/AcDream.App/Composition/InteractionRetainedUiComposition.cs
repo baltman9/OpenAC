@@ -806,7 +806,10 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                         d.Communication.AddText(text, RetailLogTextType.ClientLocal),
                     LocalFactionBits: () =>
                         d.Character.LocalPlayer.Properties.GetInt(
-                            (uint)PropertyInt.Faction1Bits)),
+                            (uint)PropertyInt.Faction1Bits),
+                    PlayerSkill: skillId => new AppraisalPlayerSkill(
+                        d.Character.LocalPlayer.GetEffectiveSkill(skillId) ?? 0,
+                        d.Character.LocalPlayer.GetSkill(skillId)?.Status ?? 0u)),
                 Options: new OptionsRuntimeBindings(
                     CommandBus: () => late.Session.Commands,
                     IsGrounded: () =>
