@@ -34,6 +34,16 @@ if (InstallRootMigration.StartupBlockReason(
     Log.CloseAndFlush();
     return 5;
 }
+// Held for the whole run, so a client update, a move of the install folder
+// or removing the old folders waits for this client, however it was started.
+using InstallSessionLease? installSession =
+    InstallSessionLease.TryAcquireShared(applicationPaths);
+if (installSession is null)
+{
+    Log.Error("{Reason}", InstallSessionLease.BusyMessage(applicationPaths));
+    Log.CloseAndFlush();
+    return 5;
+}
 Log.Information(
     "graphical platform {RuntimeIdentifier}; native closure: {NativeDependencies}",
     graphicalPlatform.RuntimeIdentifier,

@@ -80,6 +80,28 @@ public sealed class InstallRootMoverTests : IDisposable
         Assert.False(File.Exists(ApplicationRootPointer.PathFor(_defaultRoot)));
     }
 
+    /// <summary>
+    /// A client or bot started by hand holds the same session lock the
+    /// launcher's barrier uses, so the move refuses under it too. Mutation:
+    /// giving the barrier a different lock file fails this.
+    /// </summary>
+    [Fact]
+    public void MoveIsRefusedWhileAHandStartedClientRuns()
+    {
+        SeedInstall();
+        using InstallSessionLease? client = InstallSessionLease.TryAcquireShared(_paths);
+        var mover = new InstallRootMover(_paths, _defaultRoot, (_, _) => true);
+
+        InstallRootMoveResult result = mover.Move(Path.Combine(_scratch, "Games", "OpenAC"));
+
+        Assert.NotNull(client);
+        Assert.False(result.Moved);
+        Assert.Equal(InstallRootMover.SessionRefusal, result.Message);
+        Assert.Equal(
+            InstallSessionLease.LockPath(_paths),
+            new UpdateSessionBarrier(_paths.DataDirectory).LockPath);
+    }
+
     /// <summary>Mutation: letting a command-line root be moved through the pointer fails this.</summary>
     [Fact]
     public void AnExplicitlyNamedRootCannotBeMovedFromTheLauncher()

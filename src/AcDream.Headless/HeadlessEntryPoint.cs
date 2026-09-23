@@ -102,6 +102,15 @@ internal static class HeadlessEntryPoint
                     error.WriteLine(migrationBlock);
                     return (int)HeadlessExitCode.ConfigurationError;
                 }
+                // Held for the whole run, like the window client's, so an
+                // update or a move of the install waits for this bot.
+                using InstallSessionLease? installSession =
+                    InstallSessionLease.TryAcquireShared(paths.Application);
+                if (installSession is null)
+                {
+                    error.WriteLine(InstallSessionLease.BusyMessage(paths.Application));
+                    return (int)HeadlessExitCode.ConfigurationError;
+                }
                 bool consoleEnabled = HeadlessConsoleOptions.Resolve(
                     commandLine.ConsoleEnabled,
                     standardInputIsTerminal);

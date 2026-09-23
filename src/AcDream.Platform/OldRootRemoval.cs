@@ -50,6 +50,10 @@ public sealed record OldRootRemovalPlan(
 /// <summary>Plans and performs "Remove the old folders".</summary>
 public static class OldRootRemoval
 {
+    /// <summary>Why the old folders are not removed while anything runs.</summary>
+    public const string SessionRefusal =
+        "Close every OpenAC client and bot before removing the old folders.";
+
     /// <summary>Works out what removing the old folders would delete.</summary>
     public static OldRootRemovalPlan Plan(ApplicationPathSet paths)
     {
@@ -107,6 +111,14 @@ public static class OldRootRemoval
     public static IReadOnlyList<string> Remove(ApplicationPathSet paths)
     {
         ArgumentNullException.ThrowIfNull(paths);
+
+        // A running client or bot (started by the launcher or by hand) holds
+        // the session lock; nothing is deleted while one could still be
+        // reading from an old folder.
+        using InstallSessionLease? exclusive = InstallSessionLease.TryAcquireExclusive(paths);
+        if (exclusive is null)
+            return [SessionRefusal];
+
         OldRootRemovalPlan plan = Plan(paths);
         if (plan.Refusals.Count > 0)
             return plan.Refusals;
