@@ -613,7 +613,7 @@ public sealed class LauncherInstallerTests : IDisposable
                  {
                      fixtureDll,
                      "orphan-parent",
-                     store.DataDirectory,
+                     _paths.DataDirectory,
                      _dats,
                      _bakeExecutable,
                      schedule,
