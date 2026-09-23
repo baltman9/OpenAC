@@ -152,6 +152,14 @@ setup form says so and names the old folders. They are left exactly as they
 were and are no longer used; delete them once you no longer need anything in
 them.
 
+If you started the old launcher with `--data-dir` (or `ACDREAM_DATA_DIR`), the
+update itself still finishes in that folder, but the new launcher will not use
+that folder: `--data-dir` now names the whole install folder, and one that
+holds an earlier version's files (`launcher-update`, `pak`, `install.json`,
+`install.verification.json` or `crash-reports` at its top) is refused with a
+message saying so. Start the launcher with `--root-dir <new empty folder>`
+instead, or without the option to use the default folder.
+
 ## Testing a pre-release
 
 Pre-releases are development builds. The launcher never finds one by itself:
@@ -170,8 +178,10 @@ acdream-launcher --update-manifest-uri https://github.com/eriknihlen/OpenAC/rele
 That launcher then offers the pre-release's client, and the pre-release's
 launcher as well when it is newer than the one running. The option is not
 saved: start the launcher without it and it is back on the ordinary feed. Add
-`--root-dir <folder>` (or `--config-dir`, `--data-dir` and `--cache-dir`, all
-three together) to keep the test install away from your real one.
+`--root-dir <new empty folder>` to keep the test install away from your real
+one. (`--config-dir`, `--data-dir` and `--cache-dir`, all three together, still
+work, but `--data-dir` names the install folder itself, so give it a new folder
+too; a folder an earlier version used is refused.)
 
 **Build one from source.** `tools/run-launcher-trial.ps1` publishes the client
 and launcher from a checkout, installs the client into a scratch directory and
