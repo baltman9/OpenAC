@@ -113,6 +113,9 @@ public sealed class InstallFolderViewModel : ObservableObject
     private bool _clientStarted;
     private IReadOnlyList<string> _oldFolders;
     private string? _oldFoldersStatus;
+    private readonly Func<InstallRootMigrationResult>? _retryMigration;
+    private string? _migrationNotice;
+    private string? _migrationBlockReason;
     private OldRootRemovalPlan? _removalPlan;
     private bool _isReviewingOldFolderRemoval;
     private IReadOnlyList<string> _oldFolderRemovalItems = [];
@@ -130,7 +133,8 @@ public sealed class InstallFolderViewModel : ObservableObject
         IUiDispatcher dispatcher,
         Func<bool> canMove,
         Action restartLauncher,
-        InstallRootMigrationResult? migration = null)
+        InstallRootMigrationResult? migration = null,
+        Func<InstallRootMigrationResult>? retryMigration = null)
     {
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _mover = mover ?? throw new ArgumentNullException(nameof(mover));
@@ -145,8 +149,14 @@ public sealed class InstallFolderViewModel : ObservableObject
             new InstallFolderRowViewModel("Settings", paths.ConfigDirectory, () => _shell),
             new InstallFolderRowViewModel("Logs", paths.LogsDirectory, () => _shell),
         ];
-        MigrationNotice = DescribeMigration(migration, paths.RootDirectory);
-        MigrationIncomplete = migration?.Outcome == InstallRootMigrationOutcome.Incomplete;
+        _retryMigration = retryMigration;
+        _migrationNotice = DescribeMigration(migration, paths.RootDirectory);
+        _migrationBlockReason = migration is null
+            ? null
+            : InstallRootMigration.StartupBlockReason(migration, paths.RootDirectory);
+        RetryMigrationCommand = new RelayCommand(
+            RetryMigration,
+            () => MigrationBlocksSessions && _retryMigration is not null);
         _oldFolders = InstallRootMigration.ReadOldRoots(paths);
         MoveCommand = new AsyncRelayCommand(PickAndMoveAsync, () => CanMove);
         RemoveOldFoldersCommand = new RelayCommand(ReviewOldFolderRemoval, () => CanRemoveOldFolders);
@@ -211,10 +221,41 @@ public sealed class InstallFolderViewModel : ObservableObject
     public bool HasMoveError => !string.IsNullOrWhiteSpace(MoveError);
 
     /// <summary>What the startup migration did, or null when it did nothing worth saying.</summary>
-    public string? MigrationNotice { get; }
+    public string? MigrationNotice
+    {
+        get => _migrationNotice;
+        private set
+        {
+            if (SetProperty(ref _migrationNotice, value))
+                OnPropertyChanged(nameof(HasMigrationNotice));
+        }
+    }
 
     /// <summary>True when the startup migration could not move everything.</summary>
-    public bool MigrationIncomplete { get; }
+    public bool MigrationIncomplete => MigrationBlocksSessions;
+
+    /// <summary>
+    /// Why no session may start: the old folders are only half moved, or
+    /// another process is still moving them. Null when sessions may start.
+    /// </summary>
+    public string? MigrationBlockReason
+    {
+        get => _migrationBlockReason;
+        private set
+        {
+            if (SetProperty(ref _migrationBlockReason, value))
+            {
+                OnPropertyChanged(nameof(MigrationBlocksSessions));
+                RetryMigrationCommand.NotifyCanExecuteChanged();
+            }
+        }
+    }
+
+    /// <summary>True while the migration keeps sessions from starting.</summary>
+    public bool MigrationBlocksSessions => MigrationBlockReason is not null;
+
+    /// <summary>Runs the migration again; restarts the launcher when it finishes.</summary>
+    public RelayCommand RetryMigrationCommand { get; }
 
     /// <summary>Whether <see cref="MigrationNotice"/> has something to show.</summary>
     public bool HasMigrationNotice => !string.IsNullOrWhiteSpace(MigrationNotice);
@@ -357,6 +398,22 @@ public sealed class InstallFolderViewModel : ObservableObject
 
         MoveStatus = result.Message + " The launcher restarts now.";
         _restartLauncher();
+    }
+
+    private void RetryMigration()
+    {
+        if (_retryMigration is null)
+            return;
+
+        InstallRootMigrationResult result = _retryMigration();
+        MigrationNotice = DescribeMigration(result, _paths.RootDirectory);
+        MigrationBlockReason = InstallRootMigration.StartupBlockReason(result, _paths.RootDirectory);
+        if (MigrationBlockReason is null)
+        {
+            // Every store this launcher opened was opened on the half-moved
+            // root; a fresh start reads the finished one.
+            _restartLauncher();
+        }
     }
 
     /// <summary>Asks before deleting: what would go, with sizes, or why nothing can.</summary>

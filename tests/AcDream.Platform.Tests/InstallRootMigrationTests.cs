@@ -386,6 +386,70 @@ public sealed class InstallRootMigrationTests : IDisposable
         Assert.Equal("2.0 GB", OldRootRemovalItem.FormatBytes(2L * 1024 * 1024 * 1024));
     }
 
+    /// <summary>
+    /// A second process finding the migration in progress waits for it, then
+    /// gives up as Busy rather than running on a half-moved root.
+    /// Mutation: returning Busy without waiting fails this.
+    /// </summary>
+    [Fact]
+    public void ABusyMigrationIsWaitedForThenRefused()
+    {
+        Directory.CreateDirectory(_paths.RootDirectory);
+        using (new FileStream(
+                   Path.Combine(_paths.RootDirectory, ".migration.lock"),
+                   FileMode.OpenOrCreate,
+                   FileAccess.ReadWrite,
+                   FileShare.None))
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            InstallRootMigrationResult result = InstallRootMigration.RunWaitingForOthers(
+                _old,
+                _paths,
+                sameVolume: null,
+                TimeSpan.FromMilliseconds(600));
+
+            Assert.Equal(InstallRootMigrationOutcome.Busy, result.Outcome);
+            Assert.True(clock.Elapsed >= TimeSpan.FromMilliseconds(500), clock.Elapsed.ToString());
+            Assert.NotNull(InstallRootMigration.StartupBlockReason(result, _paths.RootDirectory));
+        }
+    }
+
+    /// <summary>Mutation: giving up at the first Busy fails this.</summary>
+    [Fact]
+    public async Task AMigrationThatFinishesWhileWaitingLetsTheWaiterProceed()
+    {
+        Directory.CreateDirectory(_paths.RootDirectory);
+        var holder = new FileStream(
+            Path.Combine(_paths.RootDirectory, ".migration.lock"),
+            FileMode.OpenOrCreate,
+            FileAccess.ReadWrite,
+            FileShare.None);
+        Task release = Task.Delay(300).ContinueWith(_ => holder.Dispose(), TaskScheduler.Default);
+
+        InstallRootMigrationResult result = InstallRootMigration.RunWaitingForOthers(
+            _old,
+            _paths,
+            sameVolume: null,
+            TimeSpan.FromSeconds(10));
+        await release;
+
+        Assert.Equal(InstallRootMigrationOutcome.Fresh, result.Outcome);
+        Assert.Null(InstallRootMigration.StartupBlockReason(result, _paths.RootDirectory));
+    }
+
+    /// <summary>Mutation: letting an incomplete migration start sessions fails this.</summary>
+    [Fact]
+    public void AnIncompleteMigrationBlocksStartup()
+    {
+        SeedOldLayout();
+        Directory.CreateDirectory(_paths.RootDirectory);
+        File.WriteAllText(_paths.LogsDirectory, "in the way");
+
+        InstallRootMigrationResult result = InstallRootMigration.Run(_old, _paths);
+
+        Assert.Contains("retry", InstallRootMigration.StartupBlockReason(result, _paths.RootDirectory), StringComparison.Ordinal);
+    }
+
     private void SeedOldLayout()
     {
         string data = _old.DataDirectory;

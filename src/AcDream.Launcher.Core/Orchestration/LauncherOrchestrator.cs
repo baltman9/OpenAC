@@ -30,6 +30,7 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
     private string _installationStatus;
     private PluginCatalog? _pluginCatalog;
     private bool _disposed;
+    private string? _launchBlock;
 
     public LauncherOrchestrator(
         LauncherProfileStore profileStore,
@@ -100,8 +101,39 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
         }
     }
 
+    /// <summary>
+    /// Stops every launch and character refresh with <paramref name="reason"/>
+    /// until it is cleared, as while the old folders are only half moved into
+    /// the install root. Null clears it.
+    /// </summary>
+    public void SetLaunchBlock(string? reason)
+    {
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            _launchBlock = string.IsNullOrWhiteSpace(reason) ? null : reason;
+        }
+
+        RaiseStateChanged();
+    }
+
+    private LauncherCapability? LaunchBlockCapability()
+    {
+        lock (_gate)
+        {
+            return _launchBlock is { } reason
+                ? LauncherCapability.Unavailable(reason)
+                : null;
+        }
+    }
+
     public LauncherCapability GetLaunchCapability(LaunchMode mode)
     {
+        if (LaunchBlockCapability() is { } blocked)
+        {
+            return blocked;
+        }
+
         LauncherCapability platformCapability = _platform.ForLaunchMode(mode);
         if (!platformCapability.IsAvailable)
         {
@@ -188,6 +220,10 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverName);
         ArgumentException.ThrowIfNullOrWhiteSpace(accountName);
+        if (LaunchBlockCapability() is { } blocked)
+        {
+            return blocked;
+        }
 
         LauncherCapability platformCapability =
             _platform.ForLaunchMode(LaunchMode.Headless);

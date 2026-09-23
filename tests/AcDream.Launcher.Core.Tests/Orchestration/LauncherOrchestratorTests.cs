@@ -154,6 +154,34 @@ public sealed class LauncherOrchestratorTests : IDisposable
                 || property.Name.Contains("credential", StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// While the install is half moved nothing starts, and the reason is the
+    /// one the player sees. Mutation: skipping the block in GetLaunchCapability
+    /// or GetProbeCapability fails this.
+    /// </summary>
+    [Fact]
+    public async Task ALaunchBlockStopsLaunchesAndCharacterRefreshesUntilCleared()
+    {
+        var supervisors = new FakeSupervisorFactory();
+        using LauncherOrchestrator orchestrator = CreateOrchestrator(
+            configService: new RecordingConfigService(),
+            supervisorFactory: supervisors,
+            statusSourceFactory: new QueueStatusSourceFactory());
+        const string reason = "Moving the old OpenAC folders is not finished.";
+
+        orchestrator.SetLaunchBlock(reason);
+
+        Assert.Equal(reason, orchestrator.GetLaunchCapability(LaunchMode.Gui).Reason);
+        Assert.Equal(reason, orchestrator.GetProbeCapability("Local ACE", "testaccount").Reason);
+        LauncherOperationException refused = await Assert.ThrowsAsync<LauncherOperationException>(
+            () => orchestrator.LaunchAsync("Local ACE", "testaccount", "+Acdream", LaunchMode.Headless));
+        Assert.Equal(reason, refused.Message);
+        Assert.Empty(supervisors.Created);
+
+        orchestrator.SetLaunchBlock(null);
+        Assert.True(orchestrator.GetLaunchCapability(LaunchMode.Gui).IsAvailable);
+    }
+
     [Fact]
     public async Task LaunchComposesTheSelectedModeAndSpawnsThroughTheInjectedSeam()
     {

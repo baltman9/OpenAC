@@ -350,7 +350,7 @@
       </Grid>
     </Grid>
     <Border Grid.Row="4" Background="#172128" Padding="14,8">
-      <Grid RowDefinitions="Auto,Auto" RowSpacing="6">
+      <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
         <Grid ColumnDefinitions="Auto,*,Auto">
           <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,8,0" IsVisible="{Binding IsAccountsTabSelected}">
             <Button Content="Edit accounts" Command="{Binding EditUsersTextCommand}" />
@@ -374,6 +374,12 @@
           </StackPanel>
         </Grid>
         <TextBlock Grid.Row="1" Text="{Binding LastError}" Foreground="#FFB0A0" IsVisible="{Binding HasError}" TextWrapping="Wrap" MaxHeight="56" />
+        <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="8"
+              IsVisible="{Binding InstallFolder.MigrationBlocksSessions, FallbackValue=False}">
+          <TextBlock Text="{Binding InstallFolder.MigrationBlockReason}" Foreground="#FFB0A0" TextWrapping="Wrap" VerticalAlignment="Center" />
+          <Button Grid.Column="1" Content="Retry" Command="{Binding InstallFolder.RetryMigrationCommand}"
+                  AutomationProperties.Name="Retry moving the old folders" />
+        </Grid>
       </Grid>
     </Border>
 

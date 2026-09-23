@@ -88,11 +88,20 @@ internal static class HeadlessEntryPoint
                 // A bot started by hand before the launcher ever ran brings
                 // the old per-user folders into the install root itself; one
                 // the launcher starts is handed an explicit root.
+                InstallRootMigrationResult migration =
+                    InstallRootMigration.RunIfNeeded(paths.Application);
                 InstallRootMigrationLog.Write(
-                    InstallRootMigration.RunIfNeeded(paths.Application),
+                    migration,
                     paths.DataDirectory,
                     error.WriteLine,
                     error.WriteLine);
+                if (InstallRootMigration.StartupBlockReason(
+                        migration,
+                        paths.DataDirectory) is { } migrationBlock)
+                {
+                    error.WriteLine(migrationBlock);
+                    return (int)HeadlessExitCode.ConfigurationError;
+                }
                 bool consoleEnabled = HeadlessConsoleOptions.Resolve(
                     commandLine.ConsoleEnabled,
                     standardInputIsTerminal);

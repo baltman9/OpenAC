@@ -85,6 +85,14 @@ public sealed partial class App : Application
                 installRecord: null,
                 installationStatus: "Checking installed game content…",
                 updateSessionBarrier: updates.Versions.Barrier);
+            if (_migration is not null
+                && InstallRootMigration.StartupBlockReason(_migration, paths.RootDirectory)
+                    is { } migrationBlock)
+            {
+                // Nothing may start against a half-moved install; the window
+                // says why and offers Retry.
+                _orchestrator.SetLaunchBlock(migrationBlock);
+            }
             LauncherSelfUpdateManager? selfUpdates = updates.SelfUpdates;
             Func<CancellationToken, Task<bool>>? applyLauncherUpdate =
                 selfUpdates is null
@@ -112,7 +120,8 @@ public sealed partial class App : Application
                 new AvaloniaUiDispatcher(),
                 () => windowViewModel.CanMoveInstallFolder,
                 () => RestartLauncher(startupOptions, desktop),
-                _migration));
+                _migration,
+                () => InstallRootMigration.RunIfNeeded(paths)));
             var mainWindow = new MainWindow
             {
                 DataContext = _viewModel,

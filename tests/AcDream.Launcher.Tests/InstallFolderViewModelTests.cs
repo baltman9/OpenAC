@@ -187,6 +187,37 @@ public sealed class InstallFolderViewModelTests : IDisposable
         Assert.Contains("in use", viewModel.MigrationNotice, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Retry runs the migration again: still unfinished keeps sessions
+    /// blocked, finished restarts the launcher. Mutation: restarting on an
+    /// unfinished retry, or not restarting on a finished one, fails this.
+    /// </summary>
+    [Fact]
+    public void RetryKeepsSessionsBlockedUntilTheMigrationFinishes()
+    {
+        var incomplete = new InstallRootMigrationResult(
+            InstallRootMigrationOutcome.Incomplete, [], ["app: in use"], []);
+        InstallRootMigrationResult next = incomplete;
+        var viewModel = new InstallFolderViewModel(
+            _paths,
+            new InstallRootMover(_paths, _defaultRoot),
+            new ImmediateUiDispatcher(),
+            () => true,
+            () => _restarts++,
+            incomplete,
+            () => next);
+
+        Assert.True(viewModel.MigrationBlocksSessions);
+        viewModel.RetryMigrationCommand.Execute(null);
+        Assert.True(viewModel.MigrationBlocksSessions);
+        Assert.Equal(0, _restarts);
+
+        next = new InstallRootMigrationResult(InstallRootMigrationOutcome.Migrated, [], [], []);
+        viewModel.RetryMigrationCommand.Execute(null);
+        Assert.False(viewModel.MigrationBlocksSessions);
+        Assert.Equal(1, _restarts);
+    }
+
     /// <summary>Mutation: leaving conflicts out of the notice fails this.</summary>
     [Fact]
     public void ConflictsAreShownInTheMigrationNotice()

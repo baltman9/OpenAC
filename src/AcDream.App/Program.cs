@@ -26,6 +26,14 @@ InstallRootMigrationLog.Write(
     applicationPaths.RootDirectory,
     line => Log.Information("{Line}", line),
     line => Log.Warning("{Line}", line));
+if (InstallRootMigration.StartupBlockReason(
+        installRootMigration,
+        applicationPaths.RootDirectory) is { } migrationBlock)
+{
+    Log.Error("{Reason}", migrationBlock);
+    Log.CloseAndFlush();
+    return 5;
+}
 Log.Information(
     "graphical platform {RuntimeIdentifier}; native closure: {NativeDependencies}",
     graphicalPlatform.RuntimeIdentifier,

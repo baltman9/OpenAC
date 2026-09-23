@@ -208,10 +208,16 @@ public static class InstallRootMigration
     /// Whether two paths share a volume, so a rename can move between them.
     /// Tests pass <c>(_, _) =&gt; false</c> to drive the copy path.
     /// </param>
+    /// <param name="busyWait">
+    /// How long to wait for another process that is migrating the same root
+    /// before giving up with <see cref="InstallRootMigrationOutcome.Busy"/>;
+    /// <see cref="DefaultBusyWait"/> when omitted.
+    /// </param>
     public static InstallRootMigrationResult RunIfNeeded(
         ApplicationPathSet paths,
         IApplicationPathEnvironment? platform = null,
-        Func<string, string, bool>? sameVolume = null)
+        Func<string, string, bool>? sameVolume = null,
+        TimeSpan? busyWait = null)
     {
         ArgumentNullException.ThrowIfNull(paths);
         platform ??= ApplicationPathEnvironment.Instance;
@@ -222,10 +228,60 @@ public static class InstallRootMigration
                 InstallRootMigrationOutcome.NotApplicable);
         }
 
-        return Run(
+        return RunWaitingForOthers(
             LegacyApplicationLayout.Detect(platform),
             paths,
-            sameVolume);
+            sameVolume,
+            busyWait ?? DefaultBusyWait);
+    }
+
+    /// <summary>How long a starting process waits for another one that is migrating.</summary>
+    public static readonly TimeSpan DefaultBusyWait = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Runs the migration, waiting up to <paramref name="busyWait"/> while
+    /// another process holds the migration lock: when that one finishes, this
+    /// run finds the marker and has nothing to do.
+    /// </summary>
+    public static InstallRootMigrationResult RunWaitingForOthers(
+        LegacyApplicationLayout old,
+        ApplicationPathSet paths,
+        Func<string, string, bool>? sameVolume,
+        TimeSpan busyWait)
+    {
+        DateTime deadline = DateTime.UtcNow + busyWait;
+        while (true)
+        {
+            InstallRootMigrationResult result = Run(old, paths, sameVolume);
+            if (result.Outcome != InstallRootMigrationOutcome.Busy
+                || DateTime.UtcNow >= deadline)
+            {
+                return result;
+            }
+
+            Thread.Sleep(250);
+        }
+    }
+
+    /// <summary>
+    /// Why nothing may start against the root after this migration run, or
+    /// null. A half-moved install, or one another process is still moving,
+    /// would have a client read settings and content from two places.
+    /// </summary>
+    public static string? StartupBlockReason(InstallRootMigrationResult result, string root)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        return result.Outcome switch
+        {
+            InstallRootMigrationOutcome.Incomplete =>
+                $"Moving the old OpenAC folders into {root} is not finished "
+                + $"({result.Failures.Count} item(s) were in use). Close every OpenAC client, "
+                + "bot and older launcher, then retry.",
+            InstallRootMigrationOutcome.Busy =>
+                $"Another OpenAC program is still moving the old folders into {root}. "
+                + "Wait for it to finish, then start again.",
+            _ => null,
+        };
     }
 
     /// <summary>Runs the migration from <paramref name="old"/> into <paramref name="paths"/>.</summary>
