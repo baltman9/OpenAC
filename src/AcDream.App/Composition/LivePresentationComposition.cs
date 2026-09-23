@@ -763,11 +763,18 @@ internal sealed class LivePresentationCompositionPhase
                 alphaScratchBudgets.DispatcherBytes,
                 foundation.TerrainAtlas?.BuildingDetailTexture ?? default,
                 () => d.Settings.DisplayPreview.BuildingDetailTextures,
-                serverGuid => serverGuid != 0u
-                    && serverGuid == d.PlayerIdentity.ServerGuid
-                        ? d.ChaseCameraInput.Retail?.PlayerTranslucency
-                            ?? (d.ChaseCameraInput.Legacy?.IsInHead == true ? 1f : 0f)
-                        : 0f),
+                serverGuid => ObjectTranslucency.Effective(
+                    requested: serverGuid != 0u
+                        && serverGuid == d.PlayerIdentity.ServerGuid
+                            ? d.ChaseCameraInput.Retail?.PlayerTranslucency
+                                ?? (d.ChaseCameraInput.Legacy?.IsInHead == true ? 1f : 0f)
+                            : 0f,
+                    original: serverGuid != 0u
+                        && liveEntities.TryGetSnapshot(
+                            serverGuid,
+                            out AcDream.Core.Net.WorldSession.EntitySpawn spawn)
+                            ? spawn.Physics?.Translucency
+                            : null)),
             static value => value.Dispose());
         var modelHeights = new SetupModelHeightResolver(content.Dats, d.DatLock);
         var selectionQuery = new WorldSelectionQuery(
