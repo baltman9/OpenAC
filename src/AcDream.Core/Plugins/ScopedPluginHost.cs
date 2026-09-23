@@ -91,7 +91,12 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             inner.ReadText(ScopedKey(key));
         public IReadOnlyList<string> List(string prefix)
         {
-            string scopedPrefix = ScopedKey(prefix);
+            ArgumentNullException.ThrowIfNull(prefix);
+            // An empty prefix is the plugin's whole folder, as it is on the
+            // storage underneath.
+            string scopedPrefix = prefix.Length == 0
+                ? _scope
+                : ScopedKey(prefix);
             string ownerPrefix = _scope + Path.DirectorySeparatorChar;
             return inner.List(scopedPrefix)
                 .Select(key => key.Replace('/', Path.DirectorySeparatorChar))

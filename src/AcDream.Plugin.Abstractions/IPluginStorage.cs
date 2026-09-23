@@ -45,7 +45,10 @@ public interface IPluginStorage
     /// </summary>
     string? ReadText(string key) => null;
 
-    /// <summary>Relative file keys beneath one relative prefix.</summary>
+    /// <summary>
+    /// Relative file keys beneath one relative prefix. An empty prefix lists
+    /// every key in the storage.
+    /// </summary>
     IReadOnlyList<string> List(string prefix) => Array.Empty<string>();
 
     /// <summary>

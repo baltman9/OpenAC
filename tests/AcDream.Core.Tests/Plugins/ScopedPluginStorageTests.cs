@@ -48,6 +48,34 @@ public sealed class ScopedPluginStorageTests
     }
 
     [Fact]
+    public void AnEmptyPrefixListsThePluginsWholeFolderAndNothingElse()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-plugin-storage-{Guid.NewGuid():N}");
+        try
+        {
+            var shared = new FilePluginStorage(root);
+            shared.WriteText("acdream.other/secret.txt", "not yours");
+            using var scope = new ScopedPluginHost(
+                new StubHost(shared),
+                "acdream.example",
+                "Example Plugin");
+            scope.Storage.WriteText("settings.json", "{}");
+            scope.Storage.WriteText("profiles/a.utl", "x");
+
+            Assert.Equal(
+                ["profiles/a.utl", "settings.json"],
+                scope.Storage.List(string.Empty));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void EveryStorageMemberIsForwardedByTheScopedWrapper()
     {
         using var scope = new ScopedPluginHost(
