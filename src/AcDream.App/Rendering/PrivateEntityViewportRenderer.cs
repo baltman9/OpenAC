@@ -126,8 +126,7 @@ internal sealed class PrivateEntityViewportRenderer :
         }
         IReadOnlyList<WorldEntity> entities = BuildDrawEntities(
             _backdropSlot?.Entity,
-            entity,
-            ReadyAttachments());
+            entity);
         return _dispatcher.PreparePrivateEntityResources(entities);
     }
 
@@ -144,8 +143,9 @@ internal sealed class PrivateEntityViewportRenderer :
     }
 
     /// <summary>
-    /// The attachments whose meshes are ready. One still loading is left
-    /// out of this frame rather than holding back the main object.
+    /// The attachments whose meshes and textures are ready. One still
+    /// loading is left out of this frame rather than holding back the main
+    /// object.
     /// </summary>
     private List<WorldEntity>? ReadyAttachments()
     {
@@ -153,7 +153,8 @@ internal sealed class PrivateEntityViewportRenderer :
         foreach (EntitySlot slot in _attachmentSlots)
         {
             if (slot.PrepareForDraw()
-                && slot.Entity is { MeshRefs.Count: > 0 } attachment)
+                && slot.Entity is { MeshRefs.Count: > 0 } attachment
+                && _dispatcher.PreparePrivateEntityResources([attachment]))
             {
                 (ready ??= []).Add(attachment);
             }
@@ -196,12 +197,15 @@ internal sealed class PrivateEntityViewportRenderer :
         if (entity is null || entity.MeshRefs.Count == 0)
             return 0u;
 
+        if (!_dispatcher.PreparePrivateEntityResources(
+                BuildDrawEntities(_backdropSlot?.Entity, entity)))
+        {
+            return _flightTargets.CompletedHandle(frameSlot);
+        }
         IReadOnlyList<WorldEntity> drawEntities = BuildDrawEntities(
             _backdropSlot?.Entity,
             entity,
             ReadyAttachments());
-        if (!_dispatcher.PreparePrivateEntityResources(drawEntities))
-            return _flightTargets.CompletedHandle(frameSlot);
 
         PrivateViewportFlightTargets.TargetSlot? targetSlot =
             _flightTargets.Ensure(frameSlot, width, height);

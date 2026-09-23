@@ -16,3 +16,24 @@ internal static class ObjectTranslucency
         return requested < floor ? floor : requested;
     }
 }
+
+/// <summary>
+/// The per-object translucency the world draw asks for: the camera's fade
+/// of the player up close, raised to each object's own translucency. A
+/// held-object copy in the examine view answers for the object it copies.
+/// </summary>
+internal sealed class LiveObjectTranslucency(
+    Func<uint> playerGuid,
+    Func<float> playerFade,
+    Func<uint, float?> ownTranslucency,
+    Func<uint, uint?> standInFor)
+{
+    public float For(uint serverGuid)
+    {
+        if (serverGuid == 0u)
+            return 0f;
+        float requested = serverGuid == playerGuid() ? playerFade() : 0f;
+        uint source = standInFor(serverGuid) ?? serverGuid;
+        return ObjectTranslucency.Effective(requested, ownTranslucency(source));
+    }
+}

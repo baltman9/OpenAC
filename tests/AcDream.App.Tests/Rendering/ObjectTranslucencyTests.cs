@@ -26,3 +26,38 @@ public sealed class ObjectTranslucencyTests
         Assert.Equal(expected, ObjectTranslucency.Effective(requested, original));
     }
 }
+
+/// <summary>
+/// The lookup the world draw is given: the player's camera fade applies to
+/// the player only, every object keeps at least its own translucency, and
+/// an examine copy answers for the object it copies.
+/// Mutation: drop the stand-in mapping and the copy row turns red; apply
+/// the fade to everyone and the other-object row turns red.
+/// </summary>
+public sealed class LiveObjectTranslucencyTests
+{
+    private const uint Player = 0x5000000Au;
+    private const uint Shield = 0x80001234u;
+    private const uint Copy = 0xDA11_D027u;
+
+    private static LiveObjectTranslucency Build(float fade) => new(
+        () => Player,
+        () => fade,
+        guid => guid == Shield ? 0.5f : null,
+        guid => guid == Copy ? Shield : null);
+
+    [Fact]
+    public void ThePlayerFadesAndOtherObjectsKeepTheirOwnValue()
+    {
+        LiveObjectTranslucency lookup = Build(fade: 0.8f);
+
+        Assert.Equal(0.8f, lookup.For(Player));
+        Assert.Equal(0.5f, lookup.For(Shield));
+        Assert.Equal(0f, lookup.For(0x80009999u));
+        Assert.Equal(0f, lookup.For(0u));
+    }
+
+    [Fact]
+    public void AnExamineCopyTakesTheValueOfWhatItCopies() =>
+        Assert.Equal(0.5f, Build(fade: 0f).For(Copy));
+}

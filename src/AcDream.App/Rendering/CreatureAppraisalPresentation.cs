@@ -239,8 +239,29 @@ internal sealed class RetailCreatureAppraisalCloneFactory :
         new WorldEntity?[CreatureAppraisalEntityBuilder.AttachmentRenderIds.Length];
     private readonly uint[] _attachmentSources =
         new uint[CreatureAppraisalEntityBuilder.AttachmentRenderIds.Length];
+    private readonly uint[] _attachmentSourceGuids =
+        new uint[CreatureAppraisalEntityBuilder.AttachmentRenderIds.Length];
     private readonly List<WorldEntity> _heldScratch = [];
     private readonly List<WorldEntity> _attachments = [];
+
+    /// <summary>
+    /// The real object a held-object copy stands in for, so values the
+    /// object carries (how see-through it is) apply to its copy too.
+    /// </summary>
+    public bool TryGetHeldSource(uint copyServerGuid, out uint sourceServerGuid)
+    {
+        uint[] guids = CreatureAppraisalEntityBuilder.AttachmentServerGuids;
+        for (int i = 0; i < guids.Length; i++)
+        {
+            if (guids[i] == copyServerGuid && _attachmentSourceGuids[i] != 0u)
+            {
+                sourceServerGuid = _attachmentSourceGuids[i];
+                return true;
+            }
+        }
+        sourceServerGuid = 0u;
+        return false;
+    }
 
     public IReadOnlyList<WorldEntity> SynchronizeAttachments(uint serverGuid)
     {
@@ -271,8 +292,11 @@ internal sealed class RetailCreatureAppraisalCloneFactory :
             }
 
             clone.ApplyAppearance(held.MeshRefs, held.PaletteOverride, held.PartOverrides);
-            clone.IsDrawVisible = held.IsDrawVisible;
-            clone.IsAncestorDrawVisible = held.IsAncestorDrawVisible;
+            // Always drawn: in first person the held objects are hidden from
+            // the world view, and the figure here is not in first person.
+            clone.IsDrawVisible = true;
+            clone.IsAncestorDrawVisible = true;
+            _attachmentSourceGuids[slot] = held.ServerGuid;
             CreatureAppraisalEntityBuilder.PlaceAttachment(clone, held, source);
             _attachments.Add(clone);
             slot++;
@@ -282,6 +306,7 @@ internal sealed class RetailCreatureAppraisalCloneFactory :
         {
             _attachmentClones[i] = null;
             _attachmentSources[i] = 0u;
+            _attachmentSourceGuids[i] = 0u;
         }
         return _attachments;
     }

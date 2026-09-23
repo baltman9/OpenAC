@@ -742,6 +742,9 @@ internal sealed class LivePresentationCompositionPhase
             AlphaScratchBudgetProfile.Create(
                 d.Options.ResidencyBudgets.AlphaScratchBytes);
 
+        // Set once the examine view exists; its held-object copies take the
+        // translucency of the objects they stand in for.
+        RetailCreatureAppraisalCloneFactory? appraisalClones = null;
         var selectionScene = new RetailSelectionScene(
             new RetailSelectionGeometryCache(content.Dats, d.DatLock));
         IWorldPassScope? worldPassScope = d.Graphics.WorldPassScope;
@@ -763,18 +766,14 @@ internal sealed class LivePresentationCompositionPhase
                 alphaScratchBudgets.DispatcherBytes,
                 foundation.TerrainAtlas?.BuildingDetailTexture ?? default,
                 () => d.Settings.DisplayPreview.BuildingDetailTextures,
-                serverGuid => ObjectTranslucency.Effective(
-                    requested: serverGuid != 0u
-                        && serverGuid == d.PlayerIdentity.ServerGuid
-                            ? d.ChaseCameraInput.Retail?.PlayerTranslucency
-                                ?? (d.ChaseCameraInput.Legacy?.IsInHead == true ? 1f : 0f)
-                            : 0f,
-                    original: serverGuid != 0u
-                        && liveEntities.TryGetSnapshot(
-                            serverGuid,
-                            out AcDream.Core.Net.WorldSession.EntitySpawn spawn)
-                            ? spawn.Physics?.Translucency
-                            : null)),
+                new LiveObjectTranslucency(
+                    () => d.PlayerIdentity.ServerGuid,
+                    () => d.ChaseCameraInput.Retail?.PlayerTranslucency
+                        ?? (d.ChaseCameraInput.Legacy?.IsInHead == true ? 1f : 0f),
+                    liveEntities.TranslucencyOf,
+                    guid => appraisalClones?.TryGetHeldSource(guid, out uint held) == true
+                        ? held
+                        : null).For),
             static value => value.Dispose());
         var modelHeights = new SetupModelHeightResolver(content.Dats, d.DatLock);
         var selectionQuery = new WorldSelectionQuery(
@@ -996,7 +995,7 @@ internal sealed class LivePresentationCompositionPhase
                     creatureViewport,
                     examinationFrame,
                     appraisalController),
-                new RetailCreatureAppraisalCloneFactory(
+                appraisalClones = new RetailCreatureAppraisalCloneFactory(
                     new LiveCreatureAppraisalEntityLookup(
                         liveEntities,
                         equippedLease.Resource)));

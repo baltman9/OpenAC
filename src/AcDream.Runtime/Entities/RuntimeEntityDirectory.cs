@@ -79,6 +79,8 @@ public sealed class RuntimeEntityDirectory
     public bool TryGetSnapshot(uint guid, out WorldSession.EntitySpawn spawn) =>
         _inbound.TryGetSnapshot(guid, out spawn);
 
+    public float? TranslucencyOf(uint guid) => _inbound.TranslucencyOf(guid);
+
     internal bool TryGetAcceptedTimestamps(
         uint guid,
         out AcceptedPhysicsTimestamps timestamps) =>

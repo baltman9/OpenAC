@@ -267,6 +267,8 @@ public sealed partial class WbDrawDispatcher
                 ? new Vector2(lighting.Luminosity, lighting.Diffuse)
                 : new Vector2(0f, 1f);
         uint detailCategory = entity.IsBuildingShell ? 1u : 0u;
+        // One lookup per object, not per part.
+        float entityOpacity = liveDynamic ? EntityOpacity(entity.ServerGuid) : 1f;
 
         PaletteCompositeIdentity paletteIdentity = default;
         if (entity.PaletteOverride is not null)
@@ -328,7 +330,7 @@ public sealed partial class WbDrawDispatcher
 
                     float opacity = liveDynamic
                         ? WalkPartOpacity(
-                            entity.ServerGuid,
+                            entityOpacity,
                             entity.LocalEntityId,
                             (uint)setupPartIndex)
                         : 1f;
@@ -370,7 +372,7 @@ public sealed partial class WbDrawDispatcher
             {
                 float opacity = liveDynamic
                     ? WalkPartOpacity(
-                        entity.ServerGuid,
+                        entityOpacity,
                         entity.LocalEntityId,
                         (uint)partIndex)
                     : 1f;
@@ -414,11 +416,11 @@ public sealed partial class WbDrawDispatcher
     }
 
     private float WalkPartOpacity(
-        uint serverGuid,
+        float entityOpacity,
         uint localEntityId,
         uint setupPartIndex)
     {
-        float opacity = EntityOpacity(serverGuid);
+        float opacity = entityOpacity;
         if (opacity <= 0f)
             return 0f;
         if (!_translucencyFades.TryGetCurrentValue(

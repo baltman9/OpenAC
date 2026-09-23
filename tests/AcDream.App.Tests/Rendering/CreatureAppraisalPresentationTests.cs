@@ -156,6 +156,64 @@ public sealed class CreatureAppraisalPresentationTests
         Assert.Empty(factory.SynchronizeAttachments(17u));
     }
 
+    /// <summary>
+    /// The presenter hands the held-object copies to the renderer with the
+    /// creature, and clears them when the creature is gone.
+    /// Mutation: drop the presenter's SetAttachments call and this fails.
+    /// </summary>
+    [Fact]
+    public void PresenterPassesHeldObjectsAndClearsThem()
+    {
+        WorldEntity clone = Entity(CreatureAppraisalEntityBuilder.RenderId, 0x02000001u, [new MeshRef(0x01000001u, Matrix4x4.Identity)]);
+        WorldEntity held = Entity(CreatureAppraisalEntityBuilder.AttachmentRenderIds[0], 0x02000002u, [new MeshRef(0x01000002u, Matrix4x4.Identity)]);
+        var renderer = new Renderer { Texture = 73u };
+        var factory = new Factory { Clone = clone, Held = [held] };
+        var presenter = new CreatureAppraisalFramePresenter(renderer, new View(), factory);
+
+        presenter.Render();
+        factory.Available = false;
+        presenter.Render();
+
+        Assert.Same(held, Assert.Single(renderer.Attachments[0]));
+        Assert.Empty(renderer.Attachments[1]);
+    }
+
+    /// <summary>
+    /// A held object hidden from the world view (in first person the player's
+    /// own held objects are) still shows on the examine figure, and its copy
+    /// answers for the real object.
+    /// </summary>
+    [Fact]
+    public void HeldObjectCopiesAreDrawnAndMapBackToTheirObject()
+    {
+        WorldEntity creature = Entity(17u, 0x02000001u, [new MeshRef(0x01000001u, Matrix4x4.Identity)]);
+        WorldEntity shield = Entity(40u, 0x02000002u, [new MeshRef(0x01000002u, Matrix4x4.Identity)]);
+        shield.IsDrawVisible = false;
+        var lookup = new Lookup { Entity = creature };
+        lookup.Held.Add(shield);
+        var factory = new RetailCreatureAppraisalCloneFactory(lookup);
+        Assert.True(factory.TrySynchronize(17u, null, out _, out _, out _));
+
+        WorldEntity copy = Assert.Single(factory.SynchronizeAttachments(17u));
+
+        Assert.True(copy.IsDrawVisible);
+        Assert.True(factory.TryGetHeldSource(copy.ServerGuid, out uint source));
+        Assert.Equal(40u, source);
+        Assert.False(factory.TryGetHeldSource(CreatureAppraisalEntityBuilder.ServerGuid, out _));
+    }
+
+    [Fact]
+    public void TheDrawListPutsHeldObjectsAfterTheFigure()
+    {
+        WorldEntity backdrop = Entity(1u, 0x02000009u, [new MeshRef(0x01000009u, Matrix4x4.Identity)]);
+        WorldEntity main = Entity(2u, 0x02000001u, [new MeshRef(0x01000001u, Matrix4x4.Identity)]);
+        WorldEntity held = Entity(3u, 0x02000002u, [new MeshRef(0x01000002u, Matrix4x4.Identity)]);
+
+        Assert.Equal([backdrop, main, held], PrivateEntityViewportRenderer.BuildDrawEntities(backdrop, main, [held]));
+        Assert.Equal([main, held], PrivateEntityViewportRenderer.BuildDrawEntities(null, main, [held]));
+        Assert.Equal([main], PrivateEntityViewportRenderer.BuildDrawEntities(null, main, null));
+    }
+
     private static WorldEntity Entity(
         uint id,
         uint setup,
@@ -192,6 +250,10 @@ public sealed class CreatureAppraisalPresentationTests
         public uint Texture { get; init; }
         public List<WorldEntity?> Creatures { get; } = [];
         public List<(int Width, int Height)> RenderSizes { get; } = [];
+        public List<IReadOnlyList<WorldEntity>> Attachments { get; } = [];
+
+        public void SetAttachments(IReadOnlyList<WorldEntity> attachments) =>
+            Attachments.Add(attachments.ToArray());
 
         public void SetCreature(
             WorldEntity? creature,
@@ -230,6 +292,9 @@ public sealed class CreatureAppraisalPresentationTests
         public bool Available { get; set; } = true;
         public WorldEntity? Clone { get; init; }
         public List<uint> Requests { get; } = [];
+        public IReadOnlyList<WorldEntity> Held { get; init; } = [];
+
+        public IReadOnlyList<WorldEntity> SynchronizeAttachments(uint serverGuid) => Held;
 
         public bool TrySynchronize(
             uint serverGuid,
