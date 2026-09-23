@@ -20,6 +20,33 @@ public sealed class LauncherExecutableSetTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// A client without the single-install-folder marker (0.1.15 and older)
+    /// is never started: it would look for settings and plugins in the old
+    /// per-user folders. Mutation: dropping the marker check fails this.
+    /// </summary>
+    [Fact]
+    public void AClientOlderThanTheSingleInstallFolderIsNotStarted()
+    {
+        Directory.CreateDirectory(_root);
+        string suffix = OperatingSystem.IsWindows() ? ".exe" : string.Empty;
+        string graphical = Path.Combine(_root, PayloadExecutableNames.GraphicalHostForCurrentOs() + suffix);
+        string headless = Path.Combine(_root, "acdream-headless" + suffix);
+        File.WriteAllText(graphical, string.Empty);
+        File.WriteAllText(headless, string.Empty);
+        MakeExecutableOnUnix(graphical);
+        MakeExecutableOnUnix(headless);
+
+        LauncherExecutableSet set = LauncherExecutableSet.FromDirectory(_root);
+
+        LauncherCapability gui = set.GetAvailability(LaunchMode.Gui);
+        Assert.False(gui.IsAvailable);
+        Assert.Contains("older than the single OpenAC install folder", gui.Reason, StringComparison.Ordinal);
+        Assert.False(set.GetAvailability(LaunchMode.Headless).IsAvailable);
+        Assert.Throws<LauncherOperationException>(
+            () => set.CreatePlaySpec(LaunchMode.Gui, "session.json"));
+    }
+
     [Fact]
     public void FromDirectoryResolvesThePublishedCoDeploymentLayout()
     {
@@ -31,6 +58,9 @@ public sealed class LauncherExecutableSetTests : IDisposable
         string headless = Path.Combine(_root, "acdream-headless" + suffix);
         File.WriteAllText(graphical, string.Empty);
         File.WriteAllText(headless, string.Empty);
+        File.WriteAllText(
+            Path.Combine(_root, AcDream.Platform.ClientCapabilities.SingleInstallRootMarkerFileName),
+            string.Empty);
         MakeExecutableOnUnix(graphical);
         MakeExecutableOnUnix(headless);
 

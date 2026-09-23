@@ -205,16 +205,25 @@ internal static class UpdateTestData
         return output.ToArray();
     }
 
-    public static byte[] ClientZip(string rid, string marker = "client")
+    public static byte[] ClientZip(string rid, string marker = "client", bool knowsSingleRoot = true)
     {
         string suffix = rid.StartsWith("win-", StringComparison.Ordinal) ? ".exe" : string.Empty;
         const int executable = 0x81ED;
-        return CreateZip(
+        List<(string Name, byte[] Content, int? UnixAttributes)> entries =
         [
             ($"{PayloadExecutableNames.GraphicalHostForRid(rid)}{suffix}", Encoding.UTF8.GetBytes(marker + "-gui"), executable),
             ($"acdream-headless{suffix}", Encoding.UTF8.GetBytes(marker + "-headless"), executable),
             ("assets/readme.txt", Encoding.UTF8.GetBytes(marker), 0x81A4),
-        ]);
+        ];
+        if (knowsSingleRoot)
+        {
+            entries.Add((
+                AcDream.Platform.ClientCapabilities.SingleInstallRootMarkerFileName,
+                Encoding.UTF8.GetBytes("single root"),
+                0x81A4));
+        }
+
+        return CreateZip(entries);
     }
 
     public static byte[] LauncherZip(string rid, string marker = "launcher")

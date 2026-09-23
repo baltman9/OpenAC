@@ -243,12 +243,30 @@ public sealed class ClientVersionStoreTests : IDisposable
     private string GraphicalHostName =>
         PayloadExecutableNames.GraphicalHostForRid(_rid) + ExecutableSuffix;
 
+    /// <summary>
+    /// The installed current version decides: a pre-single-folder client
+    /// installed as current is not offered for play. Mutation: dropping the
+    /// marker check in LauncherExecutableSet fails this.
+    /// </summary>
+    [Fact]
+    public async Task ACurrentClientWithoutTheSingleFolderMarkerIsNotPlayable()
+    {
+        var store = new ClientVersionStore(_paths);
+        LauncherExecutableSet executables = LauncherExecutableSet.FromCurrentVersionStore(store);
+
+        _ = await PromoteAsync(store, "0.1.15", "old", knowsSingleRoot: false);
+
+        Assert.False(executables.GetAvailability(LaunchMode.Gui).IsAvailable);
+        Assert.False(executables.GetAvailability(LaunchMode.Headless).IsAvailable);
+    }
+
     private async Task<ClientVersionResolution> PromoteAsync(
         ClientVersionStore store,
         string versionText,
-        string marker)
+        string marker,
+        bool knowsSingleRoot = true)
     {
-        byte[] archive = UpdateTestData.ClientZip(_rid, marker);
+        byte[] archive = UpdateTestData.ClientZip(_rid, marker, knowsSingleRoot);
         string zipPath = Path.Combine(_root, $"{versionText}-{marker}.zip");
         Directory.CreateDirectory(_root);
         await File.WriteAllBytesAsync(zipPath, archive);
