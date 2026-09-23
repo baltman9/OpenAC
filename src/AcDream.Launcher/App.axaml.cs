@@ -17,6 +17,7 @@ namespace AcDream.Launcher;
 public sealed partial class App : Application
 {
     private readonly LauncherStartupOptions? _startupOptions;
+    private readonly InstallRootMigrationResult? _migration;
     private LauncherOrchestrator? _orchestrator;
     private LauncherWindowViewModel? _viewModel;
     private LauncherUpdateComposition? _updateComposition;
@@ -27,10 +28,13 @@ public sealed partial class App : Application
     {
     }
 
-    internal App(LauncherStartupOptions startupOptions)
+    internal App(
+        LauncherStartupOptions startupOptions,
+        InstallRootMigrationResult? migration = null)
     {
         _startupOptions = startupOptions
             ?? throw new ArgumentNullException(nameof(startupOptions));
+        _migration = migration;
     }
 
     internal LauncherStartupOptions StartupOptions => _startupOptions

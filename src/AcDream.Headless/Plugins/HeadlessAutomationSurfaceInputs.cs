@@ -16,8 +16,8 @@ internal sealed record HeadlessSurfaceInputParts
     /// </summary>
     public required AcDream.Core.Plugins.IPluginEventSink Events { get; init; }
 
-    /// <summary>This client's own data directory.</summary>
-    public required string DataDirectory { get; init; }
+    /// <summary>The folder the clients on this machine find one another in.</summary>
+    public required string PeerDirectory { get; init; }
 
     /// <summary>
     /// The words this client wants to be found by, from this session's
@@ -37,7 +37,7 @@ internal static partial class HeadlessAutomationCapabilities
         new HashSet<string>(StringComparer.Ordinal)
         {
             nameof(RuntimeAutomationSurfaceInputs.PluginEvents),
-            nameof(RuntimeAutomationSurfaceInputs.DataDirectory),
+            nameof(RuntimeAutomationSurfaceInputs.PeerDirectory),
             nameof(RuntimeAutomationSurfaceInputs.PeerTags),
         };
 
@@ -50,7 +50,7 @@ internal static partial class HeadlessAutomationCapabilities
         {
             HostName = "windowless",
             PluginEvents = parts.Events,
-            DataDirectory = parts.DataDirectory,
+            PeerDirectory = parts.PeerDirectory,
             PeerTags = parts.PluginTags ?? [],
         };
     }

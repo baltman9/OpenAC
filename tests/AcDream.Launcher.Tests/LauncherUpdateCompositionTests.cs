@@ -32,8 +32,7 @@ public sealed class LauncherUpdateCompositionTests : IDisposable
         var paths = new ApplicationPathSet(
             Path.Combine(_root, "config"),
             Path.Combine(_root, "data"),
-            Path.Combine(_root, "cache"),
-            null);
+            Path.Combine(_root, "cache"));
         Exception exception = failure switch
         {
             "io" => new IOException("storage offline"),
@@ -72,8 +71,7 @@ public sealed class LauncherUpdateCompositionTests : IDisposable
         var paths = new ApplicationPathSet(
             Path.Combine(_root, "config"),
             Path.Combine(_root, "data"),
-            Path.Combine(_root, "cache"),
-            null);
+            Path.Combine(_root, "cache"));
         var manifestUri = new Uri(value);
 
         using LauncherUpdateComposition composition = LauncherUpdateComposition.Create(

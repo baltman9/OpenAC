@@ -1071,8 +1071,7 @@ public sealed class PluginInstallerTests
             Paths = new ApplicationPathSet(
                 Path.Combine(Root, "config"),
                 Path.Combine(Root, "data"),
-                Path.Combine(Root, "cache"),
-                null);
+                Path.Combine(Root, "cache"));
             HttpClient = new HttpClient(Handler);
             RecordStore = InstalledPluginRecordStore.ForApplicationPaths(Paths);
             Inventory = new PluginInventory(Paths, RecordStore);

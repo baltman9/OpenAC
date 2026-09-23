@@ -11,19 +11,21 @@ GraphicalHostPlatformServices graphicalPlatform =
     GraphicalHostPlatformServices.Resolve();
 graphicalPlatform.ConfigureWindowBackend();
 ApplicationPathSet applicationPaths = graphicalPlatform.Paths;
-IReadOnlyList<string> migratedConfigurationFiles =
-    GraphicalLegacyConfigurationMigrator.Migrate(applicationPaths);
+// A client started by hand before the launcher ever ran brings the old
+// per-user folders into the install root itself; one started by the launcher
+// is handed an explicit root and leaves that to the launcher.
+InstallRootMigrationResult installRootMigration =
+    InstallRootMigration.RunIfNeeded(applicationPaths);
 
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Debug()
     .WriteTo.Console()
     .CreateLogger();
-foreach (string migratedConfigurationFile in migratedConfigurationFiles)
-{
-    Log.Information(
-        "migrated legacy graphical configuration to {Path}",
-        migratedConfigurationFile);
-}
+InstallRootMigrationLog.Write(
+    installRootMigration,
+    applicationPaths.RootDirectory,
+    line => Log.Information("{Line}", line),
+    line => Log.Warning("{Line}", line));
 Log.Information(
     "graphical platform {RuntimeIdentifier}; native closure: {NativeDependencies}",
     graphicalPlatform.RuntimeIdentifier,
@@ -187,7 +189,7 @@ using var automation = AcDream.Runtime.Plugins.RuntimeAutomationBindings
             new AcDream.App.Plugins.GraphicalSurfaceInputParts
             {
                 Events = worldEvents,
-                DataDirectory = applicationPaths.DataDirectory,
+                PeerDirectory = applicationPaths.PluginPeersDirectory,
                 PluginTags = runtimeOptions.PluginTags,
             }));
 var lootClassifiers = new AcDream.Core.Plugins.PluginLootClassifierRegistry();
@@ -215,7 +217,7 @@ var host = new AppPluginHost(
     lootClassifiers,
     new AcDream.Core.Plugins.FilePluginStorage(
         runtimeOptions.VtankProfileDirectoryOverride
-            ?? VtankProfilesDefault.Resolve(applicationPaths.DataDirectory)),
+            ?? applicationPaths.VtankProfilesDirectory),
     new AcDream.App.Plugins.WindowPluginClipboard(
         () => window.ClipboardKeyboard,
         () => window.ClipboardDispatch),

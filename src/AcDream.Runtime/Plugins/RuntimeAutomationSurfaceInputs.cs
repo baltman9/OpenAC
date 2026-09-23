@@ -30,12 +30,11 @@ internal sealed record RuntimeAutomationSurfaceInputs
     public required AcDream.Core.Plugins.IPluginEventSink PluginEvents { get; init; }
 
     /// <summary>
-    /// This client's own data directory. The clients on one machine find one
-    /// another by leaving small notes in a well-known folder beneath it, so
-    /// two clients pointed at the same data directory see each other and two
-    /// pointed at different ones do not.
+    /// The folder the clients on this machine leave small notes in to find
+    /// one another, so two clients pointed at the same folder see each other
+    /// and two pointed at different ones do not.
     /// </summary>
-    public required string DataDirectory { get; init; }
+    public required string PeerDirectory { get; init; }
 
     /// <summary>
     /// The words this client wants to be found by, from the player's own
@@ -44,12 +43,6 @@ internal sealed record RuntimeAutomationSurfaceInputs
     /// a plugin's peer filtering silently matches nothing.
     /// </summary>
     public required IReadOnlyList<string> PeerTags { get; init; }
-
-    /// <summary>
-    /// The folder beneath the data directory where the clients on this
-    /// machine leave their notes for one another.
-    /// </summary>
-    internal const string PeerDirectoryName = "plugin-peers";
 
     /// <summary>
     /// The inputs that are not the record's own bookkeeping, in the order the

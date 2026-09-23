@@ -59,7 +59,7 @@ internal sealed class HeadlessPluginHost
         IGameRuntimeCommands? sessionCommands = null,
         NavigationWalkController? navigationWalk = null,
         Action<string, Exception>? pluginCommandFailed = null,
-        string? dataDirectory = null,
+        string? peerDirectory = null,
         IReadOnlyList<string>? pluginTags = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
@@ -78,9 +78,9 @@ internal sealed class HeadlessPluginHost
                 new HeadlessSurfaceInputParts
                 {
                     Events = this,
-                    DataDirectory = dataDirectory
+                    PeerDirectory = peerDirectory
                         ?? AcDream.Platform.ApplicationPathSet.Resolve()
-                            .DataDirectory,
+                            .PluginPeersDirectory,
                     PluginTags = pluginTags,
                 }));
         // One registry, the surface's own, exactly as the windowed host does

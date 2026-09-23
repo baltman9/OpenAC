@@ -17,8 +17,7 @@ public sealed class PluginInventoryTests : IDisposable
         _paths = new ApplicationPathSet(
             Path.Combine(_root, "config"),
             Path.Combine(_root, "data"),
-            Path.Combine(_root, "cache"),
-            null);
+            Path.Combine(_root, "cache"));
     }
 
     public void Dispose()

@@ -23,6 +23,7 @@ internal sealed record HeadlessCommandLine(
         string? configDirectory = null;
         string? dataDirectory = null;
         string? cacheDirectory = null;
+        string? rootDirectory = null;
         string? user = null;
         string? password = null;
         bool console = false;
@@ -64,6 +65,9 @@ internal sealed record HeadlessCommandLine(
                     break;
                 case "--cache-dir":
                     SetOnce(ref cacheDirectory, value);
+                    break;
+                case "--root-dir":
+                    SetOnce(ref rootDirectory, value);
                     break;
                 case "--console-stream":
                     if (!HeadlessConsoleOptions.TryParseStream(value, out _))
@@ -122,7 +126,8 @@ internal sealed record HeadlessCommandLine(
             new HeadlessPathOverrides(
                 configDirectory,
                 dataDirectory,
-                cacheDirectory),
+                cacheDirectory,
+                rootDirectory),
             user is null
                 ? null
                 : new HeadlessDirectCredentials(user, password!),

@@ -484,8 +484,7 @@ public sealed class ExternalRenderPackPackageLifecycleTests
     private static ApplicationPathSet Paths(string root) => new(
         Path.Combine(root, "config"),
         Path.Combine(root, "data"),
-        Path.Combine(root, "cache"),
-        LegacyConfigDirectory: null);
+        Path.Combine(root, "cache"));
 
     private static string InstallPackage(string root, Version version)
     {

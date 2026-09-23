@@ -85,7 +85,8 @@ internal sealed record SessionPlayerDependencies(
     Action<string> Log,
     Func<string, bool>? TryHandlePluginCommand,
     Func<string, AcDream.Plugin.Abstractions.PluginChatInputDecision>? InterceptChatInput,
-    SessionStatusWriter StatusWriter)
+    SessionStatusWriter StatusWriter,
+    string? ChatLogDirectory = null)
 {
     public RuntimeActionState Actions => Runtime.ActionOwner;
 
@@ -1092,6 +1093,7 @@ internal sealed class SessionPlayerCompositionPhase
             d.Options.SessionId ?? "app",
             d.Options.LoginCommands,
             d.Options.LoginCommandDelayMs,
+            chatLogDirectory: d.ChatLogDirectory,
             noteOptionsSeeded: () => optionsSeeder?.NoteOptionsSeeded());
         LiveSessionHost sessionHost = sessionRuntimeFactory.Create(
             liveSession,

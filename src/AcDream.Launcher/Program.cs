@@ -19,6 +19,16 @@ internal static class Program
                 return 0;
             }
 
+            // The old per-user folders come into the install root before any
+            // store opens a file there, the self-update state included.
+            InstallRootMigrationResult migration =
+                InstallRootMigration.RunIfNeeded(options.Paths);
+            InstallRootMigrationLog.Write(
+                migration,
+                options.Paths.RootDirectory,
+                Console.WriteLine,
+                Console.Error.WriteLine);
+
             using var httpClient = new HttpClient();
             var selfUpdates = new LauncherSelfUpdateManager(options.Paths, httpClient);
             string executable = Environment.ProcessPath
@@ -41,7 +51,7 @@ internal static class Program
 
             RequireUnchangedPublicArguments(options, startup);
 
-            return BuildAvaloniaApp(options).StartWithClassicDesktopLifetime([]);
+            return BuildAvaloniaApp(options, migration).StartWithClassicDesktopLifetime([]);
         }
         catch (Exception ex)
         {
@@ -58,18 +68,18 @@ internal static class Program
     {
         try
         {
-            string dataDirectory;
+            string directory;
             try
             {
-                dataDirectory = LauncherStartupOptions.Parse(args).Paths.DataDirectory;
+                directory = LauncherStartupOptions.Parse(args).Paths.CrashReportsDirectory;
             }
             catch
             {
-                dataDirectory = TryReadRequestedDataDirectory(args)
-                    ?? ApplicationPathSet.Resolve().DataDirectory;
+                directory = TryReadRequestedRoot(args) is { } requested
+                    ? ApplicationPathSet.ForRoot(requested).CrashReportsDirectory
+                    : ResolveCrashReportsDirectory();
             }
 
-            string directory = Path.Combine(dataDirectory, "crash-reports");
             Directory.CreateDirectory(directory);
             string path = Path.Combine(
                 directory,
@@ -93,25 +103,48 @@ internal static class Program
         }
     }
 
-    private static string? TryReadRequestedDataDirectory(string[] args)
+    /// <summary>The root named by <c>--root-dir</c> or, failing that, <c>--data-dir</c>.</summary>
+    private static string? TryReadRequestedRoot(string[] args)
     {
-        for (int index = 0; index + 1 < args.Length; index++)
+        foreach (string option in new[] { "--root-dir", "--data-dir" })
         {
-            if (string.Equals(args[index], "--data-dir", StringComparison.Ordinal)
-                && !string.IsNullOrWhiteSpace(args[index + 1])
-                && Path.IsPathFullyQualified(args[index + 1]))
+            for (int index = 0; index + 1 < args.Length; index++)
             {
-                return args[index + 1];
+                if (string.Equals(args[index], option, StringComparison.Ordinal)
+                    && !string.IsNullOrWhiteSpace(args[index + 1])
+                    && Path.IsPathFullyQualified(args[index + 1]))
+                {
+                    return args[index + 1];
+                }
             }
         }
 
         return null;
     }
 
-    internal static AppBuilder BuildAvaloniaApp(LauncherStartupOptions options)
+    /// <summary>
+    /// The resolved crash folder, or the default root's when resolving is
+    /// what failed (an unreadable pointer file, say).
+    /// </summary>
+    private static string ResolveCrashReportsDirectory()
+    {
+        try
+        {
+            return ApplicationPathSet.Resolve().CrashReportsDirectory;
+        }
+        catch (InvalidOperationException)
+        {
+            return ApplicationPathSet.ForRoot(ApplicationPathSet.ResolveDefaultRoot())
+                .CrashReportsDirectory;
+        }
+    }
+
+    internal static AppBuilder BuildAvaloniaApp(
+        LauncherStartupOptions options,
+        InstallRootMigrationResult? migration = null)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return AppBuilder.Configure(() => new App(options))
+        return AppBuilder.Configure(() => new App(options, migration))
             .UsePlatformDetect();
     }
 

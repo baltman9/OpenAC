@@ -21,8 +21,7 @@ public sealed class LauncherOverlayInstallerTests : IDisposable
         _paths = new ApplicationPathSet(
             Path.Combine(_root, "config"),
             Path.Combine(_root, "data"),
-            Path.Combine(_root, "cache"),
-            null);
+            Path.Combine(_root, "cache"));
         _dats = Path.Combine(_root, "dats");
         foreach (string name in DatDirectoryLocator.RequiredFileNames)
         {
@@ -199,7 +198,7 @@ public sealed class LauncherOverlayInstallerTests : IDisposable
                 recordStore.PreparedAssetPath,
                 recipe: LauncherInstallRecordStore.CurrentBakeToolVersion - 1,
                 datDirectory: Path.GetFullPath(_dats));
-        Directory.CreateDirectory(_paths.DataDirectory);
+        Directory.CreateDirectory(_paths.GameDataDirectory);
         await File.WriteAllTextAsync(
             recordStore.RecordPath,
             JsonSerializer.Serialize(baseRecord, new JsonSerializerOptions

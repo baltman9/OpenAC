@@ -55,7 +55,9 @@ public sealed class LauncherInstallRecordStore
         _verificationCache = new PreparedAssetVerificationCache(DataDirectory);
     }
 
-    public string DataDirectory => Path.GetFullPath(_paths.DataDirectory);
+    /// <summary>The folder holding the prepared content, its install record and
+    /// the install lock: <c>data/</c> under the install root.</summary>
+    public string DataDirectory => Path.GetFullPath(_paths.GameDataDirectory);
 
     public string RecordPath => Path.Combine(DataDirectory, "install.json");
 
@@ -380,7 +382,7 @@ public sealed class LauncherInstallRecordStore
         if (!PathsEqual(recordedPreparedPath, canonicalPreparedPath))
         {
             return "The install record does not point to the launcher's canonical "
-                + "DataDirectory/pak/acdream.pak path.";
+                + "data/pak/acdream.pak path.";
         }
 
         if (requireCanonicalSerializedPaths
@@ -455,7 +457,7 @@ public sealed class LauncherInstallRecordStore
         {
             throw new InvalidDataException(
                 "The install record does not point to the launcher's canonical "
-                + "DataDirectory/pak/acdream.pak path.");
+                + "data/pak/acdream.pak path.");
         }
 
         return record with

@@ -1,0 +1,328 @@
+using System.Text.Json.Nodes;
+using AcDream.Platform;
+
+namespace AcDream.Platform.Tests;
+
+public sealed class InstallRootMigrationTests : IDisposable
+{
+    private readonly string _scratch = Path.Combine(
+        Path.GetTempPath(),
+        "openac-migration-" + Guid.NewGuid().ToString("N"));
+
+    private readonly LegacyApplicationLayout _old;
+    private readonly ApplicationPathSet _paths;
+
+    public InstallRootMigrationTests()
+    {
+        string local = Path.Combine(_scratch, "Local", "acdream");
+        _old = new LegacyApplicationLayout(
+            Path.Combine(_scratch, "Roaming", "acdream"),
+            local,
+            Path.Combine(local, "cache"),
+            local);
+        _paths = ApplicationPathSet.ForRoot(
+            Path.Combine(_scratch, "Local", "OpenAC"),
+            ApplicationRootSource.Default);
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_scratch))
+            Directory.Delete(_scratch, recursive: true);
+    }
+
+    /// <summary>
+    /// Mutation: dropping any one mapping row, moving a not-migrated entry,
+    /// or skipping the install record rewrite fails this.
+    /// </summary>
+    [Fact]
+    public void EveryRowOfTheMappingLandsWhereTheLayoutSays()
+    {
+        SeedOldLayout();
+
+        InstallRootMigrationResult result = InstallRootMigration.Run(_old, _paths);
+
+        Assert.Equal(InstallRootMigrationOutcome.Migrated, result.Outcome);
+        Assert.Empty(result.Failures);
+        string root = _paths.RootDirectory;
+        AssertFile(root, "app/0.1.15/AcDream.App.exe");
+        AssertFile(root, "app/0.1.14/AcDream.App.exe");
+        AssertFile(root, "app/current.json");
+        AssertFile(root, "app/current.previous.json");
+        AssertFile(root, "app/plugins-installed.json");
+        AssertFile(root, "app/launcher-update/transactions/t.json");
+        Assert.False(Directory.Exists(Path.Combine(root, "app", "0.1.10")));
+        AssertFile(root, "data/pak/acdream.pak");
+        AssertFile(root, "data/install.json");
+        AssertFile(root, "data/install.verification.json");
+        AssertFile(root, "settings/settings.json");
+        AssertFile(root, "settings/keybinds.json");
+        AssertFile(root, "settings/launcher-profiles.json");
+        AssertFile(root, "settings/active-keymap.txt");
+        AssertFile(root, "plugins/acdream.mosstank/plugin.json");
+        AssertFile(root, "plugins/acdream.mosstank/files/state.json");
+        AssertFile(root, "plugins/openac.goarrow/files/arrow.json");
+        AssertFile(root, "vtank/mosstank/profiles/p.usd");
+        AssertFile(root, "logs/chat.txt");
+        AssertFile(root, "logs/crash/launcher-crash-1.log");
+        AssertFile(root, "logs/crash/crash-20260911.json");
+        Assert.False(Directory.Exists(Path.Combine(root, "navigation")));
+        Assert.False(Directory.Exists(Path.Combine(root, "plugins-before-ub")));
+        Assert.False(File.Exists(Path.Combine(root, "cache", "plugins.json")));
+        Assert.False(Directory.Exists(Path.Combine(root, "plugin-peers")));
+
+        // What was not brought over stays in the old folder.
+        Assert.True(Directory.Exists(Path.Combine(_old.DataDirectory, "app", "0.1.10")));
+        Assert.True(Directory.Exists(Path.Combine(_old.DataDirectory, "navigation")));
+        Assert.True(Directory.Exists(Path.Combine(_old.DataDirectory, "plugin-backups")));
+        Assert.True(File.Exists(Path.Combine(_old.DataDirectory, ".install.lock")));
+        Assert.True(File.Exists(Path.Combine(_old.CacheDirectory, "plugins.json")));
+
+        JsonObject install = ReadObject(Path.Combine(root, "data", "install.json"));
+        Assert.Equal(
+            Path.Combine(root, "data", "pak", "acdream.pak"),
+            install["preparedAssetPath"]!.GetValue<string>());
+        Assert.Equal(
+            "C:\\Games\\AC",
+            install["datDirectory"]!.GetValue<string>());
+        JsonObject verification = ReadObject(
+            Path.Combine(root, "data", "install.verification.json"));
+        Assert.Equal(
+            Path.Combine(root, "data", "pak", "acdream.pak"),
+            verification["path"]!.GetValue<string>());
+
+        Assert.True(File.Exists(Path.Combine(_old.DataDirectory, InstallRootMigration.MovedNoteFileName)));
+        Assert.True(File.Exists(Path.Combine(_old.ConfigDirectory, InstallRootMigration.MovedNoteFileName)));
+        Assert.True(File.Exists(_paths.LayoutMarkerFile));
+    }
+
+    /// <summary>Mutation: writing the marker before the moves, or not checking it, fails this.</summary>
+    [Fact]
+    public void SecondRunDoesNothing()
+    {
+        SeedOldLayout();
+        InstallRootMigration.Run(_old, _paths);
+        File.WriteAllText(Path.Combine(_old.ConfigDirectory, "settings.json"), "{\"late\":true}");
+
+        InstallRootMigrationResult second = InstallRootMigration.Run(_old, _paths);
+
+        Assert.Equal(InstallRootMigrationOutcome.AlreadyDone, second.Outcome);
+        Assert.True(File.Exists(Path.Combine(_old.ConfigDirectory, "settings.json")));
+    }
+
+    /// <summary>
+    /// Mutation: a planner that asks for sources that are already gone, or an
+    /// executor that stops at the first missing source, fails this.
+    /// </summary>
+    [Fact]
+    public void HalfDoneRunResumesFromWhatIsLeft()
+    {
+        SeedOldLayout();
+        // An earlier run moved the logs and the pak and was stopped before
+        // the install record, the settings or the marker.
+        Directory.CreateDirectory(_paths.RootDirectory);
+        Directory.Move(Path.Combine(_old.DataDirectory, "logs"), _paths.LogsDirectory);
+        Directory.CreateDirectory(_paths.GameDataDirectory);
+        Directory.Move(
+            Path.Combine(_old.DataDirectory, "pak"),
+            Path.Combine(_paths.GameDataDirectory, "pak"));
+
+        InstallRootMigrationResult result = InstallRootMigration.Run(_old, _paths);
+
+        Assert.Equal(InstallRootMigrationOutcome.Migrated, result.Outcome);
+        AssertFile(_paths.RootDirectory, "logs/chat.txt");
+        AssertFile(_paths.RootDirectory, "data/pak/acdream.pak");
+        AssertFile(_paths.RootDirectory, "settings/settings.json");
+        Assert.Empty(InstallRootMigration.Plan(_old, _paths).Steps);
+    }
+
+    /// <summary>
+    /// Mutation: dropping the rewrite step when the record was already moved
+    /// fails this (the launcher would then refuse the install).
+    /// </summary>
+    [Fact]
+    public void RunStoppedBetweenMoveAndRewriteStillRewritesTheRecord()
+    {
+        Directory.CreateDirectory(_paths.GameDataDirectory);
+        File.WriteAllText(
+            Path.Combine(_paths.GameDataDirectory, "install.json"),
+            "{ \"preparedAssetPath\": \"C:\\\\old\\\\pak\\\\acdream.pak\", \"version\": 1 }");
+
+        InstallRootMigrationResult result = InstallRootMigration.Run(_old, _paths);
+
+        Assert.Equal(InstallRootMigrationOutcome.Migrated, result.Outcome);
+        Assert.Equal(
+            Path.Combine(_paths.GameDataDirectory, "pak", "acdream.pak"),
+            ReadObject(Path.Combine(_paths.GameDataDirectory, "install.json"))["preparedAssetPath"]!
+                .GetValue<string>());
+    }
+
+    /// <summary>
+    /// Mutation: making the copy path skip the source delete, or copy without
+    /// the rename into place, fails this.
+    /// </summary>
+    [Fact]
+    public void AcrossVolumesEverythingIsCopiedThenDeleted()
+    {
+        SeedOldLayout();
+
+        InstallRootMigrationResult result = InstallRootMigration.Run(
+            _old,
+            _paths,
+            sameVolume: static (_, _) => false);
+
+        Assert.Equal(InstallRootMigrationOutcome.Migrated, result.Outcome);
+        AssertFile(_paths.RootDirectory, "app/0.1.15/AcDream.App.exe");
+        AssertFile(_paths.RootDirectory, "plugins/acdream.mosstank/files/state.json");
+        AssertFile(_paths.RootDirectory, "vtank/mosstank/profiles/p.usd");
+        Assert.False(Directory.Exists(Path.Combine(_old.DataDirectory, "vtank")));
+        Assert.False(Directory.Exists(Path.Combine(_old.DataDirectory, "app", "0.1.15")));
+        Assert.False(File.Exists(Path.Combine(_old.ConfigDirectory, "settings.json")));
+        Assert.Empty(Directory.EnumerateFiles(_paths.RootDirectory, "*.moving", SearchOption.AllDirectories));
+    }
+
+    /// <summary>Mutation: overwriting a file the new root already has fails this.</summary>
+    [Fact]
+    public void AFileTheNewRootAlreadyHasIsKept()
+    {
+        SeedOldLayout();
+        Directory.CreateDirectory(_paths.ConfigDirectory);
+        File.WriteAllText(_paths.SettingsFile, "{\"new\":true}");
+
+        InstallRootMigration.Run(_old, _paths);
+
+        Assert.Equal("{\"new\":true}", File.ReadAllText(_paths.SettingsFile));
+        Assert.True(File.Exists(Path.Combine(_old.ConfigDirectory, "settings.json")));
+    }
+
+    /// <summary>Mutation: writing the marker despite a failed step fails this.</summary>
+    [Fact]
+    public void AFailedStepLeavesNoMarkerSoTheNextStartResumes()
+    {
+        SeedOldLayout();
+        Directory.CreateDirectory(_paths.RootDirectory);
+        // A file where the logs folder must go makes that one step fail.
+        File.WriteAllText(_paths.LogsDirectory, "in the way");
+
+        InstallRootMigrationResult result = InstallRootMigration.Run(_old, _paths);
+
+        Assert.Equal(InstallRootMigrationOutcome.Incomplete, result.Outcome);
+        Assert.NotEmpty(result.Failures);
+        Assert.False(File.Exists(_paths.LayoutMarkerFile));
+        AssertFile(_paths.RootDirectory, "settings/settings.json");
+    }
+
+    /// <summary>Mutation: migrating into an explicitly named root fails this.</summary>
+    [Fact]
+    public void AnExplicitlyNamedRootIsNeverMigratedInto()
+    {
+        ApplicationPathSet explicitRoot = ApplicationPathSet.ForRoot(
+            Path.Combine(_scratch, "isolated"));
+
+        InstallRootMigrationResult result = InstallRootMigration.RunIfNeeded(explicitRoot);
+
+        Assert.Equal(InstallRootMigrationOutcome.NotApplicable, result.Outcome);
+        Assert.False(Directory.Exists(explicitRoot.RootDirectory));
+    }
+
+    /// <summary>Mutation: not marking a fresh root fails this.</summary>
+    [Fact]
+    public void WithoutAnOldLayoutTheRootIsMarkedFresh()
+    {
+        InstallRootMigrationResult result = InstallRootMigration.Run(_old, _paths);
+
+        Assert.Equal(InstallRootMigrationOutcome.Fresh, result.Outcome);
+        Assert.True(File.Exists(_paths.LayoutMarkerFile));
+        Assert.Empty(InstallRootMigration.ReadOldRoots(_paths));
+    }
+
+    /// <summary>Mutation: ignoring the earlier settings folder fails this.</summary>
+    [Fact]
+    public void SettingsOnlyTheEarlierFolderHadAreBroughtOver()
+    {
+        Directory.CreateDirectory(_old.EarlierConfigDirectory!);
+        File.WriteAllText(Path.Combine(_old.EarlierConfigDirectory!, "keybinds.json"), "{}");
+
+        InstallRootMigration.Run(_old, _paths);
+
+        AssertFile(_paths.RootDirectory, "settings/keybinds.json");
+    }
+
+    /// <summary>Mutation: removing a root whose note does not name this install fails this.</summary>
+    [Fact]
+    public void RemoveOldRootsDeletesOnlyTheNotedOldFolders()
+    {
+        SeedOldLayout();
+        InstallRootMigration.Run(_old, _paths);
+        File.WriteAllText(
+            Path.Combine(_old.ConfigDirectory, InstallRootMigration.MovedNoteFileName),
+            "somewhere else");
+
+        IReadOnlyList<string> failures = InstallRootMigration.RemoveOldRoots(_paths);
+
+        Assert.Empty(failures);
+        Assert.False(Directory.Exists(_old.DataDirectory));
+        Assert.True(Directory.Exists(_old.ConfigDirectory));
+    }
+
+    private void SeedOldLayout()
+    {
+        string data = _old.DataDirectory;
+        string config = _old.ConfigDirectory;
+        Write(data, "app/0.1.15/AcDream.App.exe", "x");
+        Write(data, "app/0.1.14/AcDream.App.exe", "x");
+        Write(data, "app/0.1.10/AcDream.App.exe", "x");
+        Write(data, "app/current.json", "{ \"schemaVersion\": 1, \"currentVersion\": \"0.1.15\", \"previousVersion\": \"0.1.14\" }");
+        Write(data, "app/current.previous.json", "{}");
+        Write(data, "app/plugins-installed.json", "{}");
+        Write(data, "app/.update-session.lock", string.Empty);
+        Write(data, "launcher-update/transactions/t.json", "{}");
+        Write(data, "pak/acdream.pak", "pak");
+        Write(
+            data,
+            "install.json",
+            "{ \"datDirectory\": \"C:\\\\Games\\\\AC\", \"preparedAssetPath\": "
+            + System.Text.Json.JsonSerializer.Serialize(Path.Combine(data, "pak", "acdream.pak"))
+            + ", \"version\": 1 }");
+        Write(
+            data,
+            "install.verification.json",
+            "{ \"version\": 1, \"path\": "
+            + System.Text.Json.JsonSerializer.Serialize(Path.Combine(data, "pak", "acdream.pak"))
+            + " }");
+        Write(data, ".install.lock", string.Empty);
+        Write(data, "plugins/acdream.mosstank/plugin.json", "{}");
+        Write(data, "vtank/mosstank/profiles/p.usd", "u");
+        Write(data, "logs/chat.txt", "hi");
+        Write(data, "crash-reports/launcher-crash-1.log", "boom");
+        Write(data, "navigation/x.nav", "n");
+        Write(data, "plugins-before-ub/a/plugin.json", "{}");
+        Write(data, "plugins-disabled/b/plugin.json", "{}");
+        Write(data, "plugin-backups/c.zip", "z");
+        Write(data, "plugin-peers/peer.json", "{}");
+        Write(_old.CacheDirectory, "plugins.json", "{}");
+        Write(_old.CacheDirectory, "diagnostics/crash-20260911.json", "{}");
+        Write(_old.CacheDirectory, "diagnostics/graphical-capabilities-vulkan.json", "{}");
+        Write(config, "settings.json", "{}");
+        Write(config, "keybinds.json", "{}");
+        Write(config, "launcher-profiles.json", "{}");
+        Write(config, "active-keymap.txt", "default");
+        Write(config, "plugins/acdream.mosstank/state.json", "{}");
+        Write(config, "plugins/openac.goarrow/arrow.json", "{}");
+    }
+
+    private static void Write(string root, string relative, string content)
+    {
+        string path = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, content);
+    }
+
+    private static void AssertFile(string root, string relative) =>
+        Assert.True(
+            File.Exists(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar))),
+            $"missing {relative}");
+
+    private static JsonObject ReadObject(string path) =>
+        (JsonObject)JsonNode.Parse(File.ReadAllText(path))!;
+}

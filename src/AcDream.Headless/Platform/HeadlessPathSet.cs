@@ -3,24 +3,38 @@ using AcDream.Platform;
 
 namespace AcDream.Headless.Platform;
 
+/// <summary>
+/// The folders a bot process uses. They come from the same resolver the
+/// graphical client and the launcher use, so a plugin driven by a bot and a
+/// plugin driven by a window read and write the same files.
+/// </summary>
 internal sealed record HeadlessPathSet(
     string ConfigDirectory,
     string DataDirectory,
     string CacheDirectory)
 {
-    internal string PluginsDirectory =>
-        Path.Combine(DataDirectory, "plugins");
+    /// <summary>How the install root was chosen.</summary>
+    internal ApplicationRootSource RootSource { get; init; } =
+        ApplicationRootSource.Explicit;
+
+    /// <summary>The shared path set these folders belong to.</summary>
+    internal ApplicationPathSet Application =>
+        new(ConfigDirectory, DataDirectory, CacheDirectory)
+        {
+            RootSource = RootSource,
+        };
+
+    internal string PluginsDirectory => Application.PluginsDirectory;
 
     /// <summary>
-    /// Where a plugin's own persisted state lives. The same place the
-    /// graphical host uses, so a plugin driven by a bot and a plugin driven
-    /// by a window read and write the same files.
+    /// Where plugin private storage is keyed: each plugin's own files live in
+    /// <c>&lt;id&gt;/files</c> beneath it, inside that plugin's folder.
     /// </summary>
-    internal string PluginStorageDirectory =>
-        Path.Combine(ConfigDirectory, "plugins");
+    internal string PluginStorageDirectory => Application.PluginStorageDirectory;
 
-    internal string VtankProfilesDirectory =>
-        Path.Combine(DataDirectory, "vtank");
+    internal string VtankProfilesDirectory => Application.VtankProfilesDirectory;
+
+    internal string PluginPeersDirectory => Application.PluginPeersDirectory;
 
     internal static HeadlessPathSet Resolve(
         HeadlessPathOverrides overrides,
@@ -35,11 +49,15 @@ internal sealed record HeadlessPathSet(
                 overrides.ConfigDirectory,
                 overrides.DataDirectory,
                 overrides.CacheDirectory,
-                platform);
+                platform,
+                overrides.RootDirectory);
             return new HeadlessPathSet(
                 paths.ConfigDirectory,
                 paths.DataDirectory,
-                paths.CacheDirectory);
+                paths.CacheDirectory)
+            {
+                RootSource = paths.RootSource,
+            };
         }
         catch (Exception exception)
             when (exception is ArgumentException

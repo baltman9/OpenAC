@@ -80,8 +80,7 @@ static ApplicationPathSet Paths(string dataDirectory)
     return new ApplicationPathSet(
         Path.Combine(data, "fixture-config"),
         data,
-        Path.Combine(data, "fixture-cache"),
-        null);
+        Path.Combine(data, "fixture-cache"));
 }
 
 static async Task<int> CrashSelfUpdateAsync(string[] arguments)
@@ -297,8 +296,7 @@ static async Task<int> RunOrphanParentAsync(string[] arguments)
     var paths = new ApplicationPathSet(
         Path.Combine(dataDirectory, "fixture-config"),
         dataDirectory,
-        Path.Combine(dataDirectory, "fixture-cache"),
-        null);
+        Path.Combine(dataDirectory, "fixture-cache"));
     var runner = new OrphanBakeProcessRunner(
         schedule,
         childReadyPath,

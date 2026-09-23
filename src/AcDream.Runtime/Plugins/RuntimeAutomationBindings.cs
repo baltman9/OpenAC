@@ -153,7 +153,7 @@ internal static class RuntimeAutomationBindings
     /// </summary>
     /// <param name="inputs">What this host hands the surface at birth.</param>
     /// <exception cref="ArgumentException">
-    /// The host named no data directory, so the clients on this machine would
+    /// The host named no peer folder, so the clients on this machine would
     /// have nowhere to find one another.
     /// </exception>
     internal static RuntimeAutomationSurface CreateSurface(
@@ -161,13 +161,11 @@ internal static class RuntimeAutomationBindings
     {
         ArgumentNullException.ThrowIfNull(inputs);
         ArgumentException.ThrowIfNullOrWhiteSpace(
-            inputs.DataDirectory,
-            $"{inputs.HostName}.{nameof(inputs.DataDirectory)}");
+            inputs.PeerDirectory,
+            $"{inputs.HostName}.{nameof(inputs.PeerDirectory)}");
         return new RuntimeAutomationSurface(
             inputs.PluginEvents,
-            new LocalPluginPeerRegistry(Path.Combine(
-                inputs.DataDirectory,
-                RuntimeAutomationSurfaceInputs.PeerDirectoryName)),
+            new LocalPluginPeerRegistry(inputs.PeerDirectory),
             inputs.PeerTags);
     }
 

@@ -177,8 +177,7 @@ internal static class UpdateTestData
     public static ApplicationPathSet Paths(string root) => new(
         Path.Combine(root, "config"),
         Path.Combine(root, "data"),
-        Path.Combine(root, "cache"),
-        null);
+        Path.Combine(root, "cache"));
 
     public static byte[] CreateZip(
         IEnumerable<(string Name, byte[] Content, int? UnixAttributes)> entries,

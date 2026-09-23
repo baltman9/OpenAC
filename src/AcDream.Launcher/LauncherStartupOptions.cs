@@ -68,7 +68,7 @@ internal sealed class LauncherStartupOptions
                 // The publish probe returns before this value is observed. A
                 // non-resolving sentinel keeps the probe display- and
                 // user-profile-free even under a deliberately broken runtime.
-                new ApplicationPathSet(string.Empty, string.Empty, string.Empty, null),
+                new ApplicationPathSet(string.Empty, string.Empty, string.Empty),
                 ReleaseManifestClient.ProductionManifestUri,
                 PluginCatalog.ProductionListUri,
                 publicArguments);
@@ -77,6 +77,7 @@ internal sealed class LauncherStartupOptions
         string? configDirectory = null;
         string? dataDirectory = null;
         string? cacheDirectory = null;
+        string? rootDirectory = null;
         Uri? updateManifestUri = null;
         Uri? pluginListUri = null;
 
@@ -107,6 +108,9 @@ internal sealed class LauncherStartupOptions
                     break;
                 case "--cache-dir":
                     SetDirectoryOnce(ref cacheDirectory, value, name);
+                    break;
+                case "--root-dir":
+                    SetDirectoryOnce(ref rootDirectory, value, name);
                     break;
                 case "--update-manifest-uri":
                     if (updateManifestUri is not null)
@@ -140,13 +144,17 @@ internal sealed class LauncherStartupOptions
                 "--config-dir, --data-dir, and --cache-dir must be supplied together.");
         }
 
+        // The three member flags still win for their own member; a root alone
+        // names the whole install. Either way the environment and the pointer
+        // file are not consulted: the command line said where.
         ApplicationPathSet paths = suppliedRoots == 3
             ? new ApplicationPathSet(
                 configDirectory!,
                 dataDirectory!,
-                cacheDirectory!,
-                LegacyConfigDirectory: null)
-            : resolveDefaultPaths();
+                cacheDirectory!)
+            : rootDirectory is not null
+                ? ApplicationPathSet.ForRoot(rootDirectory)
+                : resolveDefaultPaths();
         return new LauncherStartupOptions(
             mode,
             paths,

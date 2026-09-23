@@ -710,7 +710,7 @@ public sealed class GameWindow :
             try
             {
                 Diagnostics.LocalCrashReportWriter.TryWrite(
-                    failure, _applicationPaths.DiagnosticsDirectory,
+                    failure, _applicationPaths.CrashReportsDirectory,
                     CaptureLocalCrashReportContext, Console.Error.WriteLine);
             }
             catch { /* Diagnostics must never mask the frame-loop failure. */ }
@@ -1393,7 +1393,8 @@ public sealed class GameWindow :
                     _renderPackDiagnostics.CaptureDiagnostics,
                     _applicationPaths.ScreenshotsDirectory,
                     _automation,
-                    GameplayInputFrame: () => _gameplayInputFrame),
+                    GameplayInputFrame: () => _gameplayInputFrame,
+                    JournalDirectory: _applicationPaths.JournalDirectory),
                 _retailUiLease,
                 this).Compose(
                     platformResult,
@@ -1520,7 +1521,8 @@ public sealed class GameWindow :
                     _automation is null
                         ? null
                         : _automation.InterceptChatInput,
-                    _statusWriter),
+                    _statusWriter,
+                    ChatLogDirectory: _applicationPaths.LogsDirectory),
                 this).Compose(
                     hostInputCamera,
                     contentEffectsAudio,

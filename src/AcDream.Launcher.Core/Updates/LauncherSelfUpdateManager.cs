@@ -121,7 +121,7 @@ public sealed class LauncherSelfUpdateManager
     {
         ArgumentNullException.ThrowIfNull(paths);
         RootDirectory = Path.Combine(
-            Path.GetFullPath(paths.DataDirectory),
+            Path.GetFullPath(paths.AppDirectory),
             "launcher-update");
         TransactionsDirectory = Path.Combine(RootDirectory, "transactions");
         PendingPlanPath = Path.Combine(RootDirectory, "pending.json");

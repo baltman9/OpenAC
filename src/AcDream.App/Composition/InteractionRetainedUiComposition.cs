@@ -77,7 +77,8 @@ internal sealed record InteractionRetainedUiDependencies(
         RenderPackDiagnostics = null,
     string? ScreenshotsDirectory = null,
     AcDream.Runtime.Plugins.RuntimeAutomationSurface? Automation = null,
-    Func<GameplayInputFrameController?>? GameplayInputFrame = null)
+    Func<GameplayInputFrameController?>? GameplayInputFrame = null,
+    string? JournalDirectory = null)
 {
     public RuntimeActionState Actions => Runtime.ActionOwner;
 
@@ -932,9 +933,8 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                     PlayerCell: () => d.PlayerController.Controller?.CellId ?? 0u,
                     AbandonContract: contractId =>
                         late.Session.CurrentSession?.SendAbandonContract(contractId),
-                    JournalDirectory: System.IO.Path.Combine(
-                        AcDream.Platform.ApplicationPathSet.Resolve().DataDirectory,
-                        "journal"),
+                    JournalDirectory: d.JournalDirectory
+                        ?? AcDream.Platform.ApplicationPathSet.Resolve().JournalDirectory,
                     Report: message =>
                         d.Communication.Chat.OnSystemMessage(message, 0x0Fu)),
                 StackSplitQuantity: d.StackSplitQuantity,

@@ -38,7 +38,7 @@ public sealed class LauncherStartupOptionsTests
         Assert.Equal(
             Path.TrimEndingDirectorySeparator(Path.GetFullPath(cache)),
             options.Paths.CacheDirectory);
-        Assert.Null(options.Paths.LegacyConfigDirectory);
+        Assert.Equal(ApplicationRootSource.Explicit, options.Paths.RootSource);
         Assert.Equal(
             "http://127.0.0.1:43119/manifest.json",
             options.UpdateManifestUri.AbsoluteUri);
@@ -48,7 +48,7 @@ public sealed class LauncherStartupOptionsTests
     [Fact]
     public void NoOverridesResolveDefaultsExactlyOnce()
     {
-        var expected = new ApplicationPathSet("config", "data", "cache", "legacy");
+        var expected = new ApplicationPathSet("config", "data", "cache");
         int calls = 0;
 
         LauncherStartupOptions options = LauncherStartupOptions.Parse(
@@ -92,7 +92,7 @@ public sealed class LauncherStartupOptionsTests
         Assert.Throws<LauncherStartupOptionsException>(() =>
             LauncherStartupOptions.Parse(
                 arguments,
-                () => new ApplicationPathSet("c", "d", "x", null)));
+                () => new ApplicationPathSet("c", "d", "x")));
     }
 
     [Theory]
@@ -103,7 +103,7 @@ public sealed class LauncherStartupOptionsTests
     {
         LauncherStartupOptions options = LauncherStartupOptions.Parse(
             ["--update-manifest-uri", value],
-            () => new ApplicationPathSet("c", "d", "x", null));
+            () => new ApplicationPathSet("c", "d", "x"));
 
         Assert.Equal(new Uri(value), options.UpdateManifestUri);
     }
@@ -115,7 +115,7 @@ public sealed class LauncherStartupOptionsTests
     {
         LauncherStartupOptions options = LauncherStartupOptions.Parse(
             ["--plugin-list-uri", value],
-            () => new ApplicationPathSet("c", "d", "x", null));
+            () => new ApplicationPathSet("c", "d", "x"));
 
         Assert.Equal(new Uri(value), options.PluginListUri);
     }
@@ -125,7 +125,7 @@ public sealed class LauncherStartupOptionsTests
     {
         LauncherStartupOptions options = LauncherStartupOptions.Parse(
             [],
-            () => new ApplicationPathSet("c", "d", "x", null));
+            () => new ApplicationPathSet("c", "d", "x"));
 
         Assert.Equal(PluginCatalog.ProductionListUri, options.PluginListUri);
     }
@@ -217,7 +217,7 @@ public sealed class LauncherStartupOptionsTests
     [Fact]
     public void CompositionRejectsAnyBootstrapArgumentDrift()
     {
-        var paths = new ApplicationPathSet("config", "data", "cache", null);
+        var paths = new ApplicationPathSet("config", "data", "cache");
         LauncherStartupOptions options = LauncherStartupOptions.Parse(
             ["--update-manifest-uri", "https://updates.example.test/manifest.json"],
             () => paths);

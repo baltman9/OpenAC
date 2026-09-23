@@ -2,6 +2,7 @@ using AcDream.Headless.Configuration;
 using AcDream.Headless.Credentials;
 using AcDream.Headless.Hosting;
 using AcDream.Headless.Platform;
+using AcDream.Platform;
 
 namespace AcDream.Headless;
 
@@ -21,6 +22,7 @@ internal static class HeadlessEntryPoint
           run        Run exactly one configured no-window session.
 
         Path overrides:
+          --root-dir <path>              The whole install folder.
           --config-dir <path>
           --data-dir <path>
           --cache-dir <path>
@@ -83,6 +85,14 @@ internal static class HeadlessEntryPoint
                 configuredPaths.Merge(commandLine.Paths));
             if (commandLine.Command == "run")
             {
+                // A bot started by hand before the launcher ever ran brings
+                // the old per-user folders into the install root itself; one
+                // the launcher starts is handed an explicit root.
+                InstallRootMigrationLog.Write(
+                    InstallRootMigration.RunIfNeeded(paths.Application),
+                    paths.DataDirectory,
+                    error.WriteLine,
+                    error.WriteLine);
                 bool consoleEnabled = HeadlessConsoleOptions.Resolve(
                     commandLine.ConsoleEnabled,
                     standardInputIsTerminal);

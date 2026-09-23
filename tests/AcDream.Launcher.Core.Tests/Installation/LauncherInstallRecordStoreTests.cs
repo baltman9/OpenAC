@@ -27,8 +27,7 @@ public sealed class LauncherInstallRecordStoreTests : IDisposable
         _paths = new ApplicationPathSet(
             Path.Combine(_root, "config"),
             Path.Combine(_root, "data"),
-            Path.Combine(_root, "cache"),
-            null);
+            Path.Combine(_root, "cache"));
         _dats = Path.Combine(_root, "retail-dats");
         CreateCompleteDatDirectory(_dats);
     }
@@ -55,7 +54,7 @@ public sealed class LauncherInstallRecordStoreTests : IDisposable
         Assert.True(verification.IsVerified);
         Assert.Equal(record, verification.Record);
         Assert.Contains("SHA-256", verification.Status, StringComparison.Ordinal);
-        Assert.Empty(Directory.EnumerateFiles(_paths.DataDirectory, ".install.json.*.tmp"));
+        Assert.Empty(Directory.EnumerateFiles(_paths.GameDataDirectory, ".install.json.*.tmp"));
     }
 
     [Fact]
@@ -103,7 +102,7 @@ public sealed class LauncherInstallRecordStoreTests : IDisposable
             new string('a', 64),
             new FileInfo(store.PreparedAssetPath).Length,
             LauncherInstallRecordStore.CurrentBakeToolVersion - 1);
-        Directory.CreateDirectory(_paths.DataDirectory);
+        Directory.CreateDirectory(_paths.GameDataDirectory);
         await File.WriteAllTextAsync(
             store.RecordPath,
             JsonSerializer.Serialize(stale, new JsonSerializerOptions
@@ -125,7 +124,7 @@ public sealed class LauncherInstallRecordStoreTests : IDisposable
     public async Task NullIntegrityMetadataIsReportedAsInvalidInsteadOfThrowing()
     {
         var store = new LauncherInstallRecordStore(_paths);
-        Directory.CreateDirectory(_paths.DataDirectory);
+        Directory.CreateDirectory(_paths.GameDataDirectory);
         await File.WriteAllTextAsync(
             store.RecordPath,
             JsonSerializer.Serialize(new
@@ -149,7 +148,7 @@ public sealed class LauncherInstallRecordStoreTests : IDisposable
     public async Task MissingExplicitVersionIsRejectedBeforeAdmission()
     {
         var store = new LauncherInstallRecordStore(_paths);
-        Directory.CreateDirectory(_paths.DataDirectory);
+        Directory.CreateDirectory(_paths.GameDataDirectory);
         await File.WriteAllTextAsync(
             store.RecordPath,
             JsonSerializer.Serialize(new
@@ -218,7 +217,7 @@ public sealed class LauncherInstallRecordStoreTests : IDisposable
             await FileIntegrity.ComputeSha256HexAsync(store.PreparedAssetPath),
             info.Length,
             LauncherInstallRecordStore.CurrentBakeToolVersion);
-        Directory.CreateDirectory(_paths.DataDirectory);
+        Directory.CreateDirectory(_paths.GameDataDirectory);
         await File.WriteAllTextAsync(
             store.RecordPath,
             JsonSerializer.Serialize(relative, new JsonSerializerOptions
@@ -255,7 +254,7 @@ public sealed class LauncherInstallRecordStoreTests : IDisposable
             await FileIntegrity.ComputeSha256HexAsync(store.PreparedAssetPath),
             info.Length,
             LauncherInstallRecordStore.CurrentBakeToolVersion);
-        Directory.CreateDirectory(_paths.DataDirectory);
+        Directory.CreateDirectory(_paths.GameDataDirectory);
         await File.WriteAllTextAsync(
             store.RecordPath,
             JsonSerializer.Serialize(nonCanonical, new JsonSerializerOptions

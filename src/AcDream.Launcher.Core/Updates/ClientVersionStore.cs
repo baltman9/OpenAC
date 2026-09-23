@@ -80,7 +80,7 @@ public sealed class ClientVersionStore
         Func<string, CancellationToken, Task<string>>? computeSha256 = null)
     {
         ArgumentNullException.ThrowIfNull(paths);
-        AppDirectory = Path.Combine(Path.GetFullPath(paths.DataDirectory), "app");
+        AppDirectory = Path.GetFullPath(paths.AppDirectory);
         CurrentPointerPath = Path.Combine(AppDirectory, "current.json");
         PreviousPointerPath = Path.Combine(AppDirectory, "current.previous.json");
         Barrier = new UpdateSessionBarrier(paths.DataDirectory);

@@ -204,9 +204,8 @@ internal sealed class RuntimeAutomationSurface
         _chatInterceptors.InterceptorFaulted = error =>
             ReportPluginCommandFailure("chat-input-interceptor", error);
         _events = events;
-        _peers = peers ?? new LocalPluginPeerRegistry(Path.Combine(
-            AcDream.Platform.ApplicationPathSet.Resolve().DataDirectory,
-            "plugin-peers"));
+        _peers = peers ?? new LocalPluginPeerRegistry(
+            AcDream.Platform.ApplicationPathSet.Resolve().PluginPeersDirectory);
         _peerTags = NormalizePeerTags(peerTags);
         if (_events is not null)
             _events.Tick += OnPeerTick;

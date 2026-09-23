@@ -122,7 +122,7 @@ internal sealed class HeadlessProcessHost : IDisposable
                         pluginRoots: pluginRoots,
                         storage: pluginStorage,
                         vtankProfiles: vtankProfiles,
-                        dataDirectory: paths.DataDirectory));
+                        peerDirectory: paths.PluginPeersDirectory));
                 }
                 catch
                 {

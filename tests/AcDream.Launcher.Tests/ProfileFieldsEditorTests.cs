@@ -14,7 +14,7 @@ public sealed class ProfileFieldsEditorTests : IDisposable
 
     public ProfileFieldsEditorTests()
     {
-        var paths = new ApplicationPathSet(Path.Combine(_root, "config"), Path.Combine(_root, "data"), Path.Combine(_root, "cache"), null);
+        var paths = new ApplicationPathSet(Path.Combine(_root, "config"), Path.Combine(_root, "data"), Path.Combine(_root, "cache"));
         _store = LauncherProfileStore.ForApplicationPaths(paths);
         _core = new LauncherOrchestrator(_store, paths, new LauncherExecutableSet("unused-client", "unused-headless"));
         _core.LoadProfiles();

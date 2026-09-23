@@ -19,8 +19,7 @@ public sealed class LauncherContentStateStoreTests : IDisposable
         _paths = new ApplicationPathSet(
             Path.Combine(_root, "config"),
             Path.Combine(_root, "data"),
-            Path.Combine(_root, "cache"),
-            null);
+            Path.Combine(_root, "cache"));
     }
 
     public void Dispose()
@@ -44,9 +43,9 @@ public sealed class LauncherContentStateStoreTests : IDisposable
                     path,
                     cancellationToken);
             });
-        string basePath = Path.Combine(_paths.DataDirectory, "pak", "acdream.pak");
+        string basePath = Path.Combine(_paths.GameDataDirectory, "pak", "acdream.pak");
         string overlayPath = Path.Combine(
-            _paths.DataDirectory,
+            _paths.GameDataDirectory,
             "pak",
             "acdream-update-5-test.pak");
         WritePakHeader(basePath, recipe: 4);
@@ -89,7 +88,7 @@ public sealed class LauncherContentStateStoreTests : IDisposable
     public async Task OverlayPathMustBeOneContainedPakFilename(string path)
     {
         var store = new LauncherContentStateStore(_paths);
-        string basePath = Path.Combine(_paths.DataDirectory, "pak", "acdream.pak");
+        string basePath = Path.Combine(_paths.GameDataDirectory, "pak", "acdream.pak");
         WritePakHeader(basePath, recipe: 4);
         LauncherInstallRecord record = await RecordAsync(basePath, recipe: 4);
         var state = new LauncherContentState(
@@ -109,7 +108,7 @@ public sealed class LauncherContentStateStoreTests : IDisposable
     public async Task BaseDigestBindingRejectsSidecarFromPriorFullRebuild()
     {
         var store = new LauncherContentStateStore(_paths);
-        string basePath = Path.Combine(_paths.DataDirectory, "pak", "acdream.pak");
+        string basePath = Path.Combine(_paths.GameDataDirectory, "pak", "acdream.pak");
         WritePakHeader(basePath, recipe: 4);
         LauncherInstallRecord record = await RecordAsync(basePath, recipe: 4);
         var state = new LauncherContentState(

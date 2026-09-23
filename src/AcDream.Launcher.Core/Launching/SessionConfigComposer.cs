@@ -392,9 +392,7 @@ public static class SessionConfigComposer
             string sessionId)
     {
         string sessionDirectory = Path.Combine(
-            paths.CacheDirectory,
-            "launcher",
-            "sessions",
+            paths.LauncherSessionsDirectory,
             sessionId);
 
         return (

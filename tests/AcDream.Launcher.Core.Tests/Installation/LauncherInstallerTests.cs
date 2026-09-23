@@ -24,8 +24,7 @@ public sealed class LauncherInstallerTests : IDisposable
         _paths = new ApplicationPathSet(
             Path.Combine(_root, "config"),
             Path.Combine(_root, "data"),
-            Path.Combine(_root, "cache"),
-            null);
+            Path.Combine(_root, "cache"));
         _dats = Path.Combine(_root, "retail-dats");
         _bakeExecutable = Path.Combine(_root, "bin", "acdream-bake");
         CreateCompleteDatDirectory(_dats);
@@ -77,13 +76,13 @@ public sealed class LauncherInstallerTests : IDisposable
         Assert.Equal(Path.GetFullPath(_dats), observedRequest.DatDirectory);
         Assert.Equal(
             LauncherInstaller.GetFullRebuildCandidatePath(
-                Path.Combine(_paths.DataDirectory, "pak", "acdream.pak")),
+                Path.Combine(_paths.GameDataDirectory, "pak", "acdream.pak")),
             observedRequest.OutputPath);
         Assert.Equal(
             [
                 "--dat-dir", Path.GetFullPath(_dats),
                 "--out", LauncherInstaller.GetFullRebuildCandidatePath(
-                    Path.Combine(_paths.DataDirectory, "pak", "acdream.pak")),
+                    Path.Combine(_paths.GameDataDirectory, "pak", "acdream.pak")),
                 "--threads", "7",
                 "--progress-json",
             ],
@@ -176,7 +175,7 @@ public sealed class LauncherInstallerTests : IDisposable
             Assert.Contains("active package", error.Message, StringComparison.Ordinal);
             Assert.False(File.Exists(
                 LauncherInstaller.GetFullRebuildCandidatePath(
-                    Path.Combine(_paths.DataDirectory, "pak", "acdream.pak"))));
+                    Path.Combine(_paths.GameDataDirectory, "pak", "acdream.pak"))));
         }
         finally
         {

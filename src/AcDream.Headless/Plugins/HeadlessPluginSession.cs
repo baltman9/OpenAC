@@ -61,7 +61,7 @@ internal sealed class HeadlessPluginSession : IDisposable
         object? contentLock = null,
         IGameRuntimeCommands? sessionCommands = null,
         NavigationWalkController? navigationWalk = null,
-        string? dataDirectory = null,
+        string? peerDirectory = null,
         IReadOnlyList<string>? pluginTags = null,
         PluginHostVersion? hostVersion = null)
     {
@@ -93,7 +93,7 @@ internal sealed class HeadlessPluginSession : IDisposable
                 sessionId,
                 $"plugin-command-{verb}",
                 error),
-            dataDirectory,
+            peerDirectory,
             pluginTags);
         var plugins = new PluginSession(
             host,
