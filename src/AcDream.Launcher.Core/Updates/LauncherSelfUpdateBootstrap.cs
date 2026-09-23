@@ -71,23 +71,33 @@ public static class LauncherSelfUpdateBootstrap
             Path.GetFullPath(launcherBaseDirectory));
         string executable = Path.GetFullPath(currentExecutablePath);
         var current = new LauncherSelfUpdateManager(paths, httpClient);
-        LauncherSelfUpdateManager earlier = EarlierLayoutSelfUpdate.ManagerFor(
-            paths,
-            httpClient,
-            platform);
-        SelfUpdatePlan? earlierPlan = await TryLoadPendingAsync(earlier, cancellationToken)
-            .ConfigureAwait(false);
-        string mode = args.Length > 0 ? args[0] : string.Empty;
+        var earlierPending = new List<(LauncherSelfUpdateManager Manager, SelfUpdatePlan Plan)>();
+        foreach (LauncherSelfUpdateManager candidate in EarlierLayoutSelfUpdate.ManagersFor(
+                     paths,
+                     httpClient,
+                     platform))
+        {
+            if (await TryLoadPendingAsync(candidate, cancellationToken).ConfigureAwait(false)
+                is { } pending)
+            {
+                earlierPending.Add((candidate, pending));
+            }
+        }
 
+        string mode = args.Length > 0 ? args[0] : string.Empty;
         if (string.Equals(mode, HelperArgument, StringComparison.Ordinal))
         {
             // The helper is the staged copy itself; its own path says whose
             // transaction it was staged by.
-            bool stagedByEarlier = earlierPlan is not null
-                && PathsEqual(earlier.GetStagedLauncherPath(earlierPlan), executable);
+            LauncherSelfUpdateManager stagedBy = earlierPending
+                .Where(earlier => PathsEqual(
+                    earlier.Manager.GetStagedLauncherPath(earlier.Plan),
+                    executable))
+                .Select(earlier => earlier.Manager)
+                .FirstOrDefault() ?? current;
             return await HandleAsync(
                     args,
-                    stagedByEarlier ? earlier : current,
+                    stagedBy,
                     baseDirectory,
                     executable,
                     cancellationToken)
@@ -96,9 +106,16 @@ public static class LauncherSelfUpdateBootstrap
 
         if (string.Equals(mode, ConfirmArgument, StringComparison.Ordinal))
         {
-            if (earlierPlan is null
-                || args.Length < 2
-                || !string.Equals(earlierPlan.TransactionId, args[1], StringComparison.Ordinal))
+            LauncherSelfUpdateManager? confirming = args.Length < 2
+                ? null
+                : earlierPending
+                    .Where(earlier => string.Equals(
+                        earlier.Plan.TransactionId,
+                        args[1],
+                        StringComparison.Ordinal))
+                    .Select(earlier => earlier.Manager)
+                    .FirstOrDefault();
+            if (confirming is null)
             {
                 return await HandleAsync(
                         args,
@@ -111,7 +128,7 @@ public static class LauncherSelfUpdateBootstrap
 
             SelfUpdateStartupResult confirmed = await HandleAsync(
                     args,
-                    earlier,
+                    confirming,
                     baseDirectory,
                     executable,
                     cancellationToken)
@@ -122,7 +139,7 @@ public static class LauncherSelfUpdateBootstrap
             }
 
             await FinishEarlierTransactionAsync(
-                    earlier,
+                    confirming,
                     baseDirectory,
                     executable,
                     earlierHelperWait,
@@ -140,9 +157,13 @@ public static class LauncherSelfUpdateBootstrap
         // An earlier update of this very launcher that was interrupted is
         // recovered where it lives. One that targets another copy of the
         // launcher belongs to that copy and is left alone.
-        if (earlierPlan is not null
-            && PathsEqual(earlierPlan.TargetDirectory, baseDirectory))
+        foreach ((LauncherSelfUpdateManager earlier, SelfUpdatePlan plan) in earlierPending)
         {
+            if (!PathsEqual(plan.TargetDirectory, baseDirectory))
+            {
+                continue;
+            }
+
             SelfUpdateStartupResult recovered = await HandleAsync(
                     args,
                     earlier,

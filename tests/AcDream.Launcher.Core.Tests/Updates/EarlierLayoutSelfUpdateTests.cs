@@ -46,12 +46,16 @@ public sealed class EarlierLayoutSelfUpdateTests : IDisposable
         Assert.Equal(Path.Combine(earlierData, "launcher-update", "pending.json"), earlier.PendingPlanPath);
         Assert.Equal(Path.Combine(earlierData, "app", ".update-session.lock"), earlier.Barrier.LockPath);
         Assert.Equal(
-            earlierData,
-            EarlierLayoutSelfUpdate.DataDirectoryFor(ApplicationPathSet.Resolve(platform: platform), platform));
+            [earlierData],
+            EarlierLayoutSelfUpdate.DataDirectoriesFor(ApplicationPathSet.Resolve(platform: platform), platform));
+
+        // A data folder named the way the earlier launcher also read comes
+        // first; the per-user default stays a candidate, since a folder named
+        // only in this version's terms (a root) meant nothing to it.
         string named = Path.Combine(_root, "named data");
         Assert.Equal(
-            named,
-            EarlierLayoutSelfUpdate.DataDirectoryFor(
+            [named, earlierData],
+            EarlierLayoutSelfUpdate.DataDirectoriesFor(
                 new ApplicationPathSet(Path.Combine(_root, "c"), named, Path.Combine(_root, "k")),
                 platform));
     }
@@ -120,11 +124,15 @@ public sealed class EarlierLayoutSelfUpdateTests : IDisposable
     /// <summary>
     /// A normal start of this launcher finds its own earlier update still
     /// waiting for confirmation (the helper died first) and finishes it in
-    /// the earlier folder. Mutation: skipping the earlier folder on a normal
-    /// start fails this.
+    /// the earlier folder, also when this start names its install folder in
+    /// terms the earlier launcher never read. Mutation: skipping the earlier
+    /// folder on a normal start, or not looking in the per-user default when
+    /// a root is named, fails this.
     /// </summary>
-    [Fact]
-    public async Task ANormalStartFinishesAnInterruptedEarlierUpdateWhereItLives()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ANormalStartFinishesAnInterruptedEarlierUpdateWhereItLives(bool namedRoot)
     {
         using var harness = await EarlierHarness.StageAsync(_root);
         SelfUpdatePlan applied;
@@ -134,10 +142,13 @@ public sealed class EarlierLayoutSelfUpdateTests : IDisposable
         }
 
         IReadOnlyDictionary<string, string> before = harness.SnapshotEarlierFolders();
+        ApplicationPathSet paths = namedRoot
+            ? ApplicationPathSet.ForRoot(Path.Combine(_root, "named root"))
+            : harness.Paths;
 
         SelfUpdateStartupResult result = await LauncherSelfUpdateBootstrap.HandleAsync(
             PublicArguments,
-            harness.Paths,
+            paths,
             harness.Http,
             harness.Target,
             harness.LauncherPath,
@@ -149,7 +160,7 @@ public sealed class EarlierLayoutSelfUpdateTests : IDisposable
         Assert.Equal("new-launcher", await File.ReadAllTextAsync(harness.LauncherPath));
         harness.AssertEarlierTransactionGone(applied.TransactionId);
         Assert.Equal(before, harness.SnapshotEarlierFolders());
-        harness.AssertNewRootIsEmpty();
+        EarlierHarness.AssertRootIsEmpty(paths);
     }
 
     /// <summary>
@@ -308,13 +319,16 @@ public sealed class EarlierLayoutSelfUpdateTests : IDisposable
             Assert.Empty(Directory.EnumerateDirectories(Target, ".acdream-self-update-*"));
         }
 
-        /// <summary>The new install folder holds nothing but the lock the start took.</summary>
-        public void AssertNewRootIsEmpty()
+        /// <summary>The profile's default install folder holds nothing but the start's lock.</summary>
+        public void AssertNewRootIsEmpty() => AssertRootIsEmpty(Paths);
+
+        /// <summary>The install folder holds nothing but the lock the start took.</summary>
+        public static void AssertRootIsEmpty(ApplicationPathSet paths)
         {
             Assert.Equal(
                 [Path.Combine("app", ".update-session.lock")],
-                Directory.EnumerateFiles(Paths.RootDirectory, "*", SearchOption.AllDirectories)
-                    .Select(file => Path.GetRelativePath(Paths.RootDirectory, file))
+                Directory.EnumerateFiles(paths.RootDirectory, "*", SearchOption.AllDirectories)
+                    .Select(file => Path.GetRelativePath(paths.RootDirectory, file))
                     .ToArray());
         }
 

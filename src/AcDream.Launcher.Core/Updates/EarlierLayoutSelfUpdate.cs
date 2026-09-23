@@ -13,27 +13,34 @@ namespace AcDream.Launcher.Core.Updates;
 public static class EarlierLayoutSelfUpdate
 {
     /// <summary>
-    /// The data folder an earlier launcher started the same way would have
-    /// used. A data folder named on the command line or in the environment
-    /// was its data folder too; otherwise it was the per-user default.
+    /// The data folders an earlier launcher started the same way could have
+    /// used, most specific first: a data folder named on the command line or
+    /// in the environment (the earlier launcher read the same names), then
+    /// the per-user default it used otherwise. Only a transaction that
+    /// matches the running launcher exactly is ever acted on, so looking in
+    /// both is safe.
     /// </summary>
-    public static string DataDirectoryFor(
+    public static IReadOnlyList<string> DataDirectoriesFor(
         ApplicationPathSet paths,
         IApplicationPathEnvironment? platform = null)
     {
         ArgumentNullException.ThrowIfNull(paths);
-        return paths.RootSource is ApplicationRootSource.Pointer
-            or ApplicationRootSource.Default
-            ? LegacyApplicationLayout.Detect(platform).DataDirectory
-            : paths.DataDirectory;
+        string perUserDefault = LegacyApplicationLayout.Detect(platform).DataDirectory;
+        if (paths.RootSource is ApplicationRootSource.Pointer or ApplicationRootSource.Default
+            || ApplicationPathIdentity.Equals(paths.DataDirectory, perUserDefault))
+        {
+            return [perUserDefault];
+        }
+
+        return [paths.DataDirectory, perUserDefault];
     }
 
-    /// <summary>The manager for the earlier launcher's self-update state.</summary>
-    public static LauncherSelfUpdateManager ManagerFor(
+    /// <summary>A manager for each place the earlier launcher's self-update state could be.</summary>
+    public static IReadOnlyList<LauncherSelfUpdateManager> ManagersFor(
         ApplicationPathSet paths,
         HttpClient httpClient,
         IApplicationPathEnvironment? platform = null) =>
-        LauncherSelfUpdateManager.ForEarlierLayout(
-            DataDirectoryFor(paths, platform),
-            httpClient);
+        DataDirectoriesFor(paths, platform)
+            .Select(data => LauncherSelfUpdateManager.ForEarlierLayout(data, httpClient))
+            .ToArray();
 }
