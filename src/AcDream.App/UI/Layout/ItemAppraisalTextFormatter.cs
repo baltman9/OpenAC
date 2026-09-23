@@ -22,14 +22,16 @@ public static class ItemAppraisalTextFormatter
         ClientObject obj,
         AppraiseInfoParser.Parsed appraisal,
         Func<uint, SpellMetadata?> resolveSpell,
-        RetailAppraisalNameResolver? names = null)
-        => BuildReport(obj, appraisal, resolveSpell, names).ToString();
+        RetailAppraisalNameResolver? names = null,
+        Func<uint, AppraisalPlayerSkill>? playerSkill = null)
+        => BuildReport(obj, appraisal, resolveSpell, names, playerSkill).ToString();
 
     public static ItemAppraisalReport BuildReport(
         ClientObject obj,
         AppraiseInfoParser.Parsed appraisal,
         Func<uint, SpellMetadata?> resolveSpell,
-        RetailAppraisalNameResolver? names = null)
+        RetailAppraisalNameResolver? names = null,
+        Func<uint, AppraisalPlayerSkill>? playerSkill = null)
     {
         ArgumentNullException.ThrowIfNull(obj);
         ArgumentNullException.ThrowIfNull(resolveSpell);
@@ -41,7 +43,7 @@ public static class ItemAppraisalTextFormatter
         ShowValueAndBurden(report, properties);
         ShowTinkering(report, properties);
         ShowSetAndRatings(report, properties);
-        ShowWeaponAndArmor(report, obj, appraisal, names);
+        ShowWeaponAndArmor(report, obj, appraisal, names, playerSkill);
         ShowDefenseModifiers(report, appraisal);
         ShowArmorModifiers(report, appraisal);
         ShowShortMagicInfo(report, appraisal, resolveSpell);
@@ -171,11 +173,28 @@ public static class ItemAppraisalTextFormatter
             report.BlankLine();
     }
 
+    private const uint ShieldSkillId = 48u;
+
+    /// <summary>
+    /// How much of a shield's level the viewer can use: their buffed Shield
+    /// skill, halved unless they are specialized in it, and never more than
+    /// the shield's own level. A viewer without the skill gets 0.
+    /// </summary>
+    internal static int EffectiveShieldLevel(int shieldLevel, AppraisalPlayerSkill skill)
+    {
+        const uint specialized = 3u;
+        int level = skill.Level;
+        if (skill.AdvancementClass < specialized)
+            level /= 2;
+        return level > shieldLevel ? shieldLevel : level;
+    }
+
     private static void ShowWeaponAndArmor(
         RetailReportBuilder report,
         ClientObject obj,
         AppraiseInfoParser.Parsed appraisal,
-        RetailAppraisalNameResolver names)
+        RetailAppraisalNameResolver names,
+        Func<uint, AppraisalPlayerSkill>? playerSkill)
     {
         PropertyBundle properties = appraisal.Properties;
         uint validLocations = obj.IsHook && appraisal.HookProfile is { } hook
@@ -192,11 +211,18 @@ public static class ItemAppraisalTextFormatter
             && (validLocations & (uint)EquipMask.Shield) != 0)
         {
             if (properties.Ints.TryGetValue(28u, out int shieldLevel))
+            {
                 report.Line(
                     $"Base Shield Level: {shieldLevel.ToString(CultureInfo.InvariantCulture)}",
                     EnchantmentStyle(
                         appraisal.ArmorEnchantments,
                         0x0001u));
+                int effective = EffectiveShieldLevel(
+                    shieldLevel,
+                    playerSkill?.Invoke(ShieldSkillId) ?? default);
+                report.Line(
+                    $"Effective Shield Level : {effective.ToString(CultureInfo.InvariantCulture)} (with Shield skill)");
+            }
             else
                 report.Line("Shield Level: Unknown");
         }
@@ -1714,3 +1740,10 @@ public static class ItemAppraisalTextFormatter
         public ItemAppraisalReport Build() => _report.Build();
     }
 }
+
+/// <summary>One of the viewer's own skills, as an appraisal reads it.</summary>
+/// <param name="Level">The buffed skill level.</param>
+/// <param name="AdvancementClass">
+/// 1 untrained, 2 trained, 3 specialized; 0 when the skill is unknown.
+/// </param>
+public readonly record struct AppraisalPlayerSkill(int Level, uint AdvancementClass);
