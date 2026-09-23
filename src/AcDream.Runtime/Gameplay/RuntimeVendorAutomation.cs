@@ -21,6 +21,11 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
     private bool _hasLatchedFailure;
     private uint _latchedFailureError;
     private PluginVendorTransaction? _completedTransaction;
+    // The object the player last used, until the vendor answers it. A
+    // refresh of the open vendor that answers the player's own use of it is
+    // a fresh visit to a plugin, as it was to the original client's add-ons;
+    // one that follows a buy or sell is not.
+    private uint _approachedObjectId;
     private bool _disposed;
 
     private Action<uint>? _opened;
@@ -32,6 +37,7 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _runtime.InventoryOwner.Vendor.Changed += OnVendorChanged;
         _runtime.ActionOwner.Transactions.UseCompleted += OnUseCompleted;
+        _runtime.ActionOwner.Transactions.UseDispatched += OnUseDispatched;
         _runtime.InventoryOwner.Transactions.RequestFailed += OnShopRequestFailed;
     }
 
@@ -285,6 +291,7 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
                     if (_pendingKind is not null)
                         return false;
                     _pendingKind = PluginVendorTransactionKind.Buy;
+                    _approachedObjectId = 0u;
                 }
                 try
                 {
@@ -338,6 +345,7 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
                     if (_pendingKind is not null)
                         return false;
                     _pendingKind = PluginVendorTransactionKind.Sell;
+                    _approachedObjectId = 0u;
                 }
                 try
                 {
@@ -434,11 +442,19 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
         }
     }
 
+    private void OnUseDispatched(uint objectId)
+    {
+        lock (_gate)
+            _approachedObjectId = objectId;
+    }
+
     private void OnVendorChanged(VendorTransition transition)
     {
         switch (transition.Kind)
         {
             case VendorStateTransitionKind.Opened:
+                lock (_gate)
+                    _approachedObjectId = 0u;
                 // A vendor switch (a new ApproachVendor without an
                 // intervening Close) must not carry over a stale shopping
                 // list staged against the previous vendor's stock.
@@ -449,11 +465,31 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
                 }
                 Raise(_opened, transition.VendorId);
                 break;
+            case VendorStateTransitionKind.Refreshed:
+                // The player used the vendor whose visit is still open (its
+                // window closed but not walked away from): the window refreshes
+                // in place, and a plugin sees the visit it asked for.
+                bool approached;
+                lock (_gate)
+                {
+                    approached = _approachedObjectId != 0u
+                        && _approachedObjectId == transition.VendorId;
+                    if (approached)
+                    {
+                        _approachedObjectId = 0u;
+                        _buyList.Clear();
+                        _sellList.Clear();
+                    }
+                }
+                if (approached)
+                    Raise(_opened, transition.VendorId);
+                break;
             case VendorStateTransitionKind.Closed:
             case VendorStateTransitionKind.Reset:
                 Raise(_closed);
                 lock (_gate)
                 {
+                    _approachedObjectId = 0u;
                     _buyList.Clear();
                     _sellList.Clear();
                     _pendingKind = null;
@@ -519,6 +555,7 @@ public sealed class RuntimeVendorAutomation : IVendorAutomation, IDisposable
         }
         _runtime.InventoryOwner.Vendor.Changed -= OnVendorChanged;
         _runtime.ActionOwner.Transactions.UseCompleted -= OnUseCompleted;
+        _runtime.ActionOwner.Transactions.UseDispatched -= OnUseDispatched;
         _runtime.InventoryOwner.Transactions.RequestFailed -= OnShopRequestFailed;
     }
 }

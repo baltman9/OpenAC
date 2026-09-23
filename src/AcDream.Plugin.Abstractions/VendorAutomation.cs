@@ -311,7 +311,12 @@ public interface IVendorAutomation
     PluginVendorCommandResult SellAll() =>
         new(PluginVendorCommandStatus.Unavailable);
 
-    /// <summary>Raised when a vendor's shop pane becomes the open one.</summary>
+    /// <summary>
+    /// Raised when a vendor's shop pane becomes the open one, and again each
+    /// time the player uses the vendor whose visit is still open (the pane
+    /// refreshes in place). A refresh that follows a buy or a sell does not
+    /// raise it.
+    /// </summary>
     event Action<uint> Opened
     {
         add { }

@@ -260,6 +260,11 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
     /// </summary>
     public event Action<uint>? UseCompleted;
 
+    /// <summary>
+    /// Raised with the object's id each time a plain use of it goes out.
+    /// </summary>
+    public event Action<uint>? UseDispatched;
+
     public int OutboundCount => _outbound.Count;
     public bool HasPendingPickup => _pendingPickup is not null;
     public bool HasPendingUse => _pendingUse is not null;
@@ -352,6 +357,8 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
             _awaitingItemUseCompletion = true;
             IncrementRevision();
             verdict = RuntimeInteractionDispatchResult.Dispatched;
+            try { UseDispatched?.Invoke(serverGuid); }
+            catch { /* observer errors do not interrupt use bookkeeping */ }
         }
 
         return verdict;
