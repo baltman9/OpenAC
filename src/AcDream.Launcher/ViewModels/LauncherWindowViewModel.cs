@@ -547,6 +547,7 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         SelectionKey? previousSelection = preferredSelection ?? SelectionKey.From(SelectedNode);
         LauncherStateSnapshot snapshot = _orchestrator.GetSnapshot();
         _snapshot = snapshot;
+        NoteSessionsForInstallFolder(snapshot);
         RefreshAccountRows(snapshot);
 
         Servers.Clear();

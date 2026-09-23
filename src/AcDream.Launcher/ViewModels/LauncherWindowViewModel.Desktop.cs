@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using AcDream.Launcher.Core.Orchestration;
 using AcDream.Launcher.Core.Profiles;
 using AcDream.Launcher.Core.Status;
 using AcDream.Launcher.Core.Updates;
@@ -99,6 +100,43 @@ public sealed partial class LauncherWindowViewModel
     {
         int plus = version.IndexOf('+');
         return "v" + (plus < 0 ? version : version[..plus]);
+    }
+
+    private InstallFolderViewModel? _installFolder;
+    private bool _aClientReachedTheWorld;
+
+    /// <summary>The install folder rows in the settings and the first-run form; null until configured.</summary>
+    public InstallFolderViewModel? InstallFolder => _installFolder;
+
+    /// <summary>Whether the install folder rows are available.</summary>
+    public bool HasInstallFolder => _installFolder is not null;
+
+    /// <summary>Gives the settings their install folder section.</summary>
+    public void ConfigureInstallFolder(InstallFolderViewModel installFolder)
+    {
+        _installFolder = installFolder ?? throw new ArgumentNullException(nameof(installFolder));
+        if (_aClientReachedTheWorld)
+            _installFolder.NotifyClientStarted();
+        if (_installFolder.MigrationIncomplete)
+            LastError = _installFolder.MigrationNotice;
+        else if (_installFolder.MigrationNotice is { } notice)
+            OperationStatus = notice;
+        OnPropertyChanged(nameof(InstallFolder));
+        OnPropertyChanged(nameof(HasInstallFolder));
+    }
+
+    /// <summary>Whether the install may move now: nothing running and nothing busy.</summary>
+    internal bool CanMoveInstallFolder => !IsBusy && Sessions.All(session => !session.IsActive);
+
+    /// <summary>Notes a session that reached the world, which is what lets old folders be removed.</summary>
+    private void NoteSessionsForInstallFolder(LauncherStateSnapshot snapshot)
+    {
+        if (!_aClientReachedTheWorld
+            && snapshot.Sessions.Any(session => session.State == LauncherActivityState.InWorld))
+        {
+            _aClientReachedTheWorld = true;
+            _installFolder?.NotifyClientStarted();
+        }
     }
 
     public void ConfigureServerHealth(IServerHealthService service)
@@ -217,6 +255,7 @@ public sealed partial class LauncherWindowViewModel
 
     private void NotifyDesktopCommands()
     {
+        _installFolder?.NotifyCanMoveChanged();
         OnPropertyChanged(nameof(HasActiveSessions));
         EditUsersTextCommand?.NotifyCanExecuteChanged();
         EditServersTextCommand?.NotifyCanExecuteChanged();

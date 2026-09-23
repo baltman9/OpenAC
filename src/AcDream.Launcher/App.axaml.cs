@@ -105,6 +105,14 @@ public sealed partial class App : Application
                 updates.Updater,
                 applyLauncherUpdate,
                 () => desktop.Shutdown());
+            LauncherWindowViewModel windowViewModel = _viewModel;
+            _viewModel.ConfigureInstallFolder(new InstallFolderViewModel(
+                paths,
+                new InstallRootMover(paths),
+                new AvaloniaUiDispatcher(),
+                () => windowViewModel.CanMoveInstallFolder,
+                () => RestartLauncher(startupOptions, desktop),
+                _migration));
             var mainWindow = new MainWindow
             {
                 DataContext = _viewModel,
@@ -156,6 +164,30 @@ public sealed partial class App : Application
         _orchestrator = null;
         _updateComposition = null;
         _pluginComposition = null;
+    }
+
+    /// <summary>
+    /// Starts this launcher again with the same arguments and closes this one:
+    /// every store it opened still names the folder the install just left.
+    /// </summary>
+    private static void RestartLauncher(
+        LauncherStartupOptions options,
+        IClassicDesktopStyleApplicationLifetime desktop)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo(
+            Environment.ProcessPath
+            ?? throw new InvalidOperationException(
+                "The launcher executable path is unavailable."))
+        {
+            UseShellExecute = false,
+        };
+        foreach (string argument in options.PublicArguments)
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        System.Diagnostics.Process.Start(start)?.Dispose();
+        desktop.Shutdown();
     }
 
     private static LauncherVersion GetLauncherVersion()

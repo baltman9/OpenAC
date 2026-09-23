@@ -55,6 +55,51 @@ public sealed class MainWindowViewTests
         ProfileEditorsExposeTwoFieldsAndMaskPasswords();
         TabsRenderAndSwitchBetweenAccountsAndPlugins();
         TheGearOpensSettingsAndTheBetaCheckboxRoundTripsThroughThePlugins();
+        SettingsShowTheInstallFolderAndOpenItsRowsThroughTheWindow();
+    }
+
+    /// <summary>
+    /// The install folder section is bound, not just present: its buttons
+    /// reach the view model and each folder row shows its path. Mutation:
+    /// misspelling a binding path in the settings markup fails this.
+    /// </summary>
+    private static void SettingsShowTheInstallFolderAndOpenItsRowsThroughTheWindow()
+    {
+        using LauncherWindowViewModel viewModel = CreateViewModel();
+        string root = Path.Combine(Path.GetTempPath(), "openac-view-" + Guid.NewGuid().ToString("N"));
+        AcDream.Platform.ApplicationPathSet paths = AcDream.Platform.ApplicationPathSet.ForRoot(
+            root,
+            AcDream.Platform.ApplicationRootSource.Default);
+        viewModel.ConfigureInstallFolder(new InstallFolderViewModel(
+            paths,
+            new InstallRootMover(paths, root),
+            new ImmediateUiDispatcher(),
+            () => true,
+            () => { }));
+        var window = new MainWindow { DataContext = viewModel };
+        try
+        {
+            window.Show();
+            ((Button)GetNamedField(window, "SettingsButton")!).Command?.Execute(null);
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+
+            Button[] buttons = window.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible).ToArray();
+            Button open = buttons.First(button => Equals(AutomationProperties.GetName(button), "Open the install folder"));
+            Button move = buttons.First(button => Equals(AutomationProperties.GetName(button), "Move the install folder"));
+            Assert.Same(viewModel.InstallFolder!.Root.OpenCommand, open.Command);
+            Assert.Same(viewModel.InstallFolder.MoveCommand, move.Command);
+            foreach (InstallFolderRowViewModel row in viewModel.InstallFolder.Folders)
+            {
+                Assert.Contains(buttons, button => Equals(button.Content, row.Path) && ReferenceEquals(button.Command, row.OpenCommand));
+            }
+        }
+        finally
+        {
+            CloseTestWindow(window);
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
     }
 
     private static void EveryExplicitlyNamedControlIsAssignedAfterConstruction()
