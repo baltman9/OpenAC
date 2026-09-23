@@ -208,6 +208,14 @@ public sealed class ClientObject
     public IReadOnlyList<uint> AppraisedSpellIds { get; internal set; } =
         Array.Empty<uint>();
     public int LastAppraisalTimeMs { get; internal set; }
+
+    /// <summary>
+    /// True once the server has answered an appraisal of this object, even
+    /// unsuccessfully. An object the server no longer has (a corpse that
+    /// decayed out of sight) is answered with nothing, and whoever waits on
+    /// its description needs to know the answer came.
+    /// </summary>
+    public bool AppraisalAnswered { get; internal set; }
     /// <summary>
     /// The most recent appraisal's WeaponProfile blob, if the object is a
     /// weapon and has ever been successfully appraised. Cleared/replaced by

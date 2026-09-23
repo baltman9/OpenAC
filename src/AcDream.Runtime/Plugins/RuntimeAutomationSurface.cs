@@ -4440,6 +4440,9 @@ internal sealed class RuntimeAutomationSurface
                     (uint)PropertyBool.CorpseGeneratedRare),
                 IsIdentified = candidate.Properties.Strings.ContainsKey(
                     (uint)PropertyString.LongDesc),
+                IsAppraisalAnswered = candidate.AppraisalAnswered
+                    || candidate.Properties.Strings.ContainsKey(
+                        (uint)PropertyString.LongDesc),
             });
         }
         result.Sort(static (left, right) =>
