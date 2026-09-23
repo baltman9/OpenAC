@@ -302,7 +302,11 @@ public static class InstallRootMigration
                 };
             }
 
-            WriteLayoutMarker(paths, plan.OldRoots, conflicts);
+            WriteLayoutMarker(
+                paths,
+                plan.OldRoots,
+                conflicts,
+                OldRootRemoval.SnapshotLeftBehind(plan.OldRoots));
             File.Delete(PendingConflictsPath(paths));
             return new InstallRootMigrationResult(
                 InstallRootMigrationOutcome.Migrated,
@@ -539,31 +543,6 @@ public static class InstallRootMigration
         }
     }
 
-    /// <summary>
-    /// Deletes the old roots the migration left behind, with everything that
-    /// was deliberately not brought over. Only a root whose note names this
-    /// install is deleted.
-    /// </summary>
-    public static IReadOnlyList<string> RemoveOldRoots(ApplicationPathSet paths)
-    {
-        ArgumentNullException.ThrowIfNull(paths);
-        var failures = new List<string>();
-        foreach (string root in ReadOldRoots(paths))
-        {
-            try
-            {
-                Directory.Delete(root, recursive: true);
-            }
-            catch (Exception ex) when (ex is IOException
-                                       or UnauthorizedAccessException)
-            {
-                failures.Add($"{root}: {ex.Message}");
-            }
-        }
-
-        return failures;
-    }
-
     /// <summary>Whether a record exists and names a path other than <paramref name="expected"/>.</summary>
     private static bool NamesOtherPath(
         string recordPath,
@@ -777,7 +756,8 @@ public static class InstallRootMigration
     public static void WriteLayoutMarker(
         ApplicationPathSet paths,
         IReadOnlyList<string> migratedFrom,
-        IReadOnlyList<string>? conflicts = null)
+        IReadOnlyList<string>? conflicts = null,
+        IReadOnlyList<string>? leftBehind = null)
     {
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(migratedFrom);
@@ -793,6 +773,14 @@ public static class InstallRootMigration
         {
             marker["conflicts"] = new JsonArray(
                 conflicts.Select(static path => (JsonNode?)JsonValue.Create(path)).ToArray());
+        }
+
+        // What each old folder still held when the migration finished: the
+        // only entries "Remove the old folders" may delete.
+        if (leftBehind is { Count: > 0 })
+        {
+            marker["leftBehind"] = new JsonArray(
+                leftBehind.Select(static path => (JsonNode?)JsonValue.Create(path)).ToArray());
         }
 
         string temporary = paths.LayoutMarkerFile + ".tmp";

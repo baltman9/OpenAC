@@ -113,6 +113,10 @@ public sealed class InstallFolderViewModel : ObservableObject
     private bool _clientStarted;
     private IReadOnlyList<string> _oldFolders;
     private string? _oldFoldersStatus;
+    private OldRootRemovalPlan? _removalPlan;
+    private bool _isReviewingOldFolderRemoval;
+    private IReadOnlyList<string> _oldFolderRemovalItems = [];
+    private string? _oldFolderRemovalSummary;
 
     /// <param name="paths">The install as this launcher resolved it.</param>
     /// <param name="mover">Moves the install.</param>
@@ -145,7 +149,12 @@ public sealed class InstallFolderViewModel : ObservableObject
         MigrationIncomplete = migration?.Outcome == InstallRootMigrationOutcome.Incomplete;
         _oldFolders = InstallRootMigration.ReadOldRoots(paths);
         MoveCommand = new AsyncRelayCommand(PickAndMoveAsync, () => CanMove);
-        RemoveOldFoldersCommand = new RelayCommand(RemoveOldFolders, () => CanRemoveOldFolders);
+        RemoveOldFoldersCommand = new RelayCommand(ReviewOldFolderRemoval, () => CanRemoveOldFolders);
+        ConfirmRemoveOldFoldersCommand = new RelayCommand(
+            RemoveOldFolders,
+            () => IsReviewingOldFolderRemoval && _removalPlan is { CanRemove: true });
+        CancelRemoveOldFoldersCommand = new RelayCommand(
+            () => IsReviewingOldFolderRemoval = false);
     }
 
     /// <summary>The install folder itself.</summary>
@@ -247,6 +256,37 @@ public sealed class InstallFolderViewModel : ObservableObject
         private set => SetProperty(ref _oldFoldersStatus, value);
     }
 
+    /// <summary>Deletes the reviewed old folders.</summary>
+    public RelayCommand ConfirmRemoveOldFoldersCommand { get; }
+
+    /// <summary>Closes the review without deleting anything.</summary>
+    public RelayCommand CancelRemoveOldFoldersCommand { get; }
+
+    /// <summary>True while the player reviews what removing the old folders deletes.</summary>
+    public bool IsReviewingOldFolderRemoval
+    {
+        get => _isReviewingOldFolderRemoval;
+        private set
+        {
+            if (SetProperty(ref _isReviewingOldFolderRemoval, value))
+                ConfirmRemoveOldFoldersCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    /// <summary>Each entry the removal deletes, with its size.</summary>
+    public IReadOnlyList<string> OldFolderRemovalItems
+    {
+        get => _oldFolderRemovalItems;
+        private set => SetProperty(ref _oldFolderRemovalItems, value);
+    }
+
+    /// <summary>The total, or why nothing can be removed.</summary>
+    public string? OldFolderRemovalSummary
+    {
+        get => _oldFolderRemovalSummary;
+        private set => SetProperty(ref _oldFolderRemovalSummary, value);
+    }
+
     /// <summary>Gives the rows their window.</summary>
     public void AttachShell(IInstallFolderShell? shell) => _shell = shell;
 
@@ -319,9 +359,25 @@ public sealed class InstallFolderViewModel : ObservableObject
         _restartLauncher();
     }
 
+    /// <summary>Asks before deleting: what would go, with sizes, or why nothing can.</summary>
+    private void ReviewOldFolderRemoval()
+    {
+        _removalPlan = OldRootRemoval.Plan(_paths);
+        OldFolderRemovalItems = _removalPlan.Items
+            .Select(static item => $"{item.Path}  ({item.Size})")
+            .ToArray();
+        OldFolderRemovalSummary = _removalPlan.Refusals.Count > 0
+            ? "Nothing can be removed yet: " + string.Join(" ", _removalPlan.Refusals.Take(3))
+            : $"This deletes {_removalPlan.Items.Count} item(s), "
+              + $"{OldRootRemovalItem.FormatBytes(_removalPlan.TotalBytes)} in all. "
+              + "Nothing here is used by the new folder.";
+        IsReviewingOldFolderRemoval = true;
+    }
+
     private void RemoveOldFolders()
     {
-        IReadOnlyList<string> failures = InstallRootMigration.RemoveOldRoots(_paths);
+        IsReviewingOldFolderRemoval = false;
+        IReadOnlyList<string> failures = OldRootRemoval.Remove(_paths);
         OldFolders = InstallRootMigration.ReadOldRoots(_paths);
         OldFoldersStatus = failures.Count == 0
             ? "The old folders were removed."

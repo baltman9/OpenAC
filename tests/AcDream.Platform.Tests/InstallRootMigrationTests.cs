@@ -311,9 +311,13 @@ public sealed class InstallRootMigrationTests : IDisposable
         AssertFile(_paths.RootDirectory, "settings/keybinds.json");
     }
 
-    /// <summary>Mutation: removing a root whose note does not name this install fails this.</summary>
+    /// <summary>
+    /// Only what the migration left behind is deleted, and only from old
+    /// folders whose note names this install. Mutation: deleting a root whose
+    /// note names another install, or leaving a listed entry, fails this.
+    /// </summary>
     [Fact]
-    public void RemoveOldRootsDeletesOnlyTheNotedOldFolders()
+    public void RemovalDeletesWhatTheMigrationLeftBehindInNotedFolders()
     {
         SeedOldLayout();
         InstallRootMigration.Run(_old, _paths);
@@ -321,11 +325,65 @@ public sealed class InstallRootMigrationTests : IDisposable
             Path.Combine(_old.ConfigDirectory, InstallRootMigration.MovedNoteFileName),
             "somewhere else");
 
-        IReadOnlyList<string> failures = InstallRootMigration.RemoveOldRoots(_paths);
+        OldRootRemovalPlan plan = OldRootRemoval.Plan(_paths);
+        IReadOnlyList<string> failures = OldRootRemoval.Remove(_paths);
 
+        Assert.True(plan.CanRemove);
+        Assert.Contains(plan.Items, item => item.Path == Path.Combine(_old.DataDirectory, "plugin-backups"));
+        Assert.Contains(plan.Items, item => item.Path == Path.Combine(_old.DataDirectory, "app") && item.Bytes > 0);
         Assert.Empty(failures);
         Assert.False(Directory.Exists(_old.DataDirectory));
         Assert.True(Directory.Exists(_old.ConfigDirectory));
+    }
+
+    /// <summary>
+    /// Something written into an old folder after the move (an old client
+    /// still running from it) stops the removal entirely. Mutation: deleting
+    /// entries that were not recorded as left behind fails this.
+    /// </summary>
+    [Fact]
+    public void RemovalRefusesWhenSomethingAppearedAfterTheMove()
+    {
+        SeedOldLayout();
+        InstallRootMigration.Run(_old, _paths);
+        Directory.CreateDirectory(Path.Combine(_old.DataDirectory, "crash-reports"));
+        File.WriteAllText(Path.Combine(_old.DataDirectory, "crash-reports", "late.log"), "x");
+        // Dated before the move, so only the not-left-behind rule can catch it.
+        File.SetLastWriteTimeUtc(
+            Path.Combine(_old.DataDirectory, "crash-reports", "late.log"),
+            new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+
+        IReadOnlyList<string> refusals = OldRootRemoval.Remove(_paths);
+
+        Assert.NotEmpty(refusals);
+        Assert.True(File.Exists(Path.Combine(_old.DataDirectory, "crash-reports", "late.log")));
+        Assert.True(Directory.Exists(Path.Combine(_old.DataDirectory, "plugin-backups")));
+    }
+
+    /// <summary>Mutation: dropping the newer-than-the-move check fails this.</summary>
+    [Fact]
+    public void RemovalRefusesWhenALeftBehindFileChangedAfterTheMove()
+    {
+        SeedOldLayout();
+        InstallRootMigration.Run(_old, _paths);
+        string touched = Path.Combine(_old.DataDirectory, "app", "0.1.10", "AcDream.App.exe");
+        File.SetLastWriteTimeUtc(
+            touched,
+            File.GetLastWriteTimeUtc(_paths.LayoutMarkerFile).AddMinutes(1));
+
+        OldRootRemovalPlan plan = OldRootRemoval.Plan(_paths);
+
+        Assert.False(plan.CanRemove);
+        Assert.Contains(plan.Refusals, refusal => refusal.Contains(touched, StringComparison.Ordinal));
+    }
+
+    /// <summary>Mutation: formatting sizes with the current culture fails this under sv-SE.</summary>
+    [Fact]
+    public void SizesReadTheSameInEveryLocale()
+    {
+        Assert.Equal("512 B", OldRootRemovalItem.FormatBytes(512));
+        Assert.Equal("1.5 KB", OldRootRemovalItem.FormatBytes(1536));
+        Assert.Equal("2.0 GB", OldRootRemovalItem.FormatBytes(2L * 1024 * 1024 * 1024));
     }
 
     private void SeedOldLayout()

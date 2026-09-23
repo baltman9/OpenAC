@@ -763,8 +763,29 @@
               <SelectableTextBlock Text="{Binding InstallFolder.OldFoldersText}" Classes="muted" TextWrapping="Wrap" />
               <TextBlock Text="{Binding InstallFolder.OldFoldersStatus}" Classes="muted" FontSize="12" TextWrapping="Wrap"
                          IsVisible="{Binding InstallFolder.OldFoldersStatus, Converter={x:Static ObjectConverters.IsNotNull}}" />
-              <Button Content="Remove the old folders" Command="{Binding InstallFolder.RemoveOldFoldersCommand}"
+              <Button Content="Remove the old folders…" Command="{Binding InstallFolder.RemoveOldFoldersCommand}"
                       AutomationProperties.Name="Remove the old folders" />
+              <Border BorderBrush="#FFB0A0" BorderThickness="1" CornerRadius="4" Padding="10"
+                      IsVisible="{Binding InstallFolder.IsReviewingOldFolderRemoval}"
+                      AutomationProperties.Name="Confirm removing the old folders">
+                <StackPanel Spacing="6">
+                  <TextBlock Text="Delete these for good?" FontWeight="SemiBold" />
+                  <ItemsControl ItemsSource="{Binding InstallFolder.OldFolderRemovalItems}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="x:String">
+                        <SelectableTextBlock Text="{Binding}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <TextBlock Text="{Binding InstallFolder.OldFolderRemovalSummary}" TextWrapping="Wrap" />
+                  <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                    <Button Content="Cancel" Command="{Binding InstallFolder.CancelRemoveOldFoldersCommand}"
+                            AutomationProperties.Name="Keep the old folders" />
+                    <Button Content="Delete" Classes="primary" Command="{Binding InstallFolder.ConfirmRemoveOldFoldersCommand}"
+                            AutomationProperties.Name="Delete the old folders" />
+                  </StackPanel>
+                </StackPanel>
+              </Border>
             </StackPanel>
           </StackPanel>
           <StackPanel Spacing="0">

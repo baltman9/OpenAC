@@ -116,28 +116,61 @@ public sealed class InstallFolderViewModelTests : IDisposable
 
     /// <summary>
     /// Old folders are offered only after a client reached the world from the
-    /// new folder. Mutation: enabling removal before NotifyClientStarted fails this.
+    /// new folder, and deleted only after the player confirms a list with
+    /// sizes. Mutation: enabling removal before NotifyClientStarted, or
+    /// deleting on the first click, fails this.
     /// </summary>
     [Fact]
-    public void OldFoldersAreRemovableOnlyAfterAClientStarted()
+    public void OldFoldersAreRemovedOnlyAfterAClientStartedAndTheListIsConfirmed()
     {
-        string old = Path.Combine(_scratch, "Local", "acdream");
-        Directory.CreateDirectory(old);
-        File.WriteAllText(
-            Path.Combine(old, InstallRootMigration.MovedNoteFileName),
-            "moved" + Environment.NewLine + _defaultRoot + Environment.NewLine);
-        InstallRootMigration.WriteLayoutMarker(_paths, [old]);
+        string old = SeedOldFolder(out string leftBehind);
         InstallFolderViewModel viewModel = Create();
 
         Assert.Equal([old], viewModel.OldFolders);
         Assert.False(viewModel.RemoveOldFoldersCommand.CanExecute(null));
 
         viewModel.NotifyClientStarted();
-        Assert.True(viewModel.RemoveOldFoldersCommand.CanExecute(null));
         viewModel.RemoveOldFoldersCommand.Execute(null);
+        Assert.True(viewModel.IsReviewingOldFolderRemoval);
+        Assert.True(Directory.Exists(old));
+        Assert.Contains(viewModel.OldFolderRemovalItems, item => item.StartsWith(leftBehind, StringComparison.Ordinal) && item.EndsWith("(3 B)", StringComparison.Ordinal));
+
+        viewModel.ConfirmRemoveOldFoldersCommand.Execute(null);
 
         Assert.False(Directory.Exists(old));
         Assert.False(viewModel.HasOldFolders);
+    }
+
+    /// <summary>
+    /// A file that appeared in the old folder after the move blocks the
+    /// removal and says why. Mutation: letting Delete run on a refused plan fails this.
+    /// </summary>
+    [Fact]
+    public void ASurpriseInTheOldFolderBlocksRemoval()
+    {
+        string old = SeedOldFolder(out _);
+        File.WriteAllText(Path.Combine(old, "late.log"), "x");
+        InstallFolderViewModel viewModel = Create();
+        viewModel.NotifyClientStarted();
+
+        viewModel.RemoveOldFoldersCommand.Execute(null);
+
+        Assert.False(viewModel.ConfirmRemoveOldFoldersCommand.CanExecute(null));
+        Assert.Contains("late.log", viewModel.OldFolderRemovalSummary, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(old, "late.log")));
+    }
+
+    private string SeedOldFolder(out string leftBehind)
+    {
+        string old = Path.Combine(_scratch, "Local", "acdream");
+        leftBehind = Path.Combine(old, "navigation");
+        Directory.CreateDirectory(leftBehind);
+        File.WriteAllText(Path.Combine(leftBehind, "x.nav"), "nav");
+        File.WriteAllText(
+            Path.Combine(old, InstallRootMigration.MovedNoteFileName),
+            "moved" + Environment.NewLine + _defaultRoot + Environment.NewLine);
+        InstallRootMigration.WriteLayoutMarker(_paths, [old], leftBehind: [leftBehind]);
+        return old;
     }
 
     /// <summary>Mutation: describing an incomplete migration as done fails this.</summary>
