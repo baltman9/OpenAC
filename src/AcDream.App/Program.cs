@@ -212,7 +212,7 @@ var host = new AppPluginHost(
     uiRegistry,
     automation,
     new AcDream.Core.Plugins.FilePluginStorage(
-        Path.Combine(applicationPaths.ConfigDirectory, "plugins")),
+        applicationPaths.PluginStorageDirectory),
     automation.PluginCommands,
     lootClassifiers,
     new AcDream.Core.Plugins.FilePluginStorage(

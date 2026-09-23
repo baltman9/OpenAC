@@ -69,20 +69,30 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     public IPluginMapResourceCatalog MapResources => _inner.MapResources;
     public IPluginRenderRegistry Rendering => _inner.Rendering;
 
+    /// <summary>
+    /// One plugin's view of the shared storage root: everything it keeps lives
+    /// in <c>&lt;id&gt;/files</c>, which is inside the plugin's own folder when the
+    /// root is the plugins folder, and which installs, updates and code removal
+    /// leave alone.
+    /// </summary>
     private sealed class ScopedPluginStorage(
         IPluginStorage inner,
         string pluginId) : IPluginStorage
     {
+        private const string FilesFolderName = "files";
+
+        private readonly string _scope = Path.Combine(pluginId, FilesFolderName);
+
         public bool IsAvailable => inner.IsAvailable;
         public string? RootPath => inner.RootPath is { } root
-            ? Path.Combine(root, pluginId)
+            ? Path.Combine(root, _scope)
             : null;
         public string? ReadText(string key) =>
             inner.ReadText(ScopedKey(key));
         public IReadOnlyList<string> List(string prefix)
         {
             string scopedPrefix = ScopedKey(prefix);
-            string ownerPrefix = pluginId + Path.DirectorySeparatorChar;
+            string ownerPrefix = _scope + Path.DirectorySeparatorChar;
             return inner.List(scopedPrefix)
                 .Select(key => key.Replace('/', Path.DirectorySeparatorChar))
                 .Where(key => key.StartsWith(
@@ -113,7 +123,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         }
 
         private string ScopedKey(string key) =>
-            Path.Combine(pluginId, ValidateKey(key));
+            Path.Combine(_scope, ValidateKey(key));
     }
 
     public void Dispose()

@@ -820,15 +820,16 @@ public sealed class PluginInstallerTests
         var release = fixture.BuildRelease(Id, "0.1.0");
         fixture.RegisterRelease(Repo, release);
         await fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null);
-        string storageDirectory = Path.Combine(fixture.Paths.ConfigDirectory, "plugins", Id);
+        string storageDirectory = fixture.Paths.PluginFilesDirectory(Id);
         Directory.CreateDirectory(storageDirectory);
         File.WriteAllText(Path.Combine(storageDirectory, "settings.json"), "{}");
 
         fixture.Installer.Remove(Id, deleteStorage: false);
 
-        Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, Id)));
+        Assert.False(File.Exists(Path.Combine(fixture.Paths.PluginsDirectory, Id, "plugin.json")));
+        Assert.False(File.Exists(Path.Combine(fixture.Paths.PluginsDirectory, Id, Id + ".dll")));
         Assert.Null(fixture.RecordStore.Find(Id));
-        Assert.True(Directory.Exists(storageDirectory));
+        Assert.True(File.Exists(Path.Combine(storageDirectory, "settings.json")));
     }
 
     [Fact]
@@ -838,13 +839,144 @@ public sealed class PluginInstallerTests
         var release = fixture.BuildRelease(Id, "0.1.0");
         fixture.RegisterRelease(Repo, release);
         await fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null);
-        string storageDirectory = Path.Combine(fixture.Paths.ConfigDirectory, "plugins", Id);
+        string storageDirectory = fixture.Paths.PluginFilesDirectory(Id);
         Directory.CreateDirectory(storageDirectory);
         File.WriteAllText(Path.Combine(storageDirectory, "settings.json"), "{}");
 
         fixture.Installer.Remove(Id, deleteStorage: true);
 
         Assert.False(Directory.Exists(storageDirectory));
+    }
+
+    /// <summary>
+    /// An update replaces the plugin's code and keeps the player's files.
+    /// Mutation: dropping the carry of files/ in SwapIntoPlace fails this.
+    /// </summary>
+    [Fact]
+    public async Task UpdateCarriesThePluginsFilesIntoTheNewVersion()
+    {
+        using var fixture = new Fixture();
+        var first = fixture.BuildRelease(Id, "0.1.0");
+        fixture.RegisterRelease(Repo, first);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, first.Tag, null, null);
+        string files = fixture.Paths.PluginFilesDirectory(Id);
+        Directory.CreateDirectory(Path.Combine(files, "profiles"));
+        File.WriteAllText(Path.Combine(files, "profiles", "a.usd"), "mine");
+
+        var second = fixture.BuildRelease(Id, "0.2.0");
+        fixture.RegisterRelease(Repo, second);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, second.Tag, null, null);
+
+        Assert.Equal("mine", File.ReadAllText(Path.Combine(files, "profiles", "a.usd")));
+        Assert.Equal("0.2.0", fixture.RecordStore.Find(Id)!.Version);
+        Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, ".trash")));
+    }
+
+    /// <summary>
+    /// A folder that holds only files/ (code removed, files kept) takes the
+    /// plugin again and keeps them. Mutation: treating that folder as an
+    /// unmanaged install in RefuseUnmanagedFolder fails this.
+    /// </summary>
+    [Fact]
+    public async Task ReinstallAfterRemoveFindsTheKeptFiles()
+    {
+        using var fixture = new Fixture();
+        var release = fixture.BuildRelease(Id, "0.1.0");
+        fixture.RegisterRelease(Repo, release);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null);
+        string files = fixture.Paths.PluginFilesDirectory(Id);
+        Directory.CreateDirectory(files);
+        File.WriteAllText(Path.Combine(files, "state.json"), "{}");
+        fixture.Installer.Remove(Id, deleteStorage: false);
+
+        fixture.RegisterRelease(Repo, release);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null);
+
+        Assert.True(File.Exists(Path.Combine(fixture.Paths.PluginsDirectory, Id, "plugin.json")));
+        Assert.True(File.Exists(Path.Combine(files, "state.json")));
+    }
+
+    /// <summary>Mutation: skipping RefusePackagedFilesFolder fails this.</summary>
+    [Fact]
+    public async Task APackageThatShipsAFilesFolderIsRefused()
+    {
+        using var fixture = new Fixture();
+        var release = fixture.BuildRelease(
+            Id,
+            "0.1.0",
+            extraEntries: [("files/defaults.json", Encoding.UTF8.GetBytes("{}"))]);
+        fixture.RegisterRelease(Repo, release);
+
+        LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(
+            () => fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null));
+
+        Assert.Equal(PluginInstaller.PackagedFilesRefusal, error.Message);
+        Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, Id)));
+    }
+
+    /// <summary>
+    /// An update stopped after the files were staged beside the new code but
+    /// before the swap: Recover hands them back instead of deleting the
+    /// staging folder with them inside. Mutation: deleting staging folders
+    /// without ReturnStagedFiles fails this.
+    /// </summary>
+    [Fact]
+    public void RecoveryReturnsFilesAnInterruptedUpdateStaged()
+    {
+        using var fixture = new Fixture();
+        string plugin = Path.Combine(fixture.Paths.PluginsDirectory, Id);
+        Directory.CreateDirectory(plugin);
+        File.WriteAllText(Path.Combine(plugin, "plugin.json"), Fixture.ManifestJson(Id, "0.1.0"));
+        string staged = Path.Combine(fixture.Paths.PluginsDirectory, ".staging", $"{Id}-abc123", "files");
+        Directory.CreateDirectory(staged);
+        File.WriteAllText(Path.Combine(staged, "state.json"), "{}");
+
+        fixture.Installer.Recover();
+
+        Assert.True(File.Exists(Path.Combine(fixture.Paths.PluginFilesDirectory(Id), "state.json")));
+        Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, ".staging")));
+    }
+
+    /// <summary>
+    /// A removal stopped with the whole folder in the trash and no record:
+    /// the code goes, the files come back. Mutation: deleting record-less
+    /// trash without returning its files fails this.
+    /// </summary>
+    [Fact]
+    public void RecoveryReturnsFilesFromRecordLessTrash()
+    {
+        using var fixture = new Fixture();
+        string trash = Path.Combine(fixture.Paths.PluginsDirectory, ".trash", $"{Id}-abc123");
+        Directory.CreateDirectory(Path.Combine(trash, "files"));
+        File.WriteAllText(Path.Combine(trash, "plugin.json"), Fixture.ManifestJson(Id, "0.1.0"));
+        File.WriteAllText(Path.Combine(trash, "files", "state.json"), "{}");
+
+        fixture.Installer.Recover();
+
+        Assert.True(File.Exists(Path.Combine(fixture.Paths.PluginFilesDirectory(Id), "state.json")));
+        Assert.False(File.Exists(Path.Combine(fixture.Paths.PluginsDirectory, Id, "plugin.json")));
+        Assert.False(Directory.Exists(trash));
+    }
+
+    /// <summary>
+    /// A hand-unzipped plugin's own files do not count against the install
+    /// limits or content rules. Mutation: walking files/ in DirectInstallCheck fails this.
+    /// </summary>
+    [Fact]
+    public void DirectInstallCheckIgnoresThePluginsOwnFiles()
+    {
+        using var fixture = new Fixture();
+        string directory = Path.Combine(fixture.Paths.PluginsDirectory, Id);
+        Directory.CreateDirectory(Path.Combine(directory, "files"));
+        File.WriteAllText(Path.Combine(directory, "plugin.json"), Fixture.ManifestJson(Id, "0.1.0"));
+        File.WriteAllBytes(Path.Combine(directory, $"{Id}.dll"), []);
+        File.WriteAllBytes(Path.Combine(directory, "files", "stray.exe"), [0x4D, 0x5A]);
+
+        string? refusal = DirectInstallCheck.Refusal(
+            directory,
+            LauncherPluginManifest.Parse(Fixture.ManifestJson(Id, "0.1.0")));
+
+        Assert.Null(refusal);
     }
 
     [Fact]
@@ -908,7 +1040,7 @@ public sealed class PluginInstallerTests
             Path.Combine(directory, "plugin.json"),
             Fixture.ManifestJson(Id, "0.1.0"));
         File.WriteAllBytes(Path.Combine(directory, $"{Id}.dll"), []);
-        string storageDirectory = Path.Combine(fixture.Paths.ConfigDirectory, "plugins", Id);
+        string storageDirectory = fixture.Paths.PluginFilesDirectory(Id);
         Directory.CreateDirectory(storageDirectory);
         File.WriteAllText(Path.Combine(storageDirectory, "settings.json"), "{}");
 
@@ -1092,7 +1224,8 @@ public sealed class PluginInstallerTests
             string version,
             string? entryDll = null,
             byte[]? icon = null,
-            bool manifestByteOrderMark = false)
+            bool manifestByteOrderMark = false,
+            IReadOnlyList<(string Name, byte[] Content)>? extraEntries = null)
         {
             entryDll ??= id + ".dll";
             byte[] manifestBytes = Encoding.UTF8.GetBytes(ManifestJson(id, version, entryDll));
@@ -1108,6 +1241,11 @@ public sealed class PluginInstallerTests
             if (icon is not null)
             {
                 entries.Add((LauncherPluginIcon.FileName, icon, null));
+            }
+
+            foreach ((string name, byte[] content) in extraEntries ?? [])
+            {
+                entries.Add((name, content, null));
             }
 
             byte[] zipBytes = UpdateTestData.CreateZip(entries);

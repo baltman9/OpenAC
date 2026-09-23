@@ -26,9 +26,9 @@ public sealed class PluginSessionTests
         alpha.Storage.WriteText("imports/route.nav", "nav");
 
         Assert.Equal("alpha", storage.Text[Path.Combine(
-            "acdream.alpha", "profile.json")]);
+            "acdream.alpha", "files", "profile.json")]);
         Assert.Equal("beta", storage.Text[Path.Combine(
-            "acdream.beta", "profile.json")]);
+            "acdream.beta", "files", "profile.json")]);
         Assert.Equal(["imports/route.nav"], alpha.Storage.List("imports"));
         Assert.Empty(beta.Storage.List("imports"));
         Assert.Throws<ArgumentException>(() =>
