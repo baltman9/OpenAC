@@ -6,11 +6,4 @@
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
-  <ItemGroup>
-    <!-- Ships with every client and windowless host that knows the single
-         install folder; the launcher refuses to start one without it. -->
-    <None Include="single-install-root.capability"
-          CopyToOutputDirectory="PreserveNewest"
-          CopyToPublishDirectory="PreserveNewest" />
-  </ItemGroup>
 </Project>

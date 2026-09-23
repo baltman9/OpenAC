@@ -52,6 +52,13 @@
     <None Include="UI\assets\**\*.xml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <!-- Says this client knows the single install folder; the launcher
+         refuses to start a client folder without it. The windowless host
+         carries it too; the launcher does not. -->
+    <None Include="..\AcDream.Platform\single-install-root.capability"
+          Link="single-install-root.capability"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="..\..\assets\icons\acdream-client-16.png"

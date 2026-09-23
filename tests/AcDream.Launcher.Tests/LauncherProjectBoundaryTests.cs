@@ -56,6 +56,70 @@ public sealed class LauncherProjectBoundaryTests
         Assert.All(centralAvaloniaPackages, package => Assert.Equal("12.1.1", package.Version));
     }
 
+    /// <summary>
+    /// The single-install-folder marker ships with the client and the
+    /// windowless host only. The launcher checks the client's folder, not its
+    /// own, and on macOS any plain file in the app bundle's code folder
+    /// (Contents/MacOS) breaks the bundle's signature. Mutation: putting the
+    /// marker back in a project the launcher or its co-deployed bake tool
+    /// builds from, or taking it out of either host, fails this.
+    /// </summary>
+    [Fact]
+    public void OnlyTheClientAndWindowlessHostShipTheSingleInstallFolderMarker()
+    {
+        const string marker = "single-install-root.capability";
+        string root = FindRepositoryRoot();
+
+        foreach (string project in ProjectClosure(
+                     Path.Combine(root, "src", "AcDream.Launcher", "AcDream.Launcher.csproj"),
+                     Path.Combine(root, "src", "AcDream.Bake", "AcDream.Bake.csproj")))
+        {
+            Assert.DoesNotContain(
+                XDocument.Load(project).Descendants()
+                    .Select(element => element.Attribute("Include")?.Value ?? string.Empty),
+                include => include.EndsWith(marker, StringComparison.OrdinalIgnoreCase));
+        }
+
+        foreach (string host in new[]
+                 {
+                     Path.Combine(root, "src", "AcDream.App", "AcDream.App.csproj"),
+                     Path.Combine(root, "src", "AcDream.Headless", "AcDream.Headless.csproj"),
+                 })
+        {
+            XElement item = Assert.Single(
+                XDocument.Load(host).Descendants("None"),
+                element => (element.Attribute("Include")?.Value ?? string.Empty)
+                    .EndsWith(marker, StringComparison.OrdinalIgnoreCase));
+            Assert.Equal("PreserveNewest", item.Attribute("CopyToPublishDirectory")?.Value);
+            Assert.Equal(marker, item.Attribute("Link")?.Value);
+        }
+    }
+
+    /// <summary>Every project the given ones reference, directly or not, themselves included.</summary>
+    private static IReadOnlyList<string> ProjectClosure(params string[] projects)
+    {
+        var seen = new List<string>();
+        var pending = new Stack<string>(projects.Select(Path.GetFullPath));
+        while (pending.Count > 0)
+        {
+            string project = pending.Pop();
+            if (seen.Contains(project, StringComparer.OrdinalIgnoreCase))
+                continue;
+            seen.Add(project);
+            foreach (string reference in XDocument.Load(project)
+                         .Descendants("ProjectReference")
+                         .Select(element => element.Attribute("Include")?.Value)
+                         .OfType<string>())
+            {
+                pending.Push(Path.GetFullPath(Path.Combine(
+                    Path.GetDirectoryName(project)!,
+                    reference.Replace('\\', Path.DirectorySeparatorChar))));
+            }
+        }
+
+        return seen;
+    }
+
     [Fact]
     public void LauncherAndItsTestsAreSolutionMembers()
     {

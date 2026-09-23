@@ -156,6 +156,18 @@ foreach ($required in @(
     }
 }
 
+# Contents/MacOS is the bundle's code folder: codesign refuses a bundle with a
+# plain file there ("code object is not signed at all ... In subcomponent"),
+# and it would do so only here, on a Mac. Name any such file up front.
+$notCode = foreach ($entry in Get-ChildItem -LiteralPath $macos -File -Recurse | Sort-Object FullName) {
+    $kind = (& /usr/bin/file -b $entry.FullName).Trim()
+    if ($LASTEXITCODE -ne 0) { throw "file could not inspect '$($entry.FullName)'." }
+    if (-not $kind.StartsWith('Mach-O', [StringComparison]::Ordinal)) { $entry.FullName }
+}
+if (@($notCode).Count -gt 0) {
+    throw "OpenAC.app/Contents/MacOS may hold only code, but the launcher publish output put these there: $(@($notCode) -join ', ')."
+}
+
 # Sign every executable nested in the bundle before signing the bundle itself.
 # This is deliberately ad-hoc: CI has no Apple Developer certificate, yet
 # amfid still requires a valid local signature for the renamed app hosts.
