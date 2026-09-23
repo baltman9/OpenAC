@@ -137,6 +137,11 @@ public sealed class LauncherExecutableSetTests : IDisposable
         string headless = Path.Combine(_root, "acdream-headless");
         File.WriteAllText(graphical, string.Empty);
         File.WriteAllText(headless, string.Empty);
+        // A client that knows the single install folder, so only the
+        // execute permission decides.
+        File.WriteAllText(
+            Path.Combine(_root, AcDream.Platform.ClientCapabilities.SingleInstallRootMarkerFileName),
+            string.Empty);
         UnixFileMode notExecutable = UnixFileMode.UserRead | UnixFileMode.UserWrite
             | UnixFileMode.GroupRead | UnixFileMode.OtherRead;
         File.SetUnixFileMode(graphical, notExecutable);

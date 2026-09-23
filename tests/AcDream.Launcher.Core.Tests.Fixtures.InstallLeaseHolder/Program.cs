@@ -10,6 +10,7 @@ const string SelfUpdateTargetEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_TARGET";
 const string SelfUpdateHelperPidEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_HELPER_PID";
 const string SelfUpdateProfileEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_PROFILE";
 const string SelfUpdateRefusedEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_REFUSED";
+const string SelfUpdateConfirmerPidEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_CONFIRMER_PID";
 
 string[] effectiveArgs = args;
 string? selfUpdateProfile = Environment.GetEnvironmentVariable(SelfUpdateProfileEnvironment);
@@ -18,6 +19,23 @@ if (!string.IsNullOrWhiteSpace(selfUpdateProfile) && IsBootstrapInvocation(effec
     // The launcher's own start: the self-update step finds the transaction
     // wherever it lives, in a per-user profile kept in a scratch folder.
     var profile = new ScratchProfileEnvironment(Path.GetFullPath(selfUpdateProfile));
+    // The test waits for every process it caused: the helper and the
+    // confirmer name themselves.
+    string? pidFile = effectiveArgs[0] switch
+    {
+        LauncherSelfUpdateBootstrap.HelperArgument =>
+            Environment.GetEnvironmentVariable(SelfUpdateHelperPidEnvironment),
+        LauncherSelfUpdateBootstrap.ConfirmArgument =>
+            Environment.GetEnvironmentVariable(SelfUpdateConfirmerPidEnvironment),
+        _ => null,
+    };
+    if (!string.IsNullOrWhiteSpace(pidFile))
+    {
+        File.WriteAllText(
+            Path.GetFullPath(pidFile),
+            Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
     using var http = new HttpClient();
     SelfUpdateStartupResult startup;
     try

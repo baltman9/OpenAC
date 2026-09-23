@@ -85,7 +85,7 @@ public sealed class EarlierLayoutSelfUpdateTests : IDisposable
         // its own executable in the transaction folder cannot be deleted.
         Task helper = Task.Run(async () =>
         {
-            FileStream running = File.Open(stagedLauncher, FileMode.Open, FileAccess.Read, FileShare.Read);
+            IDisposable running = RunningHelperCopy.Hold(stagedLauncher);
             try
             {
                 DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(20);
@@ -444,7 +444,7 @@ public sealed class EarlierLayoutSelfUpdateTests : IDisposable
         string stagedLauncher = Path.Combine(
             harness.Earlier.GetPayloadDirectory(applied.TransactionId),
             harness.LauncherName);
-        FileStream running = File.Open(stagedLauncher, FileMode.Open, FileAccess.Read, FileShare.Read);
+        IDisposable running = RunningHelperCopy.Hold(stagedLauncher);
         Task helper = Task.Run(async () =>
         {
             DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(20);
@@ -504,7 +504,7 @@ public sealed class EarlierLayoutSelfUpdateTests : IDisposable
         string stagedLauncher = Path.Combine(
             harness.Earlier.GetPayloadDirectory(applied.TransactionId),
             harness.LauncherName);
-        FileStream running = File.Open(stagedLauncher, FileMode.Open, FileAccess.Read, FileShare.Read);
+        IDisposable running = RunningHelperCopy.Hold(stagedLauncher);
         Task helper = Task.Run(async () =>
         {
             try
@@ -753,4 +753,45 @@ internal sealed class ProfileEnvironment(string home) : IApplicationPathEnvironm
         Environment.SpecialFolder.UserProfile => home,
         _ => string.Empty,
     };
+}
+
+/// <summary>
+/// Stands in for the helper process running from its staged copy: while held,
+/// the copy cannot be removed. Windows refuses to delete a file that is open;
+/// elsewhere an open file can be deleted, so the copy's folder is made
+/// read-only instead, which refuses removing anything in it.
+/// </summary>
+internal sealed class RunningHelperCopy : IDisposable
+{
+    private readonly FileStream? _open;
+    private readonly string? _folder;
+    private readonly UnixFileMode _folderMode;
+
+    private RunningHelperCopy(string executable)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            _open = File.Open(executable, FileMode.Open, FileAccess.Read, FileShare.Read);
+            return;
+        }
+
+        _folder = Path.GetDirectoryName(executable)!;
+        _folderMode = File.GetUnixFileMode(_folder);
+        File.SetUnixFileMode(
+            _folder,
+            UnixFileMode.UserRead | UnixFileMode.UserExecute
+                | UnixFileMode.GroupRead | UnixFileMode.GroupExecute
+                | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+    }
+
+    public static IDisposable Hold(string executable) => new RunningHelperCopy(executable);
+
+    public void Dispose()
+    {
+        _open?.Dispose();
+        if (_folder is not null && Directory.Exists(_folder) && !OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(_folder, _folderMode);
+        }
+    }
 }

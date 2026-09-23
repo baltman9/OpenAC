@@ -13,6 +13,7 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
     private const string DataEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_DATA";
     private const string ProfileVariable = "ACDREAM_SELF_UPDATE_FIXTURE_PROFILE";
     private const string RefusedVariable = "ACDREAM_SELF_UPDATE_FIXTURE_REFUSED";
+    private const string ConfirmerPidVariable = "ACDREAM_SELF_UPDATE_FIXTURE_CONFIRMER_PID";
     private const string TargetEnvironment = "ACDREAM_SELF_UPDATE_FIXTURE_TARGET";
     private const string HelperPidEnvironment =
         "ACDREAM_SELF_UPDATE_FIXTURE_HELPER_PID";
@@ -27,10 +28,57 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(_root))
+        // Every test waits for the processes it started. Windows can still
+        // hold a program that has just exited for a moment (its image being
+        // released or scanned), so a refused delete is tried again briefly;
+        // if it keeps failing, whatever still runs from the folder is named.
+        DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        while (Directory.Exists(_root))
         {
-            Directory.Delete(_root, recursive: true);
+            try
+            {
+                Directory.Delete(_root, recursive: true);
+            }
+            catch (UnauthorizedAccessException ex) when (OperatingSystem.IsWindows())
+            {
+                if (DateTimeOffset.UtcNow >= deadline)
+                {
+                    throw new UnauthorizedAccessException(
+                        $"{ex.Message} Still running from the test folder: {RunningFrom(_root)}",
+                        ex);
+                }
+
+                Thread.Sleep(100);
+            }
         }
+    }
+
+    private static string RunningFrom(string folder)
+    {
+        var running = new List<string>();
+        foreach (Process process in Process.GetProcesses())
+        {
+            using (process)
+            {
+                try
+                {
+                    string? path = process.MainModule?.FileName;
+                    if (path is not null
+                        && path.StartsWith(folder, StringComparison.OrdinalIgnoreCase))
+                    {
+                        running.Add($"{process.Id} {path}");
+                    }
+                }
+                catch (Exception ex) when (ex is InvalidOperationException
+                                           or System.ComponentModel.Win32Exception
+                                           or NotSupportedException)
+                {
+                    // Exited or not ours to inspect.
+                }
+            }
+        }
+
+        return running.Count == 0 ? "nothing" : string.Join("; ", running);
     }
 
     [Fact]
@@ -165,6 +213,8 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
         string profile = Path.Combine(_root, "profile");
         string target = Path.Combine(_root, "launcher");
         string launched = Path.Combine(_root, "replacement.ready");
+        string helperPid = Path.Combine(_root, "helper.pid");
+        string confirmerPid = Path.Combine(_root, "confirmer.pid");
         string[] publicArguments = ["--update-manifest-uri", "http://127.0.0.1:43119/manifest.json"];
         var platform = new ProfileEnvironment(profile);
         LegacyApplicationLayout earlierLayout = LegacyApplicationLayout.Detect(platform);
@@ -205,10 +255,17 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
         using Process start = StartProcess(
             prepared.CanonicalPath,
             ["canonical-probe", launched, .. publicArguments],
-            new Dictionary<string, string> { [ProfileVariable] = profile });
+            new Dictionary<string, string>
+            {
+                [ProfileVariable] = profile,
+                [HelperPidEnvironment] = helperPid,
+                [ConfirmerPidVariable] = confirmerPid,
+            });
         await start.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
         Assert.Equal(0, start.ExitCode);
         await WaitForFileAsync(launched, process: null, TimeSpan.FromSeconds(60));
+        await WaitForRecordedExitAsync(helperPid);
+        await WaitForRecordedExitAsync(confirmerPid);
 
         Assert.Equal(
             prepared.NewCanonicalHash,
@@ -244,6 +301,8 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
         string profile = Path.Combine(_root, "profile");
         string target = Path.Combine(_root, "launcher");
         string launched = Path.Combine(_root, "replacement.ready");
+        string helperPid = Path.Combine(_root, "helper.pid");
+        string confirmerPid = Path.Combine(_root, "confirmer.pid");
         string refused = Path.Combine(_root, "refused.txt");
         string config = Path.Combine(_root, "earlier config");
         string data = Path.Combine(_root, "earlier data");
@@ -297,10 +356,14 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
             {
                 [ProfileVariable] = profile,
                 [RefusedVariable] = refused,
+                [HelperPidEnvironment] = helperPid,
+                [ConfirmerPidVariable] = confirmerPid,
             });
         await start.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
         Assert.Equal(0, start.ExitCode);
         await WaitForFileAsync(refused, process: null, TimeSpan.FromSeconds(60));
+        await WaitForRecordedExitAsync(helperPid);
+        await WaitForRecordedExitAsync(confirmerPid);
         await WaitUntilAsync(
             () => !Directory.Exists(earlier.GetTransactionDirectory(plan.TransactionId)),
             TimeSpan.FromSeconds(30),
@@ -327,6 +390,15 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
         var files = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (string folder in layout.TopLevelRoots())
         {
+            // Not every system gives the earlier layout the same folders
+            // (Linux has a separate cache folder); one that is absent must
+            // stay absent.
+            if (!Directory.Exists(folder))
+            {
+                files[folder] = "absent";
+                continue;
+            }
+
             foreach (string file in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories))
             {
                 if (file.StartsWith(earlier.RootDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
@@ -960,6 +1032,33 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
     {
         string value = marker.Split('|', 2)[0];
         return int.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Waits for a process that recorded its id in <paramref name="pidFile"/> to exit.</summary>
+    private static async Task WaitForRecordedExitAsync(string pidFile)
+    {
+        int pid = 0;
+        await WaitUntilAsync(
+            () =>
+            {
+                try
+                {
+                    return File.Exists(pidFile)
+                        && int.TryParse(
+                            File.ReadAllText(pidFile),
+                            System.Globalization.NumberStyles.None,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out pid);
+                }
+                catch (IOException)
+                {
+                    // Still being written.
+                    return false;
+                }
+            },
+            TimeSpan.FromSeconds(30),
+            $"No process recorded itself in '{pidFile}'.");
+        await WaitForProcessExitAsync(pid, TimeSpan.FromSeconds(30));
     }
 
     private static async Task WaitForProcessExitAsync(int pid, TimeSpan timeout)
