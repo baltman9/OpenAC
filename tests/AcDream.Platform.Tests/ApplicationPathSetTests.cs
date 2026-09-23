@@ -110,7 +110,6 @@ public sealed class ApplicationPathSetTests
         Assert.Equal(Path.Combine(root, "cache"), paths.CacheDirectory);
         Assert.Equal(Path.Combine(root, "cache", "diagnostics"), paths.DiagnosticsDirectory);
         Assert.Equal(Path.Combine(root, "cache", "plugin-peers"), paths.PluginPeersDirectory);
-        Assert.Equal(Path.Combine(root, "layout.json"), paths.LayoutMarkerFile);
     }
 
     /// <summary>Mutation: reading the pointer before ACDREAM_ROOT_DIR fails this.</summary>

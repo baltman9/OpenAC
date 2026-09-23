@@ -103,7 +103,6 @@ public sealed partial class LauncherWindowViewModel
     }
 
     private InstallFolderViewModel? _installFolder;
-    private bool _aClientReachedTheWorld;
 
     /// <summary>The install folder rows in the settings and the first-run form; null until configured.</summary>
     public InstallFolderViewModel? InstallFolder => _installFolder;
@@ -111,33 +110,25 @@ public sealed partial class LauncherWindowViewModel
     /// <summary>Whether the install folder rows are available.</summary>
     public bool HasInstallFolder => _installFolder is not null;
 
+    /// <summary>
+    /// Whether the first-run form tells the player this is a new installation:
+    /// an earlier version's folders exist, and the form is setting the game up
+    /// rather than updating content an install already has.
+    /// </summary>
+    public bool ShowNewInstallationNotice =>
+        _installFolder?.HasEarlierFolders == true && !FirstRunWizardShell.IsContentUpdate;
+
     /// <summary>Gives the settings their install folder section.</summary>
     public void ConfigureInstallFolder(InstallFolderViewModel installFolder)
     {
         _installFolder = installFolder ?? throw new ArgumentNullException(nameof(installFolder));
-        if (_aClientReachedTheWorld)
-            _installFolder.NotifyClientStarted();
-        if (_installFolder.MigrationIncomplete)
-            LastError = _installFolder.MigrationNotice;
-        else if (_installFolder.MigrationNotice is { } notice)
-            OperationStatus = notice;
         OnPropertyChanged(nameof(InstallFolder));
         OnPropertyChanged(nameof(HasInstallFolder));
+        OnPropertyChanged(nameof(ShowNewInstallationNotice));
     }
 
     /// <summary>Whether the install may move now: nothing running and nothing busy.</summary>
     internal bool CanMoveInstallFolder => !IsBusy && Sessions.All(session => !session.IsActive);
-
-    /// <summary>Notes a session that reached the world, which is what lets old folders be removed.</summary>
-    private void NoteSessionsForInstallFolder(LauncherStateSnapshot snapshot)
-    {
-        if (!_aClientReachedTheWorld
-            && snapshot.Sessions.Any(session => session.State == LauncherActivityState.InWorld))
-        {
-            _aClientReachedTheWorld = true;
-            _installFolder?.NotifyClientStarted();
-        }
-    }
 
     public void ConfigureServerHealth(IServerHealthService service)
     {

@@ -11,31 +11,13 @@ GraphicalHostPlatformServices graphicalPlatform =
     GraphicalHostPlatformServices.Resolve();
 graphicalPlatform.ConfigureWindowBackend();
 ApplicationPathSet applicationPaths = graphicalPlatform.Paths;
-// A client started by hand before the launcher ever ran brings the old
-// per-user folders into the install root itself; one started by the launcher
-// is handed an explicit root and leaves that to the launcher.
-InstallRootMigrationResult installRootMigration =
-    InstallRootMigration.RunIfNeeded(applicationPaths);
 
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Debug()
     .WriteTo.Console()
     .CreateLogger();
-InstallRootMigrationLog.Write(
-    installRootMigration,
-    applicationPaths.RootDirectory,
-    line => Log.Information("{Line}", line),
-    line => Log.Warning("{Line}", line));
-if (InstallRootMigration.StartupBlockReason(
-        installRootMigration,
-        applicationPaths.RootDirectory) is { } migrationBlock)
-{
-    Log.Error("{Reason}", migrationBlock);
-    Log.CloseAndFlush();
-    return 5;
-}
-// Held for the whole run, so a client update, a move of the install folder
-// or removing the old folders waits for this client, however it was started.
+// Held for the whole run, so a client update or a move of the install folder
+// waits for this client, however it was started.
 using InstallSessionLease? installSession =
     InstallSessionLease.TryAcquireShared(applicationPaths);
 if (installSession is null)

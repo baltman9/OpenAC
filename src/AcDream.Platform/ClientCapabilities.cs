@@ -9,8 +9,8 @@ public static class ClientCapabilities
     /// <summary>
     /// Present beside the client executables from the first build that keeps
     /// everything in one install folder. An older client started against the
-    /// new folder would look for its settings and plugins in the old per-user
-    /// folders, which the migration emptied.
+    /// new folder would read and write its settings and plugins in the old
+    /// per-user folders instead.
     /// </summary>
     public const string SingleInstallRootMarkerFileName = "single-install-root.capability";
 }

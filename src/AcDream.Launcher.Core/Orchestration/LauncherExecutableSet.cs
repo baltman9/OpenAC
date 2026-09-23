@@ -199,8 +199,8 @@ public sealed class LauncherExecutableSet
 
     /// <summary>
     /// Why a client that predates the single install folder is not started:
-    /// it would read settings and plugins from the old per-user folders the
-    /// migration moved away, and write new ones there.
+    /// it would read and write settings and plugins in the old per-user
+    /// folders, which the new install does not use.
     /// </summary>
     internal static string OlderClientRefusal(string? clientDirectory) =>
         $"The installed client{(clientDirectory is null ? string.Empty : $" ({Path.GetFileName(clientDirectory)})")} "

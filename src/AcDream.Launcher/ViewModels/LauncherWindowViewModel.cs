@@ -485,6 +485,13 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
 
     private void OnModalPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (ReferenceEquals(sender, FirstRunWizardShell)
+            && e.PropertyName == nameof(FirstRunInstallerViewModel.IsContentUpdate))
+        {
+            OnPropertyChanged(nameof(ShowNewInstallationNotice));
+            return;
+        }
+
         if (e.PropertyName != nameof(ProfileEditorDialogViewModel.IsOpen)
             && e.PropertyName != nameof(LauncherShellViewModel.IsOpen)
             && e.PropertyName != nameof(FirstRunInstallerViewModel.IsOpen)
@@ -547,7 +554,6 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         SelectionKey? previousSelection = preferredSelection ?? SelectionKey.From(SelectedNode);
         LauncherStateSnapshot snapshot = _orchestrator.GetSnapshot();
         _snapshot = snapshot;
-        NoteSessionsForInstallFolder(snapshot);
         RefreshAccountRows(snapshot);
 
         Servers.Clear();

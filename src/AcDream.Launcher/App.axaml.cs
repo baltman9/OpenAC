@@ -17,7 +17,6 @@ namespace AcDream.Launcher;
 public sealed partial class App : Application
 {
     private readonly LauncherStartupOptions? _startupOptions;
-    private readonly InstallRootMigrationResult? _migration;
     private LauncherOrchestrator? _orchestrator;
     private LauncherWindowViewModel? _viewModel;
     private LauncherUpdateComposition? _updateComposition;
@@ -28,13 +27,10 @@ public sealed partial class App : Application
     {
     }
 
-    internal App(
-        LauncherStartupOptions startupOptions,
-        InstallRootMigrationResult? migration = null)
+    internal App(LauncherStartupOptions startupOptions)
     {
         _startupOptions = startupOptions
             ?? throw new ArgumentNullException(nameof(startupOptions));
-        _migration = migration;
     }
 
     internal LauncherStartupOptions StartupOptions => _startupOptions
@@ -85,14 +81,6 @@ public sealed partial class App : Application
                 installRecord: null,
                 installationStatus: "Checking installed game content…",
                 updateSessionBarrier: updates.Versions.Barrier);
-            if (_migration is not null
-                && InstallRootMigration.StartupBlockReason(_migration, paths.RootDirectory)
-                    is { } migrationBlock)
-            {
-                // Nothing may start against a half-moved install; the window
-                // says why and offers Retry.
-                _orchestrator.SetLaunchBlock(migrationBlock);
-            }
             LauncherSelfUpdateManager? selfUpdates = updates.SelfUpdates;
             Func<CancellationToken, Task<bool>>? applyLauncherUpdate =
                 selfUpdates is null
@@ -120,8 +108,7 @@ public sealed partial class App : Application
                 new AvaloniaUiDispatcher(),
                 () => windowViewModel.CanMoveInstallFolder,
                 () => RestartLauncher(startupOptions, desktop),
-                _migration,
-                () => InstallRootMigration.RunIfNeeded(paths)));
+                LegacyApplicationLayout.ExistingFolders(paths)));
             var mainWindow = new MainWindow
             {
                 DataContext = _viewModel,

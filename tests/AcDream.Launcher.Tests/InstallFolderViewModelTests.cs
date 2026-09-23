@@ -115,107 +115,29 @@ public sealed class InstallFolderViewModelTests : IDisposable
     }
 
     /// <summary>
-    /// Old folders are offered only after a client reached the world from the
-    /// new folder, and deleted only after the player confirms a list with
-    /// sizes. Mutation: enabling removal before NotifyClientStarted, or
-    /// deleting on the first click, fails this.
+    /// A player coming from an earlier version is told plainly that this is
+    /// a new installation, that nothing came over, and where the old folders
+    /// are; a player without earlier folders is told nothing. Mutation:
+    /// dropping the folder list from the notice, or showing it without
+    /// earlier folders, fails this.
     /// </summary>
     [Fact]
-    public void OldFoldersAreRemovedOnlyAfterAClientStartedAndTheListIsConfirmed()
+    public void EarlierFoldersMakeTheNewInstallationNoticeNameThem()
     {
-        string old = SeedOldFolder(out string leftBehind);
-        InstallFolderViewModel viewModel = Create();
+        string roaming = Path.Combine(_scratch, "Roaming", "acdream");
+        string local = Path.Combine(_scratch, "Local", "acdream");
 
-        Assert.Equal([old], viewModel.OldFolders);
-        Assert.False(viewModel.RemoveOldFoldersCommand.CanExecute(null));
+        InstallFolderViewModel fresh = Create();
+        InstallFolderViewModel upgraded = Create(earlierFolders: [roaming, local]);
 
-        viewModel.NotifyClientStarted();
-        viewModel.RemoveOldFoldersCommand.Execute(null);
-        Assert.True(viewModel.IsReviewingOldFolderRemoval);
-        Assert.True(Directory.Exists(old));
-        Assert.Contains(viewModel.OldFolderRemovalItems, item => item.StartsWith(leftBehind, StringComparison.Ordinal) && item.EndsWith("(3 B)", StringComparison.Ordinal));
-
-        viewModel.ConfirmRemoveOldFoldersCommand.Execute(null);
-
-        Assert.False(Directory.Exists(old));
-        Assert.False(viewModel.HasOldFolders);
-    }
-
-    /// <summary>
-    /// A file that appeared in the old folder after the move blocks the
-    /// removal and says why. Mutation: letting Delete run on a refused plan fails this.
-    /// </summary>
-    [Fact]
-    public void ASurpriseInTheOldFolderBlocksRemoval()
-    {
-        string old = SeedOldFolder(out _);
-        File.WriteAllText(Path.Combine(old, "late.log"), "x");
-        InstallFolderViewModel viewModel = Create();
-        viewModel.NotifyClientStarted();
-
-        viewModel.RemoveOldFoldersCommand.Execute(null);
-
-        Assert.False(viewModel.ConfirmRemoveOldFoldersCommand.CanExecute(null));
-        Assert.Contains("late.log", viewModel.OldFolderRemovalSummary, StringComparison.Ordinal);
-        Assert.True(File.Exists(Path.Combine(old, "late.log")));
-    }
-
-    private string SeedOldFolder(out string leftBehind)
-    {
-        string old = Path.Combine(_scratch, "Local", "acdream");
-        leftBehind = Path.Combine(old, "navigation");
-        Directory.CreateDirectory(leftBehind);
-        File.WriteAllText(Path.Combine(leftBehind, "x.nav"), "nav");
-        File.WriteAllText(
-            Path.Combine(old, InstallRootMigration.MovedNoteFileName),
-            "moved" + Environment.NewLine + _defaultRoot + Environment.NewLine);
-        InstallRootMigration.WriteLayoutMarker(_paths, [old], leftBehind: [leftBehind]);
-        return old;
-    }
-
-    /// <summary>Mutation: describing an incomplete migration as done fails this.</summary>
-    [Fact]
-    public void AnIncompleteMigrationIsReportedAsSuch()
-    {
-        InstallFolderViewModel viewModel = Create(migration: new InstallRootMigrationResult(
-            InstallRootMigrationOutcome.Incomplete,
-            [],
-            ["app\\0.1.15: in use"],
-            []));
-
-        Assert.True(viewModel.MigrationIncomplete);
-        Assert.Contains("in use", viewModel.MigrationNotice, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// Retry runs the migration again: still unfinished keeps sessions
-    /// blocked, finished restarts the launcher. Mutation: restarting on an
-    /// unfinished retry, or not restarting on a finished one, fails this.
-    /// </summary>
-    [Fact]
-    public void RetryKeepsSessionsBlockedUntilTheMigrationFinishes()
-    {
-        var incomplete = new InstallRootMigrationResult(
-            InstallRootMigrationOutcome.Incomplete, [], ["app: in use"], []);
-        InstallRootMigrationResult next = incomplete;
-        var viewModel = new InstallFolderViewModel(
-            _paths,
-            new InstallRootMover(_paths, _defaultRoot),
-            new ImmediateUiDispatcher(),
-            () => true,
-            () => _restarts++,
-            incomplete,
-            () => next);
-
-        Assert.True(viewModel.MigrationBlocksSessions);
-        viewModel.RetryMigrationCommand.Execute(null);
-        Assert.True(viewModel.MigrationBlocksSessions);
-        Assert.Equal(0, _restarts);
-
-        next = new InstallRootMigrationResult(InstallRootMigrationOutcome.Migrated, [], [], []);
-        viewModel.RetryMigrationCommand.Execute(null);
-        Assert.False(viewModel.MigrationBlocksSessions);
-        Assert.Equal(1, _restarts);
+        Assert.False(fresh.HasEarlierFolders);
+        Assert.Null(fresh.NewInstallationNotice);
+        Assert.True(upgraded.HasEarlierFolders);
+        Assert.StartsWith("This is a new installation.", upgraded.NewInstallationNotice, StringComparison.Ordinal);
+        Assert.Contains("start fresh", upgraded.NewInstallationNotice, StringComparison.Ordinal);
+        Assert.Contains(roaming, upgraded.NewInstallationNotice, StringComparison.Ordinal);
+        Assert.Contains(local, upgraded.NewInstallationNotice, StringComparison.Ordinal);
+        Assert.Equal(roaming + Environment.NewLine + local, upgraded.EarlierFoldersText);
     }
 
     /// <summary>
@@ -233,27 +155,9 @@ public sealed class InstallFolderViewModelTests : IDisposable
         Assert.Equal(0, _restarts);
     }
 
-    /// <summary>Mutation: leaving conflicts out of the notice fails this.</summary>
-    [Fact]
-    public void ConflictsAreShownInTheMigrationNotice()
-    {
-        string kept = Path.Combine(_defaultRoot, "settings", "settings.json.from-old");
-        InstallFolderViewModel viewModel = Create(migration: new InstallRootMigrationResult(
-            InstallRootMigrationOutcome.Migrated,
-            [],
-            [],
-            [])
-        {
-            Conflicts = [kept],
-        });
-
-        Assert.Contains(kept, viewModel.MigrationNotice, StringComparison.Ordinal);
-        Assert.Contains(".from-old", viewModel.MigrationNotice, StringComparison.Ordinal);
-    }
-
     private InstallFolderViewModel Create(
         bool canMove = true,
-        InstallRootMigrationResult? migration = null)
+        IReadOnlyList<string>? earlierFolders = null)
     {
         var viewModel = new InstallFolderViewModel(
             _paths,
@@ -261,7 +165,7 @@ public sealed class InstallFolderViewModelTests : IDisposable
             new ImmediateUiDispatcher(),
             () => canMove,
             () => _restarts++,
-            migration);
+            earlierFolders);
         viewModel.AttachShell(_shell);
         return viewModel;
     }

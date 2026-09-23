@@ -4,9 +4,9 @@ namespace AcDream.Platform;
 /// The install's session lock, <c>app/.update-session.lock</c>. Every running
 /// client, windowless host and launcher session holds it shared for its whole
 /// lifetime; anything that rewrites the install underneath them (a client
-/// update, moving the install folder, removing the old folders) needs it
-/// exclusively, and so refuses while any of them runs, however it was
-/// started. The launcher's own barrier opens the same file the same way.
+/// update, moving the install folder) needs it exclusively, and so refuses
+/// while any of them runs, however it was started. The launcher's own barrier
+/// opens the same file the same way.
 /// </summary>
 public sealed class InstallSessionLease : IDisposable
 {

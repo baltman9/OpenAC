@@ -47,7 +47,6 @@ public sealed class InstallRootMoverTests : IDisposable
         Assert.True(File.Exists(Path.Combine(target, "data", "pak", "acdream.pak")));
         Assert.True(File.Exists(Path.Combine(target, "settings", "settings.json")));
         Assert.True(File.Exists(Path.Combine(target, "plugins", "p", "files", "a.json")));
-        Assert.True(File.Exists(Path.Combine(target, "layout.json")));
         Assert.False(Directory.Exists(Path.Combine(target, "cache")));
         Assert.Equal(
             Path.Combine(target, "data", "pak", "acdream.pak"),
@@ -244,6 +243,39 @@ public sealed class InstallRootMoverTests : IDisposable
         Assert.Contains(result.Leftovers, line => line.Contains("next start", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// A record still naming another root's content is pointed at this root's,
+    /// once the content is here; a record naming a path inside this root, or
+    /// content that is not here, is left alone. Mutation: rewriting whenever
+    /// the path differs, or never, fails this.
+    /// </summary>
+    [Fact]
+    public void RepairPointsMovedRecordsAtThisRootsContentOnly()
+    {
+        string package = Path.Combine(_paths.GameDataDirectory, "pak", "acdream.pak");
+        string record = Path.Combine(_paths.GameDataDirectory, "install.json");
+        string elsewhere = Path.Combine(_scratch, "Elsewhere", "OpenAC", "data", "pak", "acdream.pak");
+        Write(
+            "data/install.json",
+            "{ \"preparedAssetPath\": " + System.Text.Json.JsonSerializer.Serialize(elsewhere) + " }");
+
+        Assert.Empty(InstallRootMover.RepairContentRecords(_paths));
+
+        Write("data/pak/acdream.pak", "pak");
+        Assert.Equal([record], InstallRootMover.RepairContentRecords(_paths));
+        Assert.Equal(
+            package,
+            ((JsonObject)JsonNode.Parse(File.ReadAllText(record))!)["preparedAssetPath"]!
+                .GetValue<string>());
+        Assert.Empty(InstallRootMover.RepairContentRecords(_paths));
+
+        string inside = Path.Combine(_paths.GameDataDirectory, "custom.pak");
+        Write(
+            "data/install.json",
+            "{ \"preparedAssetPath\": " + System.Text.Json.JsonSerializer.Serialize(inside) + " }");
+        Assert.Empty(InstallRootMover.RepairContentRecords(_paths));
+    }
+
     private void SeedInstall()
     {
         Write("app/current.json", "{}");
@@ -259,7 +291,6 @@ public sealed class InstallRootMoverTests : IDisposable
         Write("plugins/p/plugin.json", "{}");
         Write("plugins/p/files/a.json", "{}");
         Write("cache/plugins.json", "{}");
-        Write("layout.json", "{ \"version\": 1 }");
     }
 
     private void Write(string relative, string content)

@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using AcDream.Launcher.Core.Updates;
 using AcDream.Platform;
 
@@ -156,7 +158,7 @@ public sealed class InstallRootMover
             // defers it.
             try
             {
-                InstallRootMigration.RepairContentRecords(ApplicationPathSet.ForRoot(destination));
+                RepairContentRecords(ApplicationPathSet.ForRoot(destination));
             }
             catch (Exception ex) when (ex is IOException
                                        or UnauthorizedAccessException
@@ -176,6 +178,54 @@ public sealed class InstallRootMover
                 : $"The install folder is now {destination}. Some old files could not be "
                   + $"deleted from {RootDirectory}; they are no longer used.",
             leftovers);
+    }
+
+    /// <summary>
+    /// Points a root's install and verification records at that root's own
+    /// prepared content when they still name the content under another root:
+    /// the root was moved and the records came along unchanged. Run at every
+    /// launcher start, so a move interrupted after the pointer was written is
+    /// finished the next time. A record naming a path inside this root, or
+    /// one whose canonical content is not there, is left alone for the
+    /// launcher to judge. Returns the records it rewrote.
+    /// </summary>
+    public static IReadOnlyList<string> RepairContentRecords(ApplicationPathSet paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        string package = Path.Combine(paths.GameDataDirectory, "pak", "acdream.pak");
+        var repaired = new List<string>();
+        foreach ((string record, string property) in new[]
+                 {
+                     (Path.Combine(paths.GameDataDirectory, "install.json"), "preparedAssetPath"),
+                     (Path.Combine(paths.GameDataDirectory, "install.verification.json"), "path"),
+                 })
+        {
+            if (!File.Exists(record) || !File.Exists(package))
+                continue;
+
+            if (JsonNode.Parse(File.ReadAllText(record)) is not JsonObject document
+                || document[property] is not JsonValue value
+                || !value.TryGetValue(out string? recorded)
+                || string.IsNullOrWhiteSpace(recorded)
+                || !Path.IsPathFullyQualified(recorded)
+                || ApplicationPathIdentity.IsSameOrInside(recorded, paths.RootDirectory))
+            {
+                continue;
+            }
+
+            // The launcher refuses a record whose content path is not the
+            // canonical one for its root, so a moved record that still named
+            // the old path would read as a broken install.
+            document[property] = package;
+            string temporary = record + ".repair.tmp";
+            File.WriteAllText(
+                temporary,
+                document.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            File.Move(temporary, record, overwrite: true);
+            repaired.Add(record);
+        }
+
+        return repaired;
     }
 
     /// <summary>The entries that move: everything but the cache and the lock file.</summary>

@@ -84,9 +84,6 @@ public sealed record ApplicationPathSet(
     /// <summary>Overrides the cache folder alone.</summary>
     public const string CacheEnvironmentVariable = "ACDREAM_CACHE_DIR";
 
-    /// <summary>The marker a finished layout (fresh or migrated) carries.</summary>
-    public const string LayoutMarkerFileName = "layout.json";
-
     /// <summary>The name of the per-plugin folder that holds its private files.</summary>
     public const string PluginFilesFolderName = "files";
 
@@ -150,10 +147,6 @@ public sealed record ApplicationPathSet(
     /// <summary>Where the clients on this machine leave notes for one another.</summary>
     public string PluginPeersDirectory =>
         Path.Combine(CacheDirectory, "plugin-peers");
-
-    /// <summary>The marker a finished layout carries.</summary>
-    public string LayoutMarkerFile =>
-        Path.Combine(RootDirectory, LayoutMarkerFileName);
 
     /// <summary>The private files folder of one plugin.</summary>
     public string PluginFilesDirectory(string pluginId)

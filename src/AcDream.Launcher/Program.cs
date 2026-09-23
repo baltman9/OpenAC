@@ -1,3 +1,4 @@
+using AcDream.Launcher.Core.Installation;
 using AcDream.Launcher.Core.Updates;
 using AcDream.Platform;
 using Avalonia;
@@ -19,15 +20,6 @@ internal static class Program
                 return 0;
             }
 
-            // The old per-user folders come into the install root before any
-            // store opens a file there, the self-update state included.
-            InstallRootMigrationResult migration =
-                InstallRootMigration.RunIfNeeded(options.Paths);
-            InstallRootMigrationLog.Write(
-                migration,
-                options.Paths.RootDirectory,
-                Console.WriteLine,
-                Console.Error.WriteLine);
             RepairContentRecords(options.Paths);
 
             using var httpClient = new HttpClient();
@@ -52,7 +44,7 @@ internal static class Program
 
             RequireUnchangedPublicArguments(options, startup);
 
-            return BuildAvaloniaApp(options, migration).StartWithClassicDesktopLifetime([]);
+            return BuildAvaloniaApp(options).StartWithClassicDesktopLifetime([]);
         }
         catch (Exception ex)
         {
@@ -74,7 +66,7 @@ internal static class Program
     {
         try
         {
-            foreach (string repaired in InstallRootMigration.RepairContentRecords(paths))
+            foreach (string repaired in InstallRootMover.RepairContentRecords(paths))
             {
                 Console.WriteLine($"install folder: {repaired} now names this folder's content");
             }
@@ -164,12 +156,10 @@ internal static class Program
         }
     }
 
-    internal static AppBuilder BuildAvaloniaApp(
-        LauncherStartupOptions options,
-        InstallRootMigrationResult? migration = null)
+    internal static AppBuilder BuildAvaloniaApp(LauncherStartupOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return AppBuilder.Configure(() => new App(options, migration))
+        return AppBuilder.Configure(() => new App(options))
             .UsePlatformDetect();
     }
 

@@ -39,32 +39,4 @@ public sealed class InstallSessionLeaseTests : IDisposable
             Path.Combine(_paths.RootDirectory, "app", ".update-session.lock"),
             InstallSessionLease.LockPath(_paths));
     }
-
-    /// <summary>
-    /// A client started by hand holds the lock, so the old folders are not
-    /// removed under it. Mutation: removing without the exclusive lock fails this.
-    /// </summary>
-    [Fact]
-    public void OldFoldersAreNotRemovedWhileAClientRuns()
-    {
-        string old = Path.Combine(_paths.RootDirectory + "-old", "acdream");
-        Directory.CreateDirectory(old);
-        File.WriteAllText(
-            Path.Combine(old, InstallRootMigration.MovedNoteFileName),
-            "moved" + Environment.NewLine + _paths.RootDirectory + Environment.NewLine);
-        InstallRootMigration.WriteLayoutMarker(_paths, [old]);
-        try
-        {
-            using InstallSessionLease? client = InstallSessionLease.TryAcquireShared(_paths);
-
-            IReadOnlyList<string> refusals = OldRootRemoval.Remove(_paths);
-
-            Assert.Equal([OldRootRemoval.SessionRefusal], refusals);
-            Assert.True(Directory.Exists(old));
-        }
-        finally
-        {
-            Directory.Delete(Path.GetDirectoryName(old)!, recursive: true);
-        }
-    }
 }

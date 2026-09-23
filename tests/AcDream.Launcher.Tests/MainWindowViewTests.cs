@@ -56,6 +56,7 @@ public sealed class MainWindowViewTests
         TabsRenderAndSwitchBetweenAccountsAndPlugins();
         TheGearOpensSettingsAndTheBetaCheckboxRoundTripsThroughThePlugins();
         SettingsShowTheInstallFolderAndOpenItsRowsThroughTheWindow();
+        TheFirstRunFormTellsAnUpgradingPlayerThisIsANewInstallation();
     }
 
     /// <summary>
@@ -195,6 +196,50 @@ public sealed class MainWindowViewTests
             {
                 CloseTestWindow(window);
             }
+        }
+    }
+
+    /// <summary>
+    /// The first-run form shows the new-installation notice, naming the
+    /// earlier folders, when a player comes from an earlier version.
+    /// Mutation: misspelling the notice's binding path or its visibility
+    /// binding in the markup fails this.
+    /// </summary>
+    private static void TheFirstRunFormTellsAnUpgradingPlayerThisIsANewInstallation()
+    {
+        using LauncherWindowViewModel viewModel = CreateViewModel();
+        string root = Path.Combine(Path.GetTempPath(), "openac-view-" + Guid.NewGuid().ToString("N"));
+        string earlier = Path.Combine(Path.GetTempPath(), "acdream-earlier-" + Guid.NewGuid().ToString("N"));
+        AcDream.Platform.ApplicationPathSet paths = AcDream.Platform.ApplicationPathSet.ForRoot(
+            root,
+            AcDream.Platform.ApplicationRootSource.Default);
+        viewModel.ConfigureInstallFolder(new InstallFolderViewModel(
+            paths,
+            new InstallRootMover(paths, root),
+            new ImmediateUiDispatcher(),
+            () => true,
+            () => { },
+            [earlier]));
+        var window = new MainWindow { DataContext = viewModel };
+        try
+        {
+            window.Show();
+            viewModel.FirstRunWizardShell.OpenCommand.Execute(null);
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+
+            SelectableTextBlock notice = window.GetVisualDescendants()
+                .OfType<SelectableTextBlock>()
+                .Single(block => Equals(AutomationProperties.GetName(block), "New installation notice"));
+            Assert.True(notice.IsEffectivelyVisible);
+            Assert.Equal(viewModel.InstallFolder!.NewInstallationNotice, notice.Text);
+            Assert.Contains(earlier, notice.Text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            CloseTestWindow(window);
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
         }
     }
 

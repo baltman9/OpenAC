@@ -85,23 +85,6 @@ internal static class HeadlessEntryPoint
                 configuredPaths.Merge(commandLine.Paths));
             if (commandLine.Command == "run")
             {
-                // A bot started by hand before the launcher ever ran brings
-                // the old per-user folders into the install root itself; one
-                // the launcher starts is handed an explicit root.
-                InstallRootMigrationResult migration =
-                    InstallRootMigration.RunIfNeeded(paths.Application);
-                InstallRootMigrationLog.Write(
-                    migration,
-                    paths.DataDirectory,
-                    error.WriteLine,
-                    error.WriteLine);
-                if (InstallRootMigration.StartupBlockReason(
-                        migration,
-                        paths.DataDirectory) is { } migrationBlock)
-                {
-                    error.WriteLine(migrationBlock);
-                    return (int)HeadlessExitCode.ConfigurationError;
-                }
                 // Held for the whole run, like the window client's, so an
                 // update or a move of the install waits for this bot.
                 using InstallSessionLease? installSession =
