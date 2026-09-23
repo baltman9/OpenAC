@@ -450,6 +450,33 @@ public sealed class InstallRootMigrationTests : IDisposable
         Assert.Contains("retry", InstallRootMigration.StartupBlockReason(result, _paths.RootDirectory), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A record still naming another root's content is pointed at this root's,
+    /// once the content is here; a record naming a path inside this root, or
+    /// content that is not here, is left alone. Mutation: rewriting whenever
+    /// the path differs, or never, fails this.
+    /// </summary>
+    [Fact]
+    public void RepairPointsMovedRecordsAtThisRootsContentOnly()
+    {
+        string package = Path.Combine(_paths.GameDataDirectory, "pak", "acdream.pak");
+        string record = Path.Combine(_paths.GameDataDirectory, "install.json");
+        Directory.CreateDirectory(_paths.GameDataDirectory);
+        string elsewhere = Path.Combine(_scratch, "Elsewhere", "OpenAC", "data", "pak", "acdream.pak");
+        File.WriteAllText(record, "{ \"preparedAssetPath\": " + System.Text.Json.JsonSerializer.Serialize(elsewhere) + " }");
+
+        Assert.Empty(InstallRootMigration.RepairContentRecords(_paths));
+
+        Write(_paths.GameDataDirectory, "pak/acdream.pak", "pak");
+        Assert.Equal([record], InstallRootMigration.RepairContentRecords(_paths));
+        Assert.Equal(package, ReadObject(record)["preparedAssetPath"]!.GetValue<string>());
+        Assert.Empty(InstallRootMigration.RepairContentRecords(_paths));
+
+        string inside = Path.Combine(_paths.GameDataDirectory, "custom.pak");
+        File.WriteAllText(record, "{ \"preparedAssetPath\": " + System.Text.Json.JsonSerializer.Serialize(inside) + " }");
+        Assert.Empty(InstallRootMigration.RepairContentRecords(_paths));
+    }
+
     private void SeedOldLayout()
     {
         string data = _old.DataDirectory;

@@ -74,7 +74,18 @@ public sealed class InstallRootMover
         if (string.IsNullOrWhiteSpace(target) || !Path.IsPathFullyQualified(target))
             return "Choose a full folder path.";
 
-        string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(target));
+        string full;
+        try
+        {
+            full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(target));
+        }
+        catch (Exception ex) when (ex is ArgumentException
+                                   or NotSupportedException
+                                   or PathTooLongException)
+        {
+            return $"That is not a usable folder path: {ex.Message}";
+        }
+
         if (ApplicationPathIdentity.Equals(full, RootDirectory))
             return "The install is already in that folder.";
         if (ApplicationPathIdentity.IsSameOrInside(full, RootDirectory))
@@ -103,27 +114,61 @@ public sealed class InstallRootMover
         if (!_barrier.TryAcquireExclusive(out UpdateSessionBarrier.ExclusiveLease? lease))
             return InstallRootMoveResult.Refused(SessionRefusal);
 
-        bool destinationExisted = Directory.Exists(destination);
         bool sameVolume = _sameVolume(RootDirectory, destination);
+        var warnings = new List<string>();
         using (lease)
         {
-            Directory.CreateDirectory(destination);
-            string? failure = sameVolume
-                ? RenameInto(destination, progress)
-                : CopyInto(destination, destinationExisted, progress);
-            if (failure is not null)
+            var created = new List<string>();
+            var renamed = new List<(string From, string To)>();
+            string? failure;
+            try
             {
-                return InstallRootMoveResult.Refused(
-                    "The install folder was not moved: " + failure);
+                CreateDirectoryTracked(destination, created);
+                failure = sameVolume
+                    ? RenameInto(destination, renamed, created, progress)
+                    : CopyInto(destination, progress);
+                if (failure is null)
+                {
+                    // The pointer goes down the moment the install is whole
+                    // at the new folder: from here on every start finds it.
+                    ApplicationRootPointer.Write(_defaultRoot, destination);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                failure = ex.Message;
             }
 
-            ApplicationPathSet moved = ApplicationPathSet.ForRoot(destination);
-            InstallRootMigration.RewriteContentRecords(moved);
-            ApplicationRootPointer.Write(_defaultRoot, destination);
+            if (failure is not null)
+            {
+                IReadOnlyList<string> stranded = sameVolume
+                    ? UndoRenames(renamed, created)
+                    : UndoCopy(destination, created);
+                return InstallRootMoveResult.Refused(
+                    "The install folder was not moved: " + failure
+                    + (stranded.Count == 0
+                        ? string.Empty
+                        : " Some items could not be put back and are still in "
+                          + $"{destination}: {string.Join("; ", stranded)}"));
+            }
+
+            // Also done at every launcher start, so a failure here only
+            // defers it.
+            try
+            {
+                InstallRootMigration.RepairContentRecords(ApplicationPathSet.ForRoot(destination));
+            }
+            catch (Exception ex) when (ex is IOException
+                                       or UnauthorizedAccessException
+                                       or System.Text.Json.JsonException
+                                       or InvalidOperationException)
+            {
+                warnings.Add($"The install record will be updated at the next start: {ex.Message}");
+            }
         }
 
         // The lock is released before the old folder goes: it lives there.
-        IReadOnlyList<string> leftovers = DeleteOldRoot();
+        IReadOnlyList<string> leftovers = [.. warnings, .. DeleteOldRoot()];
         return new InstallRootMoveResult(
             true,
             leftovers.Count == 0
@@ -150,9 +195,12 @@ public sealed class InstallRootMover
         }
     }
 
-    private string? RenameInto(string destination, Action<string>? progress)
+    private string? RenameInto(
+        string destination,
+        List<(string From, string To)> renamed,
+        List<string> created,
+        Action<string>? progress)
     {
-        var renamed = new List<(string From, string To)>();
         try
         {
             foreach (string entry in EntriesToMove(RootDirectory, isRoot: true))
@@ -162,7 +210,7 @@ public sealed class InstallRootMover
                 {
                     // The app folder holds the lock this move is holding, so
                     // its entries move one by one around it.
-                    Directory.CreateDirectory(to);
+                    CreateDirectoryTracked(to, created);
                     foreach (string child in EntriesToMove(entry, isRoot: false))
                     {
                         string childTo = Path.Combine(to, Path.GetFileName(child));
@@ -183,16 +231,36 @@ public sealed class InstallRootMover
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            for (int index = renamed.Count - 1; index >= 0; index--)
-            {
-                Rename(renamed[index].To, renamed[index].From);
-            }
-
             return ex.Message;
         }
     }
 
-    private string? CopyInto(string destination, bool destinationExisted, Action<string>? progress)
+    /// <summary>
+    /// Renames everything back and removes the folders the move created, so
+    /// the same target can be tried again. Returns what could not be undone.
+    /// </summary>
+    private static IReadOnlyList<string> UndoRenames(
+        List<(string From, string To)> renamed,
+        List<string> created)
+    {
+        var stranded = new List<string>();
+        for (int index = renamed.Count - 1; index >= 0; index--)
+        {
+            try
+            {
+                Rename(renamed[index].To, renamed[index].From);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                stranded.Add($"{renamed[index].To} ({ex.Message})");
+            }
+        }
+
+        RemoveCreatedFolders(created, stranded);
+        return stranded;
+    }
+
+    private string? CopyInto(string destination, Action<string>? progress)
     {
         try
         {
@@ -206,21 +274,59 @@ public sealed class InstallRootMover
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Only what this move created is removed; the old install is
-            // untouched and still the one in use.
-            foreach (string entry in EntriesToMove(RootDirectory, isRoot: true))
+            return ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Removes only what the copy created; the old install is untouched and
+    /// still the one in use. Returns what could not be removed.
+    /// </summary>
+    private IReadOnlyList<string> UndoCopy(string destination, List<string> created)
+    {
+        var stranded = new List<string>();
+        foreach (string entry in EntriesToMove(RootDirectory, isRoot: true))
+        {
+            string copied = Path.Combine(destination, Path.GetFileName(entry));
+            try
             {
-                string copied = Path.Combine(destination, Path.GetFileName(entry));
                 if (Directory.Exists(copied))
                     Directory.Delete(copied, recursive: true);
                 else if (File.Exists(copied))
                     File.Delete(copied);
             }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                stranded.Add($"{copied} ({ex.Message})");
+            }
+        }
 
-            if (!destinationExisted && !Directory.EnumerateFileSystemEntries(destination).Any())
-                Directory.Delete(destination);
+        RemoveCreatedFolders(created, stranded);
+        return stranded;
+    }
 
-            return ex.Message;
+    private static void CreateDirectoryTracked(string path, List<string> created)
+    {
+        if (Directory.Exists(path))
+            return;
+        Directory.CreateDirectory(path);
+        created.Add(path);
+    }
+
+    private static void RemoveCreatedFolders(List<string> created, List<string> stranded)
+    {
+        for (int index = created.Count - 1; index >= 0; index--)
+        {
+            string folder = created[index];
+            try
+            {
+                if (Directory.Exists(folder) && !Directory.EnumerateFileSystemEntries(folder).Any())
+                    Directory.Delete(folder);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                stranded.Add($"{folder} ({ex.Message})");
+            }
         }
     }
 

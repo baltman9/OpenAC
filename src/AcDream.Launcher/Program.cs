@@ -28,6 +28,7 @@ internal static class Program
                 options.Paths.RootDirectory,
                 Console.WriteLine,
                 Console.Error.WriteLine);
+            RepairContentRecords(options.Paths);
 
             using var httpClient = new HttpClient();
             var selfUpdates = new LauncherSelfUpdateManager(options.Paths, httpClient);
@@ -61,6 +62,30 @@ internal static class Program
                 ? "No crash report could be written."
                 : $"Crash report: {report}");
             return 74;
+        }
+    }
+
+    /// <summary>
+    /// Points the install record at this root's own content when a move of the
+    /// root left it naming the old one; the launcher would otherwise reject
+    /// the install as not at its canonical path.
+    /// </summary>
+    private static void RepairContentRecords(ApplicationPathSet paths)
+    {
+        try
+        {
+            foreach (string repaired in InstallRootMigration.RepairContentRecords(paths))
+            {
+                Console.WriteLine($"install folder: {repaired} now names this folder's content");
+            }
+        }
+        catch (Exception ex) when (ex is IOException
+                                   or UnauthorizedAccessException
+                                   or System.Text.Json.JsonException
+                                   or InvalidOperationException)
+        {
+            // The install check that follows reports the record as it is.
+            Console.Error.WriteLine($"install folder: the install record could not be updated: {ex.Message}");
         }
     }
 

@@ -384,6 +384,14 @@ public sealed class InstallFolderViewModel : ObservableObject
                     entry => _dispatcher.Post(() => MoveStatus = $"Moving {entry}…")))
                 .ConfigureAwait(true);
         }
+        catch (Exception ex)
+        {
+            // This runs from a button: whatever went wrong is the player's to
+            // read, not an unobserved failure that closes the launcher.
+            MoveStatus = null;
+            MoveError = "The install folder was not moved: " + ex.Message;
+            return;
+        }
         finally
         {
             IsMoving = false;

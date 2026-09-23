@@ -190,6 +190,36 @@ public sealed class InstallRootMoverTests : IDisposable
         Assert.True(File.Exists(Path.Combine(_defaultRoot, "app", "current.json")));
         Assert.True(File.Exists(Path.Combine(_defaultRoot, "data", "pak", "acdream.pak")));
         Assert.False(File.Exists(ApplicationRootPointer.PathFor(_defaultRoot)));
+
+        // Nothing half-made is left at the target, so the same folder can be
+        // tried again once the file is closed. Mutation: not removing the
+        // folders the move created fails this.
+        Assert.False(Directory.Exists(target));
+        InstallRootMoveResult retry = mover.Move(target);
+        Assert.True(retry.Moved, retry.Message);
+    }
+
+    /// <summary>
+    /// The pointer is written as soon as the install is whole at the new
+    /// folder; a record that cannot be rewritten then does not undo the move
+    /// (the next launcher start repairs it). Mutation: rewriting the record
+    /// before the pointer, so a bad record fails the whole move, fails this.
+    /// </summary>
+    [Fact]
+    public void AnUnreadableInstallRecordDoesNotStopTheMove()
+    {
+        SeedInstall();
+        Write("data/install.json", "not json");
+        string target = Path.Combine(_scratch, "Games", "OpenAC");
+        var mover = new InstallRootMover(_paths, _defaultRoot, (_, _) => true);
+
+        InstallRootMoveResult result = mover.Move(target);
+
+        Assert.True(result.Moved, result.Message);
+        Assert.Equal(
+            target,
+            ApplicationRootPointer.Parse(File.ReadAllText(ApplicationRootPointer.PathFor(_defaultRoot))));
+        Assert.Contains(result.Leftovers, line => line.Contains("next start", StringComparison.Ordinal));
     }
 
     private void SeedInstall()

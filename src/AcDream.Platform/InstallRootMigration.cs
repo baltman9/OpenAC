@@ -722,20 +722,42 @@ public static class InstallRootMigration
 
     /// <summary>
     /// Points a root's install and verification records at that root's own
-    /// prepared content, after the root itself was moved.
+    /// prepared content when they still name the content under another root:
+    /// the root was moved and the records came along unchanged. Run at every
+    /// launcher start, so a move interrupted after the pointer was written is
+    /// finished the next time. A record naming a path inside this root, or
+    /// one whose canonical content is not there, is left alone for the
+    /// launcher to judge. Returns the records it rewrote.
     /// </summary>
-    public static void RewriteContentRecords(ApplicationPathSet paths)
+    public static IReadOnlyList<string> RepairContentRecords(ApplicationPathSet paths)
     {
         ArgumentNullException.ThrowIfNull(paths);
         string package = Path.Combine(paths.GameDataDirectory, "pak", "acdream.pak");
-        RewritePathProperty(
-            Path.Combine(paths.GameDataDirectory, "install.json"),
-            "preparedAssetPath",
-            package);
-        RewritePathProperty(
-            Path.Combine(paths.GameDataDirectory, "install.verification.json"),
-            "path",
-            package);
+        var repaired = new List<string>();
+        foreach ((string record, string property) in new[]
+                 {
+                     (Path.Combine(paths.GameDataDirectory, "install.json"), "preparedAssetPath"),
+                     (Path.Combine(paths.GameDataDirectory, "install.verification.json"), "path"),
+                 })
+        {
+            if (!File.Exists(record) || !File.Exists(package))
+                continue;
+
+            if (JsonNode.Parse(File.ReadAllText(record)) is not JsonObject document
+                || document[property] is not JsonValue value
+                || !value.TryGetValue(out string? recorded)
+                || string.IsNullOrWhiteSpace(recorded)
+                || !Path.IsPathFullyQualified(recorded)
+                || ApplicationPathIdentity.IsSameOrInside(recorded, paths.RootDirectory))
+            {
+                continue;
+            }
+
+            RewritePathProperty(record, property, package);
+            repaired.Add(record);
+        }
+
+        return repaired;
     }
 
     /// <summary>

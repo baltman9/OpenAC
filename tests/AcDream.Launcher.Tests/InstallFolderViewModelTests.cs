@@ -218,6 +218,21 @@ public sealed class InstallFolderViewModelTests : IDisposable
         Assert.Equal(1, _restarts);
     }
 
+    /// <summary>
+    /// A path the file system rejects is reported, never thrown out of the
+    /// button. Mutation: letting ValidateTarget throw on it fails this.
+    /// </summary>
+    [Fact]
+    public async Task AnUnusablePathIsReportedNotThrown()
+    {
+        InstallFolderViewModel viewModel = Create();
+
+        await viewModel.MoveToAsync(Path.Combine(_scratch, "bad\0name"));
+
+        Assert.NotNull(viewModel.MoveError);
+        Assert.Equal(0, _restarts);
+    }
+
     /// <summary>Mutation: leaving conflicts out of the notice fails this.</summary>
     [Fact]
     public void ConflictsAreShownInTheMigrationNotice()
