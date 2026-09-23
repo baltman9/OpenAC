@@ -221,6 +221,12 @@ internal sealed partial class RuntimeNavigationAutomation : IScopedNavigationSou
         public PluginNavigationCommandStatus GoTo(uint objectId, float arrivalMeters) =>
             inner.GoToFor(owner, objectId, arrivalMeters);
 
+        public Task<PluginNavigationPlan> PreviewPathAsync(uint objectId, float arrivalMeters = 2.5f) =>
+            inner.PreviewPathAsync(objectId, arrivalMeters);
+
+        public Task<PluginNavigationPlan> PreviewPathAsync(PluginNavigationPosition position, float arrivalMeters = 2.5f) =>
+            inner.PreviewPathAsync(position, arrivalMeters);
+
         public PluginNavigationCommandStatus GoTo(PluginNavigationPosition position, float arrivalMeters) =>
             inner.GoToFor(owner, position, arrivalMeters);
 

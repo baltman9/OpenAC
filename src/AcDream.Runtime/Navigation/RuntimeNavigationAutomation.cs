@@ -416,6 +416,26 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
     public PluginNavigationCommandStatus GoTo(uint objectId, float arrivalMeters) =>
         GoToFor(PlayerOwner, objectId, arrivalMeters);
 
+    public Task<PluginNavigationPlan> PreviewPathAsync(uint objectId, float arrivalMeters = 2.5f)
+    {
+        if (objectId == 0u || !(arrivalMeters > 0f) || arrivalMeters > MaximumGoToArrivalMeters)
+            return Task.FromResult(new PluginNavigationPlan(PluginNavigationPlanStatus.InvalidTarget, [], "invalid destination or arrival distance"));
+        return TryWalk(out NavigationWalkController walk)
+            ? walk.PreviewPathAsync(objectId, arrivalMeters)
+            : Task.FromResult(new PluginNavigationPlan(PluginNavigationPlanStatus.Unavailable, [], "navigation is unavailable"));
+    }
+
+    public Task<PluginNavigationPlan> PreviewPathAsync(PluginNavigationPosition position, float arrivalMeters = 2.5f)
+    {
+        if (!double.IsFinite(position.EastWest) || !double.IsFinite(position.NorthSouth)
+            || double.IsInfinity(position.Elevation) || !(arrivalMeters > 0f)
+            || arrivalMeters > MaximumGoToArrivalMeters)
+            return Task.FromResult(new PluginNavigationPlan(PluginNavigationPlanStatus.InvalidTarget, [], "invalid destination or arrival distance"));
+        return TryWalk(out NavigationWalkController walk)
+            ? walk.PreviewPathAsync(position.CellId, RuntimeNavigationProjection.LandblockLocal(position), arrivalMeters)
+            : Task.FromResult(new PluginNavigationPlan(PluginNavigationPlanStatus.Unavailable, [], "navigation is unavailable"));
+    }
+
     public PluginNavigationCommandStatus GoTo(PluginNavigationPosition position, float arrivalMeters) =>
         GoToFor(PlayerOwner, position, arrivalMeters);
 

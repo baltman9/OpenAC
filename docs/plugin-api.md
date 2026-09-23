@@ -1568,6 +1568,37 @@ the character has to travel, not how far away the thing is.
 `Navigation.TryFindObject`'s radius is measured the same way, and is
 documented as such.
 
+### Planning a navigation path
+
+`host.Automation.Navigation.PreviewPathAsync(objectId, arrivalMeters)` and its
+`PluginNavigationPosition` overload preview where the client would route from
+the character's current position. They work in graphical and headless hosts
+with collision data loaded. A position overload uses its cell and elevation
+to select the destination floor, including an indoor floor. An elevation of
+NaN asks for the ground there. Arrival distance must be above zero and at
+most 50 metres.
+
+```csharp
+Task<PluginNavigationPlan> pending = host.Automation.Navigation
+    .PreviewPathAsync(targetId, 2.5f);
+// Check pending.IsCompleted on a later Tick; do not wait synchronously in Tick.
+PluginNavigationPlan plan = await pending;
+if (plan.Status == PluginNavigationPlanStatus.Routed)
+    foreach (PluginNavigationPosition point in plan.Path)
+        UseRoutePoint(point);
+```
+
+`Path` contains ordered route leg points with cell ids, map coordinates and
+elevation. `LengthMeters` is the planned route length. The path is empty for
+`NoRoute`, `Unavailable` and `InvalidTarget`; `Reason` explains the outcome.
+The preview does not move the character, own navigation or change an active
+walk. It snapshots currently loaded collision and nearby objects, so a path
+may become stale. It covers one planning region, up to 320 metres outdoors or
+2,048 metres across a sealed dungeon; it does not plan a multi-stage outdoor
+walk or portal travel. Grid building and route search run asynchronously,
+which matters for large dungeon grids. See [navigation.md](navigation.md#path-previews)
+for planning details.
+
 ### Available, but only with the installed data files
 
 A windowless session holds a lease on the installed data files only when it
@@ -1575,7 +1606,7 @@ was configured with content, and several parts of the surface are read out of
 those files. On a content-less bot they answer rather than act, where a client
 with a window does the work:
 
-- `Navigation`'s walks -- `GoTo`, `StandOn`, `Follow` -- need the collision
+- `Navigation`'s walks and path previews need the collision
   data the files carry. Everything else on `Navigation` -- the snapshot, the
   move channels, `FaceHeading`, `Jump`, `TryFindObject` -- is real either way.
 - `Spells` and `Magic` come from the spell catalogue, so a content-less
