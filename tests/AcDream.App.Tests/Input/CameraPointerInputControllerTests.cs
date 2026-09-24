@@ -233,6 +233,40 @@ public sealed class CameraPointerInputControllerTests
         }
     }
 
+    [Fact]
+    public void RmbDragInFirstPerson_LooksAroundWithoutLeavingTheHead()
+    {
+        bool savedRetail = CameraDiagnostics.UseRetailChaseCamera;
+        try
+        {
+            CameraDiagnostics.UseRetailChaseCamera = true;
+            var surface = new RawSurface();
+            var fixture = Create([surface]);
+            var legacy = new ChaseCamera();
+            var retail = new RetailChaseCamera();
+            fixture.Mode.IsPlayerMode = true;
+            fixture.Chase.Legacy = legacy;
+            fixture.Chase.Retail = retail;
+            fixture.Chase.RmbOrbitHeld = true;
+            fixture.Camera.EnterChaseMode(legacy, retail);
+            retail.SetRetailFirstPersonView();
+            fixture.Owner.AttachRaw();
+
+            // Drag right and up.
+            surface.Raise(new Vector2(20f, -20f));
+
+            Assert.True(retail.IsInHead);
+            Assert.Equal(0f, retail.YawOffset);
+            // Horizontal: the character turns toward the drag (compass +8 degrees = right).
+            Assert.True(retail.TryTakeFirstPersonTurn(out float step));
+            Assert.Equal(8f, step);
+        }
+        finally
+        {
+            CameraDiagnostics.UseRetailChaseCamera = savedRetail;
+        }
+    }
+
     private static (float PitchDelta, float YawDelta) DeltasAfterRmbOrbit(
         bool retailCamera, bool invert, float dx, float dy)
     {

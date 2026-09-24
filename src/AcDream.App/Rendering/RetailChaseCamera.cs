@@ -17,6 +17,9 @@ public sealed class RetailChaseCamera : ICamera
     private const float RetailInHeadDirectionStep = 0.200000003f;
     private const float RetailInHeadDirectionLimit = 0.800000012f;
 
+    // One first-person rotate turns the character this many compass degrees.
+    internal const float FirstPersonTurnStepDegrees = 8f;
+
     internal const float OffsetScalePerAdjustment = 0.200000003f;
     internal const float OffsetAngleRadians = 8f * MathF.PI / 180f;
     internal const float MinimumOffsetLength = 0.5f;
@@ -59,6 +62,7 @@ public sealed class RetailChaseCamera : ICamera
     private float _savedYawOffset;
     private Vector3? _targetDirectionLocal;
     private Vector3? _savedTargetDirectionLocal;
+    private float _pendingFirstPersonRotate;
 
     public bool IsLookingDown => _lookingDown;
     public bool IsMapMode => _mapMode;
@@ -248,13 +252,40 @@ public sealed class RetailChaseCamera : ICamera
         if (!float.IsFinite(adjustment) || adjustment == 0f)
             return;
 
+        // In the head view the rotate command turns the character, not the eye:
+        // the view stays first person. The turn is collected here and handed to
+        // the movement owner once per frame (TryTakeFirstPersonTurn).
         if (_inHead)
         {
-            _inHead = false;
-            SetViewerOffset(RetailLeaveHeadBack, RetailLeaveHeadUp);
+            _pendingFirstPersonRotate += adjustment;
+            return;
         }
 
         YawOffset += adjustment * OffsetAngleRadians;
+    }
+
+    /// <summary>
+    /// Takes the rotate collected in the head view since the last call, as a
+    /// compass-heading step in degrees: a rotate-left (negative adjustment) is
+    /// +8 degrees, a rotate-right -8 degrees. False when nothing is pending.
+    /// </summary>
+    public bool TryTakeFirstPersonTurn(out float headingStepDegrees)
+    {
+        float pending = _pendingFirstPersonRotate;
+        _pendingFirstPersonRotate = 0f;
+        headingStepDegrees = pending < 0f
+            ? FirstPersonTurnStepDegrees
+            : -FirstPersonTurnStepDegrees;
+        return _inHead && pending != 0f && float.IsFinite(pending);
+    }
+
+    /// <summary>The heading the character turns to for one first-person rotate step, in [0, 360).</summary>
+    public static float FirstPersonTurnTargetHeading(
+        float currentHeadingDegrees,
+        float headingStepDegrees)
+    {
+        float target = (currentHeadingDegrees + headingStepDegrees) % 360f;
+        return target < 0f ? target + 360f : target;
     }
 
     public void SetRetailDefaultView()
