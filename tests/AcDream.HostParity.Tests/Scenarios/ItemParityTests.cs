@@ -37,6 +37,26 @@ public sealed class ItemParityTests
     /// <summary>Past the bound on waiting for a description, at the shared step.</summary>
     private const int TicksPastTheDescriptionWait = 400;
 
+    /// <summary>
+    /// A loot rule matching a rare reads the icon drawn beneath the item's
+    /// icon, so both icon layers reach a plugin, on both clients, as the
+    /// full icon ids the object carries.
+    /// </summary>
+    [Fact]
+    public void AnItemsIconLayersReachAPluginOnBothClients() =>
+        ParityScenario.Run(static (arm, transcript) =>
+        {
+            IItemAutomation items = StageAndTakeItems(arm);
+
+            PluginInventoryItem kit = Assert.Single(
+                items.CaptureOwnedItems(),
+                static item => item.ObjectId == ParityWorld.Kit);
+            transcript.Record("kit.underlay", kit.IconUnderlayId);
+            transcript.Record("kit.overlay", kit.IconOverlayId);
+            Assert.Equal(ParityWorld.KitIconUnderlay, kit.IconUnderlayId);
+            Assert.Equal(ParityWorld.KitIconOverlay, kit.IconOverlayId);
+        });
+
     [Fact]
     public void UsingACarriedItemLooksTheSameOnBothClients() =>
         ParityScenario.Run(static (arm, transcript) =>

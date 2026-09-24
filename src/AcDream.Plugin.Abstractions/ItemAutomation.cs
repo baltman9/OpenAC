@@ -326,6 +326,20 @@ public readonly record struct PluginInventoryItem(
     public uint IconId { get; init; }
 
     /// <summary>
+    /// The icon drawn beneath the item's icon, as a full icon id (for example
+    /// the backdrop the server gives a rare item); zero when the item has
+    /// none. Loot rules written for the original client's macro tools match
+    /// on this value without its <c>0x06000000</c> prefix.
+    /// </summary>
+    public uint IconUnderlayId { get; init; }
+
+    /// <summary>
+    /// The icon drawn over the item's icon, as a full icon id (for example
+    /// the mark an imbue adds); zero when the item has none.
+    /// </summary>
+    public uint IconOverlayId { get; init; }
+
+    /// <summary>
     /// The icon-highlight effect bits the server sends with the object
     /// itself. Bit 0 is "magical", which is how a loot rule can tell that an
     /// item is expected to carry spells before anything has appraised it.

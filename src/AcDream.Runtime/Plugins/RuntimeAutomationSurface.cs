@@ -4853,6 +4853,8 @@ internal sealed class RuntimeAutomationSurface
             ObjectClass = ClassifyObject(item),
             Palettes = ProjectPalettes(runtime, item.ObjectId),
             IconId = item.IconId,
+            IconUnderlayId = item.IconUnderlayId,
+            IconOverlayId = item.IconOverlayId,
             Effects = item.Effects,
         };
     }
