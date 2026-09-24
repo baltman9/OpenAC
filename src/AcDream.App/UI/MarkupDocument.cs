@@ -189,6 +189,7 @@ public static class MarkupDocument
                     var button = new UiSimpleButton
                     {
                         AcceptsFocus = true,
+                        FocusOnMouseClick = false,
                         TabStop = true,
                         Left = F(el, "x"),
                         Top = F(el, "y"),
@@ -296,6 +297,7 @@ public static class MarkupDocument
                 var tab = new UiMarkupTabButton
                 {
                     AcceptsFocus = true,
+                    FocusOnMouseClick = false,
                     TabStop = true,
                     Left = F(el, "x"),
                     Top = F(el, "y"),
@@ -328,6 +330,7 @@ public static class MarkupDocument
                 var toggle = new UiMarkupToggle
                 {
                     AcceptsFocus = true,
+                    FocusOnMouseClick = false,
                     TabStop = true,
                     Left = F(el, "x"),
                     Top = F(el, "y"),

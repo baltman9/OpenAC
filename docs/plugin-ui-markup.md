@@ -121,7 +121,7 @@ Unknown or miscased element names throw at build time.
 | `tab` | Tab button | `x y w h text selected onclick` |
 | `toggle` | Checkbox | `x y w h text checked onclick color` |
 | `slider` | Horizontal slider | `x y w h value onchange min max style` |
-| `field` | Single-line text input | `x y w h text maxlength clearonsubmit onchange onsubmit color background` |
+| `field` | Single-line text input | `x y w h text maxlength clearonsubmit onchange onsubmit onup ondown color background` |
 | `menu` | Drop-down | `x y w h items selected onchange rows rowheight openupward style` |
 | `list` | Scrolling rows | `x y w h selected onchange rowheight selectionband`, then either `items colors icons iconkind` or `<column>` children |
 
@@ -131,6 +131,9 @@ a binding.
 
 A `field` can bind `onup` and `ondown` to handle arrow keys while focused.
 Fields without these callbacks retain their usual history navigation.
+
+Clicking a `button`, `tab`, or `toggle` invokes its action without taking keyboard
+focus from the game. Use Tab to focus these controls for Enter or Space activation.
 
 A `field` shows its bound `text` and goes on following it: while nobody is
 typing in the field, a value that changes behind it -- a profile loaded after

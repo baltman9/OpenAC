@@ -101,7 +101,7 @@ public class UiSimpleButton : UiPanel
 
     public event System.Action? Click;
 
-    private bool _keyboardFocused;
+    private readonly UiKeyboardActivation _keyboardActivation = new();
 
     public override bool HandlesClick => true;
 
@@ -113,23 +113,8 @@ public class UiSimpleButton : UiPanel
 
     public override bool OnEvent(in UiEvent e)
     {
-        if (e.Type == UiEventType.FocusGained && TabStop)
-        {
-            _keyboardFocused = true;
+        if (_keyboardActivation.HandleEvent(in e, TabStop, Enabled, () => Click?.Invoke()))
             return true;
-        }
-        if (e.Type == UiEventType.FocusLost && TabStop)
-        {
-            _keyboardFocused = false;
-            return true;
-        }
-        if (e.Type == UiEventType.KeyDown && TabStop && Enabled
-            && ((Silk.NET.Input.Key)e.Data0 is Silk.NET.Input.Key.Enter
-                or Silk.NET.Input.Key.KeypadEnter or Silk.NET.Input.Key.Space))
-        {
-            Click?.Invoke();
-            return true;
-        }
         if (e.Type == UiEventType.Click && Enabled)
         {
             Click?.Invoke();
@@ -141,7 +126,7 @@ public class UiSimpleButton : UiPanel
     protected override void OnDraw(UiRenderContext ctx)
     {
         base.OnDraw(ctx);
-        if (_keyboardFocused)
+        if (_keyboardActivation.Focused)
             ctx.DrawRectOutline(1f, 1f, Width - 2f, Height - 2f,
                 new Vector4(1f, 0.82f, 0.25f, 1f), 1f);
 

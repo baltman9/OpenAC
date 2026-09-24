@@ -143,6 +143,7 @@ public abstract class UiElement
     public Func<bool>? EnabledSource { get; set; }
 
     public bool AcceptsFocus    { get; set; }
+    public bool FocusOnMouseClick { get; set; } = true;
     public bool TabStop         { get; set; }
 
     /// <summary>

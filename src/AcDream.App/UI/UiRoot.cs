@@ -583,7 +583,7 @@ public sealed class UiRoot : UiElement
         }
 
         if (btn == UiMouseButton.Left)
-            SetKeyboardFocus(target.AcceptsFocus ? target : null);
+            SetKeyboardFocus(target.AcceptsFocus && target.FocusOnMouseClick ? target : null);
 
         SetCapture(target);
 

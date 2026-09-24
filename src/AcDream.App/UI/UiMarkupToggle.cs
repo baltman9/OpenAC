@@ -19,27 +19,12 @@ public sealed class UiMarkupToggle : UiElement
 
     public override bool HandlesClick => true;
 
-    private bool _keyboardFocused;
+    private readonly UiKeyboardActivation _keyboardActivation = new();
 
     public override bool OnEvent(in UiEvent e)
     {
-        if (e.Type == UiEventType.FocusGained && TabStop)
-        {
-            _keyboardFocused = true;
+        if (_keyboardActivation.HandleEvent(in e, TabStop, Enabled, Toggle))
             return true;
-        }
-        if (e.Type == UiEventType.FocusLost && TabStop)
-        {
-            _keyboardFocused = false;
-            return true;
-        }
-        if (e.Type == UiEventType.KeyDown && TabStop && Enabled
-            && ((Silk.NET.Input.Key)e.Data0 is Silk.NET.Input.Key.Enter
-                or Silk.NET.Input.Key.KeypadEnter or Silk.NET.Input.Key.Space))
-        {
-            Toggle?.Invoke();
-            return true;
-        }
         if (e.Type != UiEventType.Click || !Enabled)
             return false;
         Toggle?.Invoke();
@@ -48,7 +33,7 @@ public sealed class UiMarkupToggle : UiElement
 
     protected override void OnDraw(UiRenderContext ctx)
     {
-        if (_keyboardFocused)
+        if (_keyboardActivation.Focused)
             ctx.DrawRectOutline(0f, 0f, Width, Height,
                 new Vector4(1f, 0.82f, 0.25f, 1f), 1f);
         UiCheckLamp.Draw(ctx, 1f, MathF.Max(1f, (Height - UiCheckLamp.LampSize) * 0.5f), IsChecked);
