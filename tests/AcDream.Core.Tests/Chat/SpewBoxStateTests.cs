@@ -143,6 +143,82 @@ public sealed class SpewBoxStateTests
     }
 
     [Fact]
+    public void Enqueue_WithoutTick_PendingStaysBounded()
+    {
+        // A windowless host with no console never ticks the box; a long
+        // session's status lines must not pile up behind it.
+        var state = new SpewBoxState();
+
+        for (int i = 0; i < 10_000; i++)
+            state.Enqueue($"line {i % 7}");
+
+        Assert.True(
+            state.PendingCount <= SpewBoxState.MaxConcurrentItems,
+            $"pending grew to {state.PendingCount}");
+
+        state.Tick(0d);
+        SpewBoxEntry[] snapshot = state.Snapshot();
+        Assert.Equal(
+            new[] { "line 3", "line 2", "line 1", "line 0" },
+            snapshot.Select(e => e.Text).ToArray());
+    }
+
+    [Fact]
+    public void Enqueue_Bounded_TickShowsExactlyWhatAnUnboundedQueueWould()
+    {
+        // The bound must be invisible to a host that does tick: for any
+        // burst between two ticks, starting from any visible set, the
+        // visible lines and their expiries equal an unbounded queue's.
+        var random = new Random(4891);
+        string[] alphabet = ["a", "b", "c", "d", "e", "f"];
+        for (int trial = 0; trial < 2_000; trial++)
+        {
+            var state = new SpewBoxState();
+            var model = new UnboundedModel();
+            double now = 0d;
+            int bursts = random.Next(1, 5);
+            for (int burst = 0; burst < bursts; burst++)
+            {
+                int lines = random.Next(0, 12);
+                for (int i = 0; i < lines; i++)
+                {
+                    string text = alphabet[random.Next(alphabet.Length)];
+                    state.Enqueue(text);
+                    model.Enqueue(text);
+                }
+                now += random.Next(0, 3);
+                state.Tick(now);
+                model.Tick(now);
+                Assert.Equal(model.Visible, state.Snapshot());
+            }
+        }
+    }
+
+    /// <summary>The box's tick over a queue that is never trimmed.</summary>
+    private sealed class UnboundedModel
+    {
+        private readonly List<string> _pending = new();
+        public List<SpewBoxEntry> Visible { get; } = new();
+
+        public void Enqueue(string text) => _pending.Add(text);
+
+        public void Tick(double now)
+        {
+            foreach (string text in _pending)
+            {
+                if (Visible.Count > 0 && Visible[0].Text == text)
+                    Visible.RemoveAt(0);
+                Visible.Insert(0, new SpewBoxEntry(
+                    text, now + SpewBoxState.DefaultLifetime.TotalSeconds));
+                while (Visible.Count > SpewBoxState.MaxConcurrentItems)
+                    Visible.RemoveAt(Visible.Count - 1);
+            }
+            _pending.Clear();
+            Visible.RemoveAll(e => e.ExpiresAtSeconds <= now);
+        }
+    }
+
+    [Fact]
     public void Revision_AdvancesOnTickThatChangesVisibleSet()
     {
         var state = new SpewBoxState();
