@@ -364,6 +364,20 @@ public sealed class RuntimeCommunicationStateTests
         Assert.Equal(0, state.SpewBox.Count);
     }
 
+    [Fact]
+    public void AddText_ClientLocalBurst_WithNothingTickingTheSpewBox_DoesNotGrowItsQueue()
+    {
+        // A windowless session with no console never ticks the spew box.
+        using var state = new RuntimeCommunicationState();
+
+        for (int i = 0; i < 10_000; i++)
+            state.AddText($"status {i}", RetailLogTextType.ClientLocal);
+
+        Assert.True(
+            state.SpewBox.PendingCount <= SpewBoxState.MaxConcurrentItems,
+            $"pending grew to {state.SpewBox.PendingCount}");
+    }
+
 
     [Fact]
     public void ChatWindows_SeededWithRetailPostInitDefaults_OnConstruction()
