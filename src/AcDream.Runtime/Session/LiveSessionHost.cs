@@ -137,6 +137,9 @@ public sealed class LiveSessionHost
     public IRuntimeConnectionView Connection => _controller.Connection;
     public bool IsInWorld => _controller.IsInWorld;
 
+    /// <summary>True when the last session ended because the server went silent.</summary>
+    public bool ConnectionLost => _controller.ConnectionLost;
+
     public LiveSessionStartResult Start(LiveSessionConnectOptions options) =>
         _controller.Start(options, _lifecycle);
 

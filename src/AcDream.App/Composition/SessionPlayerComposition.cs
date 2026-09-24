@@ -700,7 +700,11 @@ internal sealed class SessionPlayerCompositionPhase
             d.Runtime.EntityObjects,
             d.Runtime.PlayerIdentity,
             deletion,
-            new RuntimePhysicsCurrentCellSource(d.Runtime.EntityObjects));
+            new RuntimePhysicsCurrentCellSource(d.Runtime.EntityObjects),
+            d.Runtime.InventoryOwner.ExternalContainers,
+            d.Runtime.TradeOwner,
+            d.Runtime.InventoryOwner.Vendor);
+        bindings.Adopt("live liveness", liveness);
         var sessionEvents = new LiveEntitySessionController(
             d.InboundEntityEvents,
             hydration,

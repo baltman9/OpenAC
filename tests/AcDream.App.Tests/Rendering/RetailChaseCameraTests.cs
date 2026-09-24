@@ -993,6 +993,67 @@ public class RetailChaseCameraTests
         var cam = new RetailChaseCamera();
         cam.AdjustYaw(+1f);
         Assert.Equal(RetailChaseCamera.OffsetAngleRadians, cam.YawOffset, 6);
+        Assert.False(cam.TryTakeFirstPersonTurn(out _));
+    }
+
+    [Fact]
+    public void AdjustYawInFirstPerson_StaysInTheHeadAndAsksTheCharacterToTurn()
+    {
+        var cam = new RetailChaseCamera();
+        cam.SetRetailFirstPersonView();
+
+        // Rotate-left: the view stays first person and the character turns +8 degrees.
+        cam.AdjustYaw(-0.5f);
+        cam.AdjustYaw(-0.5f);
+        cam.Update(
+            playerPosition: Vector3.Zero,
+            playerYaw: 0f,
+            playerVelocity: Vector3.Zero,
+            inContact: true,
+            contactPlaneNormal: Vector3.UnitZ,
+            dt: 1f / 60f);
+
+        Assert.True(cam.IsInHead);
+        Assert.Equal(0.18f, cam.Distance, 5);
+        Assert.Equal(0f, cam.YawOffset);
+        Assert.Equal(new Vector3(0.18f, 0f, 1.5f), cam.Position);
+        Assert.True(cam.TryTakeFirstPersonTurn(out float leftStep));
+        Assert.Equal(8f, leftStep);
+        Assert.False(cam.TryTakeFirstPersonTurn(out _));
+
+        cam.AdjustYaw(+1f);
+        Assert.True(cam.IsInHead);
+        Assert.True(cam.TryTakeFirstPersonTurn(out float rightStep));
+        Assert.Equal(-8f, rightStep);
+    }
+
+    [Fact]
+    public void FirstPersonTurnPendingWhenLeavingTheHead_IsDropped()
+    {
+        var cam = new RetailChaseCamera();
+        cam.SetRetailFirstPersonView();
+        cam.AdjustYaw(-1f);
+
+        cam.AdjustDistance(+1f);
+
+        Assert.False(cam.IsInHead);
+        Assert.False(cam.TryTakeFirstPersonTurn(out _));
+    }
+
+    [Theory]
+    [InlineData(90f, 8f, 98f)]
+    [InlineData(90f, -8f, 82f)]
+    [InlineData(355f, 8f, 3f)]
+    [InlineData(3f, -8f, 355f)]
+    public void FirstPersonTurnTargetHeading_StepsAndWrapsTheCompass(
+        float current,
+        float step,
+        float expected)
+    {
+        Assert.Equal(
+            expected,
+            RetailChaseCamera.FirstPersonTurnTargetHeading(current, step),
+            4);
     }
 
     // ── View rules and orbit ──────────────────────────────────────────

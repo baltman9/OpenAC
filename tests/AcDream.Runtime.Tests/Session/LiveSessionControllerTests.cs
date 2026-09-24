@@ -118,6 +118,42 @@ public sealed class LiveSessionControllerTests
         Assert.Equal(RuntimeConnectionStatus.Inactive, controller.Connection.Snapshot.Status);
     }
 
+    [Fact]
+    public void LostServer_EndsTheSessionAndReportsTheLossUntilTheNextStart()
+    {
+        var calls = new List<string>();
+        var operations = new TestOperations(calls);
+        using var controller = new LiveSessionController(operations);
+        var host = new TestHost(calls);
+        Assert.Equal(
+            LiveSessionStartStatus.Connected,
+            controller.Start(LiveOptions(), host).Status);
+        WorldSession lostSession = operations.Sessions[0];
+        controller.Tick();
+        Assert.True(controller.IsInWorld);
+        Assert.False(controller.ConnectionLost);
+
+        operations.ConnectionLost = true;
+        controller.Tick();
+
+        Assert.False(controller.IsInWorld);
+        Assert.Null(controller.CurrentSession);
+        Assert.True(controller.ConnectionLost);
+        Assert.Equal(1, operations.DisposeCounts[lostSession]);
+        Assert.Equal(RuntimeConnectionStatus.Failed, controller.Connection.Snapshot.Status);
+        Assert.Equal(
+            new ServerConnectionLostException().Message,
+            controller.Connection.Snapshot.Error);
+
+        operations.ConnectionLost = false;
+        Assert.Equal(
+            LiveSessionStartStatus.Connected,
+            controller.Start(LiveOptions(), host).Status);
+        Assert.False(controller.ConnectionLost);
+        Assert.Equal(RuntimeConnectionStatus.Ready, controller.Connection.Snapshot.Status);
+        Assert.True(controller.IsInWorld);
+    }
+
     private sealed class ManualTimeProvider : TimeProvider
     {
         private long _timestamp;
@@ -280,6 +316,10 @@ public sealed class LiveSessionControllerTests
             if (ThrowOnTick)
                 throw new InvalidOperationException("tick failure");
         }
+
+        public bool ConnectionLost { get; set; }
+
+        public bool IsConnectionLost(WorldSession session) => ConnectionLost;
 
         public void DisposeSession(WorldSession session)
         {

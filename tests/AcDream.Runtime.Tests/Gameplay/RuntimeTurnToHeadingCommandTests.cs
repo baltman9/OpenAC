@@ -122,6 +122,23 @@ public sealed class RuntimeTurnToHeadingCommandTests
         Assert.Equal(90f, rig.MoveTo.Params.DesiredHeading, 3);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void MovementEventIsRequestedOnlyWhenTheCallerAsksForIt(bool requestMovementEvent)
+    {
+        Rig rig = MakeRig();
+        Step(rig, 2);
+
+        Assert.True(rig.Controller.RequestTurnToHeading(
+            90f,
+            requestMovementEvent: requestMovementEvent));
+        MovementResult result = rig.Controller.Update(1f / 30f, new MovementInput());
+
+        Assert.Equal(MovementType.TurnToHeading, rig.MoveTo.MovementTypeState);
+        Assert.Equal(requestMovementEvent, result.ShouldSendMovementEvent);
+    }
+
     [Fact]
     public void RunHoldKeyArgumentAppliesRetailHoldKeyRun()
     {

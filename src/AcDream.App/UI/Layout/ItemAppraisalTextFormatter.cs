@@ -300,37 +300,34 @@ public static class ItemAppraisalTextFormatter
                        | EquipMask.TwoHanded);
             if ((validLocations & timedWeaponLocations) != 0)
             {
-                report.Line(
-                    weapon.WeaponTime == uint.MaxValue
-                        ? "Speed:  Unknown"
-                        : $"Speed: {WeaponTimeName((int)weapon.WeaponTime)} "
-                          + $"({weapon.WeaponTime.ToString(CultureInfo.InvariantCulture)})",
-                    EnchantmentStyle(
-                        appraisal.WeaponEnchantments,
-                        0x0004u));
-            }
-
-            if (launcher)
-            {
-                if (!appraisal.Success)
+                // Range belongs to anything that fills the missile slot,
+                // thrown weapons included; it does not need an ammunition
+                // type the way the launcher rows above do.
+                bool missileSlot =
+                    (validLocations & (uint)EquipMask.MissileWeapon) != 0;
+                if (weapon.WeaponTime == uint.MaxValue)
                 {
-                    report.Line("Range:  Unknown");
+                    report.Line("Speed:  Unknown");
+                    if (missileSlot)
+                        report.Line("Range:  Unknown");
                 }
                 else
                 {
-                    double rawRange = Math.Min(
-                        85d,
-                        2d * Math.Pow(weapon.MaxVelocity, 2d)
-                        * (1d / 9.8d)
-                        * 1.094d);
-                    int range = rawRange < 10d
-                        ? (int)Math.Ceiling(rawRange)
-                        : (int)rawRange - (int)rawRange % 5;
                     report.Line(
-                        $"Range: {range.ToString(CultureInfo.InvariantCulture)} yds."
-                        + (weapon.MaxVelocityEstimated != 0u
-                            ? " (based on STRENGTH 100)"
-                            : string.Empty));
+                        $"Speed: {WeaponTimeName((int)weapon.WeaponTime)} "
+                        + $"({weapon.WeaponTime.ToString(CultureInfo.InvariantCulture)})",
+                        EnchantmentStyle(
+                            appraisal.WeaponEnchantments,
+                            0x0004u));
+                    if (missileSlot)
+                    {
+                        int range = MissileRangeYards(weapon.MaxVelocity);
+                        report.Line(
+                            $"Range: {range.ToString(CultureInfo.InvariantCulture)} yds."
+                            + (weapon.MaxVelocityEstimated != 0u
+                                ? " (based on STRENGTH 100)"
+                                : string.Empty));
+                    }
                 }
             }
 
@@ -1587,6 +1584,27 @@ public static class ItemAppraisalTextFormatter
             130 => "Shimmering Shadows",
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// The examination window's range for a missile-slot weapon: the flat
+    /// ground distance of a 45-degree throw, launch speed squared over
+    /// gravity (9.8 m/s²), converted from meters to yards and capped at 85
+    /// yards. Under ten yards the figure rounds up; from ten on it rounds
+    /// down to a multiple of five.
+    /// </summary>
+    private static int MissileRangeYards(double maxVelocity)
+    {
+        const double inverseGravity = 0.1020408163265306;
+        const double yardsPerMeter = 1.094;
+        const double rangeCapYards = 85.0;
+        double range = Math.Pow(maxVelocity, 2d) * inverseGravity * yardsPerMeter;
+        if (rangeCapYards < range)
+            range = rangeCapYards;
+        if (range < 10d)
+            return (int)Math.Ceiling(range);
+        int whole = (int)range;
+        return whole - whole % 5;
     }
 
     private static string WeaponTimeName(int weaponTime) => weaponTime switch

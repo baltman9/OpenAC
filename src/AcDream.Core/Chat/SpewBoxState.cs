@@ -15,6 +15,7 @@ public sealed class SpewBoxState
     private readonly object _gate = new();
     private readonly Queue<string> _pending = new();
     private readonly List<SpewBoxEntry> _visible = new();
+    private string? _lastPending;
     private long _revision;
 
     public long Revision => Interlocked.Read(ref _revision);
@@ -24,10 +25,34 @@ public sealed class SpewBoxState
         get { lock (_gate) return _visible.Count; }
     }
 
+    /// <summary>Lines enqueued since the last <see cref="Tick"/>.</summary>
+    internal int PendingCount
+    {
+        get { lock (_gate) return _pending.Count; }
+    }
+
+    /// <summary>
+    /// Queues a line for the next <see cref="Tick"/>. The queue never holds
+    /// more than <see cref="MaxConcurrentItems"/> lines, so a host that never
+    /// ticks (a windowless client with no console) does not accumulate every
+    /// status line of its lifetime. Nothing a tick would show is lost:
+    /// a line equal to the one queued just before it is a no-op for the tick
+    /// (it replaces that line with the same expiry), and once repeats are
+    /// folded, a tick keeps only the newest <see cref="MaxConcurrentItems"/>
+    /// lines, which are exactly the ones retained here.
+    /// </summary>
     public void Enqueue(string text)
     {
         lock (_gate)
+        {
+            if (_pending.Count > 0 && _lastPending == text)
+                return;
+
             _pending.Enqueue(text);
+            _lastPending = text;
+            while (_pending.Count > MaxConcurrentItems)
+                _pending.Dequeue();
+        }
     }
 
     public void Tick(double nowSeconds)

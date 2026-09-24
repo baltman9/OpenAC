@@ -4853,6 +4853,15 @@ internal sealed class RuntimeAutomationSurface
             ObjectClass = ClassifyObject(item),
             Palettes = ProjectPalettes(runtime, item.ObjectId),
             IconId = item.IconId,
+            IconUnderlayId = item.IconUnderlayId,
+            IconOverlayId = item.IconOverlayId,
+            CoverageMask = item.Priority,
+            PluralName = item.PluralName,
+            UseRadius = runtime.EntityObjects.Entities.TryGetActive(
+                    item.ObjectId,
+                    out RuntimeEntityRecord useRecord)
+                ? useRecord.Snapshot.UseRadius ?? 0f
+                : 0f,
             Effects = item.Effects,
         };
     }
@@ -4877,7 +4886,13 @@ internal sealed class RuntimeAutomationSurface
         for (int index = 0; index < result.Length; index++)
         {
             var palette = record.Snapshot.SubPalettes[index];
-            int sampleIndex = (palette.Length * 16) + (palette.Offset * 32) + 8;
+            // The swap's offset and length count blocks of eight colours, so
+            // this is the colour in the middle of the recoloured range: the
+            // one the macro tools' colour rules compare against. Their
+            // formula, length*16 + offset*32 + 8, is a byte position in the
+            // palette file (an 8-byte header, then 4 bytes a colour), not a
+            // colour number.
+            int sampleIndex = (palette.Offset * 8) + (palette.Length * 4);
             _ = colors.TryGetColor(
                 palette.SubPaletteId,
                 sampleIndex,

@@ -169,6 +169,9 @@ internal static class ParityWorld
 
     /// <summary>A healing kit: usable on its own, carried in the main pack.</summary>
     internal const uint Kit = 0x50000040u;
+    internal const uint KitIconUnderlay = 0x06005B0Cu;
+    internal const uint KitIconOverlay = 0x06006C0Bu;
+    internal const uint KitCoverage = 0x0000_0400u;
 
     /// <summary>A side pack, carried, with room for four things.</summary>
     internal const uint SidePack = 0x50000041u;
@@ -232,7 +235,14 @@ internal static class ParityWorld
         player.ItemsCapacity = 10;
         player.ContainersCapacity = 2;
         objects.AddOrUpdate(player);
-        objects.AddOrUpdate(Carried(Kit, "Healing Kit", ItemUseability.Contained));
+        ClientObject kit = Carried(Kit, "Healing Kit", ItemUseability.Contained);
+        // The icon layers a loot rule can match on: the backdrop the server
+        // gives a rare, and an imbue mark.
+        kit.IconUnderlayId = KitIconUnderlay;
+        kit.IconOverlayId = KitIconOverlay;
+        kit.Priority = KitCoverage;
+        kit.PluralName = "Healing Kits";
+        objects.AddOrUpdate(kit);
         objects.AddOrUpdate(new ClientObject
         {
             ObjectId = SidePack,

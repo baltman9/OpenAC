@@ -4,7 +4,9 @@ using AcDream.App.Input;
 using AcDream.App.Rendering;
 using AcDream.App.Update;
 using AcDream.Core.Physics;
+using AcDream.Core.Physics.Motion;
 using AcDream.Core.Rendering;
+using AcDream.Runtime.Physics;
 
 namespace AcDream.App.Tests.Rendering;
 
@@ -142,6 +144,8 @@ public sealed class CameraFrameControllerTests
 
         frame.Tick(timing);
         Assert.True(retail.YawOffset < 0f, $"left gave {retail.YawOffset}");
+        // Only the active camera takes the keys.
+        Assert.Equal(0f, legacy.YawOffset);
         float afterLeft = retail.YawOffset;
 
         input.Chase = default(ChaseCameraAdjustmentInput) with { RotateRight = true };
@@ -171,6 +175,83 @@ public sealed class CameraFrameControllerTests
         input.Chase = default(ChaseCameraAdjustmentInput) with { RotateRight = true };
         frame.Tick(timing);
         Assert.True(legacy.YawOffset > afterLeft, $"right gave {legacy.YawOffset}");
+    }
+
+    [Theory]
+    [InlineData(true, 8f)]
+    [InlineData(false, -8f)]
+    public void FirstPersonKeypadRotate_TurnsTheCharacterAndKeepsTheHeadView(
+        bool rotateLeft,
+        float expectedStep)
+    {
+        const float startHeading = 90f;
+        PlayerMovementController controller = CreatePlayer();
+        controller.Yaw = MoveToMath.YawFromHeading(startHeading);
+        MoveToManager moveTo = BindMoveTo(controller);
+        var runtime = new PlayerRuntime(controller, []);
+        var localFrame = new RetailLocalPlayerFrameController(runtime, new StillMovementInput());
+        CameraController camera = CreateCamera();
+        var legacy = new ChaseCamera();
+        var retail = new RetailChaseCamera();
+        camera.EnterChaseMode(legacy, retail);
+        retail.SetRetailFirstPersonView();
+        var input = new InputSource
+        {
+            Chase = default(ChaseCameraAdjustmentInput) with
+            {
+                RotateLeft = rotateLeft,
+                RotateRight = !rotateLeft,
+            },
+        };
+        var frame = new CameraFrameController(
+            camera, new CaptureSource(), input, runtime,
+            new ChaseSource(legacy, retail), localFrame, new Reconciler([]), new CombatTargetSource());
+
+        frame.Tick(new UpdateFrameTiming(1.0 / 60.0, 1f / 60f, 1.0));
+
+        Assert.True(retail.IsInHead);
+        Assert.Equal(0f, retail.YawOffset);
+        Assert.Equal(MovementType.TurnToHeading, moveTo.MovementTypeState);
+        Assert.Equal(startHeading + expectedStep, moveTo.Params.DesiredHeading, 3);
+
+        // The turn is a real character turn toward that heading.
+        for (int i = 0; i < 10; i++)
+        {
+            while (controller.Motion.MotionsPending())
+                controller.Motion.MotionDone(0, true);
+            controller.Update(1f / 30f, new MovementInput());
+        }
+        float turned = MoveToMath.HeadingFromYaw(controller.Yaw) - startHeading;
+        Assert.True(
+            MathF.Sign(turned) == MathF.Sign(expectedStep) && MathF.Abs(turned) > 1f,
+            $"heading moved {turned} degrees");
+        Assert.True(retail.IsInHead);
+    }
+
+    [Fact]
+    public void FirstPersonRotate_DoesNotRequestAMovementEventOfItsOwn()
+    {
+        PlayerMovementController controller = CreatePlayer();
+        MoveToManager moveTo = BindMoveTo(controller);
+        controller.Update(1f / 30f, new MovementInput());
+        var runtime = new PlayerRuntime(controller, []);
+        var localFrame = new RetailLocalPlayerFrameController(runtime, new StillMovementInput());
+        CameraController camera = CreateCamera();
+        var legacy = new ChaseCamera();
+        var retail = new RetailChaseCamera();
+        camera.EnterChaseMode(legacy, retail);
+        retail.SetRetailFirstPersonView();
+        var frame = new CameraFrameController(
+            camera, new CaptureSource(),
+            new InputSource { Chase = default(ChaseCameraAdjustmentInput) with { RotateLeft = true } },
+            runtime, new ChaseSource(legacy, retail), localFrame, new Reconciler([]),
+            new CombatTargetSource());
+
+        frame.Tick(new UpdateFrameTiming(1.0 / 60.0, 1f / 60f, 1.0));
+        Assert.Equal(MovementType.TurnToHeading, moveTo.MovementTypeState);
+
+        // A held key re-issues the turn every frame; that must not become a packet per frame.
+        Assert.False(controller.Update(1f / 30f, new MovementInput()).ShouldSendMovementEvent);
     }
 
     [Fact]
@@ -337,6 +418,46 @@ public sealed class CameraFrameControllerTests
         var controller = new PlayerMovementController(engine);
         controller.SeedPlacementForTest(new Vector3(96f, 96f, 50f), 0x0001u, new Vector3(96f, 96f, 50f));
         return controller;
+    }
+
+    // Binds the move-to layer a live session publishes, so turn requests are accepted.
+    private static MoveToManager BindMoveTo(PlayerMovementController controller)
+    {
+        const uint selfGuid = 0x5000000Au;
+        EntityPhysicsHost host = null!;
+        var moveTo = new MoveToManager(
+            controller.Motion,
+            stopCompletely: () => controller.StopCompletelyAtPhysicsObjectBoundary(),
+            getPosition: () => new Position(controller.CellId, controller.Position, controller.BodyOrientation),
+            getHeading: () => MoveToMath.HeadingFromYaw(controller.Yaw),
+            setHeading: (h, _) => controller.Yaw = MoveToMath.YawFromHeading(h),
+            getOwnRadius: () => 0.5f,
+            getOwnHeight: () => 1f,
+            contact: () => controller.BodyInContact,
+            isInterpolating: static () => false,
+            getVelocity: () => controller.BodyVelocity,
+            getSelfId: () => selfGuid,
+            setTarget: (ctx, id, radius, quantum) => host.SetTarget(ctx, id, radius, quantum),
+            clearTarget: () => host.ClearTarget(),
+            getTargetQuantum: () => host.TargetManager.GetTargetQuantum(),
+            setTargetQuantum: quantum => host.TargetManager.SetTargetQuantum(quantum),
+            curTime: () => controller.SimTimeSeconds);
+        host = new EntityPhysicsHost(
+            selfGuid,
+            getPosition: () => new Position(controller.CellId, controller.Position, controller.BodyOrientation),
+            getVelocity: () => controller.BodyVelocity,
+            getRadius: () => 0.5f,
+            inContact: () => controller.BodyInContact,
+            minterpMaxSpeed: () => controller.Motion.GetMaxSpeed(),
+            curTime: () => controller.SimTimeSeconds,
+            physicsTimerTime: () => controller.SimTimeSeconds,
+            getObjectA: static _ => null,
+            handleUpdateTarget: info => moveTo.HandleUpdateTarget(info),
+            interruptCurrentMovement: () => moveTo.CancelMoveTo(WeenieError.ActionCancelled));
+        controller.MoveTo = moveTo;
+        controller.Motion.InterruptCurrentMovement =
+            () => moveTo.CancelMoveTo(WeenieError.ActionCancelled);
+        return moveTo;
     }
 
     private sealed class CaptureSource : IInputCaptureSource

@@ -63,6 +63,15 @@ public sealed class RuntimeTradeState : IDisposable
 
     public IRuntimeTradeView View { get; }
 
+    /// <summary>Raised after the partner puts an item into the trade.</summary>
+    public event Action<uint>? PartnerItemAdded;
+
+    /// <summary>
+    /// Raised with the partner's items when they leave the trade window: an
+    /// item taken back, or the trade reset or closed.
+    /// </summary>
+    public event Action<IReadOnlyList<uint>>? PartnerItemsReleased;
+
     public bool IsDisposed
     {
         get { lock (_gate) return _disposed; }
@@ -89,15 +98,19 @@ public sealed class RuntimeTradeState : IDisposable
 
     public void ApplyClose()
     {
+        uint[] released;
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            released = _partnerItems.ToArray();
             ClearLocked();
         }
+        Release(released);
     }
 
     public void ApplyAdd(GameEvents.AddToTrade update)
     {
+        bool partnerAdded = false;
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -109,26 +122,34 @@ public sealed class RuntimeTradeState : IDisposable
                 items.Add(update.ItemGuid);
             if (update.Side != (uint)RuntimeTradeSide.Partner)
                 SetTradeState(update.ItemGuid, 1);
+            else
+                partnerAdded = true;
             _selfAccepted = false;
             _partnerAccepted = false;
             Bump();
         }
+        if (partnerAdded)
+            PartnerItemAdded?.Invoke(update.ItemGuid);
     }
 
     public void ApplyRemove(GameEvents.RemoveFromTrade update)
     {
+        bool partnerRemoved;
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (!_isOpen) return;
             bool removed = _selfItems.Remove(update.ItemGuid);
-            removed |= _partnerItems.Remove(update.ItemGuid);
+            partnerRemoved = _partnerItems.Remove(update.ItemGuid);
+            removed |= partnerRemoved;
             if (removed)
             {
                 SetTradeState(update.ItemGuid, 0);
                 Bump();
             }
         }
+        if (partnerRemoved)
+            Release([update.ItemGuid]);
     }
 
     public void ApplyAccept(uint whoAccepted, uint selfGuid)
@@ -158,10 +179,12 @@ public sealed class RuntimeTradeState : IDisposable
 
     public void ApplyReset()
     {
+        uint[] released;
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (!_isOpen) return;
+            released = _partnerItems.ToArray();
             ClearSelfTradeStates();
             _selfItems.Clear();
             _partnerItems.Clear();
@@ -169,6 +192,7 @@ public sealed class RuntimeTradeState : IDisposable
             _partnerAccepted = false;
             Bump();
         }
+        Release(released);
     }
 
     public void ApplyFailure(GameEvents.TradeFailure failure)
@@ -260,6 +284,12 @@ public sealed class RuntimeTradeState : IDisposable
     }
 
     private void Bump() => _revision++;
+
+    private void Release(uint[] released)
+    {
+        if (released.Length != 0)
+            PartnerItemsReleased?.Invoke(released);
+    }
 
     private sealed class TradeView(RuntimeTradeState owner) : IRuntimeTradeView
     {
