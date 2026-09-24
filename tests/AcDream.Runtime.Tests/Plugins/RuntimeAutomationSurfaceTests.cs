@@ -508,6 +508,40 @@ public sealed class RuntimeAutomationSurfaceTests
     }
 
     [Fact]
+    public void ProjectInventoryItem_CarriesTheUseRadiusTheServerSent()
+    {
+        const uint lever = 0x50000322u;
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        _ = runtime.EntityObjects
+            .RegisterEntity(new WorldSession.EntitySpawn(
+                lever,
+                null,
+                null,
+                [],
+                [],
+                [],
+                null,
+                null,
+                "Lever",
+                null,
+                null,
+                null,
+                UseRadius: 2.5f))
+            .Canonical!;
+        var item = new ClientObject { ObjectId = lever, Name = "Lever" };
+
+        PluginInventoryItem projected = surface.ProjectInventoryItem(runtime, item);
+        PluginInventoryItem unknown = surface.ProjectInventoryItem(
+            runtime,
+            new ClientObject { ObjectId = 0x50000323u, Name = "Elsewhere" });
+
+        Assert.Equal(2.5f, projected.UseRadius);
+        Assert.Equal(0f, unknown.UseRadius);
+    }
+
+    [Fact]
     public void ProjectWorldObject_PrefersThePhysicsBodyPositionOnTheGraphicalHost()
     {
         const uint remote = 0x50000321u;

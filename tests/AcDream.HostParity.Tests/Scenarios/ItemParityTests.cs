@@ -55,6 +55,10 @@ public sealed class ItemParityTests
             transcript.Record("kit.overlay", kit.IconOverlayId);
             Assert.Equal(ParityWorld.KitIconUnderlay, kit.IconUnderlayId);
             Assert.Equal(ParityWorld.KitIconOverlay, kit.IconOverlayId);
+            transcript.Record("kit.coverage", kit.CoverageMask);
+            transcript.Record("kit.plural", kit.PluralName);
+            Assert.Equal(ParityWorld.KitCoverage, kit.CoverageMask);
+            Assert.Equal("Healing Kits", kit.PluralName);
         });
 
     [Fact]
