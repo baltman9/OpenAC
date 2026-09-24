@@ -12,6 +12,15 @@ public enum ConnectionPhase
 
 public readonly record struct ConnectionProgress(ConnectionPhase Phase, string? Error = null);
 
+/// <summary>The server went silent and the session was given up.</summary>
+public sealed class ServerConnectionLostException : Exception
+{
+    public ServerConnectionLostException()
+        : base("The connection to the server was lost.")
+    {
+    }
+}
+
 public sealed class UnsupportedDataUpdateException : NotSupportedException
 {
     public UnsupportedDataUpdateException()

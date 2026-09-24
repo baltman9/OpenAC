@@ -210,6 +210,14 @@ internal sealed class HeadlessProcessScheduler
                         session.ReconnectDeadline);
                     RuntimeSessionStartResult result =
                         session.CompletePendingReconnect(nowTimestamp);
+                    // A session that lost its server keeps trying: a failed
+                    // attempt comes back deferred with the next one set.
+                    if (result.Status is RuntimeSessionStartStatus.Deferred
+                        && session.IsReconnectPending)
+                    {
+                        dispatched = true;
+                        continue;
+                    }
                     if (result.Status
                         is not RuntimeSessionStartStatus.Connected)
                     {

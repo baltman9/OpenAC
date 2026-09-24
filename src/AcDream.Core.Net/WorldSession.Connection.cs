@@ -138,6 +138,9 @@ public sealed partial class WorldSession
                 ? new TransportClock(source.GetTimestamp, source.Frequency) : null,
             assembler: _assembler);
         _transportNegotiated = true;
+        // The connect request is the server's first word on the new
+        // connection, stamped on the connection's own clock.
+        Volatile.Write(ref _lastInboundPacketTicks, _transport.Clock.GetTimestamp());
         LastServerTimeTicks = opt.ConnectRequestServerTime;
         ServerTimeUpdated?.Invoke(opt.ConnectRequestServerTime);
         byte[] response = new byte[8];

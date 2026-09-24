@@ -149,6 +149,16 @@ internal sealed class HeadlessSessionHost : IDisposable
     private readonly Dictionary<CharacterOptionId, bool> _declaredCharacterOptions;
     private RuntimeCharacterOptionsSeeder? _optionsSeeder;
     private readonly TimeSpan _reconnectQuiescence;
+
+    /// <summary>
+    /// How long a session that lost its server waits before each attempt to
+    /// log in again. It keeps trying at this pace until one attempt gets back
+    /// into the world.
+    /// </summary>
+    internal static readonly TimeSpan DefaultLostConnectionRetryInterval =
+        TimeSpan.FromSeconds(30);
+
+    private readonly TimeSpan _lostConnectionRetryInterval;
     private readonly TimeProvider _timeProvider;
     private readonly HeadlessGenerationResetHost _resetHost = new();
     private readonly IDisposable _hostLease;
@@ -191,6 +201,7 @@ internal sealed class HeadlessSessionHost : IDisposable
     private int _disposeStage;
     private long _reconnectDeadline;
     private bool _reconnectPending;
+    private bool _recoveringLostConnection;
     private ulong _stoppedGeneration;
     private string _accountName = string.Empty;
     private Exception? _fault;
@@ -215,7 +226,8 @@ internal sealed class HeadlessSessionHost : IDisposable
         IPluginStorage? storage = null,
         IPluginStorage? vtankProfiles = null,
         Func<bool>? logoutConfirmedOverride = null,
-        string? peerDirectory = null)
+        string? peerDirectory = null,
+        TimeSpan? lostConnectionRetryInterval = null)
     {
         _descriptor = descriptor
             ?? throw new ArgumentNullException(nameof(descriptor));
@@ -234,6 +246,13 @@ internal sealed class HeadlessSessionHost : IDisposable
         {
             throw new ArgumentOutOfRangeException(
                 nameof(reconnectQuiescence));
+        }
+        _lostConnectionRetryInterval = lostConnectionRetryInterval
+            ?? DefaultLostConnectionRetryInterval;
+        if (_lostConnectionRetryInterval <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(lostConnectionRetryInterval));
         }
 
         GameRuntime? runtimeRef = null;
@@ -486,6 +505,12 @@ internal sealed class HeadlessSessionHost : IDisposable
     internal bool IsFaulted => _faulted;
     internal Exception? Fault => _fault;
     internal bool IsReconnectPending => _reconnectPending;
+
+    /// <summary>
+    /// True from the moment the server is found gone until a login gets back
+    /// into the world.
+    /// </summary>
+    internal bool IsRecoveringLostConnection => _recoveringLostConnection;
     internal HeadlessProcessContentOwner.HeadlessProcessContentLease?
         Content => _contentLease;
     internal long ReconnectDeadline => _reconnectPending
@@ -581,6 +606,11 @@ internal sealed class HeadlessSessionHost : IDisposable
         _remoteBodies?.Tick(checked((float)deltaSeconds));
         Runtime.FinishRemoteBodyPass();
         _liveSession.Tick();
+        if (_liveSession.ConnectionLost)
+        {
+            BeginLostConnectionRecovery();
+            return;
+        }
         _worldProjection?.PumpFirstEntry();
         _entities?.PumpPortalCompletion();
         _eventRoute?.RetryPending();
@@ -642,6 +672,7 @@ internal sealed class HeadlessSessionHost : IDisposable
 
         _reconnectPending = false;
         _reconnectDeadline = 0L;
+        _recoveringLostConnection = false;
         RuntimeTeardownAcknowledgement stopped = Stop();
         if (!stopped.IsComplete)
         {
@@ -669,6 +700,7 @@ internal sealed class HeadlessSessionHost : IDisposable
         _fault = error;
         _reconnectPending = false;
         _reconnectDeadline = 0L;
+        _recoveringLostConnection = false;
         _diagnostics.Failure(
             _descriptor.Id,
             "quarantined",
@@ -711,7 +743,62 @@ internal sealed class HeadlessSessionHost : IDisposable
 
         _reconnectPending = false;
         _reconnectDeadline = 0L;
-        return StartLive(reconnect: true);
+        RuntimeSessionStartResult result = StartLive(reconnect: true);
+        if (!_recoveringLostConnection)
+            return result;
+
+        if (result.Status == RuntimeSessionStartStatus.Failed)
+        {
+            // The server is still gone or not yet taking logins: the attempt
+            // is written to the diagnostics by StartLive, and the next one
+            // waits another interval.
+            ScheduleLostConnectionRetry(_timeProvider.GetTimestamp());
+            return new RuntimeSessionStartResult(
+                RuntimeSessionStartStatus.Deferred,
+                Runtime.Generation);
+        }
+
+        _recoveringLostConnection = false;
+        return result;
+    }
+
+    /// <summary>
+    /// The server stopped answering and the runtime has already ended the
+    /// session. The host records the end the way it records any other, then
+    /// logs in again on a fixed interval until it is back in the world.
+    /// </summary>
+    private void BeginLostConnectionRecovery()
+    {
+        _diagnostics.Lifecycle(
+            _descriptor.Id,
+            "connection-lost",
+            Runtime);
+        RuntimeTeardownAcknowledgement stopped = Stop("connection-lost");
+        if (!stopped.IsComplete)
+        {
+            Quarantine(
+                stopped.Error
+                ?? new InvalidOperationException(
+                    $"Headless session '{_descriptor.Id}' did not "
+                        + "converge after losing its server."));
+            return;
+        }
+
+        _recoveringLostConnection = true;
+        ScheduleLostConnectionRetry(_timeProvider.GetTimestamp());
+    }
+
+    private void ScheduleLostConnectionRetry(long nowTimestamp)
+    {
+        _reconnectDeadline = HeadlessMonotonicTime.Add(
+            _timeProvider,
+            nowTimestamp,
+            _lostConnectionRetryInterval);
+        _reconnectPending = true;
+        _diagnostics.Lifecycle(
+            _descriptor.Id,
+            "reconnect-scheduled",
+            Runtime);
     }
 
     public void Dispose()
@@ -727,6 +814,7 @@ internal sealed class HeadlessSessionHost : IDisposable
                 {
                     _reconnectPending = false;
                     _reconnectDeadline = 0L;
+                    _recoveringLostConnection = false;
                     RuntimeTeardownAcknowledgement stopped = Stop();
                     if (!stopped.IsComplete)
                     {

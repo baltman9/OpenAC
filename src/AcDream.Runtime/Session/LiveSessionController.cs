@@ -165,6 +165,10 @@ public interface ILiveSessionOperations
         ReadOnlySpan<uint> skillAdvancementClasses) =>
         session.SendCharacterCreation(accountName, request, skillAdvancementClasses);
     void Tick(WorldSession session);
+
+    /// <summary>Whether the session has stopped hearing from the server.</summary>
+    bool IsConnectionLost(WorldSession session) => session.IsConnectionLost;
+
     void DisposeSession(WorldSession session);
 
     void RequestCharacterLogOff(WorldSession session) =>
@@ -362,6 +366,7 @@ public sealed class LiveSessionController
     private PendingOperation? _pendingOperation;
     private int _operationDepth;
     private bool _inWorld;
+    private bool _connectionLost;
     private bool _disposeRequested;
     private bool _disposed;
     private ulong _generation;
@@ -411,6 +416,15 @@ public sealed class LiveSessionController
     public bool IsInWorld
     {
         get { lock (_gate) return _inWorld; }
+    }
+
+    /// <summary>
+    /// True when the last session ended because the server stopped answering.
+    /// Cleared by the next start.
+    /// </summary>
+    public bool ConnectionLost
+    {
+        get { lock (_gate) return _connectionLost; }
     }
 
     public ulong SessionGeneration
@@ -625,6 +639,11 @@ public sealed class LiveSessionController
                     _operations.Tick(scope.Session);
                     if (!IsCurrent(scope, generation))
                         return;
+                    if (_operations.IsConnectionLost(scope.Session))
+                    {
+                        EndLostSession();
+                        return;
+                    }
                     CharacterSelectionState.SweepRestoreCorrelation();
                 }
                 catch (Exception tickError)
@@ -639,6 +658,23 @@ public sealed class LiveSessionController
                     InvokeAutoSaveTick(scope.Session);
             });
         }
+    }
+
+    /// <summary>
+    /// A session the server stopped answering is over: it is torn down like
+    /// any other ended session, the connection view reports the loss the way
+    /// it reports a failed connection, and <see cref="ConnectionLost"/> stays
+    /// set until the next start so a host can decide whether to log in again.
+    /// </summary>
+    private void EndLostSession()
+    {
+        var lost = new ServerConnectionLostException();
+        Console.Error.WriteLine($"live: {lost.Message}");
+        Exception reported = StopAfterFailure(lost);
+        _connectionLost = true;
+        _connection.Fail(lost);
+        if (!ReferenceEquals(reported, lost))
+            throw reported;
     }
 
     private void InvokeAutoSaveTick(WorldSession session)
@@ -706,6 +742,7 @@ public sealed class LiveSessionController
         CharacterSelectionState.Reset(activeGeneration);
         CharacterCreationState.Reset(activeGeneration);
         _connection.Reset();
+        _connectionLost = false;
         _createsSinceCharacterList = 0;
         try
         {
