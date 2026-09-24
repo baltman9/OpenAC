@@ -599,6 +599,100 @@ public sealed class ItemAppraisalTextFormatterTests
         Assert.Contains("Uses arrows as ammunition.", report);
     }
 
+    // A thrown weapon fills the missile slot but carries no ammunition type:
+    // it keeps plain "Damage" wording and still gets the range line right
+    // after its speed. The rock's 45 m/s launch speed is far past the 85-yard
+    // cap; a weapon whose profile carries the server's default 1 m/s rounds
+    // up to a single yard.
+    [Theory]
+    [InlineData("Rock", 80u, 0.5d, 4u, 20u, "Fast", 45d, 85)]
+    [InlineData("Greater Deadly Spike", 20u, 0.25d, 2u, 10u, "Very Fast", 1d, 1)]
+    public void ThrownWeapon_ShowsRangeAfterSpeed(
+        string name,
+        uint damage,
+        double variance,
+        uint damageType,
+        uint weaponTime,
+        string speedName,
+        double maxVelocity,
+        int expectedYards)
+    {
+        var obj = new ClientObject
+        {
+            ObjectId = 0x50000031u,
+            Name = name,
+            Type = ItemType.MissileWeapon,
+            ValidLocations = EquipMask.MissileWeapon,
+        };
+        var properties = new PropertyBundle();
+        properties.Ints[353u] = 10;
+        AppraiseInfoParser.Parsed appraisal = Parsed(
+            properties,
+            weapon: new AppraiseInfoParser.WeaponProfile(
+                DamageType: damageType,
+                WeaponTime: weaponTime,
+                WeaponSkill: 47u,
+                Damage: damage,
+                DamageVariance: variance,
+                DamageMod: 1d,
+                WeaponLength: 1d,
+                MaxVelocity: maxVelocity,
+                WeaponOffense: 1d,
+                MaxVelocityEstimated: 0u));
+
+        string report = ItemAppraisalTextFormatter.Build(
+            obj,
+            appraisal,
+            _ => null);
+
+        Assert.Contains("Skill: Missile Weapons (Thrown)", report);
+        Assert.DoesNotContain("Damage Bonus", report);
+        Assert.Contains(
+            $"Speed: {speedName} ({weaponTime})\n"
+            + $"Range: {expectedYards} yds.",
+            report);
+    }
+
+    // Range is the launch speed squared over gravity, in yards: below ten
+    // yards it rounds up, from ten on it rounds down to a multiple of five.
+    [Theory]
+    [InlineData(5d, 3)]
+    [InlineData(10d, 10)]
+    [InlineData(15d, 25)]
+    [InlineData(27d, 80)]
+    public void MissileRange_UsesSpeedSquaredOverGravityInYards(
+        double maxVelocity,
+        int expectedYards)
+    {
+        var obj = new ClientObject
+        {
+            ObjectId = 0x50000032u,
+            Name = "Dart",
+            Type = ItemType.MissileWeapon,
+            ValidLocations = EquipMask.MissileWeapon,
+        };
+        AppraiseInfoParser.Parsed appraisal = Parsed(
+            new PropertyBundle(),
+            weapon: new AppraiseInfoParser.WeaponProfile(
+                DamageType: 2u,
+                WeaponTime: 10u,
+                WeaponSkill: 47u,
+                Damage: 10u,
+                DamageVariance: 0d,
+                DamageMod: 1d,
+                WeaponLength: 1d,
+                MaxVelocity: maxVelocity,
+                WeaponOffense: 1d,
+                MaxVelocityEstimated: 0u));
+
+        string report = ItemAppraisalTextFormatter.Build(
+            obj,
+            appraisal,
+            _ => null);
+
+        Assert.Contains($"Range: {expectedYards} yds.", report);
+    }
+
     [Fact]
     public void SpecialProperties_AreCombinedUsingRetailNames()
     {
