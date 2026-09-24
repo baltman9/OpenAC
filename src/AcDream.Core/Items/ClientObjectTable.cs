@@ -51,6 +51,16 @@ public enum ClientObjectRemovalReason
     GenerationReplacement,
 }
 
+/// <summary>
+/// A viewed contents list the client is letting go of. <see cref="IsNested"/>
+/// marks a container inside the one the player closed: its list stays with
+/// that container until the container itself goes away.
+/// </summary>
+public readonly record struct ClientObjectContentsViewEnd(
+    uint ContainerId,
+    IReadOnlyList<uint> Contents,
+    bool IsNested);
+
 public readonly record struct ClientObjectRemoval(
     ClientObject Object,
     ClientObjectRemovalReason Reason,
@@ -129,6 +139,13 @@ public sealed class ClientObjectTable
 
     public event Action<uint>? ContainerContentsReplaced;
 
+    /// <summary>
+    /// Fires when the client stops viewing a container, with the contents
+    /// the view held, just before that list is dropped. The original client
+    /// puts those objects on its destruction queue at this point.
+    /// </summary>
+    public event Action<ClientObjectContentsViewEnd>? ContentsViewEnded;
+
     public event Action<ClientObject>? MoveRolledBack;
 
     public event Action<uint>? WieldConfirmed;
@@ -169,8 +186,19 @@ public sealed class ClientObjectTable
     public int EquipmentOwnerCount => _equipmentIndex.Count;
     public int PendingMoveCount => _pendingMoves.Count;
 
-    public IEnumerable<ClientObject> Objects => _objects.Values;
+    /// <summary>
+    /// Every object, enumerated in place. The dictionary's own
+    /// <c>Values</c> copies the whole table into a new list on each read,
+    /// which callers polling every frame turned into constant garbage.
+    /// </summary>
+    public IEnumerable<ClientObject> Objects => EnumerateObjects();
     public IEnumerable<Container> Containers => _containers.Values;
+
+    private IEnumerable<ClientObject> EnumerateObjects()
+    {
+        foreach (KeyValuePair<uint, ClientObject> entry in _objects)
+            yield return entry.Value;
+    }
 
     /// <summary>
     /// Look up an object by its server-assigned <c>ObjectId</c>.
@@ -1170,8 +1198,9 @@ public sealed class ClientObjectTable
 
     public bool StopViewingContents(uint containerId)
     {
-        if (containerId == 0u || !_containerIndex.Remove(containerId))
+        if (containerId == 0u || !_containerIndex.Remove(containerId, out List<uint>? contents))
             return false;
+        ContentsViewEnded?.Invoke(new ClientObjectContentsViewEnd(containerId, contents, IsNested: false));
         ContainerContentsReplaced?.Invoke(containerId);
         return true;
     }
@@ -1183,7 +1212,7 @@ public sealed class ClientObjectTable
 
         var pending = new Stack<uint>();
         var visited = new HashSet<uint>();
-        var removed = new List<uint>();
+        var removed = new List<(uint ContainerId, List<uint> Contents)>();
         pending.Push(rootContainerId);
         while (pending.Count != 0)
         {
@@ -1198,10 +1227,15 @@ public sealed class ClientObjectTable
                     pending.Push(childId);
             }
             _containerIndex.Remove(containerId);
-            removed.Add(containerId);
+            removed.Add((containerId, contents));
         }
 
-        foreach (uint containerId in removed)
+        foreach ((uint containerId, List<uint> contents) in removed)
+            ContentsViewEnded?.Invoke(new ClientObjectContentsViewEnd(
+                containerId,
+                contents,
+                IsNested: containerId != rootContainerId));
+        foreach ((uint containerId, _) in removed)
             ContainerContentsReplaced?.Invoke(containerId);
         return removed.Count;
     }
