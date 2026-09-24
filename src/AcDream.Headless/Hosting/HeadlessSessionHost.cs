@@ -1100,11 +1100,14 @@ internal sealed class HeadlessSessionHost : IDisposable
         // server forgets an object on that schedule without a message and
         // only announces a destroyed object to players still knowing it, so
         // a bot that never expired anything would keep every corpse it saw.
+        _liveness?.Dispose();
         _liveness = new RuntimeEntityLivenessController(
             Runtime.EntityObjects,
             Runtime.PlayerIdentity,
             new RuntimeCanonicalEntityExpirySink(Runtime.EntityObjects),
-            new RuntimePhysicsCurrentCellSource(Runtime.EntityObjects));
+            new RuntimePhysicsCurrentCellSource(Runtime.EntityObjects),
+            Runtime.InventoryOwner.ExternalContainers,
+            Runtime.TradeOwner.View);
         var route = new LiveSessionEventRouter(
             session,
             entities.CreateSink(),

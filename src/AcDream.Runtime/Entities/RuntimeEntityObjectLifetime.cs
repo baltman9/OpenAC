@@ -875,14 +875,23 @@ public sealed class RuntimeEntityObjectLifetime : IDisposable
             && canonical.CreateIntegrationVersion
                 == expectedCreateIntegrationVersion;
 
-        return IsCurrent()
+        bool applied = IsCurrent()
             && ObjectTableWiring.ApplyEntitySpawn(
                 Objects,
                 spawn,
                 replaceGeneration,
                 IsCurrent)
             && IsCurrent();
+        if (applied)
+            SpawnApplied?.Invoke(spawn.Guid);
+        return applied;
     }
+
+    /// <summary>
+    /// Raised after a create for an object has landed in the object table,
+    /// whether the object is new or described again.
+    /// </summary>
+    internal event Action<uint>? SpawnApplied;
 
     public bool TryApplyObjDesc(
         ObjDescEvent.Parsed update,

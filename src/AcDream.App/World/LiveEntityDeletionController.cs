@@ -66,4 +66,10 @@ internal sealed class LiveEntityDeletionController : IRuntimeEntityExpirySink
             isLocalPlayer: false,
             removeRetainedObject: true);
     }
+
+    /// <summary>
+    /// Destroys a container's contents whose queued deadline expired, the
+    /// same way a server delete would.
+    /// </summary>
+    public bool Destroy(DeleteObject.Parsed delete) => Delete(delete);
 }

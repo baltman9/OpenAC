@@ -1,4 +1,5 @@
 using System.Numerics;
+using AcDream.Core.Items;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.World.Cells;
@@ -296,6 +297,211 @@ public sealed class RuntimeEntityLivenessTests
         Assert.Equal(0x7000_0001u, Assert.Single(sink.Expired).ServerGuid);
     }
 
+    // Objects outside the world. The server destroys a corpse's contents
+    // (and a creature's wielded items) without a message; the original client
+    // drops them itself 25 seconds after it stops looking at them, or after
+    // their container goes away.
+
+    private const uint Corpse = 0x8000_1000u;
+
+    [Fact]
+    public void ClosingACorpseDestroysItsContentsTwentyFiveSecondsLater()
+    {
+        var world = new ContentsWorld();
+        world.Corpse(Corpse, 0x3032_0001u, 0x8000_1001u, 0x8000_1002u);
+        world.Controller.Tick(1.0);
+
+        world.Objects.StopViewingContentsTree(Corpse);
+        world.Controller.Tick(25.5);
+        Assert.NotNull(world.Objects.Get(0x8000_1001u));
+
+        world.Controller.Tick(26.5);
+
+        Assert.Null(world.Objects.Get(0x8000_1001u));
+        Assert.Null(world.Objects.Get(0x8000_1002u));
+        Assert.False(world.Lifetime.Entities.TryGetActive(0x8000_1001u, out _));
+        Assert.NotNull(world.Objects.Get(Corpse));
+    }
+
+    [Fact]
+    public void AnItemLootedIntoThePackLeavesTheQueue()
+    {
+        var world = new ContentsWorld();
+        world.Corpse(Corpse, 0x3032_0001u, 0x8000_1001u, 0x8000_1002u);
+        world.Objects.StopViewingContentsTree(Corpse);
+
+        world.Objects.ApplyConfirmedServerMove(0x8000_1001u, Player, newWielderId: 0u);
+        world.Controller.Tick(1.0);
+        world.Controller.Tick(30.0);
+
+        Assert.NotNull(world.Objects.Get(0x8000_1001u));
+        Assert.Null(world.Objects.Get(0x8000_1002u));
+    }
+
+    [Fact]
+    public void ACreateForAQueuedItemTakesItOffTheQueue()
+    {
+        // Opening the corpse again re-sends every item's create.
+        var world = new ContentsWorld();
+        world.Corpse(Corpse, 0x3032_0001u, 0x8000_1001u);
+        world.Objects.StopViewingContentsTree(Corpse);
+        Assert.Equal(1, world.Controller.QueuedObjectCount);
+
+        Spawned(world.Lifetime, ContainedSpawn(0x8000_1001u, Corpse));
+        world.Controller.Tick(1.0);
+        world.Controller.Tick(30.0);
+
+        Assert.Equal(0, world.Controller.QueuedObjectCount);
+        Assert.NotNull(world.Objects.Get(0x8000_1001u));
+    }
+
+    [Fact]
+    public void ADestroyedCorpseTakesWhatItStillHeldWithItTwentyFiveSecondsLater()
+    {
+        var world = new ContentsWorld();
+        world.Corpse(Corpse, 0x3032_0001u, 0x8000_1001u, 0x8000_1002u);
+        world.Controller.Tick(1.0);
+
+        Assert.True(RuntimeCanonicalEntityExpirySink.DeleteCanonicalOnly(
+            world.Lifetime,
+            new DeleteObject.Parsed(Corpse, 7)));
+        world.Controller.Tick(25.5);
+        Assert.NotNull(world.Objects.Get(0x8000_1001u));
+        world.Controller.Tick(26.5);
+
+        Assert.Null(world.Objects.Get(0x8000_1001u));
+        Assert.Null(world.Objects.Get(0x8000_1002u));
+    }
+
+    [Fact]
+    public void ALootedCorpsesItemsDoNotAccumulate()
+    {
+        // A bot looting all night: every corpse is opened, one item taken,
+        // the corpse closed and later destroyed by the server. What the
+        // client holds must come back to the player and what it looted.
+        var world = new ContentsWorld();
+        int baseline = world.Objects.Objects.Count();
+        double now = 0.0;
+        for (int corpse = 0; corpse < 40; corpse++)
+        {
+            uint corpseGuid = 0x8001_0000u + (uint)corpse * 0x10u;
+            uint[] items = Enumerable.Range(1, 6).Select(i => corpseGuid + (uint)i).ToArray();
+            world.Corpse(corpseGuid, 0x3032_0001u, items);
+            world.Objects.ApplyConfirmedServerMove(items[0], Player, newWielderId: 0u);
+            world.Objects.StopViewingContentsTree(corpseGuid);
+            now += 2.0;
+            world.Controller.Tick(now);
+            RuntimeCanonicalEntityExpirySink.DeleteCanonicalOnly(
+                world.Lifetime,
+                new DeleteObject.Parsed(corpseGuid, 7));
+        }
+
+        world.Controller.Tick(now + 26.0);
+
+        Assert.Equal(baseline + 40, world.Objects.Objects.Count());
+        Assert.Equal(1 + 40, world.Lifetime.Entities.Count);
+        Assert.Equal(0, world.Controller.QueuedObjectCount);
+    }
+
+    [Fact]
+    public void AWieldedObjectLeavesVisibilityWithItsHolder()
+    {
+        var lifetime = new RuntimeEntityObjectLifetime();
+        var identity = new RuntimeLocalPlayerIdentityState { ServerGuid = Player };
+        var sink = new RecordingSink();
+        var controller = new RuntimeEntityLivenessController(
+            lifetime,
+            identity,
+            sink,
+            new FixedCellSource(null));
+        Register(lifetime, Player, 0x3032_0001u);
+        Register(lifetime, 0x7000_0001u, 0xA9B4_0001u);
+        Assert.NotNull(lifetime.RegisterEntity(
+            ContainedSpawn(0x7000_0002u, containerId: null, wielderId: 0x7000_0001u)).Canonical);
+
+        controller.Tick(0.0);
+        controller.Tick(26.0);
+
+        Assert.Equal(
+            [0x7000_0001u, 0x7000_0002u],
+            sink.Expired.Select(candidate => candidate.ServerGuid).Order());
+    }
+
+    [Fact]
+    public void ALootedWeaponStaysInThePackWhenItsOldWielderLeaves()
+    {
+        // The create named a wielder; the loot moved it into the pack. Only
+        // the live placement may decide, or a recycled wielder id leaving
+        // view would take the weapon out of the player's pack.
+        var lifetime = new RuntimeEntityObjectLifetime();
+        var identity = new RuntimeLocalPlayerIdentityState { ServerGuid = Player };
+        var sink = new RecordingSink();
+        using var controller = new RuntimeEntityLivenessController(
+            lifetime,
+            identity,
+            sink,
+            new FixedCellSource(null));
+        Register(lifetime, Player, 0x3032_0001u);
+        Register(lifetime, 0x7000_0001u, 0xA9B4_0001u);
+        Spawned(lifetime, ContainedSpawn(0x7000_0002u, containerId: null, wielderId: 0x7000_0001u));
+        lifetime.Objects.ApplyConfirmedServerMove(0x7000_0002u, Player, newWielderId: 0u);
+
+        controller.Tick(0.0);
+        controller.Tick(26.0);
+
+        Assert.Equal(0x7000_0001u, Assert.Single(sink.Expired).ServerGuid);
+    }
+
+    [Fact]
+    public void AnObjectWhoseHolderIsGoneIsNotExpiredByVisibility()
+    {
+        // A deleted creature only detaches what it held.
+        var lifetime = new RuntimeEntityObjectLifetime();
+        var identity = new RuntimeLocalPlayerIdentityState { ServerGuid = Player };
+        var sink = new RecordingSink();
+        var controller = new RuntimeEntityLivenessController(
+            lifetime,
+            identity,
+            sink,
+            new FixedCellSource(null));
+        Register(lifetime, Player, 0x3032_0001u);
+        Assert.NotNull(lifetime.RegisterEntity(
+            ContainedSpawn(0x7000_0002u, containerId: null, wielderId: 0x7000_0001u)).Canonical);
+
+        controller.Tick(0.0);
+        controller.Tick(30.0);
+
+        Assert.Empty(sink.Expired);
+    }
+
+    private sealed class ContentsWorld
+    {
+        public RuntimeEntityObjectLifetime Lifetime { get; } = new();
+        public ExternalContainerState Ground { get; } = new();
+        public RuntimeEntityLivenessController Controller { get; }
+        public ClientObjectTable Objects => Lifetime.Objects;
+
+        public ContentsWorld()
+        {
+            Controller = new RuntimeEntityLivenessController(
+                Lifetime,
+                new RuntimeLocalPlayerIdentityState { ServerGuid = Player },
+                new RuntimeCanonicalEntityExpirySink(Lifetime),
+                new FixedCellSource(null),
+                Ground);
+            Register(Lifetime, Player, 0x3032_0001u);
+        }
+
+        /// <summary>A corpse in the world whose contents the player is viewing.</summary>
+        public void Corpse(uint guid, uint cell, params uint[] items)
+        {
+            Spawned(Lifetime, ContainedSpawn(guid, containerId: null));
+            foreach (uint item in items)
+                Spawned(Lifetime, ContainedSpawn(item, guid));
+            Objects.ReplaceContents(guid, items);
+        }
+    }
+
     private static void Register(
         RuntimeEntityObjectLifetime lifetime,
         uint guid,
@@ -306,6 +512,48 @@ public sealed class RuntimeEntityLivenessTests
             Spawn(guid, cell, containerId));
         Assert.NotNull(result.Canonical);
     }
+
+    /// <summary>A create as the live session applies it: registered, then ingested.</summary>
+    private static void Spawned(
+        RuntimeEntityObjectLifetime lifetime,
+        WorldSession.EntitySpawn spawn)
+    {
+        RuntimeEntityRegistrationResult registration = lifetime.RegisterEntity(spawn);
+        RuntimeEntityRecord canonical = Assert.IsType<RuntimeEntityRecord>(registration.Canonical);
+        Assert.True(lifetime.ApplyAcceptedSpawn(
+            canonical,
+            canonical.CreateIntegrationVersion,
+            canonical.Snapshot,
+            replaceGeneration: false));
+    }
+
+    private static WorldSession.EntitySpawn ContainedSpawn(
+        uint guid,
+        uint? containerId,
+        uint? wielderId = null,
+        ushort instance = 7) =>
+        new WorldSession.EntitySpawn(
+            guid,
+            null,
+            0x02000001u,
+            Array.Empty<CreateObject.AnimPartChange>(),
+            Array.Empty<CreateObject.TextureChange>(),
+            Array.Empty<CreateObject.SubPaletteSwap>(),
+            null,
+            null,
+            "item",
+            null,
+            null,
+            null,
+            PhysicsState: 0,
+            InstanceSequence: instance,
+            MovementSequence: 1,
+            ServerControlSequence: 1,
+            PositionSequence: 1) with
+        {
+            ContainerId = containerId,
+            WielderId = wielderId,
+        };
 
     private static WorldSession.EntitySpawn Spawn(uint guid, uint cell, uint? containerId)
     {
@@ -392,6 +640,8 @@ public sealed class RuntimeEntityLivenessTests
             Expired.Add(candidate);
             return true;
         }
+
+        public bool Destroy(DeleteObject.Parsed delete) => true;
     }
 
     private sealed class FixedCellSource(ObjCell? cell) : IRuntimeEntityCurrentCellSource
