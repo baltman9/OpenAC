@@ -4853,6 +4853,15 @@ internal sealed class RuntimeAutomationSurface
             ObjectClass = ClassifyObject(item),
             Palettes = ProjectPalettes(runtime, item.ObjectId),
             IconId = item.IconId,
+            IconUnderlayId = item.IconUnderlayId,
+            IconOverlayId = item.IconOverlayId,
+            CoverageMask = item.Priority,
+            PluralName = item.PluralName,
+            UseRadius = runtime.EntityObjects.Entities.TryGetActive(
+                    item.ObjectId,
+                    out RuntimeEntityRecord useRecord)
+                ? useRecord.Snapshot.UseRadius ?? 0f
+                : 0f,
             Effects = item.Effects,
         };
     }

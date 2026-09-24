@@ -326,6 +326,39 @@ public readonly record struct PluginInventoryItem(
     public uint IconId { get; init; }
 
     /// <summary>
+    /// The icon drawn beneath the item's icon, as a full icon id (for example
+    /// the backdrop the server gives a rare item); zero when the item has
+    /// none. Loot rules written for the original client's macro tools match
+    /// on this value without its <c>0x06000000</c> prefix.
+    /// </summary>
+    public uint IconUnderlayId { get; init; }
+
+    /// <summary>
+    /// The icon drawn over the item's icon, as a full icon id (for example
+    /// the mark an imbue adds); zero when the item has none.
+    /// </summary>
+    public uint IconOverlayId { get; init; }
+
+    /// <summary>
+    /// The body parts a piece of clothing or armor covers, as the coverage
+    /// bits the server sends with the object; zero for anything that is not
+    /// worn.
+    /// </summary>
+    public uint CoverageMask { get; init; }
+
+    /// <summary>
+    /// The item's name for more than one of it; an empty string when the
+    /// server did not send one.
+    /// </summary>
+    public string PluralName { get; init; } = string.Empty;
+
+    /// <summary>
+    /// How close, in metres, the character must be to use the item; zero
+    /// when the server did not send a distance.
+    /// </summary>
+    public float UseRadius { get; init; }
+
+    /// <summary>
     /// The icon-highlight effect bits the server sends with the object
     /// itself. Bit 0 is "magical", which is how a loot rule can tell that an
     /// item is expected to carry spells before anything has appraised it.
