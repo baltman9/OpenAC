@@ -542,6 +542,59 @@ public sealed class RuntimeAutomationSurfaceTests
     }
 
     [Fact]
+    public void ProjectInventoryItem_SamplesTheColourInTheMiddleOfEachSwappedRange()
+    {
+        // A swap starting at block 3 (colour 24) and covering 4 blocks
+        // (32 colours) is sampled at colour 24 + 16 = 40, which is where the
+        // loot tools' byte position 4*16 + 3*32 + 8 = 168 lands in the file.
+        const uint painted = 0x50000324u;
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        var colours = new IndexEchoPalette();
+        surface.BindPaletteColorResolver(colours);
+        _ = runtime.EntityObjects
+            .RegisterEntity(new WorldSession.EntitySpawn(
+                painted,
+                null,
+                null,
+                [],
+                [],
+                [new CreateObject.SubPaletteSwap(0x04000123u, 3, 4)],
+                null,
+                null,
+                "Painted",
+                null,
+                null,
+                null))
+            .Canonical!;
+
+        PluginInventoryItem projected = surface.ProjectInventoryItem(
+            runtime,
+            new ClientObject { ObjectId = painted, Name = "Painted" });
+
+        PluginPaletteInfo swap = Assert.Single(projected.Palettes);
+        Assert.Equal(40, colours.LastIndex);
+        Assert.Equal((byte)40, swap.Red);
+    }
+
+    /// <summary>Answers every colour with its own index in the red channel.</summary>
+    private sealed class IndexEchoPalette : AcDream.Core.CharGen.IChargenPaletteColorSource
+    {
+        public int LastIndex { get; private set; } = -1;
+
+        public bool TryGetColor(
+            uint paletteId,
+            int index,
+            out AcDream.Core.CharGen.ChargenSwatchRgb color)
+        {
+            LastIndex = index;
+            color = new AcDream.Core.CharGen.ChargenSwatchRgb((byte)index, 0, 0);
+            return true;
+        }
+    }
+
+    [Fact]
     public void ProjectWorldObject_PrefersThePhysicsBodyPositionOnTheGraphicalHost()
     {
         const uint remote = 0x50000321u;
