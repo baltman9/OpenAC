@@ -23,6 +23,37 @@ public class MarkupDocumentTests
         public Action<int> SelectIndex => value => SelectedIndex = value;
     }
 
+    private sealed class ArrowKeyBinding
+    {
+        public int UpCount { get; private set; }
+        public int DownCount { get; private set; }
+        public Action Up => () => UpCount++;
+        public Action Down => () => DownCount++;
+    }
+
+    [Fact]
+    public void MarkupFieldDispatchesArrowKeyActions()
+    {
+        const string xml = """
+            <panel x="0" y="0" w="240" h="120">
+              <field x="4" y="4" w="120" h="20"
+                     onup="{Up}" ondown="{Down}" />
+            </panel>
+            """;
+        var binding = new ArrowKeyBinding();
+        UiNineSlicePanel panel = MarkupDocument.Build(
+            xml, binding, _ => (1u, 32, 32));
+        UiField field = Assert.IsType<UiField>(panel.Children[0]);
+
+        Assert.True(field.OnEvent(new UiEvent(0u, field, UiEventType.KeyDown,
+            Data0: (int)Silk.NET.Input.Key.Up)));
+        Assert.True(field.OnEvent(new UiEvent(0u, field, UiEventType.KeyDown,
+            Data0: (int)Silk.NET.Input.Key.Down)));
+
+        Assert.Equal(1, binding.UpCount);
+        Assert.Equal(1, binding.DownCount);
+    }
+
     private sealed class LateValueBinding
     {
         public string Range { get; set; } = "5";

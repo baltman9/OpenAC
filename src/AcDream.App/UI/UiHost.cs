@@ -99,6 +99,7 @@ public sealed class UiHost : System.IDisposable
         System.ObjectDisposedException.ThrowIf(_disposeRequested || _disposed, this);
         System.ArgumentNullException.ThrowIfNull(kb);
         Keyboard = kb;   // last wired keyboard wins (one-keyboard desktop)
+        Root.Keyboard = kb;
         var binding = new RetainedKeyboardInputBinding(
             new SilkRetainedKeyboardSurface(kb),
             Root,
@@ -122,6 +123,7 @@ public sealed class UiHost : System.IDisposable
         foreach (IRetainedUiInputBinding binding in _inputBindings)
             binding.Deactivate();
         Keyboard = null;
+        Root.Keyboard = null;
     }
 
     /// <summary>Physically removes every retained input edge after quiescence.</summary>

@@ -6,6 +6,41 @@ namespace AcDream.App.Tests.UI;
 public sealed class RetailWindowManagerTests
 {
     [Fact]
+    public void MarkupTabMovesThroughVisibleControlsAndEnterActivatesButton()
+    {
+        const string xml = """
+            <panel x="0" y="0" w="300" h="120">
+              <field x="8" y="8" w="100" h="20" />
+              <button x="8" y="36" w="80" h="20" text="Go" onclick="{Activate}" />
+              <button x="8" y="64" w="80" h="20" text="Hidden" visible="{ShowHidden}" />
+            </panel>
+            """;
+        var binding = new KeyboardMarkupBinding();
+        var panel = MarkupDocument.Build(xml, binding, _ => (1u, 32, 32));
+        var root = new UiRoot { Width = 800, Height = 600 };
+        root.AddChild(panel);
+        var field = Assert.IsType<UiField>(panel.Children[0]);
+        var button = Assert.IsType<UiSimpleButton>(panel.Children[1]);
+        Assert.True(field.Selectable);
+        root.Tick(0, 0);
+        root.SetKeyboardFocus(field);
+
+        root.OnKeyDown((int)Silk.NET.Input.Key.Tab);
+        Assert.Same(button, root.KeyboardFocus);
+        root.OnKeyDown((int)Silk.NET.Input.Key.Enter);
+        Assert.Equal(1, binding.Activations);
+        root.OnKeyDown((int)Silk.NET.Input.Key.Tab);
+        Assert.Same(field, root.KeyboardFocus);
+    }
+
+    private sealed class KeyboardMarkupBinding
+    {
+        public int Activations { get; private set; }
+        public bool ShowHidden => false;
+        public System.Action Activate => () => Activations++;
+    }
+
+    [Fact]
     public void Hide_ClearsRootOwnership_AndShowRestoresDefaultInput()
     {
         var root = new UiRoot { Width = 800, Height = 600 };

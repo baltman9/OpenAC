@@ -19,8 +19,12 @@ public sealed class UiMarkupToggle : UiElement
 
     public override bool HandlesClick => true;
 
+    private readonly UiKeyboardActivation _keyboardActivation = new();
+
     public override bool OnEvent(in UiEvent e)
     {
+        if (_keyboardActivation.HandleEvent(in e, TabStop, Enabled, Toggle))
+            return true;
         if (e.Type != UiEventType.Click || !Enabled)
             return false;
         Toggle?.Invoke();
@@ -29,6 +33,9 @@ public sealed class UiMarkupToggle : UiElement
 
     protected override void OnDraw(UiRenderContext ctx)
     {
+        if (_keyboardActivation.Focused)
+            ctx.DrawRectOutline(0f, 0f, Width, Height,
+                new Vector4(1f, 0.82f, 0.25f, 1f), 1f);
         UiCheckLamp.Draw(ctx, 1f, MathF.Max(1f, (Height - UiCheckLamp.LampSize) * 0.5f), IsChecked);
 
         string caption = TextSource?.Invoke() ?? Text;

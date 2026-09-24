@@ -188,6 +188,9 @@ public static class MarkupDocument
                     }
                     var button = new UiSimpleButton
                     {
+                        AcceptsFocus = true,
+                        FocusOnMouseClick = false,
+                        TabStop = true,
                         Left = F(el, "x"),
                         Top = F(el, "y"),
                         Width = F(el, "w"),
@@ -293,6 +296,9 @@ public static class MarkupDocument
 
                 var tab = new UiMarkupTabButton
                 {
+                    AcceptsFocus = true,
+                    FocusOnMouseClick = false,
+                    TabStop = true,
                     Left = F(el, "x"),
                     Top = F(el, "y"),
                     Width = F(el, "w"),
@@ -323,6 +329,9 @@ public static class MarkupDocument
                 string? toggleCaption = (string?)el.Attribute("text");
                 var toggle = new UiMarkupToggle
                 {
+                    AcceptsFocus = true,
+                    FocusOnMouseClick = false,
+                    TabStop = true,
                     Left = F(el, "x"),
                     Top = F(el, "y"),
                     Width = F(el, "w"),
@@ -421,8 +430,24 @@ public static class MarkupDocument
                         + $"Action<string> property on {binding.GetType().Name}");
                 }
 
+                string? upName = (string?)el.Attribute("onup");
+                Action? onUp = BindAction(upName, binding);
+                if (upName is not null && onUp is null)
+                    throw new FormatException(
+                        $"<field onup=\"{upName}\"> did not resolve to an "
+                        + $"Action property on {binding.GetType().Name}");
+
+                string? downName = (string?)el.Attribute("ondown");
+                Action? onDown = BindAction(downName, binding);
+                if (downName is not null && onDown is null)
+                    throw new FormatException(
+                        $"<field ondown=\"{downName}\"> did not resolve to an "
+                        + $"Action property on {binding.GetType().Name}");
+
                 var field = new UiField
                 {
+                    Selectable = true,
+                    TabStop = true,
                     Left = F(el, "x"),
                     Top = F(el, "y"),
                     Width = F(el, "w"),
@@ -438,6 +463,8 @@ public static class MarkupDocument
                     ClearOnSubmit = B(el, "clearonsubmit", false),
                     RecordHistory = false,
                     OnSubmit = submitted,
+                    OnUp = onUp,
+                    OnDown = onDown,
                 };
                 BindColorSource(
                     (string?)el.Attribute("background"), binding,
