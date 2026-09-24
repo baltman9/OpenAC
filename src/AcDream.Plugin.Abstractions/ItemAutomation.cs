@@ -8,7 +8,9 @@ namespace AcDream.Plugin.Abstractions;
 /// <param name="PaletteId">The color set the swap draws from.</param>
 /// <param name="Offset">Where in the item's color range the swap starts.</param>
 /// <param name="Length">How much of that range the swap covers.</param>
-/// <param name="Red">Red channel of a color sampled from the swap, 0 to 255.</param>
+/// <param name="Red">
+/// Red channel of the color in the middle of the swapped range, 0 to 255.
+/// </param>
 /// <param name="Green">Green channel of that sampled color, 0 to 255.</param>
 /// <param name="Blue">Blue channel of that sampled color, 0 to 255.</param>
 public readonly record struct PluginPaletteInfo(
