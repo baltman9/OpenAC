@@ -532,6 +532,75 @@ public sealed class HeadlessProcessSchedulerTests
         Assert.Equal(2UL, second.Runtime.Clock.FrameNumber);
     }
 
+    [Fact]
+    public void LostServer_IsRetriedEvery30SecondsUntilALoginGetsBackIn()
+    {
+        var time = new ManualTimeProvider();
+        var operations = new LosableServerOperations();
+        using HeadlessSessionHost session =
+            CreateSession("lost", time, operations);
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            session.Start().Status);
+        var scheduler = new HeadlessProcessScheduler([session], time);
+        TimeSpan retry = TimeSpan.FromSeconds(30);
+        Assert.Equal(
+            retry,
+            HeadlessSessionHost.DefaultLostConnectionRetryInterval);
+
+        time.Advance(TimeSpan.FromMilliseconds(15));
+        Assert.True(scheduler.DispatchDue(time.GetTimestamp()));
+        Assert.True(session.Runtime.Session.IsInWorld);
+
+        // The server goes away: the session finds it lost, ends it, and
+        // schedules a login 30 s out instead of faulting.
+        operations.ServerDown = true;
+        time.Advance(TimeSpan.FromMilliseconds(15));
+        Assert.True(scheduler.DispatchDue(time.GetTimestamp()));
+        Assert.False(session.IsFaulted);
+        Assert.False(session.Runtime.Session.IsInWorld);
+        Assert.True(session.IsRecoveringLostConnection);
+        Assert.True(session.IsReconnectPending);
+        Assert.Equal(
+            time.GetTimestamp() + retry.Ticks,
+            session.ReconnectDeadline);
+        Assert.Equal(1, operations.CreatedSessionCount);
+
+        // Every attempt against the dead server fails and sets the next one
+        // exactly 30 s later; none is made early.
+        for (int attempt = 1; attempt <= 3; attempt++)
+        {
+            time.Advance(retry - TimeSpan.FromTicks(1));
+            Assert.False(scheduler.DispatchDue(time.GetTimestamp()));
+            Assert.Equal(attempt, operations.CreatedSessionCount);
+
+            time.Advance(TimeSpan.FromTicks(1));
+            Assert.True(scheduler.DispatchDue(time.GetTimestamp()));
+            Assert.Equal(attempt + 1, operations.CreatedSessionCount);
+            Assert.False(session.IsFaulted);
+            Assert.True(session.IsReconnectPending);
+            Assert.True(session.IsRecoveringLostConnection);
+            Assert.Equal(
+                time.GetTimestamp() + retry.Ticks,
+                session.ReconnectDeadline);
+        }
+
+        // The server is back: the next attempt logs in and play resumes.
+        operations.ServerDown = false;
+        time.Advance(retry);
+        Assert.True(scheduler.DispatchDue(time.GetTimestamp()));
+        Assert.Equal(5, operations.CreatedSessionCount);
+        Assert.False(session.IsReconnectPending);
+        Assert.False(session.IsRecoveringLostConnection);
+        Assert.False(session.IsFaulted);
+        Assert.True(session.Runtime.Session.IsInWorld);
+
+        ulong frame = session.Runtime.Clock.FrameNumber;
+        time.Advance(TimeSpan.FromMilliseconds(15));
+        Assert.True(scheduler.DispatchDue(time.GetTimestamp()));
+        Assert.Equal(frame + 1, session.Runtime.Clock.FrameNumber);
+    }
+
     private static HeadlessSessionHost CreateSession(
         string id,
         TimeProvider time,
@@ -651,6 +720,65 @@ public sealed class HeadlessProcessSchedulerTests
             DisposedSessionCount++;
             session.Dispose();
         }
+    }
+
+    /// <summary>
+    /// A server that can go away: while it is down a live session reports
+    /// itself lost and every login attempt fails.
+    /// </summary>
+    private sealed class LosableServerOperations : ILiveSessionOperations
+    {
+        public bool ServerDown { get; set; }
+        public int CreatedSessionCount { get; private set; }
+
+        public IPEndPoint ResolveEndpoint(string host, int port) =>
+            new(IPAddress.Loopback, port);
+
+        public WorldSession CreateSession(IPEndPoint endpoint)
+        {
+            CreatedSessionCount++;
+            return new WorldSession(endpoint).TakingItsSends();
+        }
+
+        public void Connect(
+            WorldSession session,
+            string user,
+            string password)
+        {
+            if (ServerDown)
+                throw new TimeoutException("ConnectRequest not received");
+        }
+
+        public CharacterList.Parsed GetCharacters(
+            WorldSession session) =>
+            new(
+                0u,
+                [
+                    new CharacterList.Character(
+                        0x50000001u,
+                        "Headless",
+                        0u),
+                ],
+                [],
+                11,
+                "account",
+                true,
+                true);
+
+        public void EnterWorld(
+            WorldSession session,
+            int activeCharacterIndex)
+        {
+        }
+
+        public void Tick(WorldSession session)
+        {
+        }
+
+        public bool IsConnectionLost(WorldSession session) => ServerDown;
+
+        public void DisposeSession(WorldSession session) =>
+            session.Dispose();
     }
 
     private sealed class ThreadRecordingSessionOperations

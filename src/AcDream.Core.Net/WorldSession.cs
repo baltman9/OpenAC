@@ -363,10 +363,91 @@ public sealed partial class WorldSession : IDisposable
     public LinkStatusSnapshot LinkStatus => BuildLinkStatus(
         CurrentState,
         Volatile.Read(ref _lastInboundPacketTicks),
-        Stopwatch.GetTimestamp(),
-        Stopwatch.Frequency,
+        SessionTimestamp(),
+        SessionClockFrequency,
         PingRoundTripSeconds,
         _transport?.PacketLossPercentage ?? 0d);
+
+    /// <summary>
+    /// How long the server may stay silent before this session is taken to be
+    /// lost, in seconds. Nothing is ever said when a server goes away: it
+    /// shuts down, or the route to it breaks, and the datagrams simply stop.
+    /// </summary>
+    internal const double ServerSilenceTimeoutSeconds = 140.0;
+
+    /// <summary>
+    /// True once the server has been silent for longer than
+    /// <see cref="ServerSilenceTimeoutSeconds"/>. The session is then in
+    /// <see cref="State.Failed"/> for good; its owner tears it down and, to
+    /// get the world back, logs in again.
+    /// </summary>
+    public bool IsConnectionLost { get; private set; }
+
+    /// <summary>
+    /// The session's one clock: the transport's once the connection exists,
+    /// so the silence timer, the link status and the transport's own timers
+    /// all read the same time.
+    /// </summary>
+    private long SessionTimestamp() =>
+        _transport?.Clock.GetTimestamp() ?? Stopwatch.GetTimestamp();
+
+    private long SessionClockFrequency =>
+        _transport?.Clock.Frequency ?? Stopwatch.Frequency;
+
+    /// <summary>
+    /// Whether the server has been silent long enough to call the connection
+    /// lost. The first test guards against the client itself having stood
+    /// still: a turn that begins that long after the previous one has not yet
+    /// read what waited on the socket, so it does not judge the server.
+    /// </summary>
+    internal static bool IsServerSilent(
+        long previousTurnTimestamp,
+        long lastInboundTimestamp,
+        long nowTimestamp,
+        long frequency)
+    {
+        if (frequency <= 0)
+            return false;
+        double sincePreviousTurn =
+            (nowTimestamp - previousTurnTimestamp) / (double)frequency;
+        if (!(sincePreviousTurn < ServerSilenceTimeoutSeconds))
+            return false;
+        double sinceLastInbound =
+            (nowTimestamp - lastInboundTimestamp) / (double)frequency;
+        return sinceLastInbound > ServerSilenceTimeoutSeconds;
+    }
+
+    private void CheckServerSilence()
+    {
+        if (IsConnectionLost
+            || !_transportNegotiated
+            || _transport is not { } transport
+            || CurrentState is State.Disconnected or State.Failed)
+        {
+            return;
+        }
+
+        long now = transport.Clock.GetTimestamp();
+        bool primed = _silenceCheckPrimed;
+        long previousTurn = _previousSilenceCheckTimestamp;
+        _previousSilenceCheckTimestamp = now;
+        _silenceCheckPrimed = true;
+        if (!primed
+            || !IsServerSilent(
+                previousTurn,
+                Volatile.Read(ref _lastInboundPacketTicks),
+                now,
+                transport.Clock.Frequency))
+        {
+            return;
+        }
+
+        IsConnectionLost = true;
+        Console.Error.WriteLine(
+            $"[session] nothing heard from the server for {ServerSilenceTimeoutSeconds:0} s;"
+            + " the connection is lost");
+        Transition(State.Failed);
+    }
 
     internal double? PingRoundTripSeconds
     {
@@ -446,6 +527,8 @@ public sealed partial class WorldSession : IDisposable
 
     private readonly IWorldSessionTransport _net;
     private long _lastInboundPacketTicks = Stopwatch.GetTimestamp();
+    private long _previousSilenceCheckTimestamp;
+    private bool _silenceCheckPrimed;
     private long _lastPingRequestTicks;
     private long _lastPingRoundTripBits = BitConverter.DoubleToInt64Bits(double.NaN);
     private readonly IPEndPoint _loginEndpoint;
@@ -729,6 +812,7 @@ public sealed partial class WorldSession : IDisposable
         // budget break — a deferred inbound tail must not defer a due
         // resend past this frame.
         SweepTransport();
+        CheckServerSilence();
         return processed;
     }
 
@@ -1050,7 +1134,7 @@ public sealed partial class WorldSession : IDisposable
             }
         }
 
-        Volatile.Write(ref _lastInboundPacketTicks, Stopwatch.GetTimestamp());
+        Volatile.Write(ref _lastInboundPacketTicks, SessionTimestamp());
         if (_transport is { } acceptedTransport)
             acceptedTransport.Stats.PacketsReceived++;
 
