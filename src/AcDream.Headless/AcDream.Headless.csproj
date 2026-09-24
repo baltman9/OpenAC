@@ -7,6 +7,14 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- A windowless bot has no frames to protect, so its garbage collector
+         is set to hand memory back rather than keep it for speed: no
+         background collection thread, a small allowance for new objects
+         (runtimeconfig.template.json), and compaction whenever the heap is
+         mostly free space. Measured on a looting bot: about 40% less private
+         memory for about half a point of one core. The windowed client keeps
+         the defaults, where a longer collection would show as a stutter. -->
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
   </PropertyGroup>
 
   <ItemGroup>
