@@ -85,7 +85,7 @@ internal sealed partial class NavigationWalkController
             }
             catch (Exception error)
             {
-                return new PluginNavigationPlan(PluginNavigationPlanStatus.NoRoute, [],
+                return new PluginNavigationPlan(PluginNavigationPlanStatus.Failed, [],
                     $"the search failed: {error.Message}");
             }
         });
@@ -115,9 +115,7 @@ internal sealed partial class NavigationWalkController
             cellId = TerrainSurface.ComputeOutdoorCellId((uint)((bx << 24) | (by << 16)),
                 global.X - bx * 192f, global.Y - by * 192f);
         }
-        return new PluginNavigationPosition(cellId,
-            (global.X - 24468d) / 240d, (global.Y - 24468d) / 240d,
-            global.Z / 240d, 0f, (cellId & 0xFFFFu) is >= 1u and <= 0x40u);
+        return RuntimeNavigationProjection.GlobalPosition(cellId, global);
     }
 
     private static Task<PluginNavigationPlan> PreviewResult(PluginNavigationPlanStatus status, string reason) =>

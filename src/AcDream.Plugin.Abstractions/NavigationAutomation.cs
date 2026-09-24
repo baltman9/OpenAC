@@ -383,6 +383,8 @@ public enum PluginNavigationPlanStatus
     Unavailable,
     /// <summary>The destination or arrival distance is invalid.</summary>
     InvalidTarget,
+    /// <summary>The host could not complete the route search because of an internal error.</summary>
+    Failed,
 }
 
 /// <summary>A detached path preview. Points run from the character toward the goal.</summary>
@@ -429,15 +431,17 @@ public interface INavigationAutomation
 {
     /// <summary>
     /// Plans a path to an object without moving or taking ownership of the character.
-    /// Grid building and route search run asynchronously. The result is a snapshot of
-    /// currently loaded collision and may become stale as the world changes.
+    /// Call from the thread that raises <see cref="IEvents.Tick"/>: the world snapshot is
+    /// captured before this method returns, then grid building and route search run on a
+    /// worker. The result may become stale as the world changes.
     /// </summary>
     Task<PluginNavigationPlan> PreviewPathAsync(uint objectId, float arrivalMeters = 2.5f) =>
         Task.FromResult(new PluginNavigationPlan(PluginNavigationPlanStatus.Unavailable, [], "navigation is unavailable"));
 
     /// <summary>
     /// Plans a path to a cell-aware position without moving or taking ownership of
-    /// the character. An elevation of NaN selects ground at the destination.
+    /// the character. Call from the thread that raises <see cref="IEvents.Tick"/>.
+    /// An elevation of NaN selects ground at the destination.
     /// </summary>
     Task<PluginNavigationPlan> PreviewPathAsync(PluginNavigationPosition position, float arrivalMeters = 2.5f) =>
         Task.FromResult(new PluginNavigationPlan(PluginNavigationPlanStatus.Unavailable, [], "navigation is unavailable"));

@@ -525,14 +525,18 @@ internal static class RuntimeNavigationProjection
         uint blockX = (cellId >> 24) & 0xFFu;
         uint blockY = (cellId >> 16) & 0xFFu;
         Vector3 local = position.Frame.Origin;
-        return new PluginNavigationPosition(
-            cellId,
-            (((double)blockX - 127d) * 192d + local.X - 84d) / 240d,
-            (((double)blockY - 127d) * 192d + local.Y - 84d) / 240d,
-            local.Z / 240d,
-            MoveToMath.GetHeading(position.Frame.Orientation),
-            (cellId & 0xFFFFu) is >= 1u and <= 0x40u);
+        return GlobalPosition(cellId,
+            blockX * 192d + local.X, blockY * 192d + local.Y, local.Z,
+            MoveToMath.GetHeading(position.Frame.Orientation));
     }
+
+    /// <summary>Project a point measured from the first landblock's corner into map coordinates.</summary>
+    public static PluginNavigationPosition GlobalPosition(uint cellId, Vector3 global, float heading = 0f) =>
+        GlobalPosition(cellId, global.X, global.Y, global.Z, heading);
+
+    private static PluginNavigationPosition GlobalPosition(uint cellId, double x, double y, double z, float heading) =>
+        new(cellId, (x - 24468d) / 240d, (y - 24468d) / 240d,
+            z / 240d, heading, (cellId & 0xFFFFu) is >= 1u and <= 0x40u);
 
     /// <summary>
     /// A plugin position's point in its landblock's own frame, the inverse of
