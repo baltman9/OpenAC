@@ -190,6 +190,24 @@ public sealed class RuntimeNavigationOwnershipTests
         pause.Dispose();
     }
 
+    [Fact]
+    public async Task ScopedPluginHostPreviewDoesNotChangeWalkOwnership()
+    {
+        using var h = new Harness();
+        using var scoped = new AcDream.Core.Plugins.ScopedPluginHost(
+            new HostOver(h.Navigation), "example.plugin", "Example");
+        IPluginHost pluginHost = scoped;
+        INavigationAutomation navigation = pluginHost.Automation.Navigation;
+
+        Assert.Equal(PluginNavigationCommandStatus.Accepted, navigation.GoTo(Goal, 2f));
+        long sequence = navigation.GoToReport.Sequence;
+        PluginNavigationPlan plan = await navigation.PreviewPathAsync(Goal, 2f);
+
+        Assert.Equal(PluginNavigationPlanStatus.NoRoute, plan.Status);
+        Assert.Equal("example.plugin", h.Navigation.WalkOwner);
+        Assert.Equal(sequence, navigation.GoToReport.Sequence);
+    }
+
     private sealed class HostOver(INavigationAutomation navigation) : IPluginHost
     {
         public bool HasUi => false;

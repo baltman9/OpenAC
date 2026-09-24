@@ -372,6 +372,31 @@ public readonly record struct PluginGoToReport(
     public string? Owner { get; init; }
 }
 
+/// <summary>The outcome of a plan-only navigation request.</summary>
+public enum PluginNavigationPlanStatus
+{
+    /// <summary>A path to the requested destination was found.</summary>
+    Routed,
+    /// <summary>No path to the requested destination could be planned.</summary>
+    NoRoute,
+    /// <summary>The character or navigation world is unavailable.</summary>
+    Unavailable,
+    /// <summary>The destination or arrival distance is invalid.</summary>
+    InvalidTarget,
+    /// <summary>The host could not complete the route search because of an internal error.</summary>
+    Failed,
+}
+
+/// <summary>A detached path preview. Points run from the character toward the goal.</summary>
+public sealed record PluginNavigationPlan(
+    PluginNavigationPlanStatus Status,
+    IReadOnlyList<PluginNavigationPosition> Path,
+    string Reason)
+{
+    /// <summary>Distance along the planned route, in meters.</summary>
+    public float LengthMeters { get; init; }
+}
+
 /// <summary>What became of a movement command a plugin sent.</summary>
 public enum PluginNavigationCommandStatus
 {
@@ -404,6 +429,23 @@ public enum PluginNavigationCommandStatus
 /// </summary>
 public interface INavigationAutomation
 {
+    /// <summary>
+    /// Plans a path to an object without moving or taking ownership of the character.
+    /// Call from the thread that raises <see cref="IEvents.Tick"/>: the world snapshot is
+    /// captured before this method returns, then grid building and route search run on a
+    /// worker. The result may become stale as the world changes.
+    /// </summary>
+    Task<PluginNavigationPlan> PreviewPathAsync(uint objectId, float arrivalMeters = 2.5f) =>
+        Task.FromResult(new PluginNavigationPlan(PluginNavigationPlanStatus.Unavailable, [], "navigation is unavailable"));
+
+    /// <summary>
+    /// Plans a path to a cell-aware position without moving or taking ownership of
+    /// the character. Call from the thread that raises <see cref="IEvents.Tick"/>.
+    /// An elevation of NaN selects ground at the destination.
+    /// </summary>
+    Task<PluginNavigationPlan> PreviewPathAsync(PluginNavigationPosition position, float arrivalMeters = 2.5f) =>
+        Task.FromResult(new PluginNavigationPlan(PluginNavigationPlanStatus.Unavailable, [], "navigation is unavailable"));
+
     /// <summary>
     /// Raised when the current navigation snapshot changes. Handlers run on
     /// the same thread as <see cref="IEvents.Tick"/>. Hosts that do not

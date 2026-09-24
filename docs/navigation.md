@@ -186,11 +186,19 @@ Everything is on `host.Automation.Navigation`. A host without navigation answers
 |---|---|
 | `GoTo(objectId, arrivalMeters)` | Walks to an object and ends beside it, facing it, within `arrivalMeters` (above 0, at most 50) at a spot with a line of sight to it. |
 | `GoTo(position, arrivalMeters)` | Walks to a place and ends on the floor that place stands on. Faces nothing on arrival. A position with no cell, such as one read from a route file, is placed by its map coordinates alone, and an elevation of NaN stands it on the ground there. |
+| `PreviewPathAsync(objectId, arrivalMeters)` | Plans a path to an object and returns ordered cell-aware positions with elevation. Does not start or replace a walk. |
+| `PreviewPathAsync(position, arrivalMeters)` | Plans to a place on its specified floor, including inside a dungeon. Does not start or replace a walk. |
 | `StandOn(objectId, arrivalMeters)` | Walks onto an object and ends on its top, jumping up where the character can. |
 | `Follow(playerId, bufferMeters)` | Follows a player until stopped: see [Following](#following). Only players can be followed. |
 | `StopGoTo()` | Ends the walk under way; `Rejected` when there is none. |
 | `GoToReport` | The latest walk: its state, meters left, how often it planned again, a reason, and what blocked it. |
 | `PauseGoToWhile(need)` | Registers a callback asked every frame a walk is under way. While it returns a reason, such as `"fighting a monster"`, the walk stops and waits. Dispose the result to unregister. |
+
+### Path previews
+
+`PreviewPathAsync` returns a `Task<PluginNavigationPlan>`. Start the call on the thread that raises `host.Events.Tick`, including after an `await`: an async continuation may run on a worker and must wait for a later Tick to request another preview. The method reads the character and world and captures collision before it returns. Await the returned task outside the tick handler, or poll `IsCompleted` on later ticks. Grid building and route search run on a worker; a large dungeon can take time. The returned `Path` is a detached sequence of route leg points from the character toward the goal. Each `PluginNavigationPosition` includes a cell id, map coordinates and elevation; heading is zero because a route point does not face a direction. `LengthMeters` is the planned route length.
+
+`Status` is `Routed`, `NoRoute`, `Unavailable`, `InvalidTarget` or `Failed`. `Failed` means the grid build or route search threw an error; `Reason` contains its message. For any result other than `Routed`, `Path` is empty. A preview covers one planning region: a far outdoor destination beyond 320 m returns `NoRoute`, while a sealed dungeon can use a grid up to 2,048 m wide. Plans use collision and nearby objects as they stood when requested. They do not open doors, cross portals, reserve a walk or promise that the path will stay clear. The graphical and headless hosts expose the same API; drawing remains specific to `/nav route` in the graphical host.
 
 ### Who is driving
 

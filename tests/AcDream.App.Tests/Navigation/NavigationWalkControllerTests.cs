@@ -6,11 +6,65 @@ using AcDream.Runtime.Navigation;
 using AcDream.Core.Navigation;
 using AcDream.Core.Physics;
 using AcDream.Runtime.Gameplay;
+using AcDream.Plugin.Abstractions;
 
 namespace AcDream.App.Tests.Navigation;
 
 public sealed class NavigationWalkControllerTests
 {
+    [Fact]
+    public async Task PreviewInsideDungeonReturnsOrderedCellAwareElevatedPath()
+    {
+        const uint room = 0xA9B40100u;
+        var body = new SimulatedBody(new Vector3(20f, 20f, -30f)) { CellId = room };
+        var walk = new NavigationWalkController(DungeonWorld(room), body,
+            new Goals { [Target] = new Vector3(245f, 32f, -30f) },
+            isSealedDungeon: cell => cell == room);
+
+        Task<PluginNavigationPlan> pending = walk.PreviewPathAsync(Target, 2.5f);
+        Assert.Equal(0, walk.Report.Sequence);
+        PluginNavigationPlan plan = await pending;
+
+        Assert.Equal(PluginNavigationPlanStatus.Routed, plan.Status);
+        Assert.True(plan.Path.Count >= 2);
+        Assert.Equal(room, plan.Path[0].CellId);
+        Assert.Equal(room + 2u, plan.Path[^1].CellId);
+        Assert.All(plan.Path, point => Assert.InRange(point.Elevation * 240d, -30.1d, -29.9d));
+        Assert.True(plan.Path[0].EastWest < plan.Path[^1].EastWest);
+    }
+
+    [Fact]
+    public async Task PreviewOfUnreachableFloorReturnsNoRoute()
+    {
+        var body = new SimulatedBody(new Vector3(40f, 40f, 0f));
+        var walk = new NavigationWalkController(RaisedSlabWorld(), body, new Goals());
+
+        PluginNavigationPlan plan = await walk.PreviewPathAsync(0xA9B40001u,
+            new Vector3(52f, 52f, 1f), 2.5f);
+
+        Assert.Equal(PluginNavigationPlanStatus.NoRoute, plan.Status);
+        Assert.Empty(plan.Path);
+        Assert.Equal(0, walk.Report.Sequence);
+    }
+
+    [Fact]
+    public async Task PreviewDoesNotReplaceAnActiveWalk()
+    {
+        var body = new SimulatedBody(new Vector3(40f, 40f, 0f));
+        var walk = new NavigationWalkController(FlatWorld(), body,
+            new Goals { [Target] = new Vector3(60f, 75f, 0f), [Other] = new Vector3(75f, 75f, 0f) });
+        long sequence = walk.WalkTo(Target);
+        walk.Tick(Frame);
+        Assert.True(walk.IsBusy);
+
+        PluginNavigationPlan plan = await walk.PreviewPathAsync(Other, 2.5f);
+
+        Assert.Equal(PluginNavigationPlanStatus.Routed, plan.Status);
+        Assert.True(walk.IsBusy);
+        Assert.Equal(sequence, walk.Report.Sequence);
+        Assert.Equal(Target, walk.Report.ObjectId);
+    }
+
     private const float Frame = 1f / 30f;
     private const uint Target = 0x50000001u;
     private const uint Other = 0x50000002u;

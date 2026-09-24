@@ -35,6 +35,29 @@ public sealed class HeadlessSessionNavigationTests
         Assert.NotEqual(PluginNavigationCommandStatus.Unavailable, navigation.FaceHeading(90f));
     }
 
+    [Fact]
+    public async Task PluginHostPathPreviewValidatesArgumentsBeforeReadingTheWorld()
+    {
+        using var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var host = new HeadlessSessionHost(
+            HeadlessSessionHostTests.Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new HeadlessSessionHostTests.FixtureSessionOperations());
+        IPluginHost pluginHost = host.Plugins.Host;
+        INavigationAutomation navigation = pluginHost.Automation.Navigation;
+
+        Assert.Equal(PluginNavigationPlanStatus.InvalidTarget,
+            (await navigation.PreviewPathAsync(0u)).Status);
+        Assert.Equal(PluginNavigationPlanStatus.InvalidTarget,
+            (await navigation.PreviewPathAsync(0x70000001u, 0f)).Status);
+        Assert.Equal(PluginNavigationPlanStatus.InvalidTarget,
+            (await navigation.PreviewPathAsync(0x70000001u, float.NaN)).Status);
+        Assert.Equal(PluginNavigationPlanStatus.InvalidTarget,
+            (await navigation.PreviewPathAsync(new PluginNavigationPosition(
+                0xA9B40001u, double.NaN, 0d, 0d, 0f, true))).Status);
+    }
+
     /// <summary>
     /// What /nav answers goes to the chat log, where it can be read back and copied, never to
     /// the transient notices shown over the world.
