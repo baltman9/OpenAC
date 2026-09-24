@@ -1,6 +1,7 @@
 using AcDream.App.Combat;
 using AcDream.App.Input;
 using AcDream.App.Update;
+using AcDream.Core.Physics.Motion;
 using AcDream.Core.Rendering;
 
 namespace AcDream.App.Rendering;
@@ -108,6 +109,10 @@ internal sealed class CameraFrameController : ICameraFramePhase
                 legacy.YawOffset += adjustment * 0.02f;
         }
 
+        // In the head view a rotate (keys or mouse orbit) turns the character.
+        if (retail is not null && retail.TryTakeFirstPersonTurn(out float headingStep))
+            TurnForFirstPersonRotate(controller, headingStep);
+
         if (!_localFrame.TryGetPresentationAfterNetwork(out var playerFrame))
             return;
 
@@ -132,5 +137,22 @@ internal sealed class CameraFrameController : ICameraFramePhase
             cellId: controller.CellId,
             selfEntityId: controller.LocalEntityId,
             trackedTargetPoint: _combatTarget.GetTrackedTargetPoint());
+    }
+
+    // One step re-targets the turn from the current heading, so a held rotate
+    // turns the character continuously and finishes its last step on release.
+    // The turn sends no movement event of its own; the heading reaches the
+    // server with the position heartbeat, so a held key is not a packet per frame.
+    private static void TurnForFirstPersonRotate(
+        PlayerMovementController controller,
+        float headingStepDegrees)
+    {
+        if (!controller.CanExecuteLiveMovement)
+            return;
+        float heading = MoveToMath.HeadingFromYaw(controller.Yaw);
+        controller.RequestTurnToHeading(
+            RetailChaseCamera.FirstPersonTurnTargetHeading(heading, headingStepDegrees),
+            applyRunHoldKey: false,
+            requestMovementEvent: false);
     }
 }

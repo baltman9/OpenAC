@@ -985,9 +985,15 @@ public sealed class PlayerMovementController
         return true;
     }
 
+    /// <param name="requestMovementEvent">
+    /// False for a caller that re-issues the turn every frame (the first-person
+    /// camera rotate): the command itself sends nothing and the heading reaches
+    /// the server with the position heartbeat.
+    /// </param>
     internal bool RequestTurnToHeading(
         float headingDegrees,
-        bool applyRunHoldKey = false)
+        bool applyRunHoldKey = false,
+        bool requestMovementEvent = true)
     {
         EnsurePublishedForRuntimeOperation();
         // @006b4580: `if (this->vtable->IsActive() == 0) return 0`. The local
@@ -1020,7 +1026,8 @@ public sealed class PlayerMovementController
             return false;
         }
 
-        _externalMovementEventPending = true;
+        if (requestMovementEvent)
+            _externalMovementEventPending = true;
         return true;
     }
 
