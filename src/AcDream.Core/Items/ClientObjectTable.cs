@@ -51,6 +51,16 @@ public enum ClientObjectRemovalReason
     GenerationReplacement,
 }
 
+/// <summary>
+/// A viewed contents list the client is letting go of. <see cref="IsNested"/>
+/// marks a container inside the one the player closed: its list stays with
+/// that container until the container itself goes away.
+/// </summary>
+public readonly record struct ClientObjectContentsViewEnd(
+    uint ContainerId,
+    IReadOnlyList<uint> Contents,
+    bool IsNested);
+
 public readonly record struct ClientObjectRemoval(
     ClientObject Object,
     ClientObjectRemovalReason Reason,
@@ -134,7 +144,7 @@ public sealed class ClientObjectTable
     /// the view held, just before that list is dropped. The original client
     /// puts those objects on its destruction queue at this point.
     /// </summary>
-    public event Action<uint, IReadOnlyList<uint>>? ContentsViewEnded;
+    public event Action<ClientObjectContentsViewEnd>? ContentsViewEnded;
 
     public event Action<ClientObject>? MoveRolledBack;
 
@@ -1190,7 +1200,7 @@ public sealed class ClientObjectTable
     {
         if (containerId == 0u || !_containerIndex.Remove(containerId, out List<uint>? contents))
             return false;
-        ContentsViewEnded?.Invoke(containerId, contents);
+        ContentsViewEnded?.Invoke(new ClientObjectContentsViewEnd(containerId, contents, IsNested: false));
         ContainerContentsReplaced?.Invoke(containerId);
         return true;
     }
@@ -1221,7 +1231,10 @@ public sealed class ClientObjectTable
         }
 
         foreach ((uint containerId, List<uint> contents) in removed)
-            ContentsViewEnded?.Invoke(containerId, contents);
+            ContentsViewEnded?.Invoke(new ClientObjectContentsViewEnd(
+                containerId,
+                contents,
+                IsNested: containerId != rootContainerId));
         foreach ((uint containerId, _) in removed)
             ContainerContentsReplaced?.Invoke(containerId);
         return removed.Count;

@@ -403,6 +403,103 @@ public sealed class RuntimeEntityLivenessTests
         Assert.Equal(0, world.Controller.QueuedObjectCount);
     }
 
+    private const uint Pack = 0x8000_1100u;
+
+    /// <summary>A viewed corpse holding one item and a viewed pack of two.</summary>
+    private static ContentsWorld CorpseWithAPack()
+    {
+        var world = new ContentsWorld();
+        world.Corpse(Corpse, 0x3032_0001u, 0x8000_1001u, Pack);
+        Spawned(world.Lifetime, ContainedSpawn(0x8000_1101u, Pack));
+        Spawned(world.Lifetime, ContainedSpawn(0x8000_1102u, Pack));
+        world.Objects.ReplaceContents(Pack, [0x8000_1101u, 0x8000_1102u]);
+        return world;
+    }
+
+    [Fact]
+    public void ANestedPacksItemsGoTwentyFiveSecondsAfterThePack()
+    {
+        var world = CorpseWithAPack();
+        world.Controller.Tick(1.0);
+
+        world.Objects.StopViewingContentsTree(Corpse);
+        world.Controller.Tick(26.5);
+        Assert.Null(world.Objects.Get(Pack));
+        Assert.Null(world.Objects.Get(0x8000_1001u));
+        Assert.NotNull(world.Objects.Get(0x8000_1101u));
+
+        world.Controller.Tick(51.0);
+        Assert.NotNull(world.Objects.Get(0x8000_1101u));
+        world.Controller.Tick(52.0);
+
+        Assert.Null(world.Objects.Get(0x8000_1101u));
+        Assert.Null(world.Objects.Get(0x8000_1102u));
+    }
+
+    [Fact]
+    public void APackLootedFromAClosedCorpseKeepsItsItems()
+    {
+        var world = CorpseWithAPack();
+        world.Controller.Tick(1.0);
+        world.Objects.StopViewingContentsTree(Corpse);
+
+        world.Objects.ApplyConfirmedServerMove(Pack, Player, newWielderId: 0u);
+        world.Controller.Tick(30.0);
+        world.Controller.Tick(60.0);
+
+        Assert.NotNull(world.Objects.Get(Pack));
+        Assert.NotNull(world.Objects.Get(0x8000_1101u));
+        Assert.NotNull(world.Objects.Get(0x8000_1102u));
+    }
+
+    private const uint Partner = 0x5000_0B00u;
+
+    [Fact]
+    public void AnItemThePartnerOffersLeavesTheQueueAndTheTradeEndQueuesWhatItHolds()
+    {
+        var world = new ContentsWorld();
+        world.Controller.Tick(1.0);
+        Spawned(world.Lifetime, ContainedSpawn(0x8000_2001u, Partner));
+        Spawned(world.Lifetime, ContainedSpawn(0x8000_2002u, 0x8000_2001u));
+        world.Objects.ReplaceContents(0x8000_2001u, [0x8000_2002u]);
+        // Moved into the partner's pack while no trade was open: queued.
+        world.Objects.ApplyConfirmedServerMove(0x8000_2001u, Partner, newWielderId: 0u);
+        Assert.Equal(2, world.Controller.QueuedObjectCount);
+
+        world.Trade.ApplyRegister(new GameEvents.RegisterTrade(Partner, Player, 0ul), Player);
+        world.Trade.ApplyAdd(new GameEvents.AddToTrade(0x8000_2001u, (uint)RuntimeTradeSide.Partner, 0u));
+        Assert.Equal(0, world.Controller.QueuedObjectCount);
+
+        world.Controller.Tick(20.0);
+        world.Trade.ApplyReset();
+        world.Controller.Tick(46.0);
+
+        Assert.NotNull(world.Objects.Get(0x8000_2001u));
+        Assert.Null(world.Objects.Get(0x8000_2002u));
+    }
+
+    [Fact]
+    public void AVendorsWindowTakesItsItemsOffTheQueue()
+    {
+        // An item sold to a vendor moves into the vendor, a container the
+        // player does not own; the vendor's refreshed list shows it again.
+        const uint vendor = 0x8000_3000u;
+        var world = new ContentsWorld();
+        world.Controller.Tick(1.0);
+        Spawned(world.Lifetime, ContainedSpawn(0x8000_3001u, Player));
+        world.Objects.ApplyConfirmedServerMove(0x8000_3001u, vendor, newWielderId: 0u);
+        Assert.Equal(1, world.Controller.QueuedObjectCount);
+
+        world.Vendor.Apply(
+            vendor,
+            new VendorShopProfile(0u, 0u, 0u, false, 1f, 1f, 0u, 0u, string.Empty),
+            [new VendorShopItem(0x8000_3001u, 1, 1u, "Sold", null, 0u, 10)]);
+        world.Controller.Tick(30.0);
+
+        Assert.Equal(0, world.Controller.QueuedObjectCount);
+        Assert.NotNull(world.Objects.Get(0x8000_3001u));
+    }
+
     [Fact]
     public void AWieldedObjectLeavesVisibilityWithItsHolder()
     {
@@ -478,17 +575,22 @@ public sealed class RuntimeEntityLivenessTests
     {
         public RuntimeEntityObjectLifetime Lifetime { get; } = new();
         public ExternalContainerState Ground { get; } = new();
+        public VendorState Vendor { get; } = new();
+        public RuntimeTradeState Trade { get; }
         public RuntimeEntityLivenessController Controller { get; }
         public ClientObjectTable Objects => Lifetime.Objects;
 
         public ContentsWorld()
         {
+            Trade = new RuntimeTradeState(Lifetime.Objects);
             Controller = new RuntimeEntityLivenessController(
                 Lifetime,
                 new RuntimeLocalPlayerIdentityState { ServerGuid = Player },
                 new RuntimeCanonicalEntityExpirySink(Lifetime),
                 new FixedCellSource(null),
-                Ground);
+                Ground,
+                Trade,
+                Vendor);
             Register(Lifetime, Player, 0x3032_0001u);
         }
 

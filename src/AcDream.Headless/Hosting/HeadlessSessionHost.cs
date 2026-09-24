@@ -1107,7 +1107,8 @@ internal sealed class HeadlessSessionHost : IDisposable
             new RuntimeCanonicalEntityExpirySink(Runtime.EntityObjects),
             new RuntimePhysicsCurrentCellSource(Runtime.EntityObjects),
             Runtime.InventoryOwner.ExternalContainers,
-            Runtime.TradeOwner.View);
+            Runtime.TradeOwner,
+            Runtime.InventoryOwner.Vendor);
         var route = new LiveSessionEventRouter(
             session,
             entities.CreateSink(),

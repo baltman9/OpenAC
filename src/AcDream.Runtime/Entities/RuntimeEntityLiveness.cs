@@ -271,13 +271,18 @@ internal sealed class RuntimeEntityLivenessController : IDisposable
     private readonly IRuntimeEntityExpirySink _expiry;
     private readonly IRuntimeEntityCurrentCellSource _cells;
     private readonly ExternalContainerState? _groundObject;
-    private readonly IRuntimeTradeView? _trade;
+    private readonly RuntimeTradeState? _trade;
+    private readonly VendorState? _vendor;
     private readonly RuntimeEntityLivenessTracker _tracker = new();
     private readonly RuntimeEntityVisibleCellSet _visibleCells = new();
     private readonly List<RuntimeEntityLivenessSample> _samples = new();
     private readonly List<RuntimeEntityExpiryCandidate> _due = new();
     private readonly Dictionary<uint, double> _queuedObjects = [];
     private readonly List<uint> _dueObjects = [];
+    // The viewed lists of containers nested in one the player closed. The
+    // original client keeps such a list on its container until that
+    // container is destroyed, and only then queues what it still holds.
+    private readonly Dictionary<uint, IReadOnlyList<uint>> _nestedLists = [];
     private double _nextMaintenanceAt;
     private double _now;
     private bool _disposed;
@@ -288,7 +293,8 @@ internal sealed class RuntimeEntityLivenessController : IDisposable
         IRuntimeEntityExpirySink expiry,
         IRuntimeEntityCurrentCellSource cells,
         ExternalContainerState? groundObject = null,
-        IRuntimeTradeView? trade = null)
+        RuntimeTradeState? trade = null,
+        VendorState? vendor = null)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
@@ -296,6 +302,7 @@ internal sealed class RuntimeEntityLivenessController : IDisposable
         _cells = cells ?? throw new ArgumentNullException(nameof(cells));
         _groundObject = groundObject;
         _trade = trade;
+        _vendor = vendor;
 
         ClientObjectTable objects = _entities.Objects;
         objects.ContentsViewEnded += OnContentsViewEnded;
@@ -303,6 +310,13 @@ internal sealed class RuntimeEntityLivenessController : IDisposable
         objects.ObjectMoved += OnObjectMoved;
         objects.Cleared += OnObjectsCleared;
         _entities.SpawnApplied += OnSpawnApplied;
+        if (_trade is not null)
+        {
+            _trade.PartnerItemAdded += OnPartnerItemAdded;
+            _trade.PartnerItemsReleased += OnPartnerItemsReleased;
+        }
+        if (_vendor is not null)
+            _vendor.Changed += OnVendorChanged;
     }
 
     /// <summary>Objects outside the world waiting on their deadline.</summary>
@@ -409,6 +423,7 @@ internal sealed class RuntimeEntityLivenessController : IDisposable
         _due.Clear();
         _queuedObjects.Clear();
         _dueObjects.Clear();
+        _nestedLists.Clear();
         _visibleCells.Update(null, 0u);
         _nextMaintenanceAt = 0;
     }
@@ -424,6 +439,13 @@ internal sealed class RuntimeEntityLivenessController : IDisposable
         objects.ObjectMoved -= OnObjectMoved;
         objects.Cleared -= OnObjectsCleared;
         _entities.SpawnApplied -= OnSpawnApplied;
+        if (_trade is not null)
+        {
+            _trade.PartnerItemAdded -= OnPartnerItemAdded;
+            _trade.PartnerItemsReleased -= OnPartnerItemsReleased;
+        }
+        if (_vendor is not null)
+            _vendor.Changed -= OnVendorChanged;
     }
 
     private void DestroyQueuedObjects(double now)
@@ -461,10 +483,15 @@ internal sealed class RuntimeEntityLivenessController : IDisposable
         _entities.Objects.Remove(guid);
     }
 
-    private void OnContentsViewEnded(uint containerId, IReadOnlyList<uint> contents)
+    private void OnContentsViewEnded(ClientObjectContentsViewEnd end)
     {
-        for (int i = 0; i < contents.Count; i++)
-            Enqueue(contents[i]);
+        if (end.IsNested)
+        {
+            _nestedLists[end.ContainerId] = end.Contents.ToArray();
+            return;
+        }
+        for (int i = 0; i < end.Contents.Count; i++)
+            Enqueue(end.Contents[i]);
     }
 
     private void OnObjectRemoved(ClientObjectRemoval removal)
@@ -477,7 +504,8 @@ internal sealed class RuntimeEntityLivenessController : IDisposable
         // What the destroyed container still holds, and is not in the world
         // itself, follows it 25 seconds later.
         ClientObjectTable objects = _entities.Objects;
-        IReadOnlyList<uint> contents = objects.GetContents(guid);
+        IReadOnlyList<uint> contents = ViewedContents(guid);
+        _nestedLists.Remove(guid);
         for (int i = 0; i < contents.Count; i++)
         {
             uint member = contents[i];
@@ -491,6 +519,57 @@ internal sealed class RuntimeEntityLivenessController : IDisposable
             }
             Enqueue(member);
         }
+    }
+
+    /// <summary>
+    /// The partner put an item into the trade: it and what it holds stay.
+    /// </summary>
+    private void OnPartnerItemAdded(uint guid)
+    {
+        Dequeue(guid);
+        DequeueContents(guid, depth: 0);
+    }
+
+    /// <summary>
+    /// The partner's items left the trade window. What they hold is queued;
+    /// the items themselves stay where the server put them.
+    /// </summary>
+    private void OnPartnerItemsReleased(IReadOnlyList<uint> items)
+    {
+        ClientObjectTable objects = _entities.Objects;
+        uint playerGuid = _identity.ServerGuid;
+        for (int i = 0; i < items.Count; i++)
+        {
+            uint guid = items[i];
+            if (objects.Get(guid) is not { } item
+                || objects.IsOwnedByObject(guid, playerGuid)
+                || item.WielderId != 0u
+                || item.CurrentlyEquippedLocation != EquipMask.None)
+            {
+                continue;
+            }
+            EnqueueContents(guid);
+        }
+    }
+
+    /// <summary>A vendor's window shows its items, so none of them go.</summary>
+    private void OnVendorChanged(VendorTransition transition)
+    {
+        if (_vendor is null)
+            return;
+        IReadOnlyList<VendorShopItem> items = _vendor.Items;
+        for (int i = 0; i < items.Count; i++)
+            Dequeue(items[i].ItemGuid);
+    }
+
+    private IReadOnlyList<uint> ViewedContents(uint containerId)
+    {
+        IReadOnlyList<uint> viewed = _entities.Objects.GetContents(containerId);
+        if (viewed.Count != 0)
+            return viewed;
+        return _nestedLists.TryGetValue(containerId, out IReadOnlyList<uint>? nested)
+            ? nested
+            : viewed;
     }
 
     private void OnObjectMoved(ClientObjectMove move)
@@ -518,12 +597,16 @@ internal sealed class RuntimeEntityLivenessController : IDisposable
     private void OnSpawnApplied(uint guid)
     {
         Dequeue(guid);
-        IReadOnlyList<uint> contents = _entities.Objects.GetContents(guid);
+        IReadOnlyList<uint> contents = ViewedContents(guid);
         for (int i = 0; i < contents.Count; i++)
             Dequeue(contents[i]);
     }
 
-    private void OnObjectsCleared() => _queuedObjects.Clear();
+    private void OnObjectsCleared()
+    {
+        _queuedObjects.Clear();
+        _nestedLists.Clear();
+    }
 
     /// <summary>
     /// Owned by the player, inside the container the player has open, or
@@ -540,7 +623,7 @@ internal sealed class RuntimeEntityLivenessController : IDisposable
         if (groundObject != 0u && objects.IsOwnedByObject(guid, groundObject))
             return true;
 
-        if (_trade is { } trade)
+        if (_trade?.View is { } trade)
         {
             RuntimeTradeSnapshot snapshot = trade.Snapshot;
             if (snapshot.IsOpen
@@ -556,7 +639,7 @@ internal sealed class RuntimeEntityLivenessController : IDisposable
 
     private void EnqueueContents(uint containerId)
     {
-        IReadOnlyList<uint> contents = _entities.Objects.GetContents(containerId);
+        IReadOnlyList<uint> contents = ViewedContents(containerId);
         for (int i = 0; i < contents.Count; i++)
             Enqueue(contents[i]);
     }
@@ -567,7 +650,7 @@ internal sealed class RuntimeEntityLivenessController : IDisposable
         // malformed list that names its own ancestor.
         if (depth > 8)
             return;
-        IReadOnlyList<uint> contents = _entities.Objects.GetContents(containerId);
+        IReadOnlyList<uint> contents = ViewedContents(containerId);
         for (int i = 0; i < contents.Count; i++)
         {
             Dequeue(contents[i]);
